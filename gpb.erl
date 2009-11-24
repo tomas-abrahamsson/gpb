@@ -4,7 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -record(field,
-        {name, fnum, type, multiplicity, opts}).
+        {name, fnum, type, occurrence, opts}).
 
 decode_msg(MsgName, MsgDefs, Bin) ->
     Msg    = new_default_msg(MsgName, MsgDefs),
@@ -13,7 +13,7 @@ decode_msg(MsgName, MsgDefs, Bin) ->
 
 new_default_msg(MsgName, MsgDefs) ->
     MsgDef = keyfetch(MsgName, MsgDefs),
-    {MsgName, lists:map(fun(#field{name=FName, multiplicity=repeated}) ->
+    {MsgName, lists:map(fun(#field{name=FName, occurrence=repeated}) ->
                                 {FName, []};
                            (#field{name=FName, type={msg,FieldMsgName}}) ->
                                 {FName, new_default_msg(FieldMsgName, MsgDefs)};
@@ -74,7 +74,7 @@ decode_field(MsgDef, MsgDefs, Bin, Msg) when size(Bin) > 0 ->
     end;
 decode_field(MsgDef, _MsgDefs, <<>>, {MsgName, Fields}) ->
     %% Reverse any repeated fields.
-    RepeatedFNames = [N || #field{name=N, multiplicity=repeated} <- MsgDef],
+    RepeatedFNames = [N || #field{name=N, occurrence=repeated} <- MsgDef],
     {MsgName, lists:foldl(fun(FName, Acc) ->
                                   OldValue = keyfetch(FName, Acc),
                                   NewValue = lists:reverse(OldValue),
@@ -172,15 +172,15 @@ add_field(Value, FieldDef, MsgDef, MsgDefs, {MsgName, Fields}, Rest) ->
     %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
     NewFields =
         case FieldDef of
-            #field{name = FName, multiplicity = required, type={msg,FMsgName}}->
+            #field{name = FName, occurrence = required, type={msg,FMsgName}}->
                 merge_field(FName, Value, Fields, FMsgName, MsgDefs);
-            #field{name = FName, multiplicity = optional, type={msg,FMsgName}}->
+            #field{name = FName, occurrence = optional, type={msg,FMsgName}}->
                 merge_field(FName, Value, Fields, FMsgName, MsgDefs);
-            #field{name = FName, multiplicity = required}->
+            #field{name = FName, occurrence = required}->
                 replace_field(FName, Value, Fields);
-            #field{name = FName, multiplicity = optional}->
+            #field{name = FName, occurrence = optional}->
                 replace_field(FName, Value, Fields);
-            #field{name = FName, multiplicity = repeated} ->
+            #field{name = FName, occurrence = repeated} ->
                 append_to_field(FName, Value, Fields)
         end,
     decode_field(MsgDef, MsgDefs, Rest, {MsgName, NewFields}).
@@ -198,7 +198,7 @@ merge_msg({MsgName, PrevFields}, {MsgName, NewFields}, MsgDefs) ->
     MsgDef = keyfetch(MsgName, MsgDefs),
     {MsgName,
      lists:foldl(
-       fun(#field{name=FName, multiplicity=repeated}, AccFields) ->
+       fun(#field{name=FName, occurrence=repeated}, AccFields) ->
                PrevSeq = keyfetch(FName, AccFields),
                NewSeq = keyfetch(FName, NewFields),
                replace_field(FName, append_seqs(PrevSeq, NewSeq), AccFields);
@@ -282,19 +282,19 @@ decode_varint_test() ->
     {128, <<255>>} = decode_varint(<<128, 1, 255>>),
     {150, <<255>>} = decode_varint(<<150, 1, 255>>).
 
-decode_msg_simple_multiplicity_test() ->
+decode_msg_simple_occurrence_test() ->
     {t1,[{a,undefined}]} =
         gpb:decode_msg(t1,
                        [{t1, [#field{name=a, fnum=1, type=int32,
-                                     multiplicity=optional, opts=[]}]}],
+                                     occurrence=optional, opts=[]}]}],
                        <<>>),
     {t1,[{a,150}]} =
         gpb:decode_msg(t1,
                        [{t1, [#field{name=a, fnum=1, type=int32,
-                                     multiplicity=required, opts=[]}]}],
+                                     occurrence=required, opts=[]}]}],
                        <<8,150,1>>),
     {t1,[{a,[150, 151]}]} =
         gpb:decode_msg(t1,
                        [{t1, [#field{name=a, fnum=1, type=int32,
-                                     multiplicity=repeated, opts=[]}]}],
+                                     occurrence=repeated, opts=[]}]}],
                        <<8,150,1, 8,151,1>>).
