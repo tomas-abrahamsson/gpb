@@ -1,6 +1,7 @@
 -module(gpb).
 %-compile(export_all).
 -export([decode_msg/3]).
+-export([merge_msgs/3]).
 -include_lib("eunit/include/eunit.hrl").
 
 %% TODO:
@@ -60,7 +61,7 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when size(Bin) > 0 ->
             decode_field(Rest2, MsgDef, MsgDefs, NewMsg)
     end;
 decode_field(<<>>, MsgDef, _MsgDefs, {MsgName, Fields}) ->
-    %% Reverse any repeated fields.
+    %% Reverse any repeated fields, but only on the top-level, not recursively.
     RepeatedFNames = [N || #field{name=N, occurrence=repeated} <- MsgDef],
     {MsgName, lists:foldl(fun(FName, Acc) ->
                                   OldValue = keyfetch(FName, Acc),
@@ -185,11 +186,11 @@ merge_field(FName, NewMsg, Fields, FMsgName, MsgDefs) ->
         undefined ->
             replace_field(FName, NewMsg, Fields);
         {FMsgName, _PrevFields} = PrevMsg ->
-            MergedMsg = merge_msg(PrevMsg, NewMsg, MsgDefs),
+            MergedMsg = merge_msgs(PrevMsg, NewMsg, MsgDefs),
             replace_field(FName, MergedMsg, Fields)
     end.
 
-merge_msg({MsgName, PrevFields}, {MsgName, NewFields}, MsgDefs) ->
+merge_msgs({MsgName, PrevFields}, {MsgName, NewFields}, MsgDefs) ->
     MsgDef = keyfetch({msg,MsgName}, MsgDefs),
     {MsgName,
      lists:foldl(
@@ -200,11 +201,13 @@ merge_msg({MsgName, PrevFields}, {MsgName, NewFields}, MsgDefs) ->
           (#field{name=FName, type={msg,_FieldMsgName}}, AccFields) ->
                PrevMsg = keyfetch(FName,AccFields),
                NewMsg  = keyfetch(FName,NewFields),
-               MergedMsg = merge_msg(PrevMsg, NewMsg, MsgDefs),
+               MergedMsg = merge_msgs(PrevMsg, NewMsg, MsgDefs),
                replace_field(FName, MergedMsg, AccFields);
           (#field{name=FName}, AccFields) ->
-               NewValue = keyfetch(FName, NewFields),
-               replace_field(FName, NewValue, AccFields)
+               case keyfetch(FName, NewFields) of
+                   undefined -> AccFields;
+                   NewValue  -> replace_field(FName, NewValue, AccFields)
+               end
        end,
        PrevFields,
        MsgDef)}.
@@ -217,7 +220,7 @@ append_to_field(FName, NewElem, Fields) ->
     replace_field(FName, [NewElem | PrevElems], Fields).
 
 append_seqs(Seq1, Seq2) ->
-    lists:reverse(Seq2, Seq1).
+    Seq1 ++ Seq2.
 
 
 decode_varint(Bin) -> de_vi(Bin, 0, 0).
@@ -338,3 +341,37 @@ decode_msg_with_sub_msg_field_test() ->
                                        occurrence=required, opts=[]}]},
                     {{msg,t2}, [#field{name=b, fnum=1, type=uint32,
                                        occurrence=required, opts=[]}]}]).
+
+merge_msg_test() ->
+    {m1, [{a, 20},
+          {b, 22},
+          {c, 13},
+          {d, [11,12, 21,22]},
+          {e, {m2, [{x, 210},
+                    {y, [111,112, 211,212]}]}}]} =
+        merge_msgs({m1, [{a, 10},
+                         {b, undefined},
+                         {c, 13},
+                         {d, [11,12]},
+                         {e, {m2, [{x, 110},
+                                   {y, [111, 112]}]}}]},
+                   {m1, [{a, 20},             %% overwrites integers
+                         {b, 22},             %% overwrites undefined
+                         {c, undefined},      %% undefined does not overwrite
+                         {d, [21,22]},        %% sequences appends
+                         {e, {m2, [{x, 210},  %% merging recursively
+                                   {y, [211, 212]}]}}]},
+                   [{{msg,m1}, [#field{name=a,fnum=1, type=uint32,
+                                       occurrence=required, opts=[]},
+                                #field{name=b,fnum=2, type=uint32,
+                                       occurrence=optional, opts=[]},
+                                #field{name=c,fnum=3, type=uint32,
+                                       occurrence=optional, opts=[]},
+                                #field{name=d,fnum=4, type=uint32,
+                                       occurrence=repeated, opts=[]},
+                                #field{name=e,fnum=5, type={msg,m2},
+                                       occurrence=optional, opts=[]}]},
+                    {{msg,m2}, [#field{name=x, fnum=1, type=uint32,
+                                       occurrence=optional, opts=[]},
+                                #field{name=y, fnum=w, type=uint32,
+                                       occurrence=repeated, opts=[]}]}]).
