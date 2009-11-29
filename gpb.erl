@@ -1,5 +1,5 @@
 -module(gpb).
--compile(export_all).
+%-compile(export_all).
 -export([decode_msg/3]).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -13,6 +13,8 @@
 %%   type (and optionalness) as docoumented on the google web:
 %%   strings="", booleans=false, integers=0, enums=<first value> and so on.
 %%
+%%   Message fields can also have default values specified in the .proto file.
+%%
 %% * Optionally non-crash on type-mismatches spec<-->actual-wire-contents
 %%   Ignore/skip instead of crash?
 %%
@@ -23,23 +25,24 @@
 -record(field,
         {name, fnum, type, occurrence, opts}).
 
-decode_msg(MsgName, MsgDefs, Bin) ->
-    Msg    = new_initial_msg(MsgName, MsgDefs),
-    MsgDef = keyfetch(MsgName, MsgDefs),
-    decode_field(MsgDef, MsgDefs, Bin, Msg).
+decode_msg(Bin, MsgName, MsgDefs) ->
+    MsgKey = {msg,MsgName},
+    Msg    = new_initial_msg(MsgKey, MsgDefs),
+    MsgDef = keyfetch(MsgKey, MsgDefs),
+    decode_field(Bin, MsgDef, MsgDefs, Msg).
 
-new_initial_msg(MsgName, MsgDefs) ->
-    MsgDef = keyfetch(MsgName, MsgDefs),
+new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
+    MsgDef = keyfetch(MsgKey, MsgDefs),
     {MsgName, lists:map(fun(#field{name=FName, occurrence=repeated}) ->
                                 {FName, []};
-                           (#field{name=FName, type={msg,FieldMsgName}}) ->
-                                {FName, new_initial_msg(FieldMsgName, MsgDefs)};
+                           (#field{name=FName, type={msg,_Name}=FMsgKey}) ->
+                                {FName, new_initial_msg(FMsgKey, MsgDefs)};
                            (#field{name=FName}) ->
                                 {FName, undefined}
                         end,
                         MsgDef)}.
 
-decode_field(MsgDef, MsgDefs, Bin, Msg) when size(Bin) > 0 ->
+decode_field(Bin, MsgDef, MsgDefs, Msg) when size(Bin) > 0 ->
     {Key, Rest} = decode_varint(Bin),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
@@ -47,53 +50,16 @@ decode_field(MsgDef, MsgDefs, Bin, Msg) when size(Bin) > 0 ->
     %% then do the updating here, keeping recursion to be only in this function
     %% thus sending down fewer args to auxiliary subfunctions
     %% Inline subfunctions??
-    case {WireType, lists:keyfind(FieldNum, #field.fnum, MsgDef)} of
-        {0, #field{type=sint32} = FieldDef} ->
-            add_zigzag32_varint(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {0, #field{type=sint64} = FieldDef} ->
-            add_zigzag64_varint(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {0, #field{type=int32} = FieldDef} ->
-            add_2compl32_varint(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {0, #field{type=int64} = FieldDef} ->
-            add_2compl64_varint(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {0, #field{type=uint32} = FieldDef} ->
-            add_unsigned32_varint(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {0, #field{type=uint64} = FieldDef} ->
-            add_unsigned64_varint(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {0, #field{type=bool} = FieldDef} ->
-            add_bool_varint(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {0, #field{type={enum,EnumName}} = FieldDef} ->
-            add_enum_varint(Rest, EnumName, FieldDef, MsgDef, MsgDefs, Msg);
-        {1, #field{type=fixed64} = FieldDef} ->
-            add_unsigned64(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {1, #field{type=sfixed64} = FieldDef} ->
-            add_signed64(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {1, #field{type=double} = FieldDef} ->
-            add_double(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {2, #field{type=string} = FieldDef} ->
-            add_string(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {2, #field{type=bytes} = FieldDef} ->
-            add_bytes(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {2, #field{type={msg,SubMsgName}} = FieldDef} ->
-            add_embedded_msg(Rest, SubMsgName, FieldDef, MsgDef, MsgDefs, Msg);
-        {2, #field{type=packed_repeated} = FieldDef} ->
-            add_packed_repeated(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {5, #field{type=fixed32} = FieldDef} ->
-            add_unsigned32(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {5, #field{type=sfixed32} = FieldDef} ->
-            add_signed32(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {5, #field{type=float} = FieldDef} ->
-            add_float(Rest, FieldDef, MsgDef, MsgDefs, Msg);
-        {0, false} ->
-            skip_varint(Rest, MsgDef, MsgDefs, Msg);
-        {1, false} ->
-            skip_64bits(Rest, MsgDef, MsgDefs, Msg);
-        {2, false} ->
-            skip_length_delimited(Rest, MsgDef, MsgDefs, Msg);
-        {5, false} ->
-            skip_32bits(Rest, MsgDef, MsgDefs, Msg)
+    case lists:keyfind(FieldNum, #field.fnum, MsgDef) of
+        false ->
+            Rest2 = skip_field(Rest, WireType),
+            decode_field(MsgDef, MsgDefs, Rest2, Msg);
+        #field{type = FieldType} = FieldDef ->
+            {NewValue, Rest2} = decode_type(FieldType, WireType, Rest, MsgDefs),
+            NewMsg = add_field(NewValue, FieldDef, MsgDefs, Msg),
+            decode_field(Rest2, MsgDef, MsgDefs, NewMsg)
     end;
-decode_field(MsgDef, _MsgDefs, <<>>, {MsgName, Fields}) ->
+decode_field(<<>>, MsgDef, _MsgDefs, {MsgName, Fields}) ->
     %% Reverse any repeated fields.
     RepeatedFNames = [N || #field{name=N, occurrence=repeated} <- MsgDef],
     {MsgName, lists:foldl(fun(FName, Acc) ->
@@ -104,107 +70,115 @@ decode_field(MsgDef, _MsgDefs, <<>>, {MsgName, Fields}) ->
                           Fields,
                           RepeatedFNames)}.
 
-add_zigzag32_varint(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    {NV, Rest} = decode_varint(Bin),
-    N = decode_zigzag(NV),
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
+decode_wiretype(0) -> varint;
+decode_wiretype(1) -> bits64;
+decode_wiretype(2) -> length_delimited;
+decode_wiretype(5) -> bits32.
 
-add_zigzag64_varint(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    {NV, Rest} = decode_varint(Bin),
-    N = decode_zigzag(NV),
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
+skip_field(Bin, WireType) ->
+    case decode_wiretype(WireType) of
+        varint ->
+            {_N, Rest} = decode_varint(Bin),
+            Rest;
+        bits64 ->
+            <<_:64, Rest/binary>> = Bin,
+            Rest;
+        length_delimited ->
+            {Len, Rest} = decode_varint(Bin),
+            <<_:Len/binary, Rest2>> = Rest,
+            Rest2;
+        bits32 ->
+            <<_:32, Rest/binary>> = Bin,
+            Rest
+    end.
 
-add_2compl32_varint(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    %% This doc says: "If you use int32 or int64 as the type for a
-    %% negative number, the resulting varint is always ten bytes long --
-    %% it is, effectively, treated like a very large unsigned integer."
-    %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
-    add_2compl64_varint(Bin, FieldDef, MsgDef, MsgDefs, Msg).
+decode_type(FieldType, WireType, Bin, MsgDefs) ->
+    case {FieldType, decode_wiretype(WireType)} of
+        {sint32, varint} ->
+            {NV, T} = decode_varint(Bin),
+            {decode_zigzag(NV), T};
+        {sint64, varint} ->
+            {NV, T} = decode_varint(Bin),
+            {decode_zigzag(NV), T};
+        {int32, varint} ->
+            %% This doc says: "If you use int32 or int64 as the type
+            %% for a negative number, the resulting varint is always
+            %% ten bytes long -- it is, effectively, treated like a
+            %% very large unsigned integer."
+            %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
+            %%
+            %% 10 bytes is what it takes to varint-encode a -1 as a 64
+            %% bit signed int. -1 as a 32 bit signed int is only 5 bytes.
+            decode_type(int64, WireType, Bin, MsgDefs);
+        {int64, varint} ->
+            {NV, T} = decode_varint(Bin),
+            <<N:64/signed>> = <<NV:64>>,
+            {N, T};
+        {uint32, varint} ->
+            {_N, _Rest} = decode_varint(Bin);
+        {uint64, varint} ->
+            {_N, _Rest} = decode_varint(Bin);
+        {bool, varint} ->
+            {N, Rest} = decode_varint(Bin),
+            {N =/= 0, Rest};
+        {{enum, _EnumName}=Key, varint} ->
+            {N, Rest} = decode_varint(Bin),
+            {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
+            {value, {EnumName, N}} = lists:keysearch(N, 2, EnumValues),
+            {EnumName, Rest};
+        {fixed64, bits64} ->
+            <<N:64/little, Rest/binary>> = Bin,
+            {N, Rest};
+        {sfixed64, bits64} ->
+            <<N:64/little-signed, Rest/binary>> = Bin,
+            {N, Rest};
+        {double, bits64} ->
+            <<N:64/little-float, Rest/binary>> = Bin,
+            {N, Rest};
+        {string, length_delimited} ->
+            {Len, Rest} = decode_varint(Bin),
+            <<Utf8Str:Len/binary, Rest2/binary>> = Rest,
+            {unicode:characters_to_list(Utf8Str, unicode), Rest2};
+        {bytes, length_delimited} ->
+            {Len, Rest} = decode_varint(Bin),
+            <<Bytes:Len/binary, Rest2/binary>> = Rest,
+            {Bytes, Rest2};
+        {{msg,MsgName}, length_delimited} ->
+            {Len, Rest} = decode_varint(Bin),
+            <<MsgBytes:Len/binary, Rest2/binary>> = Rest,
+            {decode_msg(MsgBytes, MsgName, MsgDefs), Rest2};
+        {packed, length_delimited} ->
+            fixme_handle_packed;
+        {fixed32, bits32} ->
+            <<N:32/little, Rest/binary>> = Bin,
+            {N, Rest};
+        {sfixed32, bits32} ->
+            <<N:32/little-signed, Rest/binary>> = Bin,
+            {N, Rest};
+        {float, bits32} ->
+            <<N:32/little-float, Rest/binary>> = Bin,
+            {N, Rest}
+    end.
 
-add_2compl64_varint(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    {NV, Rest} = decode_varint(Bin),
-    <<N:64/signed>> = <<NV:64>>,
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_unsigned32_varint(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    {N, Rest} = decode_varint(Bin),
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_unsigned64_varint(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    {N, Rest} = decode_varint(Bin),
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_bool_varint(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    {N, Rest} = decode_varint(Bin),
-    add_field(N =/= 0, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_enum_varint(_Bin, _EnumName, _FieldDef, _MsgDef, _MsgDefs, _Msg) -> fixme.
-
-add_unsigned64(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    <<N:64/little, Rest/binary>> = Bin,
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_signed64(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    <<N:64/little-signed, Rest/binary>> = Bin,
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_double(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    <<N:64/little-float, Rest/binary>> = Bin,
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_string(_Bin, _FieldDef, _MsgDef, _MsgDefs, _Msg) -> fixme. % utf8?
-add_bytes(_Bin, _FieldDef, _MsgDef, _MsgDefs, _Msg) -> fixme.
-add_embedded_msg(_Bin, _SubMsgName, _FieldDef, _MsgDef, _MsgDefs, _Msg) -> fixme.
-add_packed_repeated(_Bin, _FieldDef, _MsgDef, _MsgDefs, _Msg) -> fixme.
-
-add_unsigned32(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    <<N:32/little, Rest/binary>> = Bin,
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_signed32(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    <<N:32/little-signed, Rest/binary>> = Bin,
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-add_float(Bin, FieldDef, MsgDef, MsgDefs, Msg) ->
-    <<N:32/little-float, Rest/binary>> = Bin,
-    add_field(N, FieldDef, MsgDef, MsgDefs, Msg, Rest).
-
-skip_varint(Bin, MsgDef, MsgDefs, Msg) ->
-    {_N, Rest} = decode_varint(Bin),
-    decode_field(MsgDef, MsgDefs, Rest, Msg).
-
-skip_64bits(Bin, MsgDef, MsgDefs, Msg) ->
-    <<_:64, Rest/binary>> = Bin,
-    decode_field(MsgDef, MsgDefs, Rest, Msg).
-
-skip_length_delimited(Bin, MsgDef, MsgDefs, Msg) ->
-    {Len, Rest} = decode_varint(Bin),
-    <<_:Len/binary, Rest2>> = Rest,
-    decode_field(MsgDef, MsgDefs, Rest2, Msg).
-
-skip_32bits(Bin, MsgDef, MsgDefs, Msg) ->
-    <<_:32, Rest/binary>> = Bin,
-    decode_field(MsgDef, MsgDefs, Rest, Msg).
-
-add_field(Value, FieldDef, MsgDef, MsgDefs, {MsgName, Fields}, Rest) ->
+add_field(Value, FieldDef, MsgDefs, {MsgName, Fields}) ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
     %% the same value appears multiple times, the parser accepts the
     %% last value it sees." But what about bytes?
     %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
-    NewFields =
-        case FieldDef of
-            #field{name = FName, occurrence = required, type={msg,FMsgName}}->
-                merge_field(FName, Value, Fields, FMsgName, MsgDefs);
-            #field{name = FName, occurrence = optional, type={msg,FMsgName}}->
-                merge_field(FName, Value, Fields, FMsgName, MsgDefs);
-            #field{name = FName, occurrence = required}->
-                replace_field(FName, Value, Fields);
-            #field{name = FName, occurrence = optional}->
-                replace_field(FName, Value, Fields);
-            #field{name = FName, occurrence = repeated} ->
-                append_to_field(FName, Value, Fields)
-        end,
-    decode_field(MsgDef, MsgDefs, Rest, {MsgName, NewFields}).
+    %% For now, we assume it works like strings.
+    {MsgName,
+     case FieldDef of
+         #field{name = FName, occurrence = required, type = {msg, FMsgName}} ->
+             merge_field(FName, Value, Fields, FMsgName, MsgDefs);
+         #field{name = FName, occurrence = optional, type = {msg, FMsgName}} ->
+             merge_field(FName, Value, Fields, FMsgName, MsgDefs);
+         #field{name = FName, occurrence = required}->
+             replace_field(FName, Value, Fields);
+         #field{name = FName, occurrence = optional}->
+             replace_field(FName, Value, Fields);
+         #field{name = FName, occurrence = repeated} ->
+             append_to_field(FName, Value, Fields)
+     end}.
 
 merge_field(FName, NewMsg, Fields, FMsgName, MsgDefs) ->
     case keyfetch(FName, Fields) of
@@ -216,7 +190,7 @@ merge_field(FName, NewMsg, Fields, FMsgName, MsgDefs) ->
     end.
 
 merge_msg({MsgName, PrevFields}, {MsgName, NewFields}, MsgDefs) ->
-    MsgDef = keyfetch(MsgName, MsgDefs),
+    MsgDef = keyfetch({msg,MsgName}, MsgDefs),
     {MsgName,
      lists:foldl(
        fun(#field{name=FName, occurrence=repeated}, AccFields) ->
@@ -305,17 +279,61 @@ decode_varint_test() ->
 
 decode_msg_simple_occurrence_test() ->
     {t1,[{a,undefined}]} =
-        gpb:decode_msg(t1,
-                       [{t1, [#field{name=a, fnum=1, type=int32,
-                                     occurrence=optional, opts=[]}]}],
-                       <<>>),
+        decode_msg(<<>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type=int32,
+                                       occurrence=optional, opts=[]}]}]),
     {t1,[{a,150}]} =
-        gpb:decode_msg(t1,
-                       [{t1, [#field{name=a, fnum=1, type=int32,
-                                     occurrence=required, opts=[]}]}],
-                       <<8,150,1>>),
+        decode_msg(<<8,150,1>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type=int32,
+                                       occurrence=required, opts=[]}]}]),
     {t1,[{a,[150, 151]}]} =
-        gpb:decode_msg(t1,
-                       [{t1, [#field{name=a, fnum=1, type=int32,
-                                     occurrence=repeated, opts=[]}]}],
-                       <<8,150,1, 8,151,1>>).
+        decode_msg(<<8,150,1, 8,151,1>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type=int32,
+                                       occurrence=repeated, opts=[]}]}]),
+    ok.
+
+decode_msg_with_enum_field_test() ->
+    {t1, [{a,v2}]} =
+        decode_msg(<<8,150,1>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type={enum,e},
+                                       occurrence=required, opts=[]}]},
+                    {{enum,e}, [{v1, 100},
+                                {v2, 150}]}]).
+
+decode_msg_with_bool_field_test() ->
+    {t1, [{a,true}]} =
+        decode_msg(<<8,1>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type=bool,
+                                       occurrence=required, opts=[]}]}]),
+    {t1, [{a,false}]} =
+        decode_msg(<<8,0>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type=bool,
+                                       occurrence=required, opts=[]}]}]).
+decode_msg_with_string_field_test() ->
+    {t1, [{a,"abcåäö"}]} =
+        decode_msg(<<10,9,$a,$b,$c,$\303,$\245,$\303,$\244,$\303,$\266>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type=string,
+                                       occurrence=required, opts=[]}]}]).
+
+decode_msg_with_bytes_field_test() ->
+    {t1, [{a,<<0,0,0,0>>}]} =
+        decode_msg(<<10,4,0,0,0,0>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type=bytes,
+                                       occurrence=required, opts=[]}]}]).
+
+decode_msg_with_sub_msg_field_test() ->
+    {t1, [{a, {t2, [{b,150}]}}]} =
+        decode_msg(<<10,3, 8,150,1>>,
+                   t1,
+                   [{{msg,t1}, [#field{name=a, fnum=1, type={msg,t2},
+                                       occurrence=required, opts=[]}]},
+                    {{msg,t2}, [#field{name=b, fnum=1, type=uint32,
+                                       occurrence=required, opts=[]}]}]).
