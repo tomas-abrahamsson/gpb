@@ -316,7 +316,7 @@ decode_msg_with_bool_field_test() ->
                    [{{msg,t1}, [#field{name=a, fnum=1, type=bool,
                                        occurrence=required, opts=[]}]}]).
 decode_msg_with_string_field_test() ->
-    {t1, [{a,"abcåäö"}]} =
+    {t1, [{a,"abc\345\344\366"}]} =
         decode_msg(<<10,9,$a,$b,$c,$\303,$\245,$\303,$\244,$\303,$\266>>,
                    t1,
                    [{{msg,t1}, [#field{name=a, fnum=1, type=string,
