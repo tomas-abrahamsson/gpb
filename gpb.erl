@@ -3,20 +3,37 @@
 -export([decode_msg/3]).
 -include_lib("eunit/include/eunit.hrl").
 
+%% TODO:
+%%
+%% * Support records on the erlang side:
+%%   let #fields have a record field index number: #record.field
+%%   and do setelement instead of keyfetch and replace_field
+%%
+%% * Add a new_default_msg that sets default values according to
+%%   type (and optionalness) as docoumented on the google web:
+%%   strings="", booleans=false, integers=0, enums=<first value> and so on.
+%%
+%% * Optionally non-crash on type-mismatches spec<-->actual-wire-contents
+%%   Ignore/skip instead of crash?
+%%
+%% * Crash or silent truncation on values out of range?
+%%   Example: (1 bsl 33) for an uint32? The bitsyntax silently truncats,
+%%   but this has been under debate on the erlang mailing list since it
+%%   was unexpected. Related: principle of least astonishment.
 -record(field,
         {name, fnum, type, occurrence, opts}).
 
 decode_msg(MsgName, MsgDefs, Bin) ->
-    Msg    = new_default_msg(MsgName, MsgDefs),
+    Msg    = new_initial_msg(MsgName, MsgDefs),
     MsgDef = keyfetch(MsgName, MsgDefs),
     decode_field(MsgDef, MsgDefs, Bin, Msg).
 
-new_default_msg(MsgName, MsgDefs) ->
+new_initial_msg(MsgName, MsgDefs) ->
     MsgDef = keyfetch(MsgName, MsgDefs),
     {MsgName, lists:map(fun(#field{name=FName, occurrence=repeated}) ->
                                 {FName, []};
                            (#field{name=FName, type={msg,FieldMsgName}}) ->
-                                {FName, new_default_msg(FieldMsgName, MsgDefs)};
+                                {FName, new_initial_msg(FieldMsgName, MsgDefs)};
                            (#field{name=FName}) ->
                                 {FName, undefined}
                         end,
@@ -26,6 +43,10 @@ decode_field(MsgDef, MsgDefs, Bin, Msg) when size(Bin) > 0 ->
     {Key, Rest} = decode_varint(Bin),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
+    %% Cleanup: do {NewValue, ...} = case {WireType, ...} of ...
+    %% then do the updating here, keeping recursion to be only in this function
+    %% thus sending down fewer args to auxiliary subfunctions
+    %% Inline subfunctions??
     case {WireType, lists:keyfind(FieldNum, #field.fnum, MsgDef)} of
         {0, #field{type=sint32} = FieldDef} ->
             add_zigzag32_varint(Rest, FieldDef, MsgDef, MsgDefs, Msg);
