@@ -19,8 +19,21 @@
 %%   Example: (1 bsl 33) for an uint32? The bitsyntax silently truncats,
 %%   but this has been under debate on the erlang mailing list since it
 %%   was unexpected. Related: principle of least astonishment.
+
+-type gpb_field_type() :: 'sint32' | 'sint64' | 'int32' | 'int64' | 'uint32'
+                          | 'uint64' | 'bool' | {'enum',atom()}
+                          | 'fixed64' | 'sfixed64' | 'double' | 'string'
+                          | 'bytes' | {'msg',atom()} | 'packed'
+                          | 'fixed32' | 'sfixed32' | 'float'.
+
 -record(field,
-        {name, fnum, rnum, type, occurrence, opts}).
+        {name       :: atom(),
+         fnum       :: integer(),
+         rnum       :: pos_integer(), %% field number in the record
+         type       :: gpb_field_type(),
+         occurrence :: 'required' | 'optional' | 'repeated',
+         opts       :: [term()]
+        }).
 
 decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
