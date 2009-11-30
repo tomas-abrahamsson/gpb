@@ -9,15 +9,18 @@
 %% * Add a new_default_msg that sets default values according to
 %%   type (and optionalness) as docoumented on the google web:
 %%   strings="", booleans=false, integers=0, enums=<first value> and so on.
+%%   Maybe only for required fields?
 %%
 %%   Message fields can also have default values specified in the .proto file.
+%%
+%%   Records with default values could fit nicely here.
 %%
 %% * Optionally non-crash on type-mismatches spec<-->actual-wire-contents
 %%   Ignore/skip instead of crash?
 %%
-%% * Crash or silent truncation on values out of range?
-%%   Example: (1 bsl 33) for an uint32? The bitsyntax silently truncats,
-%%   but this has been under debate on the erlang mailing list since it
+%% * Crash or silent truncation on values out of range when encoding?
+%%   Example: (1 bsl 33) for an uint32? The bit-syntax silently truncates,
+%%   but this has been under debate on the erlang mailing list as it
 %%   was unexpected. Related: principle of least astonishment.
 
 -type gpb_field_type() :: 'sint32' | 'sint64' | 'int32' | 'int64' | 'uint32'
