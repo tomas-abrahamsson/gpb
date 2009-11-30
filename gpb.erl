@@ -6,10 +6,6 @@
 
 %% TODO:
 %%
-%% * Support records on the erlang side:
-%%   let #fields have a record field index number: #record.field
-%%   and do setelement instead of keyfetch and replace_field
-%%
 %% * Add a new_default_msg that sets default values according to
 %%   type (and optionalness) as docoumented on the google web:
 %%   strings="", booleans=false, integers=0, enums=<first value> and so on.
@@ -24,7 +20,7 @@
 %%   but this has been under debate on the erlang mailing list since it
 %%   was unexpected. Related: principle of least astonishment.
 -record(field,
-        {name, fnum, type, occurrence, opts}).
+        {name, fnum, rnum, type, occurrence, opts}).
 
 decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
@@ -34,23 +30,21 @@ decode_msg(Bin, MsgName, MsgDefs) ->
 
 new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
     MsgDef = keyfetch(MsgKey, MsgDefs),
-    {MsgName, lists:map(fun(#field{name=FName, occurrence=repeated}) ->
-                                {FName, []};
-                           (#field{name=FName, type={msg,_Name}=FMsgKey}) ->
-                                {FName, new_initial_msg(FMsgKey, MsgDefs)};
-                           (#field{name=FName}) ->
-                                {FName, undefined}
-                        end,
-                        MsgDef)}.
+    lists:foldl(fun(#field{rnum=RNum, occurrence=repeated}, Record) ->
+                        setelement(RNum, Record, []);
+                   (#field{rnum=RNum, type={msg,_Name}=FMsgKey}, Record) ->
+                        SubMsg = new_initial_msg(FMsgKey, MsgDefs),
+                        setelement(RNum, Record, SubMsg);
+                   (#field{}, Record) ->
+                        Record
+                end,
+                erlang:make_tuple(length(MsgDef)+1, undefined, [{1,MsgName}]),
+                MsgDef).
 
 decode_field(Bin, MsgDef, MsgDefs, Msg) when size(Bin) > 0 ->
     {Key, Rest} = decode_varint(Bin),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
-    %% Cleanup: do {NewValue, ...} = case {WireType, ...} of ...
-    %% then do the updating here, keeping recursion to be only in this function
-    %% thus sending down fewer args to auxiliary subfunctions
-    %% Inline subfunctions??
     case lists:keyfind(FieldNum, #field.fnum, MsgDef) of
         false ->
             Rest2 = skip_field(Rest, WireType),
@@ -60,16 +54,16 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when size(Bin) > 0 ->
             NewMsg = add_field(NewValue, FieldDef, MsgDefs, Msg),
             decode_field(Rest2, MsgDef, MsgDefs, NewMsg)
     end;
-decode_field(<<>>, MsgDef, _MsgDefs, {MsgName, Fields}) ->
+decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
     %% Reverse any repeated fields, but only on the top-level, not recursively.
-    RepeatedFNames = [N || #field{name=N, occurrence=repeated} <- MsgDef],
-    {MsgName, lists:foldl(fun(FName, Acc) ->
-                                  OldValue = keyfetch(FName, Acc),
-                                  NewValue = lists:reverse(OldValue),
-                                  replace_field(FName, NewValue, Acc)
-                          end,
-                          Fields,
-                          RepeatedFNames)}.
+    RepeatedRNums = [N || #field{rnum=N, occurrence=repeated} <- MsgDef],
+    lists:foldl(fun(RNum, Record) ->
+                        OldValue = element(RNum, Record),
+                        ReversedField = lists:reverse(OldValue),
+                        setelement(RNum, Record, ReversedField)
+                end,
+                Record0,
+                RepeatedRNums).
 
 decode_wiretype(0) -> varint;
 decode_wiretype(1) -> bits64;
@@ -161,66 +155,62 @@ decode_type(FieldType, WireType, Bin, MsgDefs) ->
             {N, Rest}
     end.
 
-add_field(Value, FieldDef, MsgDefs, {MsgName, Fields}) ->
+add_field(Value, FieldDef, MsgDefs, Record) ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
     %% the same value appears multiple times, the parser accepts the
     %% last value it sees." But what about bytes?
     %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
     %% For now, we assume it works like strings.
-    {MsgName,
-     case FieldDef of
-         #field{name = FName, occurrence = required, type = {msg, FMsgName}} ->
-             merge_field(FName, Value, Fields, FMsgName, MsgDefs);
-         #field{name = FName, occurrence = optional, type = {msg, FMsgName}} ->
-             merge_field(FName, Value, Fields, FMsgName, MsgDefs);
-         #field{name = FName, occurrence = required}->
-             replace_field(FName, Value, Fields);
-         #field{name = FName, occurrence = optional}->
-             replace_field(FName, Value, Fields);
-         #field{name = FName, occurrence = repeated} ->
-             append_to_field(FName, Value, Fields)
-     end}.
-
-merge_field(FName, NewMsg, Fields, FMsgName, MsgDefs) ->
-    case keyfetch(FName, Fields) of
-        undefined ->
-            replace_field(FName, NewMsg, Fields);
-        {FMsgName, _PrevFields} = PrevMsg ->
-            MergedMsg = merge_msgs(PrevMsg, NewMsg, MsgDefs),
-            replace_field(FName, MergedMsg, Fields)
+    case FieldDef of
+        #field{rnum = RNum, occurrence = required, type = {msg,_FMsgName}} ->
+            merge_field(RNum, Value, Record, MsgDefs);
+        #field{rnum = RNum, occurrence = optional, type = {msg,_FMsgName}} ->
+            merge_field(RNum, Value, Record, MsgDefs);
+        #field{rnum = RNum, occurrence = required}->
+            setelement(RNum, Record, Value);
+        #field{rnum = RNum, occurrence = optional}->
+            setelement(RNum, Record, Value);
+        #field{rnum = RNum, occurrence = repeated} ->
+            append_to_element(RNum, Value, Record)
     end.
 
-merge_msgs({MsgName, PrevFields}, {MsgName, NewFields}, MsgDefs) ->
+merge_field(RNum, NewMsg, Record, MsgDefs) ->
+    case element(RNum, Record) of
+        undefined ->
+            setelement(RNum, Record, NewMsg);
+        PrevMsg ->
+            MergedMsg = merge_msgs(PrevMsg, NewMsg, MsgDefs),
+            setelement(RNum, Record, MergedMsg)
+    end.
+
+append_to_element(RNum, NewElem, Record) ->
+    PrevElems = element(RNum, Record),
+    setelement(RNum, Record, [NewElem | PrevElems]).
+
+merge_msgs(PrevMsg, NewMsg, MsgDefs)
+  when element(1,PrevMsg) == element(1,NewMsg) ->
+    MsgName = element(1, NewMsg),
     MsgDef = keyfetch({msg,MsgName}, MsgDefs),
-    {MsgName,
-     lists:foldl(
-       fun(#field{name=FName, occurrence=repeated}, AccFields) ->
-               PrevSeq = keyfetch(FName, AccFields),
-               NewSeq = keyfetch(FName, NewFields),
-               replace_field(FName, append_seqs(PrevSeq, NewSeq), AccFields);
-          (#field{name=FName, type={msg,_FieldMsgName}}, AccFields) ->
-               PrevMsg = keyfetch(FName,AccFields),
-               NewMsg  = keyfetch(FName,NewFields),
-               MergedMsg = merge_msgs(PrevMsg, NewMsg, MsgDefs),
-               replace_field(FName, MergedMsg, AccFields);
-          (#field{name=FName}, AccFields) ->
-               case keyfetch(FName, NewFields) of
-                   undefined -> AccFields;
-                   NewValue  -> replace_field(FName, NewValue, AccFields)
-               end
-       end,
-       PrevFields,
-       MsgDef)}.
+    lists:foldl(
+      fun(#field{rnum=RNum, occurrence=repeated}, AccRecord) ->
+              PrevSeq = element(RNum, AccRecord),
+              NewSeq  = element(RNum, NewMsg),
+              setelement(RNum, AccRecord, PrevSeq ++ NewSeq);
+         (#field{rnum=RNum, type={msg,_FieldMsgName}}, AccRecord) ->
+              PrevSubMsg = element(RNum, AccRecord),
+              NewSubMsg  = element(RNum, NewMsg),
+              MergedSubMsg = merge_msgs(PrevSubMsg, NewSubMsg, MsgDefs),
+              setelement(RNum, AccRecord, MergedSubMsg);
+         (#field{rnum=RNum}, AccRecord) ->
+              case element(RNum, NewMsg) of
+                  undefined -> AccRecord;
+                  NewValue  -> setelement(RNum, AccRecord, NewValue)
+              end
+      end,
+      PrevMsg,
+      MsgDef).
 
-replace_field(FName, Value, Fields) ->
-    lists:keystore(FName, 1, Fields, {FName, Value}).
 
-append_to_field(FName, NewElem, Fields) ->
-    PrevElems = keyfetch(FName, Fields),
-    replace_field(FName, [NewElem | PrevElems], Fields).
-
-append_seqs(Seq1, Seq2) ->
-    Seq1 ++ Seq2.
 
 
 decode_varint(Bin) -> de_vi(Bin, 0, 0).
@@ -280,98 +270,110 @@ decode_varint_test() ->
     {128, <<255>>} = decode_varint(<<128, 1, 255>>),
     {150, <<255>>} = decode_varint(<<150, 1, 255>>).
 
+
+-record(m1,{a}).
+
 decode_msg_simple_occurrence_test() ->
-    {t1,[{a,undefined}]} =
+    #m1{a = undefined} =
         decode_msg(<<>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type=int32,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
                                        occurrence=optional, opts=[]}]}]),
-    {t1,[{a,150}]} =
+    #m1{a = 150} =
         decode_msg(<<8,150,1>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type=int32,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
                                        occurrence=required, opts=[]}]}]),
-    {t1,[{a,[150, 151]}]} =
+    #m1{a = [150, 151]} =
         decode_msg(<<8,150,1, 8,151,1>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type=int32,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
                                        occurrence=repeated, opts=[]}]}]),
     ok.
 
 decode_msg_with_enum_field_test() ->
-    {t1, [{a,v2}]} =
+    #m1{a = v2} =
         decode_msg(<<8,150,1>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type={enum,e},
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
+                                       type={enum,e},
                                        occurrence=required, opts=[]}]},
                     {{enum,e}, [{v1, 100},
                                 {v2, 150}]}]).
 
 decode_msg_with_bool_field_test() ->
-    {t1, [{a,true}]} =
+    #m1{a = true} =
         decode_msg(<<8,1>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type=bool,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
                                        occurrence=required, opts=[]}]}]),
-    {t1, [{a,false}]} =
+    #m1{a = false} =
         decode_msg(<<8,0>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type=bool,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
                                        occurrence=required, opts=[]}]}]).
+
 decode_msg_with_string_field_test() ->
-    {t1, [{a,"abc\345\344\366"++[1022]}]} =
+    #m1{a = "abc\345\344\366"++[1022]} =
         decode_msg(<<10,11,
                     $a,$b,$c,$\303,$\245,$\303,$\244,$\303,$\266,$\317,$\276>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type=string,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=string,
                                        occurrence=required, opts=[]}]}]).
 
 decode_msg_with_bytes_field_test() ->
-    {t1, [{a,<<0,0,0,0>>}]} =
+    #m1{a = <<0,0,0,0>>} =
         decode_msg(<<10,4,0,0,0,0>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type=bytes,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bytes,
                                        occurrence=required, opts=[]}]}]).
+
+-record(m2, {b}).
 
 decode_msg_with_sub_msg_field_test() ->
-    {t1, [{a, {t2, [{b,150}]}}]} =
+    #m1{a = #m2{b = 150}} =
         decode_msg(<<10,3, 8,150,1>>,
-                   t1,
-                   [{{msg,t1}, [#field{name=a, fnum=1, type={msg,t2},
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
+                                       type={msg,m2},
                                        occurrence=required, opts=[]}]},
-                    {{msg,t2}, [#field{name=b, fnum=1, type=uint32,
+                    {{msg,m2}, [#field{name=b, fnum=1, rnum=#m2.b, type=uint32,
                                        occurrence=required, opts=[]}]}]).
 
+-record(m3, {a,b,c,d,e}).
+-record(m4, {x,y}).
+
 merge_msg_test() ->
-    {m1, [{a, 20},
-          {b, 22},
-          {c, 13},
-          {d, [11,12, 21,22]},
-          {e, {m2, [{x, 210},
-                    {y, [111,112, 211,212]}]}}]} =
-        merge_msgs({m1, [{a, 10},
-                         {b, undefined},
-                         {c, 13},
-                         {d, [11,12]},
-                         {e, {m2, [{x, 110},
-                                   {y, [111, 112]}]}}]},
-                   {m1, [{a, 20},             %% overwrites integers
-                         {b, 22},             %% overwrites undefined
-                         {c, undefined},      %% undefined does not overwrite
-                         {d, [21,22]},        %% sequences appends
-                         {e, {m2, [{x, 210},  %% merging recursively
-                                   {y, [211, 212]}]}}]},
-                   [{{msg,m1}, [#field{name=a,fnum=1, type=uint32,
+    #m3{a = 20,
+        b = 22,
+        c = 13,
+        d = [11,12, 21,22],
+        e = #m4{x = 210,
+                y = [111,112, 211,212]}} =
+        merge_msgs(#m3{a = 10,
+                       b = undefined,
+                       c = 13,
+                       d = [11,12],
+                       e = #m4{x = 110,
+                               y = [111, 112]}},
+                   #m3{a = 20,             %% overwrites integers
+                       b = 22,             %% overwrites undefined
+                       c = undefined,      %% undefined does not overwrite
+                       d = [21,22],        %% sequences appends
+                       e = #m4{x = 210,    %% merging recursively
+                               y = [211, 212]}},
+                   [{{msg,m3}, [#field{name=a,fnum=1, rnum=#m3.a, type=uint32,
                                        occurrence=required, opts=[]},
-                                #field{name=b,fnum=2, type=uint32,
+                                #field{name=b,fnum=2, rnum=#m3.b, type=uint32,
                                        occurrence=optional, opts=[]},
-                                #field{name=c,fnum=3, type=uint32,
+                                #field{name=c,fnum=3, rnum=#m3.c, type=uint32,
                                        occurrence=optional, opts=[]},
-                                #field{name=d,fnum=4, type=uint32,
+                                #field{name=d,fnum=4, rnum=#m3.d, type=uint32,
                                        occurrence=repeated, opts=[]},
-                                #field{name=e,fnum=5, type={msg,m2},
+                                #field{name=e,fnum=5, rnum=#m3.e,
+                                       type={msg,m4},
                                        occurrence=optional, opts=[]}]},
-                    {{msg,m2}, [#field{name=x, fnum=1, type=uint32,
+                    {{msg,m4}, [#field{name=x, fnum=1, rnum=#m4.x, type=uint32,
                                        occurrence=optional, opts=[]},
-                                #field{name=y, fnum=w, type=uint32,
+                                #field{name=y, fnum=w, rnum=#m4.y, type=uint32,
                                        occurrence=repeated, opts=[]}]}]).
