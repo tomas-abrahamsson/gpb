@@ -15,8 +15,7 @@
 %%
 %%   Records with default values could fit nicely here.
 %%
-%% * Optionally non-crash on type-mismatches spec<-->actual-wire-contents
-%%   Ignore/skip instead of crash?
+%% * Verify type-mismatches spec<-->actual-wire-contents? (optionally?)
 %%
 %% * Crash or silent truncation on values out of range when encoding?
 %%   Example: (1 bsl 33) for an uint32? The bit-syntax silently truncates,
@@ -65,8 +64,9 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when size(Bin) > 0 ->
         false ->
             Rest2 = skip_field(Rest, WireType),
             decode_field(MsgDef, MsgDefs, Rest2, Msg);
-        #field{type = FieldType} = FieldDef ->
-            {NewValue, Rest2} = decode_type(FieldType, WireType, Rest, MsgDefs),
+        #field{type = FieldType, opts=Opts} = FieldDef ->
+            {NewValue, Rest2} = decode_type(FieldType, Rest, MsgDefs,
+                                            proplists:get_bool(packed, Opts)),
             NewMsg = add_field(NewValue, FieldDef, MsgDefs, Msg),
             decode_field(Rest2, MsgDef, MsgDefs, NewMsg)
     end;
@@ -103,15 +103,28 @@ skip_field(Bin, WireType) ->
             Rest
     end.
 
-decode_type(FieldType, WireType, Bin, MsgDefs) ->
-    case {FieldType, decode_wiretype(WireType)} of
-        {sint32, varint} ->
+decode_type(FieldType, Bin, MsgDefs, true = _IsPacked) ->
+    {Len, Rest} = decode_varint(Bin),
+    <<Bytes:Len/binary, Rest2/binary>> = Rest,
+    {decode_packed_type(FieldType, Bytes, MsgDefs), Rest2};
+decode_type(FieldType, Bin, MsgDefs, false = _IsPacked) ->
+    decode_type_aux(FieldType, Bin, MsgDefs).
+
+decode_packed_type(FieldType, Bytes, MsgDefs) when size(Bytes) > 0 ->
+    {NewValue, Rest} = decode_type_aux(FieldType, Bytes, MsgDefs),
+    [NewValue | decode_packed_type(FieldType, Rest, MsgDefs)];
+decode_packed_type(_FieldType, <<>>, _MsgDefs) ->
+    [].
+
+decode_type_aux(FieldType, Bin, MsgDefs) ->
+    case FieldType of
+        sint32 ->
             {NV, T} = decode_varint(Bin),
             {decode_zigzag(NV), T};
-        {sint64, varint} ->
+        sint64 ->
             {NV, T} = decode_varint(Bin),
             {decode_zigzag(NV), T};
-        {int32, varint} ->
+        int32 ->
             %% This doc says: "If you use int32 or int64 as the type
             %% for a negative number, the resulting varint is always
             %% ten bytes long -- it is, effectively, treated like a
@@ -120,53 +133,51 @@ decode_type(FieldType, WireType, Bin, MsgDefs) ->
             %%
             %% 10 bytes is what it takes to varint-encode a -1 as a 64
             %% bit signed int. -1 as a 32 bit signed int is only 5 bytes.
-            decode_type(int64, WireType, Bin, MsgDefs);
-        {int64, varint} ->
+            decode_type_aux(int64, Bin, MsgDefs);
+        int64 ->
             {NV, T} = decode_varint(Bin),
             <<N:64/signed>> = <<NV:64>>,
             {N, T};
-        {uint32, varint} ->
+        uint32 ->
             {_N, _Rest} = decode_varint(Bin);
-        {uint64, varint} ->
+        uint64 ->
             {_N, _Rest} = decode_varint(Bin);
-        {bool, varint} ->
+        bool ->
             {N, Rest} = decode_varint(Bin),
             {N =/= 0, Rest};
-        {{enum, _EnumName}=Key, varint} ->
+        {enum, _EnumName}=Key ->
             {N, Rest} = decode_varint(Bin),
             {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
             {value, {EnumName, N}} = lists:keysearch(N, 2, EnumValues),
             {EnumName, Rest};
-        {fixed64, bits64} ->
+        fixed64 ->
             <<N:64/little, Rest/binary>> = Bin,
             {N, Rest};
-        {sfixed64, bits64} ->
+        sfixed64 ->
             <<N:64/little-signed, Rest/binary>> = Bin,
             {N, Rest};
-        {double, bits64} ->
+        double ->
             <<N:64/little-float, Rest/binary>> = Bin,
             {N, Rest};
-        {string, length_delimited} ->
+        string ->
             {Len, Rest} = decode_varint(Bin),
             <<Utf8Str:Len/binary, Rest2/binary>> = Rest,
             {unicode:characters_to_list(Utf8Str, unicode), Rest2};
-        {bytes, length_delimited} ->
+        bytes ->
             {Len, Rest} = decode_varint(Bin),
             <<Bytes:Len/binary, Rest2/binary>> = Rest,
             {Bytes, Rest2};
-        {{msg,MsgName}, length_delimited} ->
+        {msg,MsgName} ->
             {Len, Rest} = decode_varint(Bin),
             <<MsgBytes:Len/binary, Rest2/binary>> = Rest,
             {decode_msg(MsgBytes, MsgName, MsgDefs), Rest2};
-        {packed, length_delimited} ->
-            fixme_handle_packed;
-        {fixed32, bits32} ->
+        fixed32 ->
             <<N:32/little, Rest/binary>> = Bin,
             {N, Rest};
-        {sfixed32, bits32} ->
+        sfixed32 ->
             <<N:32/little-signed, Rest/binary>> = Bin,
             {N, Rest};
-        {float, bits32} ->
+        float ->
             <<N:32/little-float, Rest/binary>> = Bin,
             {N, Rest}
     end.
@@ -186,8 +197,11 @@ add_field(Value, FieldDef, MsgDefs, Record) ->
             setelement(RNum, Record, Value);
         #field{rnum = RNum, occurrence = optional}->
             setelement(RNum, Record, Value);
-        #field{rnum = RNum, occurrence = repeated} ->
-            append_to_element(RNum, Value, Record)
+        #field{rnum = RNum, occurrence = repeated, opts=Opts} ->
+            case proplists:get_bool(packed, Opts) of
+                true  -> append_packed_to_element(RNum, Value, Record);
+                false -> append_to_element(RNum, Value, Record)
+            end
     end.
 
 merge_field(RNum, NewMsg, Record, MsgDefs) ->
@@ -202,6 +216,10 @@ merge_field(RNum, NewMsg, Record, MsgDefs) ->
 append_to_element(RNum, NewElem, Record) ->
     PrevElems = element(RNum, Record),
     setelement(RNum, Record, [NewElem | PrevElems]).
+
+append_packed_to_element(RNum, NewElems, Record) ->
+    PrevElems = element(RNum, Record),
+    setelement(RNum, Record, lists:reverse(NewElems, PrevElems)).
 
 merge_msgs(PrevMsg, NewMsg, MsgDefs)
   when element(1,PrevMsg) == element(1,NewMsg) ->
@@ -329,6 +347,22 @@ decode_msg_with_bool_field_test() ->
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
                                        occurrence=required, opts=[]}]}]).
 
+decoding_float_test() ->
+    %% Stole idea from the python test in google-protobuf:
+    %% 1.125 is perfectly representable as a float (no rounding error).
+    #m1{a = 1.125} =
+        decode_msg(<<13,0,0,144,63>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=float,
+                                       occurrence=required, opts=[]}]}]).
+
+decoding_double_test() ->
+    #m1{a = 1.125} =
+        decode_msg(<<13,0,0,0,0,0,0,242,63>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=double,
+                                       occurrence=required, opts=[]}]}]).
+
 decode_msg_with_string_field_test() ->
     #m1{a = "abc\345\344\366"++[1022]} =
         decode_msg(<<10,11,
@@ -355,6 +389,42 @@ decode_msg_with_sub_msg_field_test() ->
                                        occurrence=required, opts=[]}]},
                     {{msg,m2}, [#field{name=b, fnum=1, rnum=#m2.b, type=uint32,
                                        occurrence=required, opts=[]}]}]).
+
+decoding_zero_instances_of_packed_varints_test() ->
+    %%    "A packed repeated field containing zero elements does not
+    %%     appear in the encoded message."
+    %%    -- http://code.google.com/apis/protocolbuffers/docs/encoding.html
+    #m1{a = []} =
+        decode_msg(<<>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
+                                       occurrence=repeated, opts=[packed]}]}]).
+
+decoding_one_packed_chunk_of_varints_test() ->
+    #m1{a = [3, 270, 86942]} =
+        decode_msg(<<16#22,                 % tag (field number 4, wire type 2)
+                     16#06,                 % payload size (6 bytes)
+                     16#03,                 % first element (varint 3)
+                     16#8E, 16#02,          % second element (varint 270)
+                     16#9E, 16#a7, 16#05>>, % third element (varint 86942)
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=4, rnum=#m1.a, type=int32,
+                                       occurrence=repeated, opts=[packed]}]}]).
+
+decoding_two_packed_chunk_of_varints_test() ->
+    %%    "Note that although there's usually no reason to encode more
+    %%     than one key-value pair for a packed repeated field, encoders
+    %%     must be prepared to accept multiple key-value pairs. In this
+    %%     case, the payloads should be concatenated. Each pair must
+    %%     contain a whole number of elements."
+    %%    -- http://code.google.com/apis/protocolbuffers/docs/encoding.html
+    #m1{a = [3, 270, 86942, 4, 271, 86943]} =
+        decode_msg(<<16#22, 16#06, 16#03, 16#8E, 16#02, 16#9E, 16#a7, 16#05,
+                     16#22, 16#06, 16#04, 16#8F, 16#02, 16#9F, 16#a7, 16#05>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=4, rnum=#m1.a, type=int32,
+                                       occurrence=repeated, opts=[packed]}]}]),
+    ok.
 
 -record(m3, {a,b,c,d,e}).
 -record(m4, {x,y}).
