@@ -63,7 +63,7 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when size(Bin) > 0 ->
     case lists:keyfind(FieldNum, #field.fnum, MsgDef) of
         false ->
             Rest2 = skip_field(Rest, WireType),
-            decode_field(MsgDef, MsgDefs, Rest2, Msg);
+            decode_field(Rest2, MsgDef, MsgDefs, Msg);
         #field{type = FieldType, rnum=RNum, opts=Opts} = FieldDef ->
             case proplists:get_bool(packed, Opts) of
                 true ->
@@ -104,7 +104,7 @@ skip_field(Bin, WireType) ->
             Rest;
         length_delimited ->
             {Len, Rest} = decode_varint(Bin),
-            <<_:Len/binary, Rest2>> = Rest,
+            <<_:Len/binary, Rest2/binary>> = Rest,
             Rest2;
         bits32 ->
             <<_:32, Rest/binary>> = Bin,
@@ -305,6 +305,33 @@ decode_varint_test() ->
 
 
 -record(m1,{a}).
+
+skipping_unknown_varint_field_test() ->
+    #m1{a = undefined} =
+        decode_msg(<<32,150,1>>, %% field number 4 (not known), wire type = 0
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
+                                       occurrence=optional, opts=[]}]}]).
+
+skipping_unknown_length_delimited_field_test() ->
+    #m1{a = undefined} =
+        decode_msg(<<34,1,1>>, %% field number 4 (not known), wire type = 2
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
+                                       occurrence=optional, opts=[]}]}]).
+
+skipping_unknown_64bit_field_test() ->
+    #m1{a = undefined} =
+        decode_msg(<<33,0,0,0,0,0,0,0,0>>, %% field number 4, wire type = 1
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
+                                       occurrence=optional, opts=[]}]}]).
+skipping_unknown_32bit_field_test() ->
+    #m1{a = undefined} =
+        decode_msg(<<37,0,0,0,0>>, %% field number 4, wire type = 5
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
+                                       occurrence=optional, opts=[]}]}]).
 
 decode_msg_simple_occurrence_test() ->
     #m1{a = undefined} =
