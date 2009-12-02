@@ -64,11 +64,19 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when size(Bin) > 0 ->
         false ->
             Rest2 = skip_field(Rest, WireType),
             decode_field(MsgDef, MsgDefs, Rest2, Msg);
-        #field{type = FieldType, opts=Opts} = FieldDef ->
-            {NewValue, Rest2} = decode_type(FieldType, Rest, MsgDefs,
-                                            proplists:get_bool(packed, Opts)),
-            NewMsg = add_field(NewValue, FieldDef, MsgDefs, Msg),
-            decode_field(Rest2, MsgDef, MsgDefs, NewMsg)
+        #field{type = FieldType, rnum=RNum, opts=Opts} = FieldDef ->
+            case proplists:get_bool(packed, Opts) of
+                true ->
+                    AccSeq = element(RNum, Msg),
+                    {NewSeq, Rest2} = decode_packed(FieldType, Rest, MsgDefs,
+                                                   AccSeq),
+                    NewMsg = setelement(RNum, Msg, NewSeq),
+                    decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
+                false ->
+                    {NewValue, Rest2} = decode_type(FieldType, Rest, MsgDefs),
+                    NewMsg = add_field(NewValue, FieldDef, MsgDefs, Msg),
+                    decode_field(Rest2, MsgDef, MsgDefs, NewMsg)
+            end
     end;
 decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
     %% Reverse any repeated fields, but only on the top-level, not recursively.
@@ -103,20 +111,18 @@ skip_field(Bin, WireType) ->
             Rest
     end.
 
-decode_type(FieldType, Bin, MsgDefs, true = _IsPacked) ->
+decode_packed(FieldType, Bin, MsgDefs, Seq0) ->
     {Len, Rest} = decode_varint(Bin),
     <<Bytes:Len/binary, Rest2/binary>> = Rest,
-    {decode_packed_type(FieldType, Bytes, MsgDefs), Rest2};
-decode_type(FieldType, Bin, MsgDefs, false = _IsPacked) ->
-    decode_type_aux(FieldType, Bin, MsgDefs).
+    {decode_packed_aux(Bytes, FieldType, MsgDefs, Seq0), Rest2}.
 
-decode_packed_type(FieldType, Bytes, MsgDefs) when size(Bytes) > 0 ->
-    {NewValue, Rest} = decode_type_aux(FieldType, Bytes, MsgDefs),
-    [NewValue | decode_packed_type(FieldType, Rest, MsgDefs)];
-decode_packed_type(_FieldType, <<>>, _MsgDefs) ->
-    [].
+decode_packed_aux(Bytes, FieldType, MsgDefs, Acc) when size(Bytes) > 0 ->
+    {NewValue, Rest} = decode_type(FieldType, Bytes, MsgDefs),
+    decode_packed_aux(Rest, FieldType, MsgDefs, [NewValue | Acc]);
+decode_packed_aux(<<>>, _FieldType, _MsgDefs, Acc) ->
+    Acc.
 
-decode_type_aux(FieldType, Bin, MsgDefs) ->
+decode_type(FieldType, Bin, MsgDefs) ->
     case FieldType of
         sint32 ->
             {NV, T} = decode_varint(Bin),
@@ -133,7 +139,7 @@ decode_type_aux(FieldType, Bin, MsgDefs) ->
             %%
             %% 10 bytes is what it takes to varint-encode a -1 as a 64
             %% bit signed int. -1 as a 32 bit signed int is only 5 bytes.
-            decode_type_aux(int64, Bin, MsgDefs);
+            decode_type(int64, Bin, MsgDefs);
         int64 ->
             {NV, T} = decode_varint(Bin),
             <<N:64/signed>> = <<NV:64>>,
@@ -197,11 +203,8 @@ add_field(Value, FieldDef, MsgDefs, Record) ->
             setelement(RNum, Record, Value);
         #field{rnum = RNum, occurrence = optional}->
             setelement(RNum, Record, Value);
-        #field{rnum = RNum, occurrence = repeated, opts=Opts} ->
-            case proplists:get_bool(packed, Opts) of
-                true  -> append_packed_to_element(RNum, Value, Record);
-                false -> append_to_element(RNum, Value, Record)
-            end
+        #field{rnum = RNum, occurrence = repeated} ->
+            append_to_element(RNum, Value, Record)
     end.
 
 merge_field(RNum, NewMsg, Record, MsgDefs) ->
@@ -216,10 +219,6 @@ merge_field(RNum, NewMsg, Record, MsgDefs) ->
 append_to_element(RNum, NewElem, Record) ->
     PrevElems = element(RNum, Record),
     setelement(RNum, Record, [NewElem | PrevElems]).
-
-append_packed_to_element(RNum, NewElems, Record) ->
-    PrevElems = element(RNum, Record),
-    setelement(RNum, Record, lists:reverse(NewElems, PrevElems)).
 
 merge_msgs(PrevMsg, NewMsg, MsgDefs)
   when element(1,PrevMsg) == element(1,NewMsg) ->
