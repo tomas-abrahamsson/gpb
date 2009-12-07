@@ -131,15 +131,9 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {NV, T} = decode_varint(Bin),
             {decode_zigzag(NV), T};
         int32 ->
-            %% This doc says: "If you use int32 or int64 as the type
-            %% for a negative number, the resulting varint is always
-            %% ten bytes long -- it is, effectively, treated like a
-            %% very large unsigned integer."
-            %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
-            %%
-            %% 10 bytes is what it takes to varint-encode a -1 as a 64
-            %% bit signed int. -1 as a 32 bit signed int is only 5 bytes.
-            decode_type(int64, Bin, MsgDefs);
+            {NV, T} = decode_varint(Bin),
+            <<N:32/signed>> = <<NV:32>>,
+            {N, T};
         int64 ->
             {NV, T} = decode_varint(Bin),
             <<N:64/signed>> = <<NV:64>>,
@@ -152,7 +146,7 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {N, Rest} = decode_varint(Bin),
             {N =/= 0, Rest};
         {enum, _EnumName}=Key ->
-            {N, Rest} = decode_varint(Bin),
+            {N, Rest} = decode_type(int32, Bin, MsgDefs),
             {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
             {value, {EnumName, N}} = lists:keysearch(N, 2, EnumValues),
             {EnumName, Rest};
@@ -360,6 +354,16 @@ decode_msg_with_enum_field_test() ->
                                        occurrence=required, opts=[]}]},
                     {{enum,e}, [{v1, 100},
                                 {v2, 150}]}]).
+
+decode_msg_with_negative_enum_value_test() ->
+    #m1{a = v2} =
+        decode_msg(<<8, 254,255,255,255,15>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
+                                       type={enum,e},
+                                       occurrence=required, opts=[]}]},
+                    {{enum,e}, [{v1, 100},
+                                {v2, -2}]}]).
 
 decode_msg_with_bool_field_test() ->
     #m1{a = true} =
