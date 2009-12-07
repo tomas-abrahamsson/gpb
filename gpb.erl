@@ -1,6 +1,7 @@
 -module(gpb).
 %-compile(export_all).
 -export([decode_msg/3]).
+-export([encode_msg/2]).
 -export([merge_msgs/3]).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -236,6 +237,140 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
       end,
       PrevMsg,
       MsgDef).
+
+
+encode_msg(Msg, MsgDefs) ->
+    MsgName = element(1, Msg),
+    MsgDef = keyfetch({msg, MsgName}, MsgDefs),
+    encode_2(MsgDef, Msg, MsgDefs, <<>>).
+
+encode_2([Field | Rest], Msg, MsgDefs, Acc) ->
+    EncodedField =
+        case {Field#field.occurrence, lists:member(packed,Field#field.opts)} of
+            {repeated, true} ->
+                encode_packed(Field, Msg, MsgDefs);
+            _ ->
+                encode_field(Field, Msg, MsgDefs)
+        end,
+    encode_2(Rest, Msg, MsgDefs, <<Acc/binary, EncodedField/binary>>);
+encode_2([], _Msg, _MsgDefs, Acc) ->
+    Acc.
+
+encode_packed(#field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
+    case element(RNum, Msg) of
+        []    ->
+            <<>>;
+        Elems ->
+            Acc = <<(encode_fnum_type(FNum, Type))/binary>>,
+            encode_packed_2(Elems, Type, MsgDefs, Acc)
+    end.
+
+encode_packed_2([Elem | Rest], Type, MsgDefs, Acc) ->
+    NewAcc = <<Acc/binary, (encode_value(Elem, Type, MsgDefs))/binary>>,
+    encode_packed_2(Rest, Type, MsgDefs, NewAcc);
+encode_packed_2([], _Type, _MsgDefs, Acc) ->
+    Acc.
+
+encode_field(#field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
+             Msg, MsgDefs) ->
+    encode_field_value(element(RNum, Msg), FNum, Type, MsgDefs);
+encode_field(#field{rnum=RNum, fnum=FNum, type=Type, occurrence=optional},
+             Msg, MsgDefs) ->
+    case element(RNum, Msg) of
+        undefined -> <<>>;
+        Value     -> encode_field_value(Value, FNum, Type, MsgDefs)
+    end;
+encode_field(#field{rnum=RNum, fnum=FNum, type=Type, occurrence=repeated},
+             Msg, MsgDefs) ->
+    encode_repeated(element(RNum, Msg), FNum, Type, MsgDefs, <<>>).
+
+encode_repeated([Elem | Rest], FNum, Type, MsgDefs, Acc) ->
+    EncodedValue = encode_field_value(Elem, FNum, Type, MsgDefs),
+    NewAcc = <<Acc/binary, EncodedValue/binary>>,
+    encode_repeated(Rest, FNum, Type, MsgDefs, NewAcc);
+encode_repeated([], _FNum, _Type, _MsgDefs, Acc) ->
+    Acc.
+
+encode_field_value(Value, FNum, Type, MsgDefs) ->
+    <<(encode_fnum_type(FNum, Type))/binary,
+      (encode_value(Value, Type, MsgDefs))/binary>>.
+
+encode_fnum_type(FNum, Type) ->
+    encode_varint((FNum bsl 3) bor encode_wire_type(Type)).
+
+encode_value(Value, Type, MsgDefs) ->
+    case Type of
+        sint32 ->
+            encode_varint(encode_zigzag(Value));
+        sint64 ->
+            encode_varint(encode_zigzag(Value));
+        int32 ->
+            if Value >= 0 ->
+                    encode_varint(Value);
+               true ->
+                    <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
+                    encode_varint(N)
+            end;
+        int64 ->
+            if Value >= 0 ->
+                    encode_varint(Value);
+               true ->
+                    <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
+                    encode_varint(N)
+            end;
+        uint32 ->
+            encode_varint(Value);
+        uint64 ->
+            encode_varint(Value);
+        bool ->
+            if Value     -> encode_varint(1);
+               not Value -> encode_varint(0)
+            end;
+        {enum, _EnumName}=Key ->
+            {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
+            {value, {Value, N}} = lists:keysearch(Value, 2, EnumValues),
+            encode_value(N, int32, MsgDefs);
+        fixed64 ->
+            <<Value:64/little>>;
+        sfixed64 ->
+            <<Value:64/signed-little>>;
+        double ->
+            <<Value:64/float-little>>;
+        string ->
+            Utf8 = unicode:characters_to_binary(Value),
+            <<(encode_varint(size(Utf8)))/binary, Utf8/binary>>;
+        bytes ->
+            <<(encode_varint(size(Value)))/binary, Value/binary>>;
+        {msg,_MsgName} ->
+            SubMsg = encode_msg(Value, MsgDefs),
+            <<(encode_varint(size(SubMsg)))/binary, SubMsg/binary>>;
+        fixed32 ->
+            <<Value:32/little>>;
+        sfixed32 ->
+            <<Value:32/signed-little>>;
+        float ->
+            <<Value:32/float-little>>
+    end.
+
+
+encode_wire_type(sint32)            -> 0;
+encode_wire_type(sint64)            -> 0;
+encode_wire_type(int32)             -> 0;
+encode_wire_type(int64)             -> 0;
+encode_wire_type(uint32)            -> 0;
+encode_wire_type(uint64)            -> 0;
+encode_wire_type(bool)              -> 0;
+encode_wire_type({enum, _EnumName}) -> 0;
+encode_wire_type(fixed64)           -> 1;
+encode_wire_type(sfixed64)          -> 1;
+encode_wire_type(double)            -> 1;
+encode_wire_type(string)            -> 2;
+encode_wire_type(bytes)             -> 2;
+encode_wire_type({msg,_MsgName})    -> 2;
+encode_wire_type(fixed32)           -> 5;
+encode_wire_type(sfixed32)          -> 5;
+encode_wire_type(float)             -> 5.
+
 
 
 
