@@ -335,7 +335,7 @@ encode_value(Value, Type, MsgDefs) ->
             end;
         {enum, _EnumName}=Key ->
             {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
-            {value, {Value, N}} = lists:keysearch(Value, 2, EnumValues),
+            {value, {Value, N}} = lists:keysearch(Value, 1, EnumValues),
             encode_value(N, int32, MsgDefs);
         fixed64 ->
             <<Value:64/little>>;
@@ -596,6 +596,90 @@ decoding_two_packed_chunks_of_varints_test() ->
                    [{{msg,m1}, [#field{name=a, fnum=4, rnum=#m1.a, type=int32,
                                        occurrence=repeated, opts=[packed]}]}]),
     ok.
+
+encode_required_varint_field_test() ->
+    <<8,150,1>> =
+        encode_msg(#m1{a=150},
+                   [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
+                                      occurrence=required, opts=[]}]}]).
+
+encode_optional_varint_field_test() ->
+    <<>> =
+        encode_msg(#m1{a=undefined},
+                   [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
+                                      occurrence=optional, opts=[]}]}]).
+
+encode_repeated_empty_field_test() ->
+    <<>> =
+        encode_msg(#m1{a=[]},
+                   [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
+                                      occurrence=repeated, opts=[packed]}]}]),
+    <<>> =
+        encode_msg(#m1{a=[]},
+                   [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
+                                      occurrence=repeated, opts=[]}]}]).
+
+encode_repeated_nonempty_field_test() ->
+    <<8,150,1, 151,1>> =
+        encode_msg(#m1{a=[150,151]},
+                   [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
+                                      occurrence=repeated, opts=[packed]}]}]),
+    <<8,150,1, 8,151,1>> =
+        encode_msg(#m1{a=[150,151]},
+                   [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
+                                      occurrence=repeated, opts=[]}]}]).
+
+encode_msg_with_sub_msg_field_test() ->
+    <<10,3, 8,150,1>> =
+        encode_msg(#m1{a = #m2{b = 150}},
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
+                                       type={msg,m2},
+                                       occurrence=required, opts=[]}]},
+                    {{msg,m2}, [#field{name=b, fnum=1, rnum=#m2.b, type=uint32,
+                                       occurrence=required, opts=[]}]}]).
+
+encode_msg_with_enum_field_test() ->
+    <<8,150,1>> =
+        encode_msg(#m1{a = v2},
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
+                                       type={enum,e},
+                                       occurrence=required, opts=[]}]},
+                    {{enum,e}, [{v1, 100},
+                                {v2, 150}]}]).
+
+encode_msg_with_negative_enum_value_test() ->
+    <<8, 254,255,255,255,15>> =
+        encode_msg(#m1{a = v2},
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
+                                       type={enum,e},
+                                       occurrence=required, opts=[]}]},
+                    {{enum,e}, [{v1, 100},
+                                {v2, -2}]}]).
+
+encode_msg_with_bool_field_test() ->
+    <<8,1>> =
+        encode_msg(#m1{a = true},
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
+                                       occurrence=required, opts=[]}]}]),
+    <<8,0>> =
+        encode_msg(#m1{a = false},
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
+                                       occurrence=required, opts=[]}]}]).
+
+encode_float_test() ->
+    %% Stole idea from the python test in google-protobuf:
+    %% 1.125 is perfectly representable as a float (no rounding error).
+    <<13,0,0,144,63>> =
+        encode_msg(#m1{a = 1.125},
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=float,
+                                       occurrence=required, opts=[]}]}]).
+
+encode_double_test() ->
+    <<9,0,0,0,0,0,0,242,63>> =
+        encode_msg(#m1{a = 1.125},
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=double,
+                                       occurrence=required, opts=[]}]}]).
+
 
 merging_second_required_integer_overrides_first_test() ->
     #m1{a=20} = merge_msgs(#m1{a=10}, #m1{a=20},
