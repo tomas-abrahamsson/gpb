@@ -529,7 +529,7 @@ decoding_float_test() ->
 
 decoding_double_test() ->
     #m1{a = 1.125} =
-        decode_msg(<<13,0,0,0,0,0,0,242,63>>,
+        decode_msg(<<9,0,0,0,0,0,0,242,63>>,
                    m1,
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=double,
                                        occurrence=required, opts=[]}]}]).
