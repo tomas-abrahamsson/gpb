@@ -636,29 +636,21 @@ merging_messages_recursively_test() ->
                                        occurrence=repeated, opts=[]}]}]).
 
 merging_optional_messages_recursively1_test() ->
-    #m1{a=#m4{x = 110,
-              y = [111, 112]}} =
-        merge_msgs(#m1{a = #m4{x = 110,
-                               y = [111, 112]}},
+    #m1{a=#m2{b = 110}} =
+        merge_msgs(#m1{a = #m2{b = 110}},
                    #m1{a = undefined},
                    [{{msg,m1}, [#field{name=a,fnum=1, rnum=#m1.a,
-                                       type={msg,m4},
+                                       type={msg,m2},
                                        occurrence=optional, opts=[]}]},
-                    {{msg,m4}, [#field{name=x, fnum=1, rnum=#m4.x, type=uint32,
-                                       occurrence=optional, opts=[]},
-                                #field{name=y, fnum=w, rnum=#m4.y, type=uint32,
-                                       occurrence=repeated, opts=[]}]}]).
+                    {{msg,m2}, [#field{name=b, fnum=1, rnum=#m2.b, type=uint32,
+                                       occurrence=optional, opts=[]}]}]).
 
 merging_optional_messages_recursively2_test() ->
-    #m1{a=#m4{x = 210,
-              y = [211, 212]}} =
+    #m1{a=#m2{b = 210}} =
         merge_msgs(#m1{a = undefined},
-                   #m1{a = #m4{x = 210,
-                               y = [211, 212]}},
+                   #m1{a = #m2{b = 210}},
                    [{{msg,m1}, [#field{name=a,fnum=1, rnum=#m1.a,
-                                       type={msg,m4},
+                                       type={msg,m2},
                                        occurrence=optional, opts=[]}]},
-                    {{msg,m4}, [#field{name=x, fnum=1, rnum=#m4.x, type=uint32,
-                                       occurrence=optional, opts=[]},
-                                #field{name=y, fnum=w, rnum=#m4.y, type=uint32,
-                                       occurrence=repeated, opts=[]}]}]).
+                    {{msg,m2}, [#field{name=b, fnum=1, rnum=#m2.b, type=uint32,
+                                       occurrence=optional, opts=[]}]}]).
