@@ -225,10 +225,17 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
               NewSeq  = element(RNum, NewMsg),
               setelement(RNum, AccRecord, PrevSeq ++ NewSeq);
          (#field{rnum=RNum, type={msg,_FieldMsgName}}, AccRecord) ->
-              PrevSubMsg = element(RNum, AccRecord),
-              NewSubMsg  = element(RNum, NewMsg),
-              MergedSubMsg = merge_msgs(PrevSubMsg, NewSubMsg, MsgDefs),
-              setelement(RNum, AccRecord, MergedSubMsg);
+              case {element(RNum, AccRecord), element(RNum, NewMsg)} of
+                  {undefined, undefined} ->
+                      AccRecord;
+                  {undefined, NewSubMsg} ->
+                      setelement(RNum, AccRecord, NewSubMsg);
+                  {_PrevSubMsg, undefined} ->
+                      AccRecord;
+                  {PrevSubMsg, NewSubMsg} ->
+                      MergedSubMsg = merge_msgs(PrevSubMsg, NewSubMsg, MsgDefs),
+                      setelement(RNum, AccRecord, MergedSubMsg)
+              end;
          (#field{rnum=RNum}, AccRecord) ->
               case element(RNum, NewMsg) of
                   undefined -> AccRecord;
@@ -370,7 +377,6 @@ encode_wire_type({msg,_MsgName})    -> 2;
 encode_wire_type(fixed32)           -> 5;
 encode_wire_type(sfixed32)          -> 5;
 encode_wire_type(float)             -> 5.
-
 
 
 
@@ -576,7 +582,7 @@ decoding_one_packed_chunk_of_varints_test() ->
                    [{{msg,m1}, [#field{name=a, fnum=4, rnum=#m1.a, type=int32,
                                        occurrence=repeated, opts=[packed]}]}]).
 
-decoding_two_packed_chunk_of_varints_test() ->
+decoding_two_packed_chunks_of_varints_test() ->
     %%    "Note that although there's usually no reason to encode more
     %%     than one key-value pair for a packed repeated field, encoders
     %%     must be prepared to accept multiple key-value pairs. In this
@@ -591,37 +597,65 @@ decoding_two_packed_chunk_of_varints_test() ->
                                        occurrence=repeated, opts=[packed]}]}]),
     ok.
 
--record(m3, {a,b,c,d,e}).
+merging_second_required_integer_overrides_first_test() ->
+    #m1{a=20} = merge_msgs(#m1{a=10}, #m1{a=20},
+                           [{{msg,m1},[#field{name=a,rnum=#m1.a,type=uint32,
+                                              occurrence=required,opts=[]}]}]).
+
+merging_second_optional_integer_overrides_undefined_test() ->
+    #m1{a=22} = merge_msgs(#m1{a=undefined}, #m1{a=22},
+                           [{{msg,m1},[#field{name=a,rnum=#m1.a,type=uint32,
+                                              occurrence=optional,opts=[]}]}]).
+
+merging_undefined_does_not_overrides_defined_integer_test() ->
+    #m1{a=25} = merge_msgs(#m1{a=25}, #m1{a=undefined},
+                           [{{msg,m1},[#field{name=a,rnum=#m1.a,type=uint32,
+                                              occurrence=optional,opts=[]}]}]).
+
+merging_sequences_test() ->
+    #m1{a=[11,12, 21,22]} =
+        merge_msgs(#m1{a=[11,12]}, #m1{a=[21,22]},
+                   [{{msg,m1},[#field{name=a,rnum=#m1.a,type=uint32,
+                                      occurrence=repeated,opts=[]}]}]).
+
 -record(m4, {x,y}).
 
-merge_msg_test() ->
-    #m3{a = 20,
-        b = 22,
-        c = 13,
-        d = [11,12, 21,22],
-        e = #m4{x = 210,
-                y = [111,112, 211,212]}} =
-        merge_msgs(#m3{a = 10,
-                       b = undefined,
-                       c = 13,
-                       d = [11,12],
-                       e = #m4{x = 110,
+merging_messages_recursively_test() ->
+    #m1{a=#m4{x = 210,
+              y = [111, 112, 211, 212]}} =
+        merge_msgs(#m1{a = #m4{x = 110,
                                y = [111, 112]}},
-                   #m3{a = 20,             %% overwrites integers
-                       b = 22,             %% overwrites undefined
-                       c = undefined,      %% undefined does not overwrite
-                       d = [21,22],        %% sequences appends
-                       e = #m4{x = 210,    %% merging recursively
+                   #m1{a = #m4{x = 210,
                                y = [211, 212]}},
-                   [{{msg,m3}, [#field{name=a,fnum=1, rnum=#m3.a, type=uint32,
-                                       occurrence=required, opts=[]},
-                                #field{name=b,fnum=2, rnum=#m3.b, type=uint32,
+                   [{{msg,m1}, [#field{name=a,fnum=1, rnum=#m1.a,
+                                       type={msg,m4},
+                                       occurrence=required, opts=[]}]},
+                    {{msg,m4}, [#field{name=x, fnum=1, rnum=#m4.x, type=uint32,
                                        occurrence=optional, opts=[]},
-                                #field{name=c,fnum=3, rnum=#m3.c, type=uint32,
+                                #field{name=y, fnum=w, rnum=#m4.y, type=uint32,
+                                       occurrence=repeated, opts=[]}]}]).
+
+merging_optional_messages_recursively1_test() ->
+    #m1{a=#m4{x = 110,
+              y = [111, 112]}} =
+        merge_msgs(#m1{a = #m4{x = 110,
+                               y = [111, 112]}},
+                   #m1{a = undefined},
+                   [{{msg,m1}, [#field{name=a,fnum=1, rnum=#m1.a,
+                                       type={msg,m4},
+                                       occurrence=optional, opts=[]}]},
+                    {{msg,m4}, [#field{name=x, fnum=1, rnum=#m4.x, type=uint32,
                                        occurrence=optional, opts=[]},
-                                #field{name=d,fnum=4, rnum=#m3.d, type=uint32,
-                                       occurrence=repeated, opts=[]},
-                                #field{name=e,fnum=5, rnum=#m3.e,
+                                #field{name=y, fnum=w, rnum=#m4.y, type=uint32,
+                                       occurrence=repeated, opts=[]}]}]).
+
+merging_optional_messages_recursively2_test() ->
+    #m1{a=#m4{x = 210,
+              y = [211, 212]}} =
+        merge_msgs(#m1{a = undefined},
+                   #m1{a = #m4{x = 210,
+                               y = [211, 212]}},
+                   [{{msg,m1}, [#field{name=a,fnum=1, rnum=#m1.a,
                                        type={msg,m4},
                                        occurrence=optional, opts=[]}]},
                     {{msg,m4}, [#field{name=x, fnum=1, rnum=#m4.x, type=uint32,
