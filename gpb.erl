@@ -66,6 +66,8 @@ new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
     MsgDef = keyfetch(MsgKey, MsgDefs),
     lists:foldl(fun(#field{rnum=RNum, occurrence=repeated}, Record) ->
                         setelement(RNum, Record, []);
+                   (#field{type={msg,_Name}, occurrence=optional}, Record) ->
+                        Record;
                    (#field{rnum=RNum, type={msg,_Name}=FMsgKey}, Record) ->
                         SubMsg = new_initial_msg(FMsgKey, MsgDefs),
                         setelement(RNum, Record, SubMsg);
@@ -576,6 +578,16 @@ decode_msg_with_sub_msg_field_test() ->
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
                                        type={msg,m2},
                                        occurrence=required, opts=[]}]},
+                    {{msg,m2}, [#field{name=b, fnum=1, rnum=#m2.b, type=uint32,
+                                       occurrence=required, opts=[]}]}]).
+
+decode_msg_with_optional_nonpresent_sub_msg_field_test() ->
+    #m1{a = undefined} =
+        decode_msg(<<>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
+                                       type={msg,m2},
+                                       occurrence=optional, opts=[]}]},
                     {{msg,m2}, [#field{name=b, fnum=1, rnum=#m2.b, type=uint32,
                                        occurrence=required, opts=[]}]}]).
 
