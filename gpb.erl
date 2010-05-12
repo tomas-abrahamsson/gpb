@@ -288,8 +288,10 @@ encode_packed(#field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
         []    ->
             <<>>;
         Elems ->
-            Acc = <<(encode_fnum_type(FNum, Type))/binary>>,
-            encode_packed_2(Elems, Type, MsgDefs, Acc)
+            PackedFields = encode_packed_2(Elems, Type, MsgDefs, <<>>),
+            <<(encode_fnum_type(FNum, Type))/binary,
+              (encode_varint(size(PackedFields)))/binary,
+              PackedFields/binary>>
     end.
 
 encode_packed_2([Elem | Rest], Type, MsgDefs, Acc) ->
@@ -650,7 +652,7 @@ encode_repeated_empty_field_test() ->
                                       occurrence=repeated, opts=[]}]}]).
 
 encode_repeated_nonempty_field_test() ->
-    <<8,150,1, 151,1>> =
+    <<8,4, 150,1, 151,1>> =
         encode_msg(#m1{a=[150,151]},
                    [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
                                       occurrence=repeated, opts=[packed]}]}]),
@@ -703,6 +705,20 @@ encode_float_test() ->
         encode_msg(#m1{a = 1.125},
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=float,
                                        occurrence=required, opts=[]}]}]).
+
+encode_packed_repeated_bools_test() ->
+    <<16#20,1,1>> =
+        encode_msg(#m1{a=[true]},
+                   [{{msg,m1},[#field{name=a,fnum=4,rnum=#m1.a, type=bool,
+                                      occurrence=repeated, opts=[packed]}]}]).
+decode_packed_repeated_bools_test() ->
+    #m1{a=[true]} =
+        decode_msg(<<16#20,1,1>>,
+                   m1,
+                   [{{msg,m1},[#field{name=a,fnum=4,rnum=#m1.a, type=bool,
+                                      occurrence=repeated, opts=[packed]}]}]).
+
+
 
 encode_double_test() ->
     <<9,0,0,0,0,0,0,242,63>> =
