@@ -713,7 +713,7 @@ encode_packed_repeated_bools_test() ->
                                       occurrence=repeated, opts=[packed]}]}]).
 decode_packed_repeated_bools_test() ->
     #m1{a=[true]} =
-        decode_msg(<<16#20,1,1>>,
+        decode_msg(<<16#22,1,1>>,
                    m1,
                    [{{msg,m1},[#field{name=a,fnum=4,rnum=#m1.a, type=bool,
                                       occurrence=repeated, opts=[packed]}]}]).
