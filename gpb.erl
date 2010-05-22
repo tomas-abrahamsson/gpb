@@ -77,7 +77,7 @@ new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
                 erlang:make_tuple(length(MsgDef)+1, undefined, [{1,MsgName}]),
                 MsgDef).
 
-decode_field(Bin, MsgDef, MsgDefs, Msg) when size(Bin) > 0 ->
+decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
     {Key, Rest} = decode_varint(Bin),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
@@ -137,7 +137,7 @@ decode_packed(FieldType, Bin, MsgDefs, Seq0) ->
     <<Bytes:Len/binary, Rest2/binary>> = Rest,
     {decode_packed_aux(Bytes, FieldType, MsgDefs, Seq0), Rest2}.
 
-decode_packed_aux(Bytes, FieldType, MsgDefs, Acc) when size(Bytes) > 0 ->
+decode_packed_aux(Bytes, FieldType, MsgDefs, Acc) when byte_size(Bytes) > 0 ->
     {NewValue, Rest} = decode_type(FieldType, Bytes, MsgDefs),
     decode_packed_aux(Rest, FieldType, MsgDefs, [NewValue | Acc]);
 decode_packed_aux(<<>>, _FieldType, _MsgDefs, Acc) ->
@@ -290,7 +290,7 @@ encode_packed(#field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
         Elems ->
             PackedFields = encode_packed_2(Elems, Type, MsgDefs, <<>>),
             <<(encode_fnum_type(FNum, bytes))/binary,
-              (encode_varint(size(PackedFields)))/binary,
+              (encode_varint(byte_size(PackedFields)))/binary,
               PackedFields/binary>>
     end.
 
@@ -367,12 +367,12 @@ encode_value(Value, Type, MsgDefs) ->
             <<Value:64/float-little>>;
         string ->
             Utf8 = unicode:characters_to_binary(Value),
-            <<(encode_varint(size(Utf8)))/binary, Utf8/binary>>;
+            <<(encode_varint(byte_size(Utf8)))/binary, Utf8/binary>>;
         bytes ->
-            <<(encode_varint(size(Value)))/binary, Value/binary>>;
+            <<(encode_varint(byte_size(Value)))/binary, Value/binary>>;
         {msg,_MsgName} ->
             SubMsg = encode_msg(Value, MsgDefs),
-            <<(encode_varint(size(SubMsg)))/binary, SubMsg/binary>>;
+            <<(encode_varint(byte_size(SubMsg)))/binary, SubMsg/binary>>;
         fixed32 ->
             <<Value:32/little>>;
         sfixed32 ->
