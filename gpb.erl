@@ -44,7 +44,7 @@
 -type gpb_field_type() :: 'sint32' | 'sint64' | 'int32' | 'int64' | 'uint32'
                           | 'uint64' | 'bool' | {'enum',atom()}
                           | 'fixed64' | 'sfixed64' | 'double' | 'string'
-                          | 'bytes' | {'msg',atom()} | 'packed'
+                          | 'bytes' | {'msg',atom()}
                           | 'fixed32' | 'sfixed32' | 'float'.
 
 -record(field,
@@ -762,7 +762,7 @@ merging_messages_recursively_test() ->
                                        occurrence=required, opts=[]}]},
                     {{msg,m4}, [#field{name=x, fnum=1, rnum=#m4.x, type=uint32,
                                        occurrence=optional, opts=[]},
-                                #field{name=y, fnum=w, rnum=#m4.y, type=uint32,
+                                #field{name=y, fnum=2, rnum=#m4.y, type=uint32,
                                        occurrence=repeated, opts=[]}]}]).
 
 merging_optional_messages_recursively1_test() ->
