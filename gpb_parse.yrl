@@ -81,7 +81,7 @@ identifiers -> identifier '.' identifiers:      [identifier_name('$1'), '.'
                                                  | '$3'].
 identifiers -> identifier:                      [identifier_name('$1')].
 
-import_def -> import str_lit:           {import, literal_value('$2')}.
+import_def -> import str_lit ';':       {import, literal_value('$2')}.
 
 option_def -> option name '=' constant: {option, '$2', '$4'}.
 
