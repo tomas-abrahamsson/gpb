@@ -22,6 +22,7 @@
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
 -include_lib("eunit/include/eunit.hrl").
+-include("gpb.hrl").
 
 %% TODO:
 %%
@@ -40,21 +41,6 @@
 %%   Example: (1 bsl 33) for an uint32? The bit-syntax silently truncates,
 %%   but this has been under debate on the erlang mailing list as it
 %%   was unexpected. Related: principle of least astonishment.
-
--type gpb_field_type() :: 'sint32' | 'sint64' | 'int32' | 'int64' | 'uint32'
-                          | 'uint64' | 'bool' | {'enum',atom()}
-                          | 'fixed64' | 'sfixed64' | 'double' | 'string'
-                          | 'bytes' | {'msg',atom()}
-                          | 'fixed32' | 'sfixed32' | 'float'.
-
--record(field,
-        {name       :: atom(),
-         fnum       :: integer(),
-         rnum       :: pos_integer(), %% field number in the record
-         type       :: gpb_field_type(),
-         occurrence :: 'required' | 'optional' | 'repeated',
-         opts       :: [term()]
-        }).
 
 decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
