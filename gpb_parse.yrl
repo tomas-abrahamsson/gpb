@@ -75,10 +75,11 @@ element -> option_def:                  '$1'.
 
 package_def -> package name ';':            {package, '$2'}.
 
-name -> '.' identifiers:                    concat_dot_identifiers('$1').
-name -> identifiers:                        concat_identifiers('$1').
+name -> '.' identifiers:                    ['.' | '$2'].
+name -> identifiers:                        '$1'.
 
-identifiers -> identifier '.' identifiers:      [identifier_name('$1') | '$3'].
+identifiers -> identifier '.' identifiers:      [identifier_name('$1'), '.'
+                                                 | '$3'].
 identifiers -> identifier:                      [identifier_name('$1')].
 
 option_def -> option name '=' constant:  {option, '$2', '$4'}.
@@ -169,11 +170,6 @@ identifier_name({identifier, _Line, Name}) -> list_to_atom(Name).
 
 literal_value({_TokenType, _Line, Value}) -> Value.
 
-concat_dot_identifiers(Ids) ->
-    list_to_atom("."++string:join([atom_to_list(Id) || Id <- Ids], ".")).
-concat_identifiers(Ids) ->
-    list_to_atom(string:join([atom_to_list(Id) || Id <- Ids], ".")).
-
 parses_simple_msg_test() ->
     {ok, [{{msg,'Msg'}, [#field{name=x, type=uint32, fnum=1,
                                 occurrence=optional, opts=[]}]}]} =
@@ -230,7 +226,7 @@ parses_nested_enum_def_test() ->
           ]).
 
 parses_dotted_references_test() ->
-    {ok, [{{msg,'Msg3'}, [#field{name=y, type={ref,'Msg.Msg2'}}]}]} =
+    {ok, [{{msg,'Msg3'}, [#field{name=y, type={ref,['Msg','.','Msg2']}}]}]} =
         parse_lines(
           ["message Msg3 {",
            "  repeated Msg.Msg2 y=1;",
