@@ -147,7 +147,7 @@ type -> bytes:                          bytes.
 type -> name:                           {ref, '$1'}.
 
 constant -> identifier:                 identifier_name('$1').
-constant -> integer:                    '$1'. 
+constant -> integer:                    '$1'.
 constant -> float_lit:                  literal_value('$1').
 constant -> string_expr:                '$1'.
 constant -> bool_lit:                   literal_value('$1').
