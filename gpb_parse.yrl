@@ -170,6 +170,7 @@ Erlang code.
 -export([verify_refs/1]).
 -export([reformat_names/1]).
 -export([resolve_refs/1]).
+-export([enumerate_msg_fields/1]).
 -export([fetch_imports/1]).
 
 
@@ -299,6 +300,22 @@ resolve_refs(Defs) ->
 fetch_ref(Name, [{{enum,Name}=Key,_} | _]) -> Key;
 fetch_ref(Name, [{{msg,Name}=Key,_} | _])  -> Key;
 fetch_ref(Name, [_ | T])                   -> fetch_ref(Name, T).
+
+%% `Defs' is expected to be flattened
+enumerate_msg_fields(Defs) ->
+    lists:map(fun({{msg,Name}, Fields}) ->
+                      {{msg, Name}, enumerate_fields(Fields)};
+                 (OtherElem) ->
+                      OtherElem
+              end,
+              Defs).
+
+enumerate_fields(Fields) ->
+    lists:map(fun({I, #field{}=F}) -> F#field{rnum=I} end,
+              index_seq(2, Fields)).
+
+index_seq(_Start, []) -> [];
+index_seq(Start, L)   -> lists:zip(lists:seq(Start, length(L) + Start - 1), L).
 
 %% `Defs' is expected to be parsed.
 fetch_imports(Defs) ->
@@ -467,6 +484,23 @@ resolve_refs_test() ->
      {{msg,m3},     [#field{name=b, type={msg,m1_m2}}]}] =
         lists:sort(
           resolve_refs(reformat_names(flatten_defs(absolutify_names(Elems))))).
+
+enumerates_msg_fields_test() ->
+    {ok, Elems} = parse_lines(["message m1 {"
+                               "  message m2 { required uint32 x = 1; }",
+                               "  enum    e1 { a = 17; }",
+                               "  required m2     y = 11;",
+                               "  required e1     z = 12;",
+                               "}"]),
+    [{{enum,m1_e1}, _},
+     {{msg,m1},     [#field{name=y, fnum=11, rnum=2},
+                     #field{name=z, fnum=12, rnum=3}]},
+     {{msg,m1_m2},  [#field{name=x, fnum=1, rnum=2}]}] =
+        lists:sort(
+          enumerate_msg_fields(
+            resolve_refs(
+              reformat_names(flatten_defs(absolutify_names(Elems)))))).
+
 
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
