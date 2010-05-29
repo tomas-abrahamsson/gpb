@@ -164,11 +164,134 @@ Erlang code.
 -include_lib("eunit/include/eunit.hrl").
 -include("gpb.hrl").
 
--export([parse_lines/1]).
+-export([absolutify_names/1]).
+-export([flatten_defs/1]).
+-export([verify_refs/1]).
+-export([reformat_names/1]).
+-export([resolve_refs/1]).
+
 
 identifier_name({identifier, _Line, Name}) -> list_to_atom(Name).
 
 literal_value({_TokenType, _Line, Value}) -> Value.
+
+absolutify_names(Defs) ->
+    abs_names_2(['.'], Defs).
+
+abs_names_2(Path, Elems) ->
+    lists:map(fun({{msg,Msg}, FieldsOrDefs}) ->
+                      MsgPath = prepend_path(Path, Msg),
+                      {{msg, MsgPath}, abs_names_2(MsgPath, FieldsOrDefs)};
+                 ({{enum,E}, ENs}) ->
+                      {{enum, prepend_path(Path, E)}, ENs};
+                 (#field{type={ref,To}}=F) ->
+                      case is_absolute_ref(To) of
+                          true  ->
+                              F;
+                          false ->
+                              FullPath = case refers_to_peer_elem(To, Elems) of
+                                             true  -> prepend_path(Path, To);
+                                             false -> prepend_path(['.'], To)
+                                         end,
+                              F#field{type={ref, FullPath}}
+                      end;
+                 (OtherElem) ->
+                      OtherElem
+              end,
+              Elems).
+
+is_absolute_ref(['.' | _]) -> true;
+is_absolute_ref(_Other)    -> false.
+
+refers_to_peer_elem(['.' | Rest], Elems) ->
+    refers_to_peer_elem(Rest, Elems);
+refers_to_peer_elem([To], Elems) ->
+    find_name(To, Elems) /= not_found;
+refers_to_peer_elem([To | Rest], Elems) ->
+    case find_name(To, Elems) of
+        not_found        -> false;
+        {found,SubElems} -> refers_to_peer_elem(Rest, SubElems)
+    end.
+
+find_name(Name, [{{enum,Name}, _Values} | _]) -> {found, []};
+find_name(Name, [{{msg,Name}, SubElems} | _]) -> {found, SubElems};
+find_name(Name, [_ | Rest])                   -> find_name(Name, Rest);
+find_name(_Name,[])                           -> not_found.
+
+prepend_path(['.'], Id) when is_atom(Id)           -> ['.', Id];
+prepend_path(['.'], SubPath) when is_list(SubPath) -> ['.' | SubPath];
+prepend_path(Path,  Id) when is_atom(Id)           -> Path ++ ['.', Id];
+prepend_path(Path,  SubPath) when is_list(SubPath) -> Path ++ ['.' | SubPath].
+
+%% `Defs' is expected to be absolutified
+flatten_defs(Defs) ->
+    lists:reverse(
+      lists:foldl(fun({{msg,Name}, FieldsOrDefs}, Acc) ->
+                          {RFields2, Defs2} =
+                              lists:foldl(fun(#field{}=F, {Fs,Ds}) ->
+                                                  {[F | Fs], Ds};
+                                             (Def, {Fs,Ds}) ->
+                                                  {Fs, flatten_defs([Def])++Ds}
+                                          end,
+                                          {[],[]},
+                                          FieldsOrDefs),
+                          Fields2 = lists:reverse(RFields2),
+                          [{{msg,Name},Fields2} | Defs2] ++ Acc;
+                     (OtherElem, Acc) ->
+                          [OtherElem | Acc]
+                  end,
+                  [],
+                  Defs)).
+
+verify_refs(_Defs) ->
+    %% FIXME: detect dangling references
+    ok.
+
+%% `Defs' is expected to be absolutified and flattened
+reformat_names(Defs) ->
+    lists:map(fun({{msg,Name}, Fields}) ->
+                      {{msg,reformat_name(Name)},
+                       lists:map(fun(#field{type={ref,N2}}=F) ->
+                                         F#field{type={ref,reformat_name(N2)}};
+                                    (#field{}=F) ->
+                                         F
+                                 end,
+                                 Fields)};
+                 ({{enum,Name}, ENs}) ->
+                      {{enum,reformat_name(Name)}, ENs};
+                 (OtherElem) ->
+                      OtherElem
+              end,
+              Defs).
+
+reformat_name(['.' | Rest]) ->
+    list_to_atom(lists:concat([if NPart == '.' -> "_";
+                                  true     -> atom_to_list(NPart)
+                               end
+                               || NPart <- Rest])).
+
+%% `Defs' is expected to be flattened and may or may not be reformatted
+%% `Defs' is expected to be verified, to have no dangling references
+resolve_refs(Defs) ->
+    lists:map(fun({{msg,Name}, Fields}) ->
+                      {{msg,Name},
+                       lists:map(fun(#field{type={ref,Name2}}=F) ->
+                                         Type = fetch_ref(Name2, Defs),
+                                         F#field{type=Type};
+                                    (#field{}=F) ->
+                                         F
+                                 end,
+                                 Fields)};
+                 (OtherElem) ->
+                      OtherElem
+              end,
+              Defs).
+
+fetch_ref(Name, [{{enum,Name}=Key,_} | _]) -> Key;
+fetch_ref(Name, [{{msg,Name}=Key,_} | _])  -> Key;
+fetch_ref(Name, [_ | T])                   -> fetch_ref(Name, T).
+
+%%----------------------------------------------------------------------
 
 parses_simple_msg_test() ->
     {ok, [{{msg,'Msg'}, [#field{name=x, type=uint32, fnum=1,
@@ -233,7 +356,92 @@ parses_dotted_references_test() ->
            "}"]).
 
 
--record(a@b@c, {xyz}).
+generates_correct_absolute_names_test() ->
+    {ok, Elems} = parse_lines(["message m1 {"
+                               "  message m2 { required uint32 x = 1; }",
+                               "  enum    e1 { a = 17; }",
+                               "  required m2     y = 1;",
+                               "  required .m1.m2 z = 2;",
+                               "  required e1     w = 3;",
+                               "}",
+                               "message m3 {",
+                               "  required m1.m2 b = 1;",
+                               "}"]),
+    [{{msg,['.',m1]}, [{{msg,['.',m1,'.',m2]}, [#field{name=x}]},
+                       {{enum,['.',m1,'.',e1]}, [_]},
+                       #field{name=y, type={ref,['.',m1,'.',m2]}},
+                       #field{name=z, type={ref,['.',m1,'.',m2]}},
+                       #field{name=w, type={ref,['.',m1,'.',e1]}}]},
+     {{msg,['.',m3]}, [#field{name=b, type={ref,['.',m1,'.',m2]}}]}] =
+        lists:sort(absolutify_names(Elems)).
+
+generates_correct_absolute_names_2_test() ->
+    {ok, Elems} = parse_lines(["message m2 {",
+                               "  message m4 { required uint32 x = 1; }",
+                               "}",
+                               "message m1 {",
+                               "  message m2 {",
+                               "    message m3 { required uint32 x = 1; }",
+                               "  }",
+                               "  required m1.m2 f1 = 1;", %% -> .m1.m2
+                               "  required m2.m3 f2 = 2;", %% -> .m1.m2.m3
+                               "  required m2.m4 f3 = 3;", %% -> .m2.m4 ???
+                               "}"]),
+    [{{msg,['.',m1]}, [{{msg,['.',m1,'.',m2]},
+                        [{{msg,['.',m1,'.',m2,'.',m3]},_}]},
+                       #field{name=f1,type={ref,['.',m1,'.',m2]}},
+                       #field{name=f2,type={ref,['.',m1,'.',m2,'.',m3]}},
+                       #field{name=f3,type={ref,['.',m2,'.',m4]}}]},
+     {{msg,['.',m2]}, _}] =
+        lists:sort(absolutify_names(Elems)).
+
+flattens_absolutified_defs_test() ->
+    {ok, Elems} = parse_lines(["message m1 {"
+                               "  message m2 { required uint32 x = 1;",
+                               "               required uint32 y = 2; }",
+                               "  required m2 z = 1;",
+                               "  required m2 w = 2;",
+                               "}"]),
+    AElems = absolutify_names(Elems),
+    [{{msg,['.',m1]},        [#field{name=z}, #field{name=w}]},
+     {{msg,['.',m1,'.',m2]}, [#field{name=x}, #field{name=y}]}] =
+        lists:sort(flatten_defs(AElems)).
+
+reformat_names_defs_test() ->
+    {ok, Elems} = parse_lines(["message m1 {"
+                               "  message m2 { required uint32 x = 1; }",
+                               "  enum    e1 { a = 17; }",
+                               "  required m2     y = 1;",
+                               "  required e1     z = 2;",
+                               "  required uint32 w = 3;",
+                               "}"]),
+    [{{enum,m1_e1}, _},
+     {{msg,m1},     [#field{name=y, type={ref,m1_m2}},
+                     #field{name=z, type={ref,m1_e1}},
+                     #field{name=w}]},
+     {{msg,m1_m2},  [#field{name=x}]}] =
+        lists:sort(reformat_names(flatten_defs(absolutify_names(Elems)))).
+
+resolve_refs_test() ->
+    {ok, Elems} = parse_lines(["message m1 {"
+                               "  message m2 { required uint32 x = 1; }",
+                               "  enum    e1 { a = 17; }",
+                               "  required m2     y = 1;",
+                               "  required e1     z = 2;",
+                               "  required uint32 w = 3;",
+                               "}",
+                               "message m3 {",
+                               "  required m1.m2 b = 1;",
+                               "}"]),
+    [{{enum,m1_e1}, _},
+     {{msg,m1},     [#field{name=y, type={msg,m1_m2}},
+                     #field{name=z, type={enum,m1_e1}},
+                     #field{name=w}]},
+     {{msg,m1_m2},  [#field{name=x}]},
+     {{msg,m3},     [#field{name=b, type={msg,m1_m2}}]}] =
+        lists:sort(
+          resolve_refs(reformat_names(flatten_defs(absolutify_names(Elems))))).
+
 %% helper
 parse_lines(Lines) ->
     {ok, Tokens, _} = gpb_scan:string(
