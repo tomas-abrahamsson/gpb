@@ -25,6 +25,7 @@ Nonterminals
         enum_def enum_fields enum_field
         field_opts field_opt cardinality type
         package_def
+        import_def
         identifiers
         option_def
         name
@@ -42,7 +43,7 @@ Terminals
         sfixed32 sfixed64 bool string bytes
         identifier str_lit dec_lit oct_lit hex_lit float_lit bool_lit
         default
-        %% import
+        import
         option
         %% '(' and ')' for options
         %% 'extensions', 'extend', 'max' and 'to' for extensions
@@ -64,25 +65,25 @@ elements -> element elements:           ['$1' | '$2'].
 elements -> ';' elements:               '$2'.
 elements -> '$empty':                   [].
 
+element -> package_def:                 '$1'.
+element -> import_def:                  '$1'.
 element -> enum_def:                    '$1'.
 element -> message_def:                 '$1'.
 %% element -> extend_def:                  '$1'.
-%% element -> pimport_def:                 '$1'.
-element -> package_def:                 '$1'.
 element -> option_def:                  '$1'.
 
-%% pimport -> import str_lit:              {import, '$2'}.
+package_def -> package name ';':        {package, '$2'}.
 
-package_def -> package name ';':            {package, '$2'}.
-
-name -> '.' identifiers:                    ['.' | '$2'].
-name -> identifiers:                        '$1'.
+name -> '.' identifiers:                ['.' | '$2'].
+name -> identifiers:                    '$1'.
 
 identifiers -> identifier '.' identifiers:      [identifier_name('$1'), '.'
                                                  | '$3'].
 identifiers -> identifier:                      [identifier_name('$1')].
 
-option_def -> option name '=' constant:  {option, '$2', '$4'}.
+import_def -> import str_lit:           {import, literal_value('$2')}.
+
+option_def -> option name '=' constant: {option, '$2', '$4'}.
 
 enum_def -> enum identifier '{' enum_fields '}':
                                         {{enum,identifier_name('$2')},'$4'}.
@@ -169,6 +170,7 @@ Erlang code.
 -export([verify_refs/1]).
 -export([reformat_names/1]).
 -export([resolve_refs/1]).
+-export([fetch_imports/1]).
 
 
 identifier_name({identifier, _Line, Name}) -> list_to_atom(Name).
@@ -176,6 +178,9 @@ identifier_name({identifier, _Line, Name}) -> list_to_atom(Name).
 literal_value({_TokenType, _Line, Value}) -> Value.
 
 absolutify_names(Defs) ->
+    %% FIXME: Search for {package, ...} in Defs,
+    %%        use that as initial Path instead of ['.'] ?
+    %%        Control this behaviour by an option?
     abs_names_2(['.'], Defs).
 
 abs_names_2(Path, Elems) ->
@@ -195,6 +200,8 @@ abs_names_2(Path, Elems) ->
                                          end,
                               F#field{type={ref, FullPath}}
                       end;
+                 ({package, Name}) ->
+                      {package, prepend_path(['.'], Name)};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -259,6 +266,8 @@ reformat_names(Defs) ->
                                  Fields)};
                  ({{enum,Name}, ENs}) ->
                       {{enum,reformat_name(Name)}, ENs};
+                 ({package, Name}) ->
+                      {package, reformat_name(Name)};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -290,6 +299,10 @@ resolve_refs(Defs) ->
 fetch_ref(Name, [{{enum,Name}=Key,_} | _]) -> Key;
 fetch_ref(Name, [{{msg,Name}=Key,_} | _])  -> Key;
 fetch_ref(Name, [_ | T])                   -> fetch_ref(Name, T).
+
+%% `Defs' is expected to be parsed.
+fetch_imports(Defs) ->
+    [Path || {import,Path} <- Defs].
 
 %%----------------------------------------------------------------------
 
@@ -355,6 +368,15 @@ parses_dotted_references_test() ->
            "  repeated Msg.Msg2 y=1;",
            "}"]).
 
+parses_package_test() ->
+    {ok, [{package,[p1,'.',p2]}, {{enum,e1}, _}]} =
+        parse_lines(["package p1.p2;",
+                     "enum e1 { a = 1; }"]).
+
+parses_import_test() ->
+    {ok, [{package,[p1,'.',p2]}, {import, "a/b/c.proto"}]} =
+        parse_lines(["package p1.p2;",
+                     "import \"a/b/c.proto\";"]).
 
 generates_correct_absolute_names_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
@@ -423,7 +445,9 @@ reformat_names_defs_test() ->
         lists:sort(reformat_names(flatten_defs(absolutify_names(Elems)))).
 
 resolve_refs_test() ->
-    {ok, Elems} = parse_lines(["message m1 {"
+    {ok, Elems} = parse_lines(["package p1;"
+                               "import \"a/b/c.proto\";",
+                               "message m1 {"
                                "  message m2 { required uint32 x = 1; }",
                                "  enum    e1 { a = 17; }",
                                "  required m2     y = 1;",
@@ -433,7 +457,9 @@ resolve_refs_test() ->
                                "message m3 {",
                                "  required m1.m2 b = 1;",
                                "}"]),
-    [{{enum,m1_e1}, _},
+    [{import, _},
+     {package, p1},
+     {{enum,m1_e1}, _},
      {{msg,m1},     [#field{name=y, type={msg,m1_m2}},
                      #field{name=z, type={enum,m1_e1}},
                      #field{name=w}]},
@@ -441,6 +467,14 @@ resolve_refs_test() ->
      {{msg,m3},     [#field{name=b, type={msg,m1_m2}}]}] =
         lists:sort(
           resolve_refs(reformat_names(flatten_defs(absolutify_names(Elems))))).
+
+fetches_imports_test() ->
+    {ok, Elems} = parse_lines(["package p1;"
+                               "import \"a/b/c.proto\";",
+                               "import 'd/e/f.proto';",
+                               "message m1 { required uint32 x = 1; }",
+                               "enum    e1 { a = 17; }"]),
+    ["a/b/c.proto", "d/e/f.proto"] = fetch_imports(Elems).
 
 %% helper
 parse_lines(Lines) ->
