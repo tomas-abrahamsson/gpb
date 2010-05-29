@@ -115,16 +115,16 @@ msg_elem -> cardinality type identifier '=' dec_lit '[' field_opts ']' ';':
 msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
 
-field_opts -> field_opt ',' field_opts: ['$1' | '$2'].
+field_opts -> field_opt ',' field_opts: ['$1' | '$3'].
 field_opts -> field_opt:                ['$1'].
 
 field_opt -> default '=' constant:      {default, '$3'}.
-field_opt -> identifiers:               {'$1', true}.
-field_opt -> identifiers '=' constant:  {'$1', '$3'}.
 field_opt -> packed:                    {packed, true}.
 field_opt -> packed '=' bool_lit:       {packed, literal_value('$3')}.
 field_opt -> deprecated:                {deprecated, true}.
-field_opt -> deprecated '=' bool_lit:   {'$1', literal_value('$3')}.
+field_opt -> deprecated '=' bool_lit:   {deprecated, literal_value('$3')}.
+field_opt -> name:                      {identifier_name('$1'), true}.
+field_opt -> name '=' constant:         {identifier_name('$1'), '$3'}.
 
 cardinality -> required:                required.
 cardinality -> optional:                optional.
@@ -171,6 +171,7 @@ Erlang code.
 -export([reformat_names/1]).
 -export([resolve_refs/1]).
 -export([enumerate_msg_fields/1]).
+-export([normalize_msg_field_options/1]).
 -export([fetch_imports/1]).
 
 
@@ -316,6 +317,31 @@ enumerate_fields(Fields) ->
 
 index_seq(_Start, []) -> [];
 index_seq(Start, L)   -> lists:zip(lists:seq(Start, length(L) + Start - 1), L).
+
+%% `Defs' is expected to be parsed.
+normalize_msg_field_options(Defs) ->
+    lists:map(fun({{msg,Name}, Fields}) ->
+                      {{msg, Name}, normalize_field_options(Fields)};
+                 (OtherElem) ->
+                      OtherElem
+              end,
+              Defs).
+
+normalize_field_options(Fields) ->
+    lists:map(fun(#field{opts=Opts}=F) ->
+                      F#field{opts=normalize_field_options_2(Opts)}
+              end,
+              Fields).
+
+normalize_field_options_2(Opts) ->
+    Opts1 = opt_tuple_to_atom_if_defined_true(packed, Opts),
+    opt_tuple_to_atom_if_defined_true(deprecated, Opts1).
+
+opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
+    case proplists:get_bool(Opt, Opts) of
+        false -> lists:keydelete(Opt, 1, Opts);
+        true  -> [Opt | lists:keydelete(Opt, 1, Opts)]
+    end.
 
 %% `Defs' is expected to be parsed.
 fetch_imports(Defs) ->
@@ -500,6 +526,28 @@ enumerates_msg_fields_test() ->
           enumerate_msg_fields(
             resolve_refs(
               reformat_names(flatten_defs(absolutify_names(Elems)))))).
+
+field_opt_normalization_test() ->
+    {ok,Defs} = parse_lines(["message m1 {"
+                             "  required uint32 f1=1 [packed=true,default=1];",
+                             "  required uint32 f2=2 [packed=false];",
+                             "  required uint32 f3=3 [packed,default=2];",
+                             "  required uint32 f4=4 [deprecated=true];",
+                             "  required uint32 f5=5 [deprecated=false];",
+                             "  required uint32 f6=5 [deprecated];",
+                             "  required bool   f7=7 [packed,default=true];",
+                             "}"]),
+    [{{msg,m1}, [#field{name=f1, opts=[packed, {default,1}]},
+                 #field{name=f2, opts=[]},
+                 #field{name=f3, opts=[packed, {default,2}]},
+                 #field{name=f4, opts=[deprecated]},
+                 #field{name=f5, opts=[]},
+                 #field{name=f6, opts=[deprecated]},
+                 #field{name=f7, opts=[packed, {default,true}]}]}] =
+        normalize_msg_field_options(
+          enumerate_msg_fields(
+            resolve_refs(
+              reformat_names(flatten_defs(absolutify_names(Defs)))))).
 
 
 fetches_imports_test() ->

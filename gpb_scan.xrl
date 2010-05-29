@@ -52,6 +52,7 @@ enum            : {token, {enum,TokenLine}}.
 option          : {token, {option,TokenLine}}.
 import          : {token, {import,TokenLine}}.
 default         : {token, {default,TokenLine}}.
+packed          : {token, {packed,TokenLine}}.
 deprecated      : {token, {deprecated,TokenLine}}.
 exensions       : {token, {extensions,TokenLine}}.
 extend          : {token, {extend,TokenLine}}.
