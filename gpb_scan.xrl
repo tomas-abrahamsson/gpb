@@ -19,7 +19,6 @@
 %%% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 
-
 Definitions.
 D       = [0-9]
 H       = [0-9a-fA-F]
@@ -61,9 +60,13 @@ max             : {token, {max,TokenLine}}.
 
 service         : {token, {service,TokenLine}}.
 rpc             : {token, {rpc,TokenLine}}.
+returns         : {token, {returns,TokenLine}}.
 
 true            : {token, {bool_lit,TokenLine,true}}.
 false           : {token, {bool_lit,TokenLine,false}}.
+
+syntax          : {token, {syntax,TokenLine}}.
+
 
 "(\\x[0-9a-fA-F]|\\[0-7]|\\[abfnrtv?"'\\]|[^"\n])*" :
                   {token,{str_lit,TokenLine,string_value(TokenChars)}}.
@@ -78,6 +81,11 @@ false           : {token, {bool_lit,TokenLine,false}}.
                    {token,{float_lit,TokenLine,str_to_float_3(TokenChars)}}.
 (\+|-)?{D}+(E|e)(\+|\-)?{D}+ :
                    {token,{float_lit,TokenLine,str_to_float_4(TokenChars)}}.
+
+% Cannot create neither +-inf or nan in erlang...
+% (\+|-)?inf :       {token,{float_lit,TokenLine,create_inf(TokenChars)}}.
+% nan :              {token,{float_lit,TokenLine,create_nan()}}.
+
 (\+|-)?0[xX]{H}+ : {token,{hex_lit,TokenLine,hexstr_to_integer(TokenChars)}}.
 (\+|-)?0{D}+     : {token,{oct_lit,TokenLine,octstr_to_integer(TokenChars)}}.
 (\+|-)?{D}+      : {token,{dec_lit,TokenLine,list_to_integer(TokenChars)}}.
