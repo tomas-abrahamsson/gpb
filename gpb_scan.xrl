@@ -53,7 +53,7 @@ import          : {token, {import,TokenLine}}.
 default         : {token, {default,TokenLine}}.
 packed          : {token, {packed,TokenLine}}.
 deprecated      : {token, {deprecated,TokenLine}}.
-exensions       : {token, {extensions,TokenLine}}.
+extensions      : {token, {extensions,TokenLine}}.
 extend          : {token, {extend,TokenLine}}.
 to              : {token, {to,TokenLine}}.
 max             : {token, {max,TokenLine}}.

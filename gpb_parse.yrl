@@ -28,6 +28,7 @@ Nonterminals
         package_def
         import_def
         identifiers
+        extend_def extensions_def exts ext
         option_def
         name
         constant
@@ -47,7 +48,7 @@ Terminals
         import
         option
         %% '(' and ')' for custom options
-        %% 'extensions', 'extend', 'max' and 'to' for extensions
+        extensions extend max to
         %% 'service', 'rpc', 'returns', '(' and ')' for services
         packed deprecated
         '.' ';' '{' '}' '[' ']' '=' ','
@@ -60,7 +61,6 @@ Endsymbol
         '$end'.
 
 
-%% TODO: implement extensions...
 %% TODO: implement services...
 %% TODO: implement generation/formatting of records               -> .hrl
 %% TODO: implement generation/formatting of msg+enum descriptions -> .erl
@@ -79,7 +79,7 @@ element -> package_def:                 '$1'.
 element -> import_def:                  '$1'.
 element -> enum_def:                    '$1'.
 element -> message_def:                 '$1'.
-%% element -> extend_def:                  '$1'.
+element -> extend_def:                  '$1'.
 element -> option_def:                  '$1'.
 %% element -> service_def                  '$1'.
 
@@ -136,6 +136,7 @@ msg_elem -> cardinality type identifier '=' dec_lit '[' opt_field_opts ']' ';':
                                                opts='$7'}.
 msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
+msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
 
 opt_field_opts -> field_opts:           '$1'.
 opt_field_opts -> '$empty':             [].
@@ -186,6 +187,19 @@ integer -> hex_lit:                     literal_value('$1').
 string_expr -> str_lit string_expr:     literal_value('$1') ++ '$2'.
 string_expr -> str_lit:                 literal_value('$1').
 
+extensions_def -> extensions exts ';':  '$2'.
+
+exts -> ext ',' exts:                   ['$1' | '$3'].
+exts -> ext:                            ['$1'].
+
+ext -> integer:                         {'$1','$1'}.
+ext -> integer to integer:              {'$1','$3'}.
+ext -> integer to max:                  {'$1',max}.
+
+extend_def -> extend identifier '{' msg_elems '}':
+                                        {{extend,identifier_name('$2')},'$4'}.
+
+
 Erlang code.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -196,6 +210,7 @@ Erlang code.
 -export([verify_refs/1]).
 -export([reformat_names/1]).
 -export([resolve_refs/1]).
+-export([extend_msgs/1]).
 -export([enumerate_msg_fields/1]).
 -export([normalize_msg_field_options/1]).
 -export([fetch_imports/1]).
@@ -228,6 +243,11 @@ abs_names_2(Path, Elems) ->
                                          end,
                               F#field{type={ref, FullPath}}
                       end;
+                 ({extensions,Exts}) ->
+                      {{extensions,Path},Exts};
+                 ({{extend,Msg}, FieldsOrDefs}) ->
+                      MsgPath = prepend_path(Path, Msg),
+                      {{extend, MsgPath}, abs_names_2(MsgPath, FieldsOrDefs)};
                  ({package, Name}) ->
                       {package, prepend_path(['.'], Name)};
                  (OtherElem) ->
@@ -262,38 +282,43 @@ prepend_path(Path,  SubPath) when is_list(SubPath) -> Path ++ ['.' | SubPath].
 flatten_defs(Defs) ->
     lists:reverse(
       lists:foldl(fun({{msg,Name}, FieldsOrDefs}, Acc) ->
-                          {RFields2, Defs2} =
-                              lists:foldl(fun(#field{}=F, {Fs,Ds}) ->
-                                                  {[F | Fs], Ds};
-                                             (Def, {Fs,Ds}) ->
-                                                  {Fs, flatten_defs([Def])++Ds}
-                                          end,
-                                          {[],[]},
-                                          FieldsOrDefs),
-                          Fields2 = lists:reverse(RFields2),
+                          {Fields2, Defs2} = flatten_fields(FieldsOrDefs),
                           [{{msg,Name},Fields2} | Defs2] ++ Acc;
+                     ({{extend,Name}, FieldsOrDefs}, Acc) ->
+                          {Fields2, Defs2} = flatten_fields(FieldsOrDefs),
+                          [{{extend,Name},Fields2} | Defs2] ++ Acc;
                      (OtherElem, Acc) ->
                           [OtherElem | Acc]
                   end,
                   [],
                   Defs)).
 
+flatten_fields(FieldsOrDefs) ->
+    {RFields2, Defs2} =
+        lists:foldl(fun(#field{}=F, {Fs,Ds}) -> {[F | Fs], Ds};
+                       (Def,        {Fs,Ds}) -> {Fs, flatten_defs([Def])++Ds}
+                    end,
+                    {[],[]},
+                    FieldsOrDefs),
+    {lists:reverse(RFields2), Defs2}.
+
+
+
 verify_refs(_Defs) ->
     %% FIXME: detect dangling references
+    %% FIXME: detect extending of missing messages
     ok.
 
 %% `Defs' is expected to be absolutified and flattened
 reformat_names(Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
-                      {{msg,reformat_name(Name)},
-                       lists:map(fun(#field{type={ref,N2}}=F) ->
-                                         F#field{type={ref,reformat_name(N2)}};
-                                    (#field{}=F) ->
-                                         F
-                                 end,
-                                 Fields)};
+                      {{msg,reformat_name(Name)}, reformat_fields(Fields)};
                  ({{enum,Name}, ENs}) ->
                       {{enum,reformat_name(Name)}, ENs};
+                 ({{extensions,Name}, Exts}) ->
+                      {{extensions,reformat_name(Name)}, Exts};
+                 ({{extend,Name}, Fields}) ->
+                      {{extend,reformat_name(Name)}, reformat_fields(Fields)};
                  ({package, Name}) ->
                       {package, reformat_name(Name)};
                  (OtherElem) ->
@@ -301,11 +326,18 @@ reformat_names(Defs) ->
               end,
               Defs).
 
-reformat_name(['.' | Rest]) ->
-    list_to_atom(lists:concat([if NPart == '.' -> "_";
-                                  true     -> atom_to_list(NPart)
-                               end
-                               || NPart <- Rest])).
+reformat_fields(Fields) ->
+    lists:map(
+      fun(#field{type={ref,Nm}}=F) -> F#field{type={ref,reformat_name(Nm)}};
+         (#field{}=F)              -> F
+      end,
+      Fields).
+
+reformat_name(Name) ->
+    list_to_atom(string:join([atom_to_list(P) || P <- Name,
+                                                 P /= '.'],
+                             "_")).
+
 
 %% `Defs' is expected to be flattened and may or may not be reformatted
 %% `Defs' is expected to be verified, to have no dangling references
@@ -327,6 +359,25 @@ resolve_refs(Defs) ->
 fetch_ref(Name, [{{enum,Name}=Key,_} | _]) -> Key;
 fetch_ref(Name, [{{msg,Name}=Key,_} | _])  -> Key;
 fetch_ref(Name, [_ | T])                   -> fetch_ref(Name, T).
+
+
+%% `Defs' is expected to be flattened and may or may not be reformatted
+%% `Defs' is expected to be verified, to not extend missing messages
+extend_msgs(Defs) ->
+    [possibly_extend_msg(Def, Defs) || Def <- Defs,
+                                       not is_extended(Def, Defs)].
+
+is_extended({{msg,Msg}, _Fields}, Defs) ->
+    lists:keymember({extend,Msg}, 1, Defs);
+is_extended(_OtherDef, _Defs) ->
+    false.
+
+possibly_extend_msg({{extend,Msg}, MoreFields}, Defs) ->
+    {value, {{msg,Msg}, OrigFields}} = lists:keysearch({msg,Msg}, 1, Defs),
+    {{msg,Msg}, OrigFields ++ MoreFields};
+possibly_extend_msg(OtherElem, _Defs) ->
+    OtherElem.
+
 
 %% `Defs' is expected to be flattened
 enumerate_msg_fields(Defs) ->
@@ -590,6 +641,51 @@ parses_and_ignores_enum_field_options_test() ->
 parses_and_ignores_empty_enum_field_options_test() ->
     {ok,_Defs} = parse_lines(["enum e1 { a=1 []; }"]).
 
+parses_msg_extensions_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required uint32 f1=1;",
+                             "  extensions 100 to 199, 300, 400 to max, 250;",
+                             "  extensions 251, 252;",
+                             "  message m2 {",
+                             "    required uint32 f2=2;",
+                             "    extensions 233;",
+                             "  }",
+                             "}"]),
+    [{{extensions,m1},[{100,199},{250,250},{300,300},{400,max}]},
+     {{extensions,m1},[{251,251},{252,252}]},
+     {{extensions,m1_m2},[{233,233}]},
+     {{msg,m1},    [#field{name=f1}]},
+     {{msg,m1_m2}, [#field{name=f2}]}] =
+        lists:sort(
+          normalize_msg_field_options(
+            enumerate_msg_fields(
+              resolve_refs(
+                reformat_names(
+                  flatten_defs(
+                    absolutify_names(Defs))))))).
+
+parses_extending_msgs_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required uint32 f1=1 [default=17];",
+                             "  extensions 200 to 299;",
+                             "}",
+                             "extend m1 {",
+                             "  optional uint32 f2=2;",
+                             "}"]),
+    [{{extensions,m1},[{200,299}]},
+     {{msg,m1},       [#field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
+                              occurrence=required},
+                       #field{name=f2, fnum=2, rnum=3, opts=[],
+                              occurrence=optional}]}] =
+        lists:sort(
+          normalize_msg_field_options(
+            enumerate_msg_fields(
+              extend_msgs(
+                resolve_refs(
+                  reformat_names(
+                    flatten_defs(
+                      absolutify_names(Defs)))))))).
+
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
                                "import \"a/b/c.proto\";",
@@ -600,7 +696,18 @@ fetches_imports_test() ->
 
 %% helper
 parse_lines(Lines) ->
-    {ok, Tokens, _} = gpb_scan:string(
-                        binary_to_list(
-                          iolist_to_binary([[Line,"\n"] || Line <- Lines]))),
-    ?MODULE:parse(Tokens++[{'$end',99}]).
+    S = binary_to_list(iolist_to_binary([[L,"\n"] || L <- Lines])),
+    case gpb_scan:string(S) of
+        {ok, Tokens, _} ->
+            case ?MODULE:parse(Tokens++[{'$end',length(Lines)+1}]) of
+                {ok, Result} ->
+                    {ok, Result};
+                {error, {LNum,_Module,EMsg}=Reason} ->
+                    io:format(user, "Parse error on line ~w:~n  ~p~n",
+                              [LNum, {Tokens,EMsg}]),
+                    erlang:error({parse_error,Lines,Reason})
+            end;
+        {error,Reason} ->
+            io:format(user, "Scan error:~n  ~p~n", [Reason]),
+            erlang:error({scan_error,Lines,Reason})
+    end.
