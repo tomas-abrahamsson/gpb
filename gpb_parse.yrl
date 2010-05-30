@@ -21,9 +21,10 @@
 Nonterminals
         proto
         elements element
-        message_def msg_elems msg_elem
         enum_def enum_fields enum_field
-        field_opts field_opt cardinality type
+        opt_enum_opts enum_opts enum_opt
+        message_def msg_elems msg_elem
+        opt_field_opts field_opts field_opt cardinality type
         package_def
         import_def
         identifiers
@@ -93,6 +94,17 @@ enum_fields -> enum_field:              ['$1'].
 
 enum_field -> identifier '=' integer ';':
                                         {identifier_name('$1'), '$3'}.
+enum_field -> identifier '=' integer '[' opt_enum_opts ']' ';':
+                                        {identifier_name('$1'), '$3'}.
+
+opt_enum_opts -> enum_opts:             '$1'.
+opt_enum_opts -> '$empty':              [].
+
+enum_opts -> enum_opt ',' enum_opts:    ['$1' | '$2'].
+enum_opts -> enum_opt:                  ['$1'].
+
+enum_opt -> name '=' constant:          {'$1', '$3'}.
+
 
 message_def -> message identifier '{' msg_elems '}':
                                         {{msg,identifier_name('$2')},'$4'}.
@@ -106,7 +118,7 @@ msg_elem -> cardinality type identifier '=' dec_lit ';':
                                                name=identifier_name('$3'),
                                                fnum=literal_value('$5'),
                                                opts=[]}.
-msg_elem -> cardinality type identifier '=' dec_lit '[' field_opts ']' ';':
+msg_elem -> cardinality type identifier '=' dec_lit '[' opt_field_opts ']' ';':
                                         #field{occurrence='$1',
                                                type='$2',
                                                name=identifier_name('$3'),
@@ -114,6 +126,10 @@ msg_elem -> cardinality type identifier '=' dec_lit '[' field_opts ']' ';':
                                                opts='$7'}.
 msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
+
+opt_field_opts -> field_opts:           '$1'.
+opt_field_opts -> '$empty':             [].
+
 
 field_opts -> field_opt ',' field_opts: ['$1' | '$3'].
 field_opts -> field_opt:                ['$1'].
@@ -549,6 +565,20 @@ field_opt_normalization_test() ->
             resolve_refs(
               reformat_names(flatten_defs(absolutify_names(Defs)))))).
 
+
+parses_empty_msg_field_options_test() ->
+    {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1 []; }"]),
+    [{{msg,m1}, [#field{name=f1, opts=[]}]}] =
+        normalize_msg_field_options(
+          enumerate_msg_fields(
+            resolve_refs(
+              reformat_names(flatten_defs(absolutify_names(Defs)))))).
+
+parses_and_ignores_enum_field_options_test() ->
+    {ok,_Defs} = parse_lines(["enum e1 { a=1 [x=y]; }"]).
+
+parses_and_ignores_empty_enum_field_options_test() ->
+    {ok,_Defs} = parse_lines(["enum e1 { a=1 []; }"]).
 
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
