@@ -46,9 +46,9 @@ Terminals
         default
         import
         option
-        %% '(' and ')' for options
+        %% '(' and ')' for custom options
         %% 'extensions', 'extend', 'max' and 'to' for extensions
-        %% 'service' and 'rpc'
+        %% 'service', 'rpc', 'returns', '(' and ')' for services
         packed deprecated
         '.' ';' '{' '}' '[' ']' '=' ','
         .
@@ -60,7 +60,16 @@ Endsymbol
         '$end'.
 
 
+%% TODO: implement extensions...
+%% TODO: implement services...
+%% TODO: implement generation/formatting of records               -> .hrl
+%% TODO: implement generation/formatting of msg+enum descriptions -> .erl
+%% TODO: implement verification of references
+%% TODO: implement (custom) options: allowed everywhere
+%% TODO: implement syntax as in syntax = "proto2"; (must come first)
+
 proto -> elements:                      '$1'.
+%% proto -> syntax_def elements:           '$1'.
 
 elements -> element elements:           ['$1' | '$2'].
 elements -> ';' elements:               '$2'.
@@ -72,6 +81,7 @@ element -> enum_def:                    '$1'.
 element -> message_def:                 '$1'.
 %% element -> extend_def:                  '$1'.
 element -> option_def:                  '$1'.
+%% element -> service_def                  '$1'.
 
 package_def -> package name ';':        {package, '$2'}.
 
