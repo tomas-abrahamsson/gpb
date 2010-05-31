@@ -48,7 +48,6 @@ Terminals
         default
         import
         option
-        %% '(' and ')' for custom options
         extensions extend max to
         service rpc returns
         packed deprecated
