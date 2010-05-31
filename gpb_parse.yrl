@@ -632,7 +632,7 @@ enumerates_msg_fields_test() ->
     [{{enum,m1_e1}, _},
      {{msg,m1},     [#field{name=y, fnum=11, rnum=2},
                      #field{name=z, fnum=12, rnum=3}]},
-     {{msg,m1_m2},  [#field{name=x, fnum=1, rnum=2}]}] =
+     {{msg,m1_m2},  [#field{name=x, fnum=1,  rnum=2}]}] =
         lists:sort(
           enumerate_msg_fields(
             resolve_refs(
@@ -655,19 +655,11 @@ field_opt_normalization_test() ->
                  #field{name=f5, opts=[]},
                  #field{name=f6, opts=[deprecated]},
                  #field{name=f7, opts=[packed, {default,true}]}]}] =
-        normalize_msg_field_options(
-          enumerate_msg_fields(
-            resolve_refs(
-              reformat_names(flatten_defs(absolutify_names(Defs)))))).
-
+        do_process_sort_defs(Defs).
 
 parses_empty_msg_field_options_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1 []; }"]),
-    [{{msg,m1}, [#field{name=f1, opts=[]}]}] =
-        normalize_msg_field_options(
-          enumerate_msg_fields(
-            resolve_refs(
-              reformat_names(flatten_defs(absolutify_names(Defs)))))).
+    [{{msg,m1}, [#field{name=f1, opts=[]}]}] = do_process_sort_defs(Defs).
 
 parses_and_ignores_enum_field_options_test() ->
     {ok,_Defs} = parse_lines(["enum e1 { a=1 [x=y]; }"]).
@@ -690,13 +682,7 @@ parses_msg_extensions_test() ->
      {{extensions,m1_m2},[{233,233}]},
      {{msg,m1},    [#field{name=f1}]},
      {{msg,m1_m2}, [#field{name=f2}]}] =
-        lists:sort(
-          normalize_msg_field_options(
-            enumerate_msg_fields(
-              resolve_refs(
-                reformat_names(
-                  flatten_defs(
-                    absolutify_names(Defs))))))).
+        do_process_sort_defs(Defs).
 
 parses_extending_msgs_test() ->
     {ok,Defs} = parse_lines(["message m1 {",
@@ -711,14 +697,7 @@ parses_extending_msgs_test() ->
                               occurrence=required},
                        #field{name=f2, fnum=2, rnum=3, opts=[],
                               occurrence=optional}]}] =
-        lists:sort(
-          normalize_msg_field_options(
-            enumerate_msg_fields(
-              extend_msgs(
-                resolve_refs(
-                  reformat_names(
-                    flatten_defs(
-                      absolutify_names(Defs)))))))).
+        do_process_sort_defs(Defs).
 
 parses_service_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
@@ -728,16 +707,7 @@ parses_service_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
-     {{service,s1},[{req,m1,m2}]}] =
-        lists:sort(
-          normalize_msg_field_options(
-            enumerate_msg_fields(
-              extend_msgs(
-                resolve_refs(
-                  reformat_names(
-                    flatten_defs(
-                      absolutify_names(Defs)))))))).
-
+     {{service,s1},[{req,m1,m2}]}] = do_process_sort_defs(Defs).
 
 parses_service_ignores_empty_method_option_braces_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
