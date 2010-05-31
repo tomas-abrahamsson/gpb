@@ -61,8 +61,6 @@ Endsymbol
         '$end'.
 
 
-%% TODO: implement generation/formatting of records               -> .hrl
-%% TODO: implement generation/formatting of msg+enum descriptions -> .erl
 %% TODO: implement verification of references
 %% TODO: implement (custom) options: allowed everywhere
 %% TODO: implement syntax as in syntax = "proto2"; (must come first)
