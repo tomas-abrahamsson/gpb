@@ -39,6 +39,7 @@ uint64          : {token, {uint64,TokenLine}}.
 sint32          : {token, {sint32,TokenLine}}.
 sint64          : {token, {sint64,TokenLine}}.
 fixed32         : {token, {fixed32,TokenLine}}.
+fixed64         : {token, {fixed64,TokenLine}}.
 sfixed32        : {token, {sfixed32,TokenLine}}.
 sfixed64        : {token, {sfixed64,TokenLine}}.
 bool            : {token, {bool,TokenLine}}.

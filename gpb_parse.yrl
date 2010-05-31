@@ -42,7 +42,7 @@ Terminals
         message enum
         required optional repeated
         double float int32 int64 uint32
-        uint64 sint32 sint64 fixed32
+        uint64 sint32 sint64 fixed32 fixed64
         sfixed32 sfixed64 bool string bytes
         identifier str_lit dec_lit oct_lit hex_lit float_lit bool_lit
         default
@@ -168,6 +168,7 @@ type -> uint64:                         uint64.
 type -> sint32:                         sint32.
 type -> sint64:                         sint64.
 type -> fixed32:                        fixed32.
+type -> fixed64:                        fixed64.
 type -> sfixed32:                       sfixed32.
 type -> sfixed64:                       sfixed64.
 type -> bool:                           bool.
