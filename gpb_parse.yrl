@@ -30,6 +30,7 @@ Nonterminals
         identifiers
         extend_def extensions_def exts ext
         option_def
+        service_def rpc_defs rpc_def
         name
         constant
         integer
@@ -49,9 +50,9 @@ Terminals
         option
         %% '(' and ')' for custom options
         extensions extend max to
-        %% 'service', 'rpc', 'returns', '(' and ')' for services
+        service rpc returns
         packed deprecated
-        '.' ';' '{' '}' '[' ']' '=' ','
+        '.' ';' '(' ')' '{' '}' '[' ']' '=' ','
         .
 
 Rootsymbol
@@ -61,7 +62,6 @@ Endsymbol
         '$end'.
 
 
-%% TODO: implement services...
 %% TODO: implement generation/formatting of records               -> .hrl
 %% TODO: implement generation/formatting of msg+enum descriptions -> .erl
 %% TODO: implement verification of references
@@ -81,7 +81,7 @@ element -> enum_def:                    '$1'.
 element -> message_def:                 '$1'.
 element -> extend_def:                  '$1'.
 element -> option_def:                  '$1'.
-%% element -> service_def                  '$1'.
+element -> service_def:                 '$1'.
 
 package_def -> package name ';':        {package, '$2'}.
 
@@ -200,6 +200,15 @@ extend_def -> extend identifier '{' msg_elems '}':
                                         {{extend,identifier_name('$2')},'$4'}.
 
 
+service_def -> service identifier '{' rpc_defs '}':
+                                        {{service,identifier_name('$2')},'$4'}.
+
+rpc_defs -> rpc_def rpc_defs:           ['$1' | '$2'].
+rpc_defs -> '$empty':                   [].
+
+rpc_def -> rpc identifier '(' name ')' returns  '(' name ')' ';':
+                                        {identifier_name('$2'), '$4', '$8'}.
+
 Erlang code.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -250,6 +259,8 @@ abs_names_2(Path, Elems) ->
                       {{extend, MsgPath}, abs_names_2(MsgPath, FieldsOrDefs)};
                  ({package, Name}) ->
                       {package, prepend_path(['.'], Name)};
+                 ({{service, Name}, RPCs}) ->
+                      {{service,Name}, abs_rpcs(Path, RPCs)};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -277,6 +288,13 @@ prepend_path(['.'], Id) when is_atom(Id)           -> ['.', Id];
 prepend_path(['.'], SubPath) when is_list(SubPath) -> ['.' | SubPath];
 prepend_path(Path,  Id) when is_atom(Id)           -> Path ++ ['.', Id];
 prepend_path(Path,  SubPath) when is_list(SubPath) -> Path ++ ['.' | SubPath].
+
+abs_rpcs(Path, RPCs) ->
+    lists:map(
+      fun({RpcName, Arg, Return}) ->
+              {RpcName, prepend_path(Path, Arg), prepend_path(Path,Return)}
+      end,
+      RPCs).
 
 %% `Defs' is expected to be absolutified
 flatten_defs(Defs) ->
@@ -307,6 +325,7 @@ flatten_fields(FieldsOrDefs) ->
 verify_refs(_Defs) ->
     %% FIXME: detect dangling references
     %% FIXME: detect extending of missing messages
+    %% FIXME: detect missing rpc service arg or return message references
     ok.
 
 %% `Defs' is expected to be absolutified and flattened
@@ -319,6 +338,8 @@ reformat_names(Defs) ->
                       {{extensions,reformat_name(Name)}, Exts};
                  ({{extend,Name}, Fields}) ->
                       {{extend,reformat_name(Name)}, reformat_fields(Fields)};
+                 ({{service,Name}, RPCs}) ->
+                      {{service,Name}, reformat_rpcs(RPCs)};
                  ({package, Name}) ->
                       {package, reformat_name(Name)};
                  (OtherElem) ->
@@ -338,6 +359,11 @@ reformat_name(Name) ->
                                                  P /= '.'],
                              "_")).
 
+reformat_rpcs(RPCs) ->
+    lists:map(fun({RpcName, Arg, Return}) ->
+                      {RpcName, reformat_name(Arg), reformat_name(Return)}
+              end,
+              RPCs).
 
 %% `Defs' is expected to be flattened and may or may not be reformatted
 %% `Defs' is expected to be verified, to have no dangling references
@@ -685,6 +711,26 @@ parses_extending_msgs_test() ->
                   reformat_names(
                     flatten_defs(
                       absolutify_names(Defs)))))))).
+
+parses_service_test() ->
+    {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
+                             "message m2 {required uint32 f2=1;}",
+                             "service s1 {",
+                             "  rpc req(m1) returns (m2);",
+                             "}"]),
+    [{{msg,m1}, _},
+     {{msg,m2}, _},
+     {{service,s1},[{req,m1,m2}]}] =
+        lists:sort(
+          normalize_msg_field_options(
+            enumerate_msg_fields(
+              extend_msgs(
+                resolve_refs(
+                  reformat_names(
+                    flatten_defs(
+                      absolutify_names(Defs)))))))).
+
+
 
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
