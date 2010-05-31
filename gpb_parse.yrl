@@ -30,7 +30,7 @@ Nonterminals
         identifiers
         extend_def extensions_def exts ext
         option_def
-        service_def rpc_defs rpc_def
+        service_def rpc_defs rpc_def m_opts
         name
         constant
         integer
@@ -100,7 +100,8 @@ enum_def -> enum identifier '{' enum_fields '}':
                                         {{enum,identifier_name('$2')},'$4'}.
 
 enum_fields -> enum_field enum_fields:  ['$1' | '$2'].
-enum_fields -> enum_field:              ['$1'].
+enum_fields -> ';' enum_fields:         '$2'.
+enum_fields -> '$empty':                [].
 
 enum_field -> identifier '=' integer ';':
                                         {identifier_name('$1'), '$3'}.
@@ -120,6 +121,7 @@ message_def -> message identifier '{' msg_elems '}':
                                         {{msg,identifier_name('$2')},'$4'}.
 
 msg_elems -> msg_elem msg_elems:        ['$1' | '$2'].
+msg_elems -> ';' msg_elems:             '$2'.
 msg_elems -> '$empty':                  [].
 
 msg_elem -> cardinality type identifier '=' dec_lit ';':
@@ -204,10 +206,16 @@ service_def -> service identifier '{' rpc_defs '}':
                                         {{service,identifier_name('$2')},'$4'}.
 
 rpc_defs -> rpc_def rpc_defs:           ['$1' | '$2'].
+rpc_defs -> ';' rpc_defs:               '$2'.
 rpc_defs -> '$empty':                   [].
 
-rpc_def -> rpc identifier '(' name ')' returns  '(' name ')' ';':
+rpc_def -> rpc identifier '(' name ')' returns '(' name ')' ';':
                                         {identifier_name('$2'), '$4', '$8'}.
+rpc_def -> rpc identifier '(' name ')' returns '(' name ')' '{' m_opts '}' ';':
+                                        {identifier_name('$2'), '$4', '$8'}.
+
+m_opts -> ';' m_opts:                   '$2'.
+m_opts -> '$empty':                     [].
 
 Erlang code.
 
@@ -731,6 +739,40 @@ parses_service_test() ->
                       absolutify_names(Defs)))))))).
 
 
+parses_service_ignores_empty_method_option_braces_test() ->
+    {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
+                             "message m2 {required uint32 f2=1;}",
+                             "service s1 {",
+                             "  rpc req(m1) returns (m2) {};",
+                             "}"]),
+    [{{msg,m1}, _},
+     {{msg,m2}, _},
+     {{service,s1},[{req,m1,m2}]}] = do_process_sort_defs(Defs).
+
+
+parses_empty_toplevel_statement_test() ->
+    {ok,Defs} = parse_lines(["; message m1 { required uint32 f1=1; }; ; "]),
+    [{{msg,m1}, _}] = do_process_sort_defs(Defs).
+
+parses_empty_message_statement_test() ->
+    {ok,Defs} = parse_lines(["message m1 { ; ; required uint32 f1=1;;; }"]),
+    [{{msg,m1}, [#field{name=f1}]}] = do_process_sort_defs(Defs).
+
+parses_empty_enum_statement_test() ->
+    {ok,Defs} = parse_lines(["enum e1 { ; ; ee1=1;;; }"]),
+    [{{enum,e1}, [{ee1,1}]}] = do_process_sort_defs(Defs).
+
+parses_empty_service_statement_test() ->
+    {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
+                             "service s1 { ; ; rpc r1(m1) returns (m1);;; }"]),
+    [{{msg,m1}, _},
+     {{service,s1},[{r1,m1,m1}]}] = do_process_sort_defs(Defs).
+
+parses_empty_service_statement_method_options_test() ->
+    {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
+                             "service s1 { rpc r1(m1) returns (m1){;;;}; }"]),
+    [{{msg,m1}, _},
+     {{service,s1},[{r1,m1,m1}]}] = do_process_sort_defs(Defs).
 
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
@@ -740,7 +782,7 @@ fetches_imports_test() ->
                                "enum    e1 { a = 17; }"]),
     ["a/b/c.proto", "d/e/f.proto"] = fetch_imports(Elems).
 
-%% helper
+%% test helpers
 parse_lines(Lines) ->
     S = binary_to_list(iolist_to_binary([[L,"\n"] || L <- Lines])),
     case gpb_scan:string(S) of
@@ -757,3 +799,13 @@ parse_lines(Lines) ->
             io:format(user, "Scan error:~n  ~p~n", [Reason]),
             erlang:error({scan_error,Lines,Reason})
     end.
+
+do_process_sort_defs(Defs) ->
+    lists:sort(
+      normalize_msg_field_options(
+        enumerate_msg_fields(
+          extend_msgs(
+            resolve_refs(
+              reformat_names(
+                flatten_defs(
+                  absolutify_names(Defs)))))))).
