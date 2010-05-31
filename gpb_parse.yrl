@@ -233,6 +233,8 @@ Erlang code.
 -export([normalize_msg_field_options/1]).
 -export([fetch_imports/1]).
 
+-export([parse_file/1]).
+
 
 identifier_name({identifier, _Line, Name}) -> list_to_atom(Name).
 
@@ -780,3 +782,63 @@ do_process_sort_defs(Defs) ->
               reformat_names(
                 flatten_defs(
                   absolutify_names(Defs)))))))).
+
+parse_file(FName) ->
+    case parse_file_and_imports(FName) of
+        {ok, {Defs1, _AllImported}} ->
+            %% io:format("processed these imports:~n  ~p~n", [_AllImported]),
+            %% io:format("Defs1=~n  ~p~n", [Defs1]),
+            Defs2 = reformat_names(flatten_defs(absolutify_names(Defs1))),
+            case verify_refs(Defs2) of
+                ok ->
+                    normalize_msg_field_options( %% Sort it?
+                      enumerate_msg_fields(
+                        extend_msgs(
+                          resolve_refs(Defs2))))
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+parse_file_and_imports(FName) ->
+    parse_file_and_imports(FName, [FName]).
+
+parse_file_and_imports(FName, AlreadyImported) ->
+    FName2 = locate_import(FName),
+    {ok,B} = file:read_file(FName2),
+    %% Add to AlreadyImported to prevent trying to import it again: in
+    %% case we get an error we don't want to try to reprocess it later
+    %% (in case it is multiply imported) and get the error again.
+    AlreadyImported2 = [FName | AlreadyImported],
+    case parse_lines([binary_to_list(B)]) of
+        {ok, Defs} ->
+            Imports = fetch_imports(Defs),
+            {ok, lists:foldl(
+                   fun(Import, {Ds,Is}) ->
+                           case lists:member(Import, Is) of
+                               true  -> {Ds,Is};
+                               false -> import_it(Import, Ds, Is)
+                           end
+                   end,
+                   {Defs, AlreadyImported2},
+                   Imports)};
+        {error, Reason} ->
+            io:format("Error for ~s (ignoring):~n  ~p~n",
+                      [FName, Reason]),
+            {error, Reason}
+    end.
+
+import_it(Import, Defs, AlreadyImported) ->
+    %% FIXME: how do we handle scope of declarations,
+    %%        e.g. options/package for imported files?
+    case parse_file_and_imports(Import, AlreadyImported) of
+        {ok, {MoreDefs, MoreImported}} ->
+            Defs2 = Defs++MoreDefs,
+            Imported2 = lists:usort(AlreadyImported++MoreImported),
+            {Defs2, Imported2};
+        {error, Reason} ->
+            io:format("Error for ~s (ignoring):~n  ~p~n", [Import, Reason]),
+            {Defs, AlreadyImported}
+    end.
+
+locate_import(Import) -> "/tmp/u/"++Import. %% FIXME: include path...
