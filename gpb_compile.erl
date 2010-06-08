@@ -129,7 +129,7 @@ format_erl(Mod, Defs) ->
          "    gpb:encode_msg(Msg, get_msg_defs()).~n"),
        "\n",
        f("decode_msg(Bin, MsgName) ->~n"
-         "    gpb:encode_msg(Bin, MsgName, get_msg_defs()).~n"),
+         "    gpb:decode_msg(Bin, MsgName, get_msg_defs()).~n"),
        "\n",
        f("get_msg_defs() ->~n"
          "    [~n~s].~n", [format_msgs_and_enums(5, Defs)])]).
