@@ -18,24 +18,39 @@
 
 -module(gpb_compile).
 %-compile(export_all).
--export([file/1]).
+-export([file/1, file/2]).
+-include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("gpb.hrl").
 
+%% @spec file(File) -> ok | {error, Reason}
+%% @equiv file(File, [])
 file(File) ->
-    Defs = parse_file(File),
-    Mod = list_to_atom(filename:basename(File, filename:extension(File))),
-    Erl = change_ext(File, ".erl"),
-    Hrl = change_ext(File, ".hrl"),
-    file:write_file(Erl, format_erl(Mod, Defs)),
-    file:write_file(Hrl, format_hrl(Mod, Defs)).
+    file(File, []).
+
+%% @spec file(File) -> ok | {error, Reason}
+%%            File = string()
+%%            Opts = [Opt]
+%%            Opt  = {i,directory()}
+file(File, Opts) ->
+    case parse_file(File, Opts) of
+        {ok, Defs} ->
+            Ext = filename:extension(File),
+            Mod = list_to_atom(filename:basename(File, Ext)),
+            Erl = change_ext(File, ".erl"),
+            Hrl = change_ext(File, ".hrl"),
+            file:write_file(Erl, format_erl(Mod, Defs)),
+            file:write_file(Hrl, format_hrl(Mod, Defs));
+        {error, _Reason} = Error ->
+            Error
+    end.
 
 change_ext(File, NewExt) ->
     filename:join(filename:dirname(File),
                   filename:basename(File, filename:extension(File)) ++ NewExt).
 
-parse_file(FName) ->
-    case parse_file_and_imports(FName) of
+parse_file(FName, Opts) ->
+    case parse_file_and_imports(FName, Opts) of
         {ok, {Defs1, _AllImported}} ->
             %% io:format("processed these imports:~n  ~p~n", [_AllImported]),
             %% io:format("Defs1=~n  ~p~n", [Defs1]),
@@ -44,40 +59,36 @@ parse_file(FName) ->
                         gpb_parse:absolutify_names(Defs1))),
             case gpb_parse:verify_refs(Defs2) of
                 ok ->
-                    gpb_parse:normalize_msg_field_options( %% Sort it?
-                      gpb_parse:enumerate_msg_fields(
-                        gpb_parse:extend_msgs(
-                          gpb_parse:resolve_refs(Defs2))))
+                    {ok, gpb_parse:normalize_msg_field_options( %% Sort it?
+                           gpb_parse:enumerate_msg_fields(
+                             gpb_parse:extend_msgs(
+                               gpb_parse:resolve_refs(Defs2))))};
+                {error, _Reason} = Error ->
+                    Error
             end;
         {error, Reason} ->
             {error, Reason}
     end.
 
-parse_file_and_imports(FName) ->
-    parse_file_and_imports(FName, [FName]).
+parse_file_and_imports(FName, Opts) ->
+    parse_file_and_imports(FName, [FName], Opts).
 
-parse_file_and_imports(FName, AlreadyImported) ->
-    FName2 = locate_import(FName),
-    {ok,B} = file:read_file(FName2),
-    %% Add to AlreadyImported to prevent trying to import it again: in
-    %% case we get an error we don't want to try to reprocess it later
-    %% (in case it is multiply imported) and get the error again.
-    AlreadyImported2 = [FName | AlreadyImported],
-    case scan_and_parse_string(binary_to_list(B)) of
-        {ok, Defs} ->
-            Imports = gpb_parse:fetch_imports(Defs),
-            {ok, lists:foldl(
-                   fun(Import, {Ds,Is}) ->
-                           case lists:member(Import, Is) of
-                               true  -> {Ds,Is};
-                               false -> import_it(Import, Ds, Is)
-                           end
-                   end,
-                   {Defs, AlreadyImported2},
-                   Imports)};
+parse_file_and_imports(FName, AlreadyImported, Opts) ->
+    case locate_import(FName, Opts) of
+        {ok, FName2} ->
+            {ok,B} = file:read_file(FName2),
+            %% Add to AlreadyImported to prevent trying to import it again: in
+            %% case we get an error we don't want to try to reprocess it later
+            %% (in case it is multiply imported) and get the error again.
+            AlreadyImported2 = [FName | AlreadyImported],
+            case scan_and_parse_string(binary_to_list(B)) of
+                {ok, Defs} ->
+                    Imports = gpb_parse:fetch_imports(Defs),
+                    read_and_parse_imports(Imports,AlreadyImported2,Defs,Opts);
+                {error, Reason} ->
+                    {error, Reason}
+            end;
         {error, Reason} ->
-            io:format("Error for ~s (ignoring):~n  ~p~n",
-                      [FName, Reason]),
             {error, Reason}
     end.
 
@@ -87,31 +98,57 @@ scan_and_parse_string(S) ->
             case gpb_parse:parse(Tokens++[{'$end', 999}]) of
                 {ok, Result} ->
                     {ok, Result};
-                {error, {LNum,_Module,EMsg}=Reason} ->
-                    io:format(user, "Parse error on line ~w:~n  ~p~n",
-                              [LNum, {Tokens,EMsg}]),
-                    erlang:error({parse_error,S,Reason})
+                {error, {_LNum,_Module,_EMsg}=Reason} ->
+                    {error, {parse_error,S,Reason}}
             end;
         {error,Reason} ->
-            io:format(user, "Scan error:~n  ~p~n", [Reason]),
-            erlang:error({scan_error,S,Reason})
+            {error, {scan_error,S,Reason}}
     end.
 
 
-import_it(Import, Defs, AlreadyImported) ->
+read_and_parse_imports([Import | Rest], AlreadyImported, Defs, Opts) ->
+    case lists:member(Import, AlreadyImported) of
+        true ->
+            read_and_parse_imports(Rest, AlreadyImported, Defs, Opts);
+        false ->
+            case import_it(Import, AlreadyImported, Defs, Opts) of
+                {ok, {Defs2, Imported2}} ->
+                    read_and_parse_imports(Rest, Imported2, Defs2, Opts);
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end;
+read_and_parse_imports([], Defs, Imported, _Opts) ->
+    {ok, {Defs, Imported}}.
+
+import_it(Import, AlreadyImported, Defs, Opts) ->
     %% FIXME: how do we handle scope of declarations,
     %%        e.g. options/package for imported files?
-    case parse_file_and_imports(Import, AlreadyImported) of
+    case parse_file_and_imports(Import, AlreadyImported, Opts) of
         {ok, {MoreDefs, MoreImported}} ->
             Defs2 = Defs++MoreDefs,
             Imported2 = lists:usort(AlreadyImported++MoreImported),
-            {Defs2, Imported2};
+            {ok, {Defs2, Imported2}};
         {error, Reason} ->
-            io:format("Error for ~s (ignoring):~n  ~p~n", [Import, Reason]),
-            {Defs, AlreadyImported}
+            {error, Reason}
     end.
 
-locate_import(Import) -> "/tmp/u/"++Import. %% FIXME: include path...
+locate_import(Import, Opts) ->
+    ImportPaths = [Path || {i, Path} <- Opts],
+    locate_import_aux(ImportPaths, Import).
+
+locate_import_aux([Path | Rest], Import) ->
+    File = filename:join(Path, Import),
+    case file:read_file_info(File) of
+        {ok, #file_info{access = A}} when A == read; A == read_write ->
+            {ok, File};
+        {ok, #file_info{}} ->
+            locate_import_aux(Rest, Import);
+        {error, _Reason} ->
+            locate_import_aux(Rest, Import)
+    end;
+locate_import_aux([], Import) ->
+    {error, {import_not_found, Import}}.
 
 format_erl(Mod, Defs) ->
     iolist_to_binary(
