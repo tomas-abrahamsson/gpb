@@ -215,30 +215,51 @@ format_hrl(Mod, Defs) ->
 format_msg_record(Msg, Fields) ->
     [f("-record(~p,~n", [Msg]),
      f("        {"),
-     case outdent_first(format_hfields(8+1, Fields)) of
-         ""  -> "\n";
-         FFs -> FFs
-     end,
+     outdent_first(format_hfields(8+1, Fields)),
+     "\n",
      f("        }).~n")].
 
 format_hfields(Indent, Fields) ->
-    lists:map(fun({I, #field{name=Name, fnum=FNum, type=Type, opts=Opts}}) ->
-                      DefaultStr =
-                          case proplists:get_value(default, Opts, '$nodflt') of
-                              '$nodflt' -> "";
-                              Default   -> f(" = ~p", [Default])
-                          end,
-                      CommaSep = if I < length(Fields) -> ",";
-                                    true               -> "" %% last entry
-                                 end,
-                      FieldTxt = indent(Indent,
-                                        f("~w~s~s",
-                                          [Name, DefaultStr, CommaSep])),
-                      LineUpStr = lineup(lists:flatlength(FieldTxt), 32),
-                      f("~s~s% = ~w, ~w~n",
-                        [FieldTxt, LineUpStr, FNum, Type])
-              end,
-              index_seq(Fields)).
+    string:join(
+      lists:map(
+        fun({I, #field{name=Name, fnum=FNum, type=Type, opts=Opts}}) ->
+                DefaultStr = case proplists:get_value(default, Opts, '$no') of
+                                 '$no'   -> "";
+                                 Default -> f(" = ~p", [Default])
+                             end,
+                TypeStr = f("~s", [type_to_typestr(Type)]),
+                CommaSep = if I < length(Fields) -> ",";
+                              true               -> "" %% last entry
+                           end,
+                FieldTxt1 = indent(Indent, f("~w~s", [Name, DefaultStr])),
+                LineUpStr1 = lineup(iolist_size(FieldTxt1), 32),
+                FieldTxt2 = f("~s~s:: ~s~s", [FieldTxt1, LineUpStr1,
+                                              TypeStr, CommaSep]),
+                LineUpStr2 = lineup(iolist_size(FieldTxt2), 54),
+                f("~s~s% = ~w, ~w",
+                  [FieldTxt2, LineUpStr2, FNum, Type])
+        end,
+        index_seq(Fields)),
+      "\n").
+
+type_to_typestr(sint32)   -> "integer()";
+type_to_typestr(sint64)   -> "integer()";
+type_to_typestr(int32)    -> "integer()";
+type_to_typestr(int64)    -> "integer()";
+type_to_typestr(uint32)   -> "non_neg_integer()";
+type_to_typestr(uint64)   -> "non_neg_integer()";
+type_to_typestr(bool)     -> "bool()";
+type_to_typestr(fixed32)  -> "non_neg_integer()";
+type_to_typestr(fixed64)  -> "non_neg_integer()";
+type_to_typestr(sfixed32) -> "integer()";
+type_to_typestr(sfixed64) -> "integer()";
+type_to_typestr(float)    -> "float()";
+type_to_typestr(double)   -> "float()";
+type_to_typestr(string)   -> "string()";
+type_to_typestr(bytes)    -> "binary()";
+type_to_typestr({enum,_}) -> "atom()"; %% FIXME: can be more narrow
+type_to_typestr({msg,M})  -> f("#~p{}", [M]).
+
 
 lineup(CurrentCol, TargetCol) when CurrentCol < TargetCol ->
     lists:duplicate(TargetCol - CurrentCol, $\s);
