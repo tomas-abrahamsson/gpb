@@ -1,11 +1,18 @@
 -ifndef(gpb_hrl).
 -define(gpb_hrl, true).
 
--type gpb_field_type() :: 'sint32' | 'sint64' | 'int32' | 'int64' | 'uint32'
-                          | 'uint64' | 'bool' | {'enum',atom()}
-                          | 'fixed64' | 'sfixed64' | 'double' | 'string'
-                          | 'bytes' | {'msg',atom()}
-                          | 'fixed32' | 'sfixed32' | 'float'.
+-type gpb_field_type() ::        %% Erlang type  Comment
+        'int32' | 'int64'         % integer()    variable-length encoded
+        | 'uint32' | 'uint64'     % integer()    variable-length encoded
+        | 'sint32' | 'sint64'     % integer()    variable-length zig-zag encoded
+        | 'fixed32' | 'fixed64'   % integer()    always 4 | 8 bytes on wire
+        | 'sfixed32' | 'sfixed64' % integer()    always 4 | 8 bytes on wire
+        | 'bool'                  % true | false
+        | 'float' | 'double'      % float()
+        | 'string'                % string()     UTF-8 encoded
+        | 'bytes'                 % binary()
+        | {'enum',atom()}         % atom()       the enum literal is the atom
+        | {'msg',atom()}.         % record()     the msg name is record name
 
 -record(field,
         {name       :: atom(),
