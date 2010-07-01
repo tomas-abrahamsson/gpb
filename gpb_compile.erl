@@ -169,7 +169,7 @@ format_erl(Mod, Defs) ->
          "    gpb:decode_msg(Bin, MsgName, get_msg_defs()).~n"),
        "\n",
        f("get_msg_defs() ->~n"
-         "    [~n~s].~n", [format_msgs_and_enums(5, Defs)])]).
+         "    [~s].~n", [outdent_first(format_msgs_and_enums(5, Defs))])]).
 
 format_msgs_and_enums(Indent, Defs) ->
     Enums = [Item || {{enum, _}, _}=Item <- Defs],
@@ -186,8 +186,10 @@ format_enums(Indent, Enums) ->
 
 format_msgs(Indent, Msgs) ->
     string:join([indent(Indent,
-                        f("{~w, [~n~s]}",
-                          [{msg,Msg}, format_efields(Indent+2, Fields)]))
+                        f("{~w,~n~s[~s]}",
+                          [{msg,Msg},
+                           indent(Indent+1, ""),
+                           outdent_first(format_efields(Indent+2, Fields))]))
                  || {{msg,Msg},Fields} <- Msgs],
                 ",\n").
 
@@ -212,8 +214,11 @@ format_hrl(Mod, Defs) ->
 
 format_msg_record(Msg, Fields) ->
     [f("-record(~p,~n", [Msg]),
-     f("        {~n"),
-     format_hfields(8+1, Fields),
+     f("        {"),
+     case outdent_first(format_hfields(8+1, Fields)) of
+         ""  -> "\n";
+         FFs -> FFs
+     end,
      f("        }).~n")].
 
 format_hfields(Indent, Fields) ->
@@ -242,6 +247,10 @@ lineup(_, _) ->
 
 indent(Indent, Str) ->
     lists:duplicate(Indent, $\s) ++ Str.
+
+outdent_first(IoList) ->
+    lists:dropwhile(fun(C) -> C == $\s end,
+                    binary_to_list(iolist_to_binary(IoList))).
 
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
