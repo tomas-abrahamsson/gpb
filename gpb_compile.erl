@@ -56,12 +56,13 @@ file(File) ->
 file(File, Opts) ->
     case parse_file(File, Opts) of
         {ok, Defs} ->
+            possibly_probe_defs(Defs, Opts),
             Ext = filename:extension(File),
             Mod = list_to_atom(filename:basename(File, Ext)),
             Erl = change_ext(File, ".erl"),
             Hrl = change_ext(File, ".hrl"),
-            file:write_file(Erl, format_erl(Mod, Defs, Opts)),
-            file:write_file(Hrl, format_hrl(Mod, Defs, Opts));
+            file_write_file(Erl, format_erl(Mod, Defs, Opts), Opts),
+            file_write_file(Hrl, format_hrl(Mod, Defs, Opts), Opts);
         {error, _Reason} = Error ->
             Error
     end.
@@ -97,7 +98,7 @@ parse_file_and_imports(FName, Opts) ->
 parse_file_and_imports(FName, AlreadyImported, Opts) ->
     case locate_import(FName, Opts) of
         {ok, FName2} ->
-            {ok,B} = file:read_file(FName2),
+            {ok,B} = file_read_file(FName2, Opts),
             %% Add to AlreadyImported to prevent trying to import it again: in
             %% case we get an error we don't want to try to reprocess it later
             %% (in case it is multiply imported) and get the error again.
@@ -156,19 +157,19 @@ import_it(Import, AlreadyImported, Defs, Opts) ->
 
 locate_import(Import, Opts) ->
     ImportPaths = [Path || {i, Path} <- Opts],
-    locate_import_aux(ImportPaths, Import).
+    locate_import_aux(ImportPaths, Import, Opts).
 
-locate_import_aux([Path | Rest], Import) ->
+locate_import_aux([Path | Rest], Import, Opts) ->
     File = filename:join(Path, Import),
-    case file:read_file_info(File) of
+    case file_read_file_info(File, Opts) of
         {ok, #file_info{access = A}} when A == read; A == read_write ->
             {ok, File};
         {ok, #file_info{}} ->
-            locate_import_aux(Rest, Import);
+            locate_import_aux(Rest, Import, Opts);
         {error, _Reason} ->
-            locate_import_aux(Rest, Import)
+            locate_import_aux(Rest, Import, Opts)
     end;
-locate_import_aux([], Import) ->
+locate_import_aux([], Import, _Opts) ->
     {error, {import_not_found, Import}}.
 
 format_erl(Mod, Defs, _Opts) ->
@@ -304,3 +305,25 @@ index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
 
 f(F)   -> f(F,[]).
 f(F,A) -> io_lib:format(F,A).
+
+file_read_file(FileName, Opts) ->
+    file_op(read_file, [FileName], Opts).
+
+file_read_file_info(FileName, Opts) ->
+    file_op(read_file_info, [FileName], Opts).
+
+file_write_file(FileName, Bin, Opts) ->
+    file_op(write_file, [FileName, Bin], Opts).
+
+file_op(Fn, Args, Opts) ->
+    FileOp = proplists:get_value(file_op, Opts, fun use_the_file_module/2),
+    FileOp(Fn, Args).
+
+use_the_file_module(Fn, Args) ->
+    apply(file, Fn, Args).
+
+possibly_probe_defs(Defs, Opts) ->
+    case proplists:get_value(probe_defs, Opts, '$no') of
+        '$no' -> ok;
+        Fn    -> Fn(Defs)
+    end.
