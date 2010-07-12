@@ -140,7 +140,7 @@ read_and_parse_imports([Import | Rest], AlreadyImported, Defs, Opts) ->
                     {error, Reason}
             end
     end;
-read_and_parse_imports([], Defs, Imported, _Opts) ->
+read_and_parse_imports([], Imported, Defs, _Opts) ->
     {ok, {Defs, Imported}}.
 
 import_it(Import, AlreadyImported, Defs, Opts) ->
