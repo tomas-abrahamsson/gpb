@@ -248,7 +248,7 @@ type_to_typestr(int32)    -> "integer()";
 type_to_typestr(int64)    -> "integer()";
 type_to_typestr(uint32)   -> "non_neg_integer()";
 type_to_typestr(uint64)   -> "non_neg_integer()";
-type_to_typestr(bool)     -> "bool()";
+type_to_typestr(bool)     -> "boolean()";
 type_to_typestr(fixed32)  -> "non_neg_integer()";
 type_to_typestr(fixed64)  -> "non_neg_integer()";
 type_to_typestr(sfixed32) -> "integer()";
