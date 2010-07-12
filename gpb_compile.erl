@@ -34,6 +34,7 @@ file(File) ->
 %%            Opt  = {i,directory()} |
 %%                   {type_specs, boolean()}
 %%
+%% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
 %%
 %% The generated .erl file will use the `gpb' module for runtime
