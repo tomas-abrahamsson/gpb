@@ -245,12 +245,12 @@ format_hfields(Indent, Fields, CompileOpts) ->
     TypeSpecs = proplists:get_value(type_specs, CompileOpts, false),
     string:join(
       lists:map(
-        fun({I, #field{name=Name, fnum=FNum, type=Type, opts=FOpts}}) ->
+        fun({I, #field{name=Name, fnum=FNum, opts=FOpts}=Field}) ->
                 DefaultStr = case proplists:get_value(default, FOpts, '$no') of
                                  '$no'   -> "";
                                  Default -> f(" = ~p", [Default])
                              end,
-                TypeStr = f("~s", [type_to_typestr(Type)]),
+                TypeStr = f("~s", [type_to_typestr(Field)]),
                 CommaSep = if I < length(Fields) -> ",";
                               true               -> "" %% last entry
                            end,
@@ -262,31 +262,45 @@ format_hfields(Indent, Fields, CompileOpts) ->
                                not TypeSpecs ->
                                     f("~s~s", [FieldTxt1, CommaSep])
                             end,
-                LineUpStr2 = lineup(iolist_size(FieldTxt2), 54),
-                f("~s~s% = ~w, ~w",
-                  [FieldTxt2, LineUpStr2, FNum, Type])
+                LineUpStr2 = lineup(iolist_size(FieldTxt2), 52),
+                f("~s~s% = ~w, ~s",
+                  [FieldTxt2, LineUpStr2, FNum, type_to_comment(Field)])
         end,
         index_seq(Fields)),
       "\n").
 
-type_to_typestr(sint32)   -> "integer()";
-type_to_typestr(sint64)   -> "integer()";
-type_to_typestr(int32)    -> "integer()";
-type_to_typestr(int64)    -> "integer()";
-type_to_typestr(uint32)   -> "non_neg_integer()";
-type_to_typestr(uint64)   -> "non_neg_integer()";
-type_to_typestr(bool)     -> "boolean()";
-type_to_typestr(fixed32)  -> "non_neg_integer()";
-type_to_typestr(fixed64)  -> "non_neg_integer()";
-type_to_typestr(sfixed32) -> "integer()";
-type_to_typestr(sfixed64) -> "integer()";
-type_to_typestr(float)    -> "float()";
-type_to_typestr(double)   -> "float()";
-type_to_typestr(string)   -> "string()";
-type_to_typestr(bytes)    -> "binary()";
-type_to_typestr({enum,_}) -> "atom()"; %% FIXME: can be more narrow
-type_to_typestr({msg,M})  -> f("#~p{}", [M]).
 
+type_to_typestr(#field{type=Type, occurrence=Occurrence}) ->
+    case Occurrence of
+        required -> type_to_typestr_2(Type);
+        repeated -> "[" ++ type_to_typestr_2(Type) ++ "]";
+        optional -> type_to_typestr_2(Type) ++ " | 'undefined'"
+    end.
+
+type_to_typestr_2(sint32)   -> "integer()";
+type_to_typestr_2(sint64)   -> "integer()";
+type_to_typestr_2(int32)    -> "integer()";
+type_to_typestr_2(int64)    -> "integer()";
+type_to_typestr_2(uint32)   -> "non_neg_integer()";
+type_to_typestr_2(uint64)   -> "non_neg_integer()";
+type_to_typestr_2(bool)     -> "boolean()";
+type_to_typestr_2(fixed32)  -> "non_neg_integer()";
+type_to_typestr_2(fixed64)  -> "non_neg_integer()";
+type_to_typestr_2(sfixed32) -> "integer()";
+type_to_typestr_2(sfixed64) -> "integer()";
+type_to_typestr_2(float)    -> "float()";
+type_to_typestr_2(double)   -> "float()";
+type_to_typestr_2(string)   -> "string()";
+type_to_typestr_2(bytes)    -> "binary()";
+type_to_typestr_2({enum,_}) -> "atom()"; %% FIXME: can be more narrow
+type_to_typestr_2({msg,M})  -> f("#~p{}", [M]).
+
+type_to_comment(#field{type=Type, occurrence=Occurrence}) ->
+    case Occurrence of
+        required -> f("~w", [Type]);
+        repeated -> "[" ++ f("~w", [Type]) ++ "]";
+        optional -> f("~w", [Type]) ++ " | 'undefined'"
+    end.
 
 lineup(CurrentCol, TargetCol) when CurrentCol < TargetCol ->
     lists:duplicate(TargetCol - CurrentCol, $\s);
