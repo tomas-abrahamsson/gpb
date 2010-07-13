@@ -21,6 +21,7 @@
 -export([decode_msg/3]).
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
+-export([verify_msg/2]).
 -include_lib("eunit/include/eunit.hrl").
 -include("gpb.hrl").
 
@@ -387,8 +388,6 @@ encode_wire_type(sfixed32)          -> 5;
 encode_wire_type(float)             -> 5.
 
 
-
-
 decode_varint(Bin) -> de_vi(Bin, 0, 0).
 
 de_vi(<<1:1, X:7, Rest/binary>>, N, Acc) -> de_vi(Rest, N+1, X bsl (N*7) + Acc);
@@ -408,6 +407,131 @@ encode_zigzag(N) when N >= 0 -> N * 2;
 encode_zigzag(N) when N <  0 -> N * -2 - 1.
 
 
+verify_msg(Msg, MsgDefs) when is_tuple(Msg), tuple_size(Msg) >= 1 ->
+    MsgName = element(1, Msg),
+    case lists:keysearch({msg,MsgName}, 1, MsgDefs) of
+        {value, _} ->
+            verify_msg2(Msg, MsgName, MsgDefs, [MsgName]);
+        false ->
+            mk_type_error(undefined_msg, MsgName, [])
+    end;
+verify_msg(Msg, _MsgDefs) ->
+    mk_type_error(expected_a_message, Msg, []).
+
+%% Verify that Msg is actually a message named MsgName as defined in MsgDefs
+verify_msg2(Msg, MsgName, MsgDefs, Path) when is_tuple(Msg),
+                                              element(1, Msg) == MsgName ->
+    MsgKey = {msg, MsgName},
+    {value, {MsgKey, Fields}} = lists:keysearch(MsgKey, 1, MsgDefs),
+    if tuple_size(Msg) == length(Fields) + 1 ->
+            verify_fields(Msg, Fields, Path, MsgDefs);
+       true ->
+            mk_type_error({bad_record,MsgName}, Msg, Path)
+    end;
+verify_msg2(V, MsgName, _MsgDefs, Path) ->
+    mk_type_error({bad_msg, MsgName}, V, Path).
+
+verify_fields(Msg, Fields, Path, MsgDefs) when tuple_size(Msg)
+                                               == length(Fields) + 1 ->
+    lists:foreach(
+      fun(#field{name=Name, type=Type, rnum=RNum, occurrence=Occurrence}) ->
+              Value = element(RNum, Msg),
+              verify_value(Value, Type, Occurrence, Path++[Name], MsgDefs)
+      end,
+      Fields);
+verify_fields(Msg, _Fields, Path, _MsgDefs) ->
+    mk_type_error(bad_record, Msg, Path).
+
+verify_value(Value, Type, Occurrence, Path, MsgDefs) ->
+    case Occurrence of
+        required -> verify_value_2(Value, Type, Path, MsgDefs);
+        repeated -> verify_list(Value, Type, Path, MsgDefs);
+        optional -> verify_optional(Value, Type, Path, MsgDefs)
+    end.
+
+verify_value_2(V, int32, Path, _MsgDefs)    -> verify_int(V, {i,32}, Path);
+verify_value_2(V, int64, Path, _MsgDefs)    -> verify_int(V, {i,64}, Path);
+verify_value_2(V, uint32, Path, _MsgDefs)   -> verify_int(V, {u,32}, Path);
+verify_value_2(V, uint64, Path, _MsgDefs)   -> verify_int(V, {u,64}, Path);
+verify_value_2(V, sint32, Path, _MsgDefs)   -> verify_int(V, {i,32}, Path);
+verify_value_2(V, sint64, Path, _MsgDefs)   -> verify_int(V, {i,64}, Path);
+verify_value_2(V, fixed32, Path, _MsgDefs)  -> verify_int(V, {u,32}, Path);
+verify_value_2(V, fixed64, Path, _MsgDefs)  -> verify_int(V, {u,64}, Path);
+verify_value_2(V, sfixed32, Path, _MsgDefs) -> verify_int(V, {i,32}, Path);
+verify_value_2(V, sfixed64, Path, _MsgDefs) -> verify_int(V, {i,64}, Path);
+verify_value_2(V, bool, Path, _MsgDefs)     -> verify_bool(V, Path);
+verify_value_2(V, float, Path, _MsgDefs)    -> verify_float(V, Path);
+verify_value_2(V, double, Path, _MsgDefs)   -> verify_float(V, Path);
+verify_value_2(V, string, Path, _MsgDefs)   -> verify_string(V, Path);
+verify_value_2(V, bytes, Path, _MsgDefs)    -> verify_bytes(V, Path);
+verify_value_2(V, {enum,E}, Path, MsgDefs)  -> verify_enum(V, E, MsgDefs, Path);
+verify_value_2(V, {msg,M}, Path, MsgDefs)   -> verify_msg2(V, M, MsgDefs, Path).
+
+verify_int(V, {i,32}, _) when -(1 bsl 31) =< V, V =< (1 bsl 31 - 1) -> ok;
+verify_int(V, {i,64}, _) when -(1 bsl 63) =< V, V =< (1 bsl 63 - 1) -> ok;
+verify_int(V, {u,32}, _) when 0 =< V, V =< (1 bsl 31 - 1)           -> ok;
+verify_int(V, {u,64}, _) when 0 =< V, V =< (1 bsl 63 - 1)           -> ok;
+verify_int(V, {S,Bits}, Path) ->
+    Signedness = case S of
+                     i -> signed;
+                     u -> unsigned
+                 end,
+    if is_integer(V) ->
+            mk_type_error({value_out_of_range, Signedness, Bits}, V, Path);
+       true ->
+            mk_type_error({bad_integer_value, Signedness, Bits}, V, Path)
+    end.
+
+verify_bool(true,  _) -> ok;
+verify_bool(false, _) -> ok;
+verify_bool(V, Path) ->
+    mk_type_error(bad_boolean_value, V, Path).
+
+verify_float(V, _) when is_float(V) -> ok;
+verify_float(V, _) when is_integer(V) -> ok;
+verify_float(V, Path) ->
+    mk_type_error(bad_floating_point_value, V, Path).
+
+verify_string(V, Path) when is_list(V) ->
+    try
+        unicode:characters_to_binary(V),
+        ok
+    catch error:badarg ->
+            mk_type_error(bad_unicode_string, V, Path)
+    end;
+verify_string(V, Path) ->
+    mk_type_error(bad_unicode_string, V, Path).
+
+verify_bytes(V, _) when is_binary(V) ->
+    ok;
+verify_bytes(V, Path) ->
+    mk_type_error(bad_binary_value, V, Path).
+
+verify_enum(V, EnumName, MsgDefs, Path) ->
+    EnumKey = {enum, EnumName},
+    {value, {EnumKey, Enumerations}} = lists:keysearch(EnumKey, 1, MsgDefs),
+    case lists:keymember(V, 1, Enumerations) of
+        true  -> ok;
+        false -> mk_type_error(bad_enum_value, V, Path)
+    end.
+
+verify_list(Elems, Type, Path, MsgDefs) when is_list(Elems) ->
+    lists:foreach(fun(Elem) -> verify_value_2(Elem, Type, Path, MsgDefs) end,
+                  Elems);
+verify_list(Elems, Type, Path, _MsgDefs) ->
+    mk_type_error({bad_repeated,Type}, Elems, Path).
+
+verify_optional(undefined, _Type, _Path, _MsgDefs) ->
+    ok;
+verify_optional(Value, Type, Path, MsgDefs) ->
+    verify_value_2(Value, Type, Path, MsgDefs).
+
+mk_type_error(Error, ValueSeen, Path) ->
+    Path2 = if Path == [] -> top_level;
+               true -> list_to_atom(string:join([atom_to_list(E) || E <- Path],
+                                                "."))
+            end,
+    erlang:error({gpb_type_error, {Error, [{value, ValueSeen},{path, Path2}]}}).
 
 keyfetch(Key, KVPairs) ->
     case lists:keysearch(Key, 1, KVPairs) of

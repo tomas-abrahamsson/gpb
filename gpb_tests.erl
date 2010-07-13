@@ -18,7 +18,7 @@
 
 -module(gpb_tests).
 %-compile(export_all).
--import(gpb, [decode_msg/3, encode_msg/2, merge_msgs/3]).
+-import(gpb, [decode_msg/3, encode_msg/2, merge_msgs/3, verify_msg/2]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("gpb.hrl").
@@ -191,6 +191,8 @@ decoding_two_packed_chunks_of_varints_test() ->
                                        occurrence=repeated, opts=[packed]}]}]),
     ok.
 
+%% -------------------------------------------------------------
+
 encode_required_varint_field_test() ->
     <<8,150,1>> =
         encode_msg(#m1{a=150},
@@ -288,6 +290,7 @@ encode_double_test() ->
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=double,
                                        occurrence=required, opts=[]}]}]).
 
+%% -------------------------------------------------------------
 
 merging_second_required_integer_overrides_first_test() ->
     #m1{a=20} = merge_msgs(#m1{a=10}, #m1{a=20},
@@ -346,3 +349,179 @@ merging_optional_messages_recursively2_test() ->
                                        occurrence=optional, opts=[]}]},
                     {{msg,m2}, [#field{name=b, fnum=1, rnum=#m2.b, type=uint32,
                                        occurrence=optional, opts=[]}]}]).
+
+
+%% -------------------------------------------------------------
+
+-define(verify_gpb_err(Expr), ?assertError({gpb_type_error, _}, Expr)).
+
+verify_presetn_required_field_succeeds_test() ->
+    ok = verify_msg(#m1{a=1},
+                    [{{msg,m1},
+                      [#field{name=a,fnum=1,rnum=#m1.a, type=uint32,
+                              occurrence=required}]}]).
+
+verify_missing_required_field_fails_test() ->
+    ?verify_gpb_err(verify_msg(#m1{},
+                               [{{msg,m1},
+                                 [#field{name=a,fnum=1,rnum=#m1.a, type=uint32,
+                                         occurrence=required}]}])).
+
+verify_optional_undefined_field_is_ok_test() ->
+    ok = verify_msg(#m1{},
+                    [{{msg,m1},
+                      [#field{name=a,fnum=1,rnum=#m1.a, type=uint32,
+                              occurrence=optional}]}]).
+
+verify_optional_present_field_is_ok_test() ->
+    ok = verify_msg(#m1{a=1},
+                    [{{msg,m1},
+                      [#field{name=a,fnum=1,rnum=#m1.a, type=uint32,
+                              occurrence=optional}]}]).
+
+verify_valid_repeated_field_succeeds_test() ->
+    ok = verify_msg(#m1{a=[1]},
+                    [{{msg,m1},
+                      [#field{name=a,fnum=1,rnum=#m1.a, type=uint32,
+                              occurrence=repeated}]}]).
+
+verify_invalid_repeated_field_fails_test() ->
+    ?verify_gpb_err(verify_msg(#m1{a=1},
+                               [{{msg,m1},
+                                 [#field{name=a,fnum=1,rnum=#m1.a, type=uint32,
+                                         occurrence=repeated}]}])).
+
+verify_valid_integer_succeeds_test() ->
+    [ok = verify_msg(#m1{a=42},
+                     [{{msg,m1},
+                       [#field{name=a,fnum=1,rnum=#m1.a, type=IType,
+                               occurrence=required}]}])
+     || IType <- [int32, int64, uint32, uint64, sint32, sint64,
+                  fixed32, fixed64, sfixed32, sfixed64]].
+
+verify_integer_out_of_range_fails_test() ->
+    [?verify_gpb_err(
+        verify_msg(#m1{a=99999999999999999999999999999999999991},
+                   [{{msg,m1},
+                     [#field{name=a,fnum=1,rnum=#m1.a, type=IType,
+                             occurrence=required}]}]))
+     || IType <- [int32, int64, uint32, uint64, sint32, sint64,
+                  fixed32, fixed64, sfixed32, sfixed64]].
+
+verify_bad_integer_fails_test() ->
+    ?verify_gpb_err(verify_msg(#m1{a=true},
+                               [{{msg,m1},
+                                 [#field{name=a,fnum=1,rnum=#m1.a, type=uint32,
+                                         occurrence=required}]}])).
+
+verify_valid_booleans_succeed_test() ->
+    [ok = verify_msg(#m1{a=B},
+                     [{{msg,m1},
+                       [#field{name=a,fnum=1,rnum=#m1.a, type=bool,
+                               occurrence=required}]}])
+     || B <- [true, false]].
+
+verify_bad_booleans_fails_test() ->
+    ?verify_gpb_err(verify_msg(#m1{a=tomato},
+                               [{{msg,m1},
+                                 [#field{name=a,fnum=1,rnum=#m1.a, type=bool,
+                                         occurrence=required}]}])).
+
+verify_valid_float_succeeds_test() ->
+    [ok = verify_msg(#m1{a=1.2e3},
+                     [{{msg,m1},
+                       [#field{name=a,fnum=1,rnum=#m1.a, type=FloatType,
+                               occurrence=required}]}])
+     || FloatType <- [float, double]].
+
+
+verify_bad_floats_fails_test() ->
+    [?verify_gpb_err(verify_msg(#m1{a=tomato},
+                                [{{msg,m1},
+                                  [#field{name=a,fnum=1,rnum=#m1.a,
+                                          type=FloatType,
+                                          occurrence=required}]}]))
+     || FloatType <- [float, double]].
+
+
+verify_valid_string_succeeds_test() ->
+    %% iolists are ok as strings
+    %% strings are unicode
+    ok = verify_msg(#m1{a=["abc", [16#449], <<"ff">>]},
+                    [{{msg,m1},
+                      [#field{name=a,fnum=1,rnum=#m1.a,
+                              type=string,
+                              occurrence=required}]}]).
+
+verify_invalid_string_fails_test() ->
+    ?verify_gpb_err(verify_msg(#m1{a=["abc", an_invalid_character]},
+                               [{{msg,m1},
+                                 [#field{name=a,fnum=1,rnum=#m1.a,
+                                         type=string,
+                                         occurrence=required}]}])).
+
+verify_valid_bytes_succeeds_test() ->
+    ok = verify_msg(#m1{a = <<"ff">>},
+                    [{{msg,m1},
+                      [#field{name=a,fnum=1,rnum=#m1.a,
+                              type=bytes,
+                              occurrence=required}]}]).
+
+verify_invalid_bytes_fails_test() ->
+    ?verify_gpb_err(verify_msg(#m1{a=33},
+                               [{{msg,m1},
+                                 [#field{name=a,fnum=1,rnum=#m1.a,
+                                         type=bytes,
+                                         occurrence=required}]}])).
+
+verify_valid_enum_succeeds_test() ->
+    ok = verify_msg(#m1{a = e1},
+                    [{{msg,m1},
+                      [#field{name=a,fnum=1,rnum=#m1.a,
+                              type={enum,e},
+                              occurrence=required}]},
+                     {{enum,e},[{e1, 1}]}]).
+
+verify_invalid_enum_fails_test() ->
+    ?verify_gpb_err(verify_msg(#m1{a = exyz},
+                               [{{msg,m1},
+                                 [#field{name=a,fnum=1,rnum=#m1.a,
+                                         type={enum,e},
+                                         occurrence=required}]},
+                                {{enum,e},[{e1, 1}]}])).
+
+verify_valid_submsg_succeeds_test() ->
+    ok = verify_msg(#m1{a = #m2{b = 1}},
+                    [{{msg,m1}, [#field{name=a,fnum=1,rnum=#m1.a,
+                                        type={msg,m2},
+                                        occurrence=required}]},
+                     {{msg,m2}, [#field{name=b,fnum=1,rnum=#m2.b,
+                                        type=uint32,
+                                        occurrence=required}]}]).
+
+verify_invalid_submsg_fails_test() ->
+    MsgDefs = [{{msg,m1}, [#field{name=a,fnum=1,rnum=#m1.a,
+                                  type={msg,m2},
+                                  occurrence=required}]},
+               {{msg,m2}, [#field{name=b,fnum=1,rnum=#m2.b,
+                                  type=uint32,
+                                  occurrence=required}]}],
+    ?verify_gpb_err(verify_msg(#m1{a = 1},    MsgDefs)),
+    ?verify_gpb_err(verify_msg(#m1{a = {}},   MsgDefs)),
+    ?verify_gpb_err(verify_msg(#m1{a = {m2}}, MsgDefs)).
+
+verify_path_when_failure_test() ->
+    MsgDefs = [{{msg,m1}, [#field{name=a,fnum=1,rnum=#m1.a,
+                                  type={msg,m2},
+                                  occurrence=required}]},
+               {{msg,m2}, [#field{name=b,fnum=1,rnum=#m2.b,
+                                  type=uint32,
+                                  occurrence=required}]}],
+    ?assertError({gpb_type_error, {_, [_, {path, top_level}]}},
+                 verify_msg(bad_msg, MsgDefs)),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1'}]}},
+                 verify_msg({m1}, MsgDefs)),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.a'}]}},
+                 verify_msg(#m1{a = bad_msg}, MsgDefs)),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.a.b'}]}},
+                 verify_msg(#m1{a = #m2{b=x}}, MsgDefs)).
