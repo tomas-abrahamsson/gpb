@@ -53,16 +53,18 @@ file(File) ->
 %% `false'. If you set it to `true', you may get into troubles for
 %% messages referencing other messages, when compiling the generated
 %% files.
-file(File, Opts) ->
-    case parse_file(File, Opts) of
-        {ok, Defs} ->
-            possibly_probe_defs(Defs, Opts),
+file(File, Opts0) ->
+    case parse_file(File, Opts0) of
+        {ok, Defs0} ->
+            {IsAcyclic, Defs} = try_topsort_defs(Defs0),
+            possibly_probe_defs(Defs, Opts0),
+            Opts1 = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
             Ext = filename:extension(File),
             Mod = list_to_atom(filename:basename(File, Ext)),
             Erl = change_ext(File, ".erl"),
             Hrl = change_ext(File, ".hrl"),
-            file_write_file(Erl, format_erl(Mod, Defs, Opts), Opts),
-            file_write_file(Hrl, format_hrl(Mod, Defs, Opts), Opts);
+            file_write_file(Erl, format_erl(Mod, Defs, Opts1), Opts1),
+            file_write_file(Hrl, format_hrl(Mod, Defs, Opts1), Opts1);
         {error, _Reason} = Error ->
             Error
     end.
@@ -172,6 +174,34 @@ locate_import_aux([Path | Rest], Import, Opts) ->
 locate_import_aux([], Import, _Opts) ->
     {error, {import_not_found, Import}}.
 
+try_topsort_defs(Defs) ->
+    G = digraph:new(),
+    [digraph:add_vertex(G, M) || {{msg,M}, _Fields} <- Defs],
+    [[digraph:add_edge(G, From, To) || #field{type={msg,To}} <- Fields]
+     || {{msg,From},Fields} <- Defs],
+    case digraph_utils:topsort(G) of
+        false ->
+            digraph:delete(G),
+            {false, Defs};
+        Order ->
+            digraph:delete(G),
+            ROrder = lists:reverse(Order),
+            OrderedMsgDefs = [lists:keyfind({msg,M},1,Defs) || M <- ROrder],
+            {true, OrderedMsgDefs ++ (Defs -- OrderedMsgDefs)}
+    end.
+
+possibly_adjust_typespec_opt(true=_IsAcyclic, Opts) ->
+    Opts;
+possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
+    case get_type_specs_by_opts(Opts) of
+        true  ->
+            io:format("Warning: omitting type specs "
+                      "due to cyclic message references.~n"),
+            lists:keydelete(type_specs, 1, Opts -- [type_specs]); % disable
+        false ->
+            Opts
+    end.
+
 format_erl(Mod, Defs, Opts) ->
     iolist_to_binary(
       [f("%% Automatically generated, do not edit~n"
@@ -246,20 +276,21 @@ format_hrl(Mod, Defs, Opts) ->
       [f("-ifndef(~p).~n", [Mod]),
        f("-define(~p, true).~n", [Mod]),
        "\n",
-       string:join([format_msg_record(Msg,Fs,Opts) || {{msg,Msg},Fs} <- Defs],
+       string:join([format_msg_record(Msg, Fields, Opts, Defs)
+                    || {{msg,Msg},Fields} <- Defs],
                    "\n"),
        "\n",
        f("-endif.~n")]).
 
-format_msg_record(Msg, Fields, Opts) ->
+format_msg_record(Msg, Fields, Opts, Defs) ->
     [f("-record(~p,~n", [Msg]),
      f("        {"),
-     outdent_first(format_hfields(8+1, Fields, Opts)),
+     outdent_first(format_hfields(8+1, Fields, Opts, Defs)),
      "\n",
      f("        }).~n")].
 
-format_hfields(Indent, Fields, CompileOpts) ->
-    TypeSpecs = proplists:get_value(type_specs, CompileOpts, false),
+format_hfields(Indent, Fields, CompileOpts, Defs) ->
+    TypeSpecs = get_type_specs_by_opts(CompileOpts),
     string:join(
       lists:map(
         fun({I, #field{name=Name, fnum=FNum, opts=FOpts}=Field}) ->
@@ -267,7 +298,7 @@ format_hfields(Indent, Fields, CompileOpts) ->
                                  '$no'   -> "";
                                  Default -> f(" = ~p", [Default])
                              end,
-                TypeStr = f("~s", [type_to_typestr(Field)]),
+                TypeStr = f("~s", [type_to_typestr(Field, Defs)]),
                 CommaSep = if I < length(Fields) -> ",";
                               true               -> "" %% last entry
                            end,
@@ -279,44 +310,72 @@ format_hfields(Indent, Fields, CompileOpts) ->
                                not TypeSpecs ->
                                     f("~s~s", [FieldTxt1, CommaSep])
                             end,
-                LineUpStr2 = lineup(iolist_size(FieldTxt2), 52),
-                f("~s~s% = ~w, ~s",
-                  [FieldTxt2, LineUpStr2, FNum, type_to_comment(Field)])
+                LineUpCol2 = if TypeSpecs -> 52;
+                               not TypeSpecs -> 40
+                            end,
+                LineUpStr2 = lineup(iolist_size(FieldTxt2), LineUpCol2),
+                TypeComment = type_to_comment(Field, TypeSpecs),
+                f("~s~s% = ~w~s~s",
+                  [FieldTxt2, LineUpStr2, FNum,
+                   [", " || TypeComment /= ""], TypeComment])
         end,
         index_seq(Fields)),
       "\n").
 
+get_type_specs_by_opts(Opts) ->
+    Default = false,
+    proplists:get_value(type_specs, Opts, Default).
 
-type_to_typestr(#field{type=Type, occurrence=Occurrence}) ->
+type_to_typestr(#field{type=Type, occurrence=Occurrence}, Defs) ->
     case Occurrence of
-        required -> type_to_typestr_2(Type);
-        repeated -> "[" ++ type_to_typestr_2(Type) ++ "]";
-        optional -> type_to_typestr_2(Type) ++ " | 'undefined'"
+        required -> type_to_typestr_2(Type, Defs);
+        repeated -> "[" ++ type_to_typestr_2(Type, Defs) ++ "]";
+        optional -> type_to_typestr_2(Type, Defs) ++ " | 'undefined'"
     end.
 
-type_to_typestr_2(sint32)   -> "integer()";
-type_to_typestr_2(sint64)   -> "integer()";
-type_to_typestr_2(int32)    -> "integer()";
-type_to_typestr_2(int64)    -> "integer()";
-type_to_typestr_2(uint32)   -> "non_neg_integer()";
-type_to_typestr_2(uint64)   -> "non_neg_integer()";
-type_to_typestr_2(bool)     -> "boolean()";
-type_to_typestr_2(fixed32)  -> "non_neg_integer()";
-type_to_typestr_2(fixed64)  -> "non_neg_integer()";
-type_to_typestr_2(sfixed32) -> "integer()";
-type_to_typestr_2(sfixed64) -> "integer()";
-type_to_typestr_2(float)    -> "float()";
-type_to_typestr_2(double)   -> "float()";
-type_to_typestr_2(string)   -> "string()";
-type_to_typestr_2(bytes)    -> "binary()";
-type_to_typestr_2({enum,_}) -> "atom()"; %% FIXME: can be more narrow
-type_to_typestr_2({msg,M})  -> f("#~p{}", [M]).
+type_to_typestr_2(sint32, _Defs)   -> "integer()";
+type_to_typestr_2(sint64, _Defs)   -> "integer()";
+type_to_typestr_2(int32, _Defs)    -> "integer()";
+type_to_typestr_2(int64, _Defs)    -> "integer()";
+type_to_typestr_2(uint32, _Defs)   -> "non_neg_integer()";
+type_to_typestr_2(uint64, _Defs)   -> "non_neg_integer()";
+type_to_typestr_2(bool, _Defs)     -> "boolean()";
+type_to_typestr_2(fixed32, _Defs)  -> "non_neg_integer()";
+type_to_typestr_2(fixed64, _Defs)  -> "non_neg_integer()";
+type_to_typestr_2(sfixed32, _Defs) -> "integer()";
+type_to_typestr_2(sfixed64, _Defs) -> "integer()";
+type_to_typestr_2(float, _Defs)    -> "float()";
+type_to_typestr_2(double, _Defs)   -> "float()";
+type_to_typestr_2(string, _Defs)   -> "string()";
+type_to_typestr_2(bytes, _Defs)    -> "binary()";
+type_to_typestr_2({enum,E}, Defs)  -> enum_typestr(E, Defs);
+type_to_typestr_2({msg,M}, _DEfs)  -> f("#~p{}", [M]).
 
-type_to_comment(#field{type=Type, occurrence=Occurrence}) ->
+enum_typestr(E, Defs) ->
+    {value, {{enum,E}, Enumerations}} = lists:keysearch({enum,E}, 1, Defs),
+    string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumerations],
+                " | ").
+
+type_to_comment(#field{type=Type}, true=_TypeSpec) ->
+    case Type of
+        sint32   -> "32 bits";
+        sint64   -> "32 bits";
+        int32    -> "32 bits";
+        int64    -> "32 bits";
+        uint32   -> "32 bits";
+        uint64   -> "32 bits";
+        fixed32  -> "32 bits";
+        fixed64  -> "32 bits";
+        sfixed32 -> "32 bits";
+        sfixed64 -> "32 bits";
+        {enum,E} -> "enum "++atom_to_list(E);
+        _        -> ""
+    end;
+type_to_comment(#field{type=Type, occurrence=Occurrence}, false=_TypeSpec) ->
     case Occurrence of
         required -> f("~w", [Type]);
         repeated -> "[" ++ f("~w", [Type]) ++ "]";
-        optional -> f("~w", [Type]) ++ " | 'undefined'"
+        optional -> f("~w (optional)", [Type])
     end.
 
 lineup(CurrentCol, TargetCol) when CurrentCol < TargetCol ->
