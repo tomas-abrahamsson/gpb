@@ -28,7 +28,7 @@
 -import(gpb_parse, [fetch_imports/1]).
 
 -include_lib("eunit/include/eunit.hrl").
--include("gpb.hrl").
+-include("../include/gpb.hrl").
 
 parses_simple_msg_test() ->
     {ok, [{{msg,'Msg'}, [#field{name=x, type=uint32, fnum=1,

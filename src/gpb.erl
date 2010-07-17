@@ -23,7 +23,7 @@
 -export([merge_msgs/3]).
 -export([verify_msg/2]).
 -include_lib("eunit/include/eunit.hrl").
--include("gpb.hrl").
+-include("../include/gpb.hrl").
 
 %% TODO:
 %%

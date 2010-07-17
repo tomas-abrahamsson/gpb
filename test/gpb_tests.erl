@@ -21,7 +21,7 @@
 -import(gpb, [decode_msg/3, encode_msg/2, merge_msgs/3, verify_msg/2]).
 
 -include_lib("eunit/include/eunit.hrl").
--include("gpb.hrl").
+-include("../include/gpb.hrl").
 
 -record(m1,{a}).
 

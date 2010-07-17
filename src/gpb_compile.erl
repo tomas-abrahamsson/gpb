@@ -21,7 +21,7 @@
 -export([file/1, file/2]).
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include("gpb.hrl").
+-include("../include/gpb.hrl").
 
 %% @spec file(File) -> ok | {error, Reason}
 %% @equiv file(File, [])

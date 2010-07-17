@@ -218,7 +218,7 @@ m_opts -> '$empty':                     [].
 Erlang code.
 
 -include_lib("eunit/include/eunit.hrl").
--include("gpb.hrl").
+-include("../include/gpb.hrl").
 
 -export([absolutify_names/1]).
 -export([flatten_defs/1]).

@@ -1,3 +1,6 @@
-*.beam
-/gpb_parse.erl
-/gpb_scan.erl
+ebin/*.beam
+test/*.beam
+# Generated from src/gpb_parse.xrl
+src/gpb_parse.erl
+# Generated from src/gpb_scan.yrl
+src/gpb_scan.erl
