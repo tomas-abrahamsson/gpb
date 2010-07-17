@@ -399,14 +399,60 @@ verify_valid_integer_succeeds_test() ->
      || IType <- [int32, int64, uint32, uint64, sint32, sint64,
                   fixed32, fixed64, sfixed32, sfixed64]].
 
-verify_integer_out_of_range_fails_test() ->
-    [?verify_gpb_err(
-        verify_msg(#m1{a=99999999999999999999999999999999999991},
-                   [{{msg,m1},
-                     [#field{name=a,fnum=1,rnum=#m1.a, type=IType,
-                             occurrence=required}]}]))
+verify_integer_range_fails_test() ->
+    [begin
+         ok = verify_msg(#m1{a=int_min(IType)},
+                         [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a,
+                                            type=IType,
+                                            occurrence=required}]}]),
+         ok = verify_msg(#m1{a=int_max(IType)},
+                         [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a,
+                                            type=IType,
+                                            occurrence=required}]}]),
+         ?verify_gpb_err(verify_msg(#m1{a=int_min(IType)-1},
+                                    [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a,
+                                                       type=IType,
+                                                       occurrence=required}]}])),
+         ?verify_gpb_err(verify_msg(#m1{a=int_max(IType)+1},
+                                    [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a,
+                                                       type=IType,
+                                                       occurrence=required}]}]))
+     end
      || IType <- [int32, int64, uint32, uint64, sint32, sint64,
                   fixed32, fixed64, sfixed32, sfixed64]].
+
+int_min(int32)    -> int_min_by_descr(  signed, 32);
+int_min(int64)    -> int_min_by_descr(  signed, 64);
+int_min(uint32)   -> int_min_by_descr(unsigned, 32);
+int_min(uint64)   -> int_min_by_descr(unsigned, 64);
+int_min(sint32)   -> int_min_by_descr(  signed, 32);
+int_min(sint64)   -> int_min_by_descr(  signed, 64);
+int_min(fixed32)  -> int_min_by_descr(unsigned, 32);
+int_min(fixed64)  -> int_min_by_descr(unsigned, 64);
+int_min(sfixed32) -> int_min_by_descr(  signed, 32);
+int_min(sfixed64) -> int_min_by_descr(  signed, 64).
+
+int_min_by_descr(signed,   32) -> -16#80000000         = -(1 bsl 31);
+int_min_by_descr(signed,   64) -> -16#8000000000000000 = -(1 bsl 63);
+int_min_by_descr(unsigned, 32) -> 0;
+int_min_by_descr(unsigned, 64) -> 0.
+
+int_max(int32)    -> int_max_by_descr(  signed, 32);
+int_max(int64)    -> int_max_by_descr(  signed, 64);
+int_max(uint32)   -> int_max_by_descr(unsigned, 32);
+int_max(uint64)   -> int_max_by_descr(unsigned, 64);
+int_max(sint32)   -> int_max_by_descr(  signed, 32);
+int_max(sint64)   -> int_max_by_descr(  signed, 64);
+int_max(fixed32)  -> int_max_by_descr(unsigned, 32);
+int_max(fixed64)  -> int_max_by_descr(unsigned, 64);
+int_max(sfixed32) -> int_max_by_descr(  signed, 32);
+int_max(sfixed64) -> int_max_by_descr(  signed, 64).
+
+int_max_by_descr(signed,   32) -> 16#7fffFFFF         = (1 bsl 31) - 1;
+int_max_by_descr(signed,   64) -> 16#7fffFFFFffffFFFF = (1 bsl 63) - 1;
+int_max_by_descr(unsigned, 32) -> 16#ffffFFFF         = (1 bsl 32) - 1;
+int_max_by_descr(unsigned, 64) -> 16#ffffFFFFffffFFFF = (1 bsl 64) - 1.
+
 
 verify_bad_integer_fails_test() ->
     ?verify_gpb_err(verify_msg(#m1{a=true},

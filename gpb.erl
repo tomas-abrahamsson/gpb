@@ -469,8 +469,8 @@ verify_value_2(V, {msg,M}, Path, MsgDefs)   -> verify_msg2(V, M, MsgDefs, Path).
 
 verify_int(V, {i,32}, _) when -(1 bsl 31) =< V, V =< (1 bsl 31 - 1) -> ok;
 verify_int(V, {i,64}, _) when -(1 bsl 63) =< V, V =< (1 bsl 63 - 1) -> ok;
-verify_int(V, {u,32}, _) when 0 =< V, V =< (1 bsl 31 - 1)           -> ok;
-verify_int(V, {u,64}, _) when 0 =< V, V =< (1 bsl 63 - 1)           -> ok;
+verify_int(V, {u,32}, _) when 0 =< V, V =< (1 bsl 32 - 1)           -> ok;
+verify_int(V, {u,64}, _) when 0 =< V, V =< (1 bsl 64 - 1)           -> ok;
 verify_int(V, {S,Bits}, Path) ->
     Signedness = case S of
                      i -> signed;
