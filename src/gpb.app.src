@@ -1,0 +1,7 @@
+%% -*- erlang -*-
+{application, gpb,
+ [{description, "Google protocol buffer compiler and runtime support"},
+  {vsn, "0.0"},
+  {applicatons, [kernel, stdlib]},
+  {modules, []},
+  {env, [gpb, gpb_compile, gpb_scan, gpb_parse]}]}.

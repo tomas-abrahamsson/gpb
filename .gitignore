@@ -1,5 +1,7 @@
 ebin/*.beam
 test/*.beam
+# Rebar compiles tests and more to .eunit/
+.eunit
 # Generated from src/gpb_parse.xrl
 src/gpb_parse.erl
 # Generated from src/gpb_scan.yrl
