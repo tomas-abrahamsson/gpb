@@ -17,15 +17,6 @@
 %%% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 -module(gpb_scan_tests).
--import(gpb_scan, [absolutify_names/1]).
--import(gpb_scan, [flatten_defs/1]).
--import(gpb_scan, [verify_refs/1]).
--import(gpb_scan, [reformat_names/1]).
--import(gpb_scan, [resolve_refs/1]).
--import(gpb_scan, [extend_msgs/1]).
--import(gpb_scan, [enumerate_msg_fields/1]).
--import(gpb_scan, [normalize_msg_field_options/1]).
--import(gpb_scan, [fetch_imports/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 

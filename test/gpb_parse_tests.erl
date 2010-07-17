@@ -17,15 +17,6 @@
 %%% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 -module(gpb_parse_tests).
--import(gpb_parse, [absolutify_names/1]).
--import(gpb_parse, [flatten_defs/1]).
--import(gpb_parse, [verify_refs/1]).
--import(gpb_parse, [reformat_names/1]).
--import(gpb_parse, [resolve_refs/1]).
--import(gpb_parse, [extend_msgs/1]).
--import(gpb_parse, [enumerate_msg_fields/1]).
--import(gpb_parse, [normalize_msg_field_options/1]).
--import(gpb_parse, [fetch_imports/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
@@ -119,7 +110,7 @@ generates_correct_absolute_names_test() ->
                        #field{name=z, type={ref,['.',m1,'.',m2]}},
                        #field{name=w, type={ref,['.',m1,'.',e1]}}]},
      {{msg,['.',m3]}, [#field{name=b, type={ref,['.',m1,'.',m2]}}]}] =
-        lists:sort(absolutify_names(Elems)).
+        lists:sort(gpb_parse:absolutify_names(Elems)).
 
 generates_correct_absolute_names_2_test() ->
     {ok, Elems} = parse_lines(["message m2 {",
@@ -139,7 +130,7 @@ generates_correct_absolute_names_2_test() ->
                        #field{name=f2,type={ref,['.',m1,'.',m2,'.',m3]}},
                        #field{name=f3,type={ref,['.',m2,'.',m4]}}]},
      {{msg,['.',m2]}, _}] =
-        lists:sort(absolutify_names(Elems)).
+        lists:sort(gpb_parse:absolutify_names(Elems)).
 
 flattens_absolutified_defs_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
@@ -148,10 +139,10 @@ flattens_absolutified_defs_test() ->
                                "  required m2 z = 1;",
                                "  required m2 w = 2;",
                                "}"]),
-    AElems = absolutify_names(Elems),
+    AElems = gpb_parse:absolutify_names(Elems),
     [{{msg,['.',m1]},        [#field{name=z}, #field{name=w}]},
      {{msg,['.',m1,'.',m2]}, [#field{name=x}, #field{name=y}]}] =
-        lists:sort(flatten_defs(AElems)).
+        lists:sort(gpb_parse:flatten_defs(AElems)).
 
 reformat_names_defs_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
@@ -166,7 +157,9 @@ reformat_names_defs_test() ->
                      #field{name=z, type={ref,m1_e1}},
                      #field{name=w}]},
      {{msg,m1_m2},  [#field{name=x}]}] =
-        lists:sort(reformat_names(flatten_defs(absolutify_names(Elems)))).
+        lists:sort(gpb_parse:reformat_names(
+                     gpb_parse:flatten_defs(
+                       gpb_parse:absolutify_names(Elems)))).
 
 resolve_refs_test() ->
     {ok, Elems} = parse_lines(["package p1;"
@@ -190,7 +183,10 @@ resolve_refs_test() ->
      {{msg,m1_m2},  [#field{name=x}]},
      {{msg,m3},     [#field{name=b, type={msg,m1_m2}}]}] =
         lists:sort(
-          resolve_refs(reformat_names(flatten_defs(absolutify_names(Elems))))).
+          gpb_parse:resolve_refs(
+            gpb_parse:reformat_names(
+              gpb_parse:flatten_defs(
+                gpb_parse:absolutify_names(Elems))))).
 
 enumerates_msg_fields_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
@@ -204,9 +200,10 @@ enumerates_msg_fields_test() ->
                      #field{name=z, fnum=12, rnum=3}]},
      {{msg,m1_m2},  [#field{name=x, fnum=1,  rnum=2}]}] =
         lists:sort(
-          enumerate_msg_fields(
-            resolve_refs(
-              reformat_names(flatten_defs(absolutify_names(Elems)))))).
+          gpb_parse:enumerate_msg_fields(
+            gpb_parse:resolve_refs(
+              gpb_parse:reformat_names(
+                gpb_parse:flatten_defs(gpb_parse:absolutify_names(Elems)))))).
 
 field_opt_normalization_test() ->
     {ok,Defs} = parse_lines(["message m1 {"
@@ -320,7 +317,7 @@ fetches_imports_test() ->
                                "import 'd/e/f.proto';",
                                "message m1 { required uint32 x = 1; }",
                                "enum    e1 { a = 17; }"]),
-    ["a/b/c.proto", "d/e/f.proto"] = fetch_imports(Elems).
+    ["a/b/c.proto", "d/e/f.proto"] = gpb_parse:fetch_imports(Elems).
 
 %% test helpers
 parse_lines(Lines) ->
@@ -342,11 +339,11 @@ parse_lines(Lines) ->
 
 do_process_sort_defs(Defs) ->
     lists:sort(
-      normalize_msg_field_options(
-        enumerate_msg_fields(
-          extend_msgs(
-            resolve_refs(
-              reformat_names(
-                flatten_defs(
-                  absolutify_names(Defs)))))))).
+      gpb_parse:normalize_msg_field_options(
+        gpb_parse:enumerate_msg_fields(
+          gpb_parse:extend_msgs(
+            gpb_parse:resolve_refs(
+              gpb_parse:reformat_names(
+                gpb_parse:flatten_defs(
+                  gpb_parse:absolutify_names(Defs)))))))).
 
