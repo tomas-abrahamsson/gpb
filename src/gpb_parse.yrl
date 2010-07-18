@@ -222,7 +222,8 @@ Erlang code.
 
 -export([absolutify_names/1]).
 -export([flatten_defs/1]).
--export([verify_refs/1]).
+-export([verify_defs/1]).
+-export([format_verification_error/1]).
 -export([reformat_names/1]).
 -export([resolve_refs/1]).
 -export([extend_msgs/1]).
@@ -327,11 +328,158 @@ flatten_fields(FieldsOrDefs) ->
 
 
 
-verify_refs(_Defs) ->
-    %% FIXME: detect dangling references
-    %% FIXME: detect extending of missing messages
-    %% FIXME: detect missing rpc service arg or return message references
+%% `Defs' is expected to be flattened and may or may not be reformatted
+verify_defs(Defs) ->
+    collect_errors(Defs,
+                   [{msg,     [fun verify_msg/2, fun verify_field_defaults/2]},
+                    {extend,  [fun verify_extend/2]},
+                    {service, [fun verify_service/2]},
+                    {'_',     [fun(_Def, _AllDefs) -> ok end]}]).
+
+collect_errors(Defs, VerifiersList) ->
+    collect_errors(Defs, Defs, VerifiersList, ok).
+
+collect_errors([{{ElemType,_},_}=Def | Rest], AllDefs, VerifiersList, Acc) ->
+    Result = lists:foldl(
+               fun(Verifier, A) -> add_acc(A, Verifier(Def, AllDefs)) end,
+               Acc,
+               find_verifiers(ElemType, VerifiersList)),
+    collect_errors(Rest, AllDefs, VerifiersList, Result);
+collect_errors([_OtherDef | Rest], AllDefs, VerifiersList, Acc) ->
+    %% Example: import, package, ...
+    collect_errors(Rest, AllDefs, VerifiersList, Acc);
+collect_errors([], _AllRefs, _VerifiersList, Acc) ->
+    case Acc of
+        ok                       -> ok;
+        {error, ReasonsReversed} -> {error, lists:reverse(ReasonsReversed)}
+    end.
+
+add_acc(AnyPreviousResult, ok)         -> AnyPreviousResult;
+add_acc(ok,                {error, R}) -> {error, add_reason([], R)};
+add_acc({error, Reasons},  {error, R}) -> {error, add_reason(Reasons, R)}.
+
+add_reason(Reasons, Reason) when not is_list(Reason) ->
+    [Reason | Reasons];
+add_reason(Reasons, MoreReasons) when is_list(MoreReasons) ->
+    lists:reverse(MoreReasons, Reasons).
+
+find_verifiers(Type,  [{Type, Verifiers} | _]) -> Verifiers;
+find_verifiers(_Type, [{'_', Verifiers} | _])  -> Verifiers;
+find_verifiers(Type,  [_Other | Rest])         -> find_verifiers(Type, Rest).
+
+verify_msg({{msg,M}, Fields}, AllDefs) ->
+    OnError = fun(FieldName, Target) ->
+                      {reference_to_undefined_msg_or_enum,
+                       {{name_to_dstr(M), atom_to_list(FieldName)},
+                        name_to_dstr(Target)}}
+              end,
+    verify_refs_aux(OnError, AllDefs, [enum, msg],
+                    [{FieldName, Target}
+                     || #field{name=FieldName, type={ref,Target}} <- Fields]).
+
+verify_refs_aux(ErrorFormatter, Defs, AllowedTargetTypes, Refs) ->
+    lists:foldl(fun({Name, Target}, Acc) ->
+                        case is_ref_defined(Defs, Target, AllowedTargetTypes) of
+                            true ->
+                                Acc;
+                            false ->
+                                Reason = ErrorFormatter(Name, Target),
+                                add_acc(Acc, {error, [Reason]})
+                        end
+                end,
+                ok,
+                Refs).
+
+verify_field_defaults({{msg,M}, Fields}, AllDefs) ->
+    lists:foldl(fun(#field{name=Name, type=Type, opts=FOpts}, Acc) ->
+                        Res = case lists:keysearch(default, 1, FOpts) of
+                                  {value, {default, Default}} ->
+                                      verify_scalar_default_if_present(
+                                        M, Name, Type, Default, AllDefs);
+                                  false ->
+                                      ok
+                              end,
+                        add_acc(Acc, Res)
+                end,
+                ok,
+                Fields).
+
+verify_scalar_default_if_present(MsgName, FieldName, Type, Default, AllDefs) ->
+    case Type of
+        {ref,Ref} ->
+            case lists:keysearch({enum, Ref}, 1, AllDefs) of
+                {value, {{enum,Ref}, Enumerators}} ->
+                    case lists:keysearch(Default, 1, Enumerators) of
+                        {value, {Default, _Value}} ->
+                            ok;
+                        false ->
+                            {error,
+                             {{invalid_default_enum_value, Default},
+                              {name_to_dstr(MsgName), atom_to_list(FieldName)}}}
+                    end;
+                false ->
+                    ok %% caught by another verification step
+            end;
+        ScalarType when is_atom(ScalarType) ->
+            case gpb:check_scalar(Default, ScalarType) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    {error, {Reason, {name_to_dstr(MsgName),
+                                      atom_to_list(FieldName)}}}
+            end
+    end.
+
+verify_extend(_, _AllDefs) ->
+    %% FIXME
     ok.
+
+verify_service(_, _AllDefs) ->
+    %% FIXME
+    ok.
+
+is_ref_defined(AllDefs, Target, AllowedTypes) ->
+    lists:any(fun(Def) ->
+                      case element(1, Def) of
+                          {Type, Target} -> lists:member(Type, AllowedTypes);
+                          _              -> false
+                      end
+              end,
+              AllDefs).
+
+name_to_dstr(Name) when is_list(Name) ->
+    string:join([atom_to_list(P) || P <- Name, P /= '.'],
+                ".").
+
+format_verification_error({error, Reasons}) ->
+    lists:flatten([[fmt_verr(Reason),"\n"] || Reason <- Reasons]).
+
+fmt_verr({reference_to_undefined_msg_or_enum, {{Msg, Field}, To}}) ->
+    f("in msg ~s, field ~s: undefined reference  ~s", [Msg, Field, To]);
+fmt_verr({{invalid_default_enum_value, Default}, {Msg, Field}}) ->
+    f("in msg ~s, field ~s: undefined enumerator in default value ~s",
+      [Msg, Field, Default]);
+fmt_verr({{{value_out_of_range, Signedness, Bits}, Default}, {Msg, Field}}) ->
+    f("in msg ~s, field ~s: default value ~p ouf of range for ~p ~p bit int",
+      [Msg, Field, Default, Signedness, Bits]);
+fmt_verr({{{bad_integer_value, Signedness, Bits}, Default}, {Msg, Field}}) ->
+    f("in msg ~s, field ~s: bad default value ~p for ~p ~p bit int",
+      [Msg, Field, Default, Signedness, Bits]);
+fmt_verr({{bad_floating_point_value, Default}, {Msg, Field}}) ->
+    f("in msg ~s, field ~s: bad floating point default value ~p",
+      [Msg, Field, Default]);
+fmt_verr({{bad_boolean_value, Default}, {Msg, Field}}) ->
+    f("in msg ~s, field ~s: bad default value ~p for boolean",
+      [Msg, Field, Default]);
+fmt_verr({{bad_unicode_string, Default}, {Msg, Field}}) ->
+    f("in msg ~s, field ~s: bad default value ~p for string",
+      [Msg, Field, Default]);
+fmt_verr({{bad_binary_value, Default}, {Msg, Field}}) ->
+    f("in msg ~s, field ~s: bad default value ~p for bytes",
+      [Msg, Field, Default]).
+
+f(F, A) ->
+    io_lib:format(F, A).
 
 %% `Defs' is expected to be absolutified and flattened
 reformat_names(Defs) ->

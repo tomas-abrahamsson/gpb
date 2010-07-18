@@ -21,7 +21,7 @@
 -export([decode_msg/3]).
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
--export([verify_msg/2]).
+-export([verify_msg/2, check_scalar/2]).
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
@@ -447,6 +447,14 @@ verify_value(Value, Type, Occurrence, Path, MsgDefs) ->
         required -> verify_value_2(Value, Type, Path, MsgDefs);
         repeated -> verify_list(Value, Type, Path, MsgDefs);
         optional -> verify_optional(Value, Type, Path, MsgDefs)
+    end.
+
+check_scalar(Value, Type) when is_atom(Type) ->
+    try
+        verify_value_2(Value, Type, [], [])
+    catch
+        error:{gpb_type_error, {Reason, _Info}} ->
+            {error, {Reason, Value}}
     end.
 
 verify_value_2(V, int32, Path, _MsgDefs)    -> verify_int(V, {i,32}, Path);

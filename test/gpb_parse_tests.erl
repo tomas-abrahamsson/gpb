@@ -319,6 +319,134 @@ fetches_imports_test() ->
                                "enum    e1 { a = 17; }"]),
     ["a/b/c.proto", "d/e/f.proto"] = gpb_parse:fetch_imports(Elems).
 
+verify_ingores_import_statements_test() ->
+    ok = do_parse_verify_defs(["import \"Y.proto\";",
+                               "message m2 { required uint32 x = 1; }"]).
+
+
+verify_succeeds_for_defined_ref_in_message_test() ->
+    ok = do_parse_verify_defs(["message m1 { required m2     x = 1; }",
+                               "message m2 { required uint32 x = 1; }"]).
+
+verify_catches_missing_ref_in_message_test() ->
+    {error, [{reference_to_undefined_msg_or_enum, _}]} = Error =
+        do_parse_verify_defs(["message m1 { required m2 f1 = 1; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "m2"]).
+
+verify_succeeds_for_good_enum_default_value_test() ->
+    ok = do_parse_verify_defs(
+           ["enum e { e1 = 1; e2 = 2; }"
+            "message m1 { required e f1 = 1 [default=e2]; }"]).
+
+verify_catches_undefined_enum_value_in_default_test() ->
+    {error, [_]} = Error = do_parse_verify_defs(
+                             ["enum e { e1 = 1; e2 = 2; }"
+                              "message m1 { required e f1 = 1 [default=e3];}"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "e3"]).
+
+verify_succeeds_for_valid_integer_in_default_test() ->
+    ok = do_parse_verify_defs(
+           ["message m1 { required uint32 f1 = 1 [default=343]; }"]).
+
+verify_catches_invalid_integer_in_default_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required uint32 f1 = 1 [default=-1]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "-1"]).
+
+verify_catches_invalid_integer_in_default_2_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required uint32 f1 = 1 [default=e3]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "e3"]).
+
+verify_catches_invalid_integer_in_default_3_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required uint32 f1 = 1 [default=\"abc\"]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1"]).
+
+verify_succeeds_for_valid_string_in_default_test() ->
+    ok = do_parse_verify_defs(
+           ["message m1 { required string f1 = 1 [default=\"abc\"]; }"]),
+    ok = do_parse_verify_defs(
+           ["message m1 { required string f1 = 1 [default='abc']; }"]).
+
+verify_catches_invalid_string_in_default_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required string f1 = 1 [default=344]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "344"]).
+
+verify_succeeds_for_valid_float_in_default_test() ->
+    ok = do_parse_verify_defs(
+           ["message m1 { required float f1 = 1 [default=1.1]; }"]).
+
+verify_succeeds_for_valid_int_as_double_in_default_test() ->
+    ok = do_parse_verify_defs(
+           ["message m1 { required double f1 = 1 [default=1]; }"]).
+
+verify_catches_invalid_float_in_default_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required float f1 = 1 [default=\"abc\"]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "abc"]).
+
+
+verify_succeeds_for_bool_in_default_test() ->
+    ok = do_parse_verify_defs(
+           ["message m1 { required bool f1 = 1 [default=true]; }"]),
+    ok = do_parse_verify_defs(
+           ["message m1 { required bool f1 = 1 [default=false]; }"]).
+
+verify_catches_invalid_bool_in_default_1_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required bool f1 = 1 [default=\"abc\"]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "abc"]).
+
+verify_catches_invalid_bool_in_default_2_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required bool f1 = 1 [default=TRUE]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "TRUE"]).
+
+verify_catches_invalid_bool_in_default_3_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required bool f1 = 1 [default=1]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1"]).
+
+
+do_parse_verify_defs(Lines) ->
+    {ok, Elems} = parse_lines(Lines),
+    gpb_parse:verify_defs(
+      gpb_parse:flatten_defs(gpb_parse:absolutify_names(Elems))).
+
+verify_flat_string(S) when is_list(S) ->
+    case lists:all(fun is_integer/1, S) of
+        true  -> S;
+        false -> erlang:error(badstring, [S])
+    end.
+
+verify_strings_present(Str, StringsToTestFor) ->
+    case [ToTest || ToTest <- StringsToTestFor, not is_present(Str, ToTest)] of
+        []      -> ok;
+        Missing -> erlang:error(missing_substring, [Missing, Str])
+    end.
+
+is_present(Str, ToTest) -> string:str(Str, ToTest) > 0.
+
 %% test helpers
 parse_lines(Lines) ->
     S = binary_to_list(iolist_to_binary([[L,"\n"] || L <- Lines])),
@@ -328,12 +456,12 @@ parse_lines(Lines) ->
                 {ok, Result} ->
                     {ok, Result};
                 {error, {LNum,_Module,EMsg}=Reason} ->
-                    io:format(user, "Parse error on line ~w:~n  ~p~n",
+                    io:format("Parse error on line ~w:~n  ~p~n",
                               [LNum, {Tokens,EMsg}]),
                     erlang:error({parse_error,Lines,Reason})
             end;
         {error,Reason} ->
-            io:format(user, "Scan error:~n  ~p~n", [Reason]),
+            io:format("Scan error:~n  ~p~n", [Reason]),
             erlang:error({scan_error,Lines,Reason})
     end.
 

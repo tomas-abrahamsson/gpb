@@ -78,16 +78,16 @@ parse_file(FName, Opts) ->
         {ok, {Defs1, _AllImported}} ->
             %% io:format("processed these imports:~n  ~p~n", [_AllImported]),
             %% io:format("Defs1=~n  ~p~n", [Defs1]),
-            Defs2 = gpb_parse:reformat_names(
-                      gpb_parse:flatten_defs(
-                        gpb_parse:absolutify_names(Defs1))),
-            case gpb_parse:verify_refs(Defs2) of
+            Defs2 = gpb_parse:flatten_defs(
+                      gpb_parse:absolutify_names(Defs1)),
+            case gpb_parse:verify_defs(Defs2) of
                 ok ->
                     {ok, gpb_parse:normalize_msg_field_options( %% Sort it?
                            gpb_parse:enumerate_msg_fields(
                              gpb_parse:extend_msgs(
-                               gpb_parse:resolve_refs(Defs2))))};
-                {error, _Reason} = Error ->
+                               gpb_parse:reformat_names(
+                                 gpb_parse:resolve_refs(Defs2)))))};
+                {error, _Reasons} = Error ->
                     Error
             end;
         {error, Reason} ->
