@@ -68,11 +68,11 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
     {Key, Rest} = decode_varint(Bin),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
-    case lists:keyfind(FieldNum, #field.fnum, MsgDef) of
+    case lists:keysearch(FieldNum, #field.fnum, MsgDef) of
         false ->
             Rest2 = skip_field(Rest, WireType),
             decode_field(Rest2, MsgDef, MsgDefs, Msg);
-        #field{type = FieldType, rnum=RNum, opts=Opts} = FieldDef ->
+        {value, #field{type = FieldType, rnum=RNum, opts=Opts} = FieldDef} ->
             case proplists:get_bool(packed, Opts) of
                 true ->
                     AccSeq = element(RNum, Msg),
@@ -155,7 +155,7 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {N =/= 0, Rest};
         {enum, _EnumName}=Key ->
             {N, Rest} = decode_type(int32, Bin, MsgDefs),
-            {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
+            {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
             {value, {EnumName, N}} = lists:keysearch(N, 2, EnumValues),
             {EnumName, Rest};
         fixed64 ->
@@ -343,7 +343,7 @@ encode_value(Value, Type, MsgDefs) ->
                not Value -> encode_varint(0)
             end;
         {enum, _EnumName}=Key ->
-            {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
+            {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
             {value, {Value, N}} = lists:keysearch(Value, 1, EnumValues),
             encode_value(N, int32, MsgDefs);
         fixed64 ->
