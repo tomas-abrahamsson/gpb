@@ -32,7 +32,8 @@ file(File) ->
 %%            File = string()
 %%            Opts = [Opt]
 %%            Opt  = {i,directory()} |
-%%                   {type_specs, boolean()}
+%%                   {type_specs, boolean()} | type_specs |
+%%                   {verify, optionally | always}
 %%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
@@ -52,7 +53,26 @@ file(File) ->
 %% annotations in the generated .hrl file. Default is currently
 %% `false'. If you set it to `true', you may get into troubles for
 %% messages referencing other messages, when compiling the generated
-%% files.
+%% files. The `type_specs' option is equivalent to `{type_specs,true}'.
+%%
+%% The `{verify,Value}' option concerns encoding of Erlang values to
+%% binary messages. It specifies whether the Erlang value are to be
+%% verified against the data types of the fields as declared in the
+%% proto files.
+%%
+%% The `{verify,always}' option instructs the compiler to generate
+%% code that unconditionally verifies Erlang values at encoding time.
+%%
+%% The `{verify,optionally}' option instructs the compiler to generate
+%% an `encode_msg/2' function with an Opts parameter, and if you call
+%% this function with the `verify' option set, the Erlang values will
+%% be verified.
+%%
+%% Erlang value verfication either succeeds or crashes with the `error'
+%% `{gpb_type_error,Reason}'.
+%% Note that it is also possible to call `verify_msg/1' in the
+%% generated code to verify Erlang messages if you do not want to
+%% encode them.
 file(File, Opts0) ->
     case parse_file(File, Opts0) of
         {ok, Defs0} ->
