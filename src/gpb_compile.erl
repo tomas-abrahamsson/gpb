@@ -266,9 +266,13 @@ format_efields(Indent, Fields) ->
     string:join([format_efield(Indent, Field) || Field <- Fields],
                 ",\n").
 
-format_efield(I, #field{name=N,fnum=F,rnum=R,type=T,occurrence=O,opts=Opts}) ->
+format_efield(I, #field{name=N, fnum=F, rnum=R, type=T,
+                        occurrence=O, is_packed=IsPacked,
+                        opts=Opts}) ->
+
     [indent(I, f("#field{name=~w, fnum=~w, rnum=~w, type=~w,~n", [N,F,R,T])),
-     indent(I, f("       occurrence=~w, opts=~p}", [O, Opts]))].
+     indent(I, f("       occurrence=~w, is_packed=~p,~n", [O, IsPacked])),
+     indent(I, f("       opts=~p}", [Opts]))].
 
 
 format_hrl(Mod, Defs, Opts) ->
