@@ -514,22 +514,22 @@ fmt_decode_zigzag(Indent, VarStr) ->
      indent(Indent,f("end"))].
 
 format_uf32_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 32, "little", FieldDef).
+    format_f_field_decoder(MsgName, 32, 'little', FieldDef).
 
 format_sf32_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 32, "signed-little", FieldDef).
+    format_f_field_decoder(MsgName, 32, 'little-signed', FieldDef).
 
 format_float_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 32, "little-float", FieldDef).
+    format_f_field_decoder(MsgName, 32, 'little-float', FieldDef).
 
 format_uf64_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 64, "little", FieldDef).
+    format_f_field_decoder(MsgName, 64, 'little', FieldDef).
 
 format_sf64_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 64, "signed-little", FieldDef).
+    format_f_field_decoder(MsgName, 64, 'little-signed', FieldDef).
 
 format_double_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 64, "little-float", FieldDef).
+    format_f_field_decoder(MsgName, 64, 'little-float', FieldDef).
 
 format_f_field_decoder(MsgName, BitLen, BitType, #field{name=FName}) ->
     [f("~p(<<Value:~p/~s, Rest/binary>>, Msg) ->~n",
