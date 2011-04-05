@@ -402,9 +402,9 @@ format_field_decoder(MsgName, #field{is_packed=false, type=Type}=FieldDef) ->
     end;
 format_field_decoder(MsgName, #field{is_packed=true, name=FName}=FieldDef) ->
     DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
-    [f("~s(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
-     f("    ~s(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [DecodePackWrapFn]),
-     f("~s(<<0:1, X:7, Rest/binary>>, N, Acc, #~p{~p=AccSeq}=Msg) ->~n",
+    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
+     f("    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [DecodePackWrapFn]),
+     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, #~p{~p=AccSeq}=Msg) ->~n",
        [DecodePackWrapFn, MsgName, FName]),
      f("    Len = X bsl (N*7) + Acc,~n"),
      f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
@@ -415,21 +415,21 @@ format_field_decoder(MsgName, #field{is_packed=true, name=FName}=FieldDef) ->
             Params -> [", ", Params, ", "]
         end]),
      f("    NewMsg = Msg#~p{~p=NewSeq},~n", [MsgName, FName]),
-     f("    ~s(Rest2, 0, 0, NewMsg).~n~n", [mk_fn(d_read_field_def_, MsgName)]),
+     f("    ~p(Rest2, 0, 0, NewMsg).~n~n", [mk_fn(d_read_field_def_, MsgName)]),
      format_packed_field_seq_decoder(MsgName, FieldDef)].
 
 format_vi_based_field_decoder(MsgName, #field{type=Type, name=FName}) ->
     BValueExpr = "X bsl (N*7) + Acc",
     {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest"),
-    [f("~s(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~s(Rest, N+1, X bsl (N*7) + Acc, Msg);~n",
+    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
+       "    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n",
        [mk_fn(d_field_, MsgName, FName),
         mk_fn(d_field_, MsgName, FName)]),
-     f("~s(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n",
+     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n",
        [mk_fn(d_field_, MsgName, FName)]),
      f("~s",
        [FValueCode]),
-     f("    NewMsg = ~s(FValue, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
+     f("    NewMsg = ~p(FValue, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
      f("    ~p(~s, 0, 0, NewMsg).~n",
        [mk_fn(d_read_field_def_, MsgName), RestVar])].
 
@@ -532,9 +532,9 @@ format_double_field_decoder(MsgName, FieldDef) ->
     format_f_field_decoder(MsgName, 64, "little-float", FieldDef).
 
 format_f_field_decoder(MsgName, BitLen, BitType, #field{name=FName}) ->
-    [f("~s(<<Value:~p/~s, Rest/binary>>, Msg) ->~n",
+    [f("~p(<<Value:~p/~s, Rest/binary>>, Msg) ->~n",
        [mk_fn(d_field_, MsgName, FName), BitLen, BitType]),
-     f("    NewMsg = ~s(Value, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
+     f("    NewMsg = ~p(Value, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
      f("    ~p(Rest, 0, 0, NewMsg).~n",
        [mk_fn(d_read_field_def_, MsgName)])].
 
@@ -598,7 +598,7 @@ format_field_adders(MsgName, MsgDef) ->
     %% FIXME: do cleverer things here, depending on type of the field,
     %%        and also depending on the field's occurrence
     %% for now, just make the generated code compile
-    [[f("~s(_NewValue, Msg) ->~n", [mk_fn(add_field_, MsgName, FName)]),
+    [[f("~p(_NewValue, Msg) ->~n", [mk_fn(add_field_, MsgName, FName)]),
       f("    Msg.~n~n")]
      || #field{name=FName} <- MsgDef].
 
@@ -610,19 +610,19 @@ format_field_skippers(MsgName) ->
 
 format_varint_skipper(MsgName) ->
     SkipFn = mk_fn(skip_varint_, MsgName),
-    [f("~s(<<0:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
-     f("    ~s(Rest, 0, 0, Msg);~n", [mk_fn(d_read_field_def_, MsgName)]),
-     f("~s(<<1:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
-     f("    ~s(Rest, Msg).~n~n", [SkipFn])].
+    [f("~p(<<0:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
+     f("    ~p(Rest, 0, 0, Msg);~n", [mk_fn(d_read_field_def_, MsgName)]),
+     f("~p(<<1:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
+     f("    ~p(Rest, Msg).~n~n", [SkipFn])].
 
 format_length_delimited_skipper(MsgName) ->
     SkipFn = mk_fn(skip_length_delimited_, MsgName),
-    [f("~s(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    ~s(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [SkipFn]),
-     f("~s(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
+    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
+     f("    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [SkipFn]),
+     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
      f("    Length = X bsl (N*7) + Acc,~n"),
      f("    <<_:Length/binary, Rest2/binary>> = Rest,~n"),
-     f("    ~s(Rest2, 0, 0, Msg).~n~n", [mk_fn(d_read_field_def_, MsgName)])].
+     f("    ~p(Rest2, 0, 0, Msg).~n~n", [mk_fn(d_read_field_def_, MsgName)])].
 
 format_32bit_skipper(MsgName) -> format_bit_skipper(MsgName, 32).
 
@@ -630,8 +630,8 @@ format_64bit_skipper(MsgName) -> format_bit_skipper(MsgName, 64).
 
 format_bit_skipper(MsgName, BitLen) ->
     SkipFn = mk_fn(skip_, BitLen, MsgName),
-    [f("~s(<<_:~w, Rest/binary>>, Msg) ->~n", [SkipFn, BitLen]),
-     f("    ~s(Rest, 0, 0, Msg).~n~n",  [mk_fn(d_read_field_def_, MsgName)])].
+    [f("~p(<<_:~w, Rest/binary>>, Msg) ->~n", [SkipFn, BitLen]),
+     f("    ~p(Rest, 0, 0, Msg).~n~n",  [mk_fn(d_read_field_def_, MsgName)])].
 
 format_msgs_and_enums(Indent, Defs) ->
     Enums = [Item || {{enum, _}, _}=Item <- Defs],
