@@ -379,7 +379,6 @@ format_field_decoders(MsgName, MsgDef) ->
     [[format_field_decoder(MsgName, FieldDef), "\n"]
      || FieldDef <- MsgDef].
 
-%% FIXME: is_packed=true
 format_field_decoder(MsgName, #field{is_packed=false, type=Type}=FieldDef) ->
     case Type of
         sint32   -> format_vi_based_field_decoder(MsgName, FieldDef);
@@ -501,8 +500,6 @@ mk_unpack_vi(Indent, FValueVar, BValueExpr, Type, RestVar) ->
                                [FValueVar, Msg2Name]))],
              Rest2Var}
     end.
-
-
 
 fmt_uint_to_int(SrcStr, ResultVar, NumBits) ->
     f("<<~s:~w/signed-native>> = <<(~s):~p/unsigned-native>>",
