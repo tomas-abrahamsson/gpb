@@ -19,6 +19,7 @@
 -module(gpb_compile).
 %-compile(export_all).
 -export([file/1, file/2]).
+-export([msg_defs/2, msg_defs/3]).
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
@@ -28,11 +29,15 @@
 file(File) ->
     file(File, []).
 
-%% @spec file(File, Opts) -> ok | {error, Reason}
+%% @spec file(File, Opts) -> ok | {ok, Mod, Code} | {error, Reason}
 %%            File = string()
 %%            Opts = [Opt]
 %%            Opt  = {i,directory()} |
-%%                   {type_specs, boolean()}
+%%                   {type_specs, boolean()} |
+%%                   {o,directory()} |
+%%                   binary
+%%            Mod  = atom()
+%%            Code = binary()
 %%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
@@ -53,20 +58,64 @@ file(File) ->
 %% `false'. If you set it to `true', you may get into troubles for
 %% messages referencing other messages, when compiling the generated
 %% files.
-file(File, Opts0) ->
-    case parse_file(File, Opts0) of
-        {ok, Defs0} ->
-            {IsAcyclic, Defs} = try_topsort_defs(Defs0),
-            possibly_probe_defs(Defs, Opts0),
-            Opts1 = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
+%%
+%% The `{o,directory()}' option specifies directory to use for storing
+%% the generated `.erl' and `.hrl' files. Default is the same
+%% directory as for the proto `File'.
+%%
+%% The `binary' option will cause the generated and compiled code be
+%% returned as a binary. No files will be written. The return value
+%% will be on the form `{ok,Mod,Code}' if the compilation is succesful.
+%% This option may be useful e.g. when generating test cases.
+file(File, Opts) ->
+    case parse_file(File, Opts) of
+        {ok, Defs} ->
             Ext = filename:extension(File),
             Mod = list_to_atom(filename:basename(File, Ext)),
-            Erl = change_ext(File, ".erl"),
-            Hrl = change_ext(File, ".hrl"),
-            file_write_file(Erl, format_erl(Mod, Defs, Opts1), Opts1),
-            file_write_file(Hrl, format_hrl(Mod, Defs, Opts1), Opts1);
+            DefaultOutDir = filename:dirname(File),
+            msg_defs(Mod, Defs, Opts ++ [{o,DefaultOutDir}]);
         {error, _Reason} = Error ->
             Error
+    end.
+
+%% @spec msg_defs(Mod, Defs) -> ok | {ok, Mod, Code} | {error, Reason}
+%% @equiv msg_defs(Mod, Defs, [])
+msg_defs(Mod, Defs) ->
+    msg_defs(Mod, Defs, []).
+
+%% @spec msg_defs(Mod, Defs, Opts) -> ok | {ok, Mod, Code} | {error, Reason}
+%%            Mod  = atom()
+%%            Defs = [Def]
+%%            Def = {{enum, EnumName}, Enums}} |
+%%                  {{msg, MsgName}, MsgFields}
+%%            EnumName = atom()
+%%            Enums = [{Name, integer()}]
+%%            Name = atom()
+%%            MsgName = atom()
+%%            MsgFields = [#field{}]
+%%            Opts = [Opt]
+%%            Opt  = {i,directory()} |
+%%                   {type_specs, boolean()} |
+%%                   {o,directory()} |
+%%                   binary
+%%            Code = binary()
+%%
+%% @doc
+%% Compile a list of pre-parsed definitions to file or to a binary.
+%% See the {@link file/2} function for furhter description.
+msg_defs(Mod, Defs0, Opts0) ->
+    {IsAcyclic, Defs} = try_topsort_defs(Defs0),
+    possibly_probe_defs(Defs, Opts0),
+    Opts1 = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
+    OutDir = proplists:get_value(o, Opts1, "."),
+    Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
+    Hrl = change_ext(Erl, ".hrl"),
+    case proplists:get_bool(binary, Opts1) of
+        true ->
+            compile_to_binary(Defs, format_erl(Mod, Defs, Opts1));
+        false ->
+            file_write_file(Erl, format_erl(Mod, Defs, Opts1), Opts1),
+            file_write_file(Hrl, format_hrl(Mod, Defs, Opts1), Opts1)
     end.
 
 change_ext(File, NewExt) ->
@@ -873,6 +922,67 @@ mk_fn(Prefix, Middlefix, Suffix) when is_integer(Middlefix) ->
 mk_fn(Prefix, Middlefix, Suffix) ->
     list_to_atom(lists:concat([Prefix, Middlefix, "_", Suffix])).
 
+%% ------------
+
+compile_to_binary(MsgDefs, ErlCode) ->
+    {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode)),
+    FormToks = split_toks_at_dot(Toks),
+    Forms = lists:map(fun(Ts) ->
+                              {ok, Form} = erl_parse:parse_form(Ts),
+                              Form
+                      end,
+                      FormToks),
+    {AttrForms, CodeForms} = split_forms_at_first_code(Forms),
+    FieldDef = field_record_to_attr_form(),
+    MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
+    compile:forms(AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms).
+
+split_toks_at_dot(AllToks) ->
+    case lists:splitwith(fun is_no_dot/1, AllToks) of
+        {Toks, [{dot,_}=Dot]}        -> [Toks ++ [Dot]];
+        {Toks, [{dot,_}=Dot | Rest]} -> [Toks ++ [Dot] | split_toks_at_dot(Rest)]
+        end.
+
+is_no_dot({dot,_}) -> false;
+is_no_dot(_)       -> true.
+
+split_forms_at_first_code(Forms) -> split_forms_at_first_code_2(Forms, []).
+
+split_forms_at_first_code_2([{attribute,_,_,_}=Attr | Rest], Acc) ->
+    split_forms_at_first_code_2(Rest, [Attr | Acc]);
+split_forms_at_first_code_2([{function, _, _Name, _, _Clauses}|_]=Code, Acc) ->
+    {lists:reverse(Acc), Code}.
+
+field_record_to_attr_form() ->
+    record_to_attr(field, record_info(fields, field)).
+
+msgdefs_to_record_attrs(Defs) ->
+    [record_to_attr(MsgName, lists:map(fun gpb_field_to_record_field/1, Fields))
+     || {{msg, MsgName}, Fields} <- Defs].
+
+record_to_attr(RecordName, Fields) ->
+    {attribute, 0, record,
+     {RecordName,
+      [case F of
+           {FName, Default} ->
+               {record_field, 0, {atom, 0, FName}, erl_parse:abstract(Default)};
+           {FName} ->
+               {record_field, 0, {atom, 0, FName}};
+           FName when is_atom(FName) ->
+               {record_field, 0, {atom, 0, FName}}
+       end
+       || F <- Fields]}}.
+
+gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
+    case proplists:get_value(default, Opts) of
+        undefined -> {FName};
+        Default   -> {FName, Default}
+    end.
+
+%% ------------
+
+
+
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
 
@@ -881,6 +991,9 @@ f(F,A) -> io_lib:format(F,A).
 
 %flength(F) -> iolist_size(f(F)).
 flength(F, A) -> iolist_size(f(F, A)).
+
+flatten_iolist(IoList) ->
+    binary_to_list(iolist_to_binary(IoList)).
 
 file_read_file(FileName, Opts) ->
     file_op(read_file, [FileName], Opts).
