@@ -357,7 +357,7 @@ format_read_field_cases(MsgName, MsgDef) ->
                   end]))
      || #field{fnum=FNum, name=FName}=FieldDef <- MsgDef].
 
-mk_field_decoder_vi_params(#field{type=Type}) ->
+mk_field_decoder_vi_params(#field{type=Type, is_packed=false}) ->
     case Type of
         sint32   -> "0, 0"; %% varint-based
         sint64   -> "0, 0"; %% varint-based
@@ -376,7 +376,10 @@ mk_field_decoder_vi_params(#field{type=Type}) ->
         string   -> "0, 0"; %% varint-based
         bytes    -> "0, 0"; %% varint-based
         {msg,_}  -> "0, 0"  %% varint-based
-    end.
+    end;
+mk_field_decoder_vi_params(#field{is_packed=true}) ->
+    "0, 0". %% length of packed bytes is varint-based
+
 
 format_field_decoders(MsgName, MsgDef) ->
     [[format_field_decoder(MsgName, FieldDef), "\n"]
@@ -412,7 +415,7 @@ format_field_decoder(MsgName, #field{is_packed=true, name=FName}=FieldDef) ->
      f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
      f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
        [mk_fn(d_packed_field_, MsgName, FName),
-        case mk_field_decoder_vi_params(FieldDef) of
+        case mk_field_decoder_vi_params(FieldDef#field{is_packed=false}) of
             ""     -> [", "];
             Params -> [", ", Params, ", "]
         end]),
