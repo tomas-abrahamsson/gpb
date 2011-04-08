@@ -281,7 +281,7 @@ format_initial_msg(MsgName, MsgDef, Defs) ->
      ".\n\n"].
 
 format_initial_msg_record(Indent, MsgName, MsgDef, Defs) ->
-    MsgNameQLen = iolist_size(f("~p", [MsgName])),
+    MsgNameQLen = flength("~p", [MsgName]),
     f("#~p{~s}",
       [MsgName, format_initial_msg_fields(Indent+MsgNameQLen+2, MsgDef, Defs)]).
 
@@ -292,7 +292,7 @@ format_initial_msg_fields(Indent, MsgDef, Defs) ->
              #field{occurrence=repeated} ->
                  indent(Indent, f("~p = []", [FName]));
              #field{type={msg,FMsgName}} ->
-                 FNameQLen = iolist_size(f("~p", [FName])),
+                 FNameQLen = flength("~p", [FName]),
                  {Type, FMsgDef} = lists:keyfind(Type, 1, Defs),
                  indent(Indent, f("~p = ~s",
                                   [FName,
@@ -569,7 +569,7 @@ format_dpacked_vi(MsgName, #field{name=FName, type=Type}) ->
      f("    AccSeq.~n~n")].
 
 format_msg_decoder_reverse_toplevel(MsgName, MsgDef) ->
-    MsgNameQLen = iolist_size(f("~p", [MsgName])),
+    MsgNameQLen = flength("~p", [MsgName]),
     FieldsToReverse = [F || F <- MsgDef, F#field.occurrence == repeated],
     if FieldsToReverse /= [] ->
             FieldMatchings =
@@ -799,6 +799,9 @@ index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
 
 f(F)   -> f(F,[]).
 f(F,A) -> io_lib:format(F,A).
+
+%flength(F) -> iolist_size(f(F)).
+flength(F, A) -> iolist_size(f(F, A)).
 
 file_read_file(FileName, Opts) ->
     file_op(read_file, [FileName], Opts).
