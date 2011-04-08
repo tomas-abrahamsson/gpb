@@ -661,7 +661,7 @@ format_msg_merger(MsgName, MsgDef) ->
                         FUpdateIndent = UpdateIndent + flength("~p = ",[FName]),
                         [f("~p = if NF~s == undefined -> PF~s;~n",
                            [FName, FName, FName]),
-                         indent(FUpdateIndent + 3, f("true -> PF~s~n", [FName])),
+                         indent(FUpdateIndent + 3, f("true -> NF~s~n", [FName])),
                          indent(FUpdateIndent, f("end"))]
                     end
                     || #field{name=FName} <- ToOverwrite],
@@ -674,9 +674,8 @@ format_msg_merger(MsgName, MsgDef) ->
     FieldUpdatings = string:join(Overwritings ++ SeqAddings ++ MsgMergings,
                                  UpdateCommaSep),
     FnIndent = flength("~p(", [MergeFn]),
-    [f("~p(undefined, New) -> New;~n", [MergeFn]),
-     f("~p(Prev, undefined) -> Prev;~n", [MergeFn]),
-     f("~p(undefined, undefined) -> undefined;~n", [MergeFn]),
+    [f("~p(Prev, undefined) -> Prev;~n", [MergeFn]),
+     f("~p(undefined, New) -> New;~n", [MergeFn]),
      f("~p(#~p{~s},~n", [MergeFn, MsgName, PFieldMatchings]),
      indent(FnIndent, f("#~p{~s}) ->~n", [MsgName, NFieldMatchings])),
      f("    #~p{~s}.~n~n", [MsgName, FieldUpdatings])].
