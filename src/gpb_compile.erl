@@ -216,6 +216,8 @@ format_erl(Mod, Defs, Opts) ->
        f("-include(\"~s.hrl\").~n", [Mod]),
        f("-include(\"gpb.hrl\").~n"),
        "\n",
+       f("-compile(nowarn_unused_function).~n"),
+       "\n",
        f("encode_msg(Msg) ->~n"
          "    encode_msg(Msg, []).~n~n"),
        case proplists:get_value(verify, Opts, optionally) of
