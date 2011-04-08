@@ -266,6 +266,10 @@ format_erl(Mod, Defs, Opts) ->
        f("-include(\"gpb.hrl\").~n"),
        "\n",
        f("-compile(nowarn_unused_function).~n"),
+       %% Enabling inlining seems to cause performance to drop drastically
+       %% I've seen decoding performance go down from 76000 msgs/s
+       %% to about 10000 msgs/s for a set of mixed message samples.
+       %% f("-compile(inline).~n"),
        "\n",
        f("encode_msg(Msg) ->~n"
          "    encode_msg(Msg, []).~n~n"),
