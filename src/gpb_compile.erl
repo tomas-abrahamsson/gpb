@@ -381,7 +381,7 @@ format_msg_decoder_read_field(MsgName, MsgDef) ->
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
        "    Key = X bsl (N*7) + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
      f("    case Key bsr 3 of~n"
-       "~s~n"
+       "~s"
        "        _ ->~n"
        "            case Key band 7 of  %% WireType~n"
        "                0 -> skip_varint_~s(Rest, Msg);~n"
