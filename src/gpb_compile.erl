@@ -317,7 +317,8 @@ format_msg_decoder(MsgName, MsgDef) ->
      format_msg_decoder_reverse_toplevel(MsgName, MsgDef),
      format_field_decoders(MsgName, MsgDef),
      format_field_adders(MsgName, MsgDef),
-     format_field_skippers(MsgName)].
+     format_field_skippers(MsgName),
+     format_msg_merger(MsgName, MsgDef)].
 
 format_msg_decoder_read_field(MsgName, MsgDef) ->
     [f("~p(Bin) ->~n", [mk_fn(d_msg_, MsgName)]),
@@ -594,12 +595,88 @@ format_msg_decoder_reverse_toplevel(MsgName, MsgDef) ->
     end.
 
 format_field_adders(MsgName, MsgDef) ->
-    %% FIXME: do cleverer things here, depending on type of the field,
-    %%        and also depending on the field's occurrence
-    %% for now, just make the generated code compile
-    [[f("~p(_NewValue, Msg) ->~n", [mk_fn(add_field_, MsgName, FName)]),
-      f("    Msg.~n~n")]
-     || #field{name=FName} <- MsgDef].
+    [case classify_field_merge_action(FieldDef) of
+        msgmerge  -> format_field_msgmerge_adder(MsgName, FieldDef);
+        overwrite -> format_field_overwrite_adder(MsgName, FieldDef);
+        seqadd    -> format_field_seqappend_adder(MsgName, FieldDef)
+     end
+     || FieldDef <- MsgDef].
+
+format_field_overwrite_adder(MsgName, #field{name=FName}) ->
+    FAdderFn = mk_fn(add_field_, MsgName, FName),
+    [f("~p(NewValue, Msg) ->~n", [FAdderFn]),
+     f("    Msg#~p{~p = NewValue}.~n~n", [MsgName, FName])].
+
+format_field_seqappend_adder(MsgName, #field{name=FName}) ->
+    FAdderFn = mk_fn(add_field_, MsgName, FName),
+    [f("~p(NewValue, #~p{~p=PrevElems}=Msg) ->~n", [FAdderFn, MsgName, FName]),
+     f("    Msg#~p{~p = [NewValue | PrevElems]}.~n~n", [MsgName, FName])].
+
+format_field_msgmerge_adder(MsgName, #field{name=FName, type={msg,FMsgName}}) ->
+    FAdderFn = mk_fn(add_field_, MsgName, FName),
+    MergeFn = mk_fn(merge_msg_, FMsgName),
+    [f("~p(NewValue, #~p{~p=undefined}=Msg) ->~n", [FAdderFn, MsgName, FName]),
+     f("    Msg#~p{~p = NewValue};~n", [MsgName, FName]),
+     f("~p(NewValue, #~p{~p=PrevValue}=Msg) ->~n", [FAdderFn, MsgName, FName]),
+     f("    Msg#~p{~p = ~p(PrevValue, NewValue)}.~n~n",
+       [MsgName, FName, MergeFn])].
+
+classify_field_merge_action(FieldDef) ->
+    case FieldDef of
+        #field{occurrence=required, type={msg, _}} -> msgmerge;
+        #field{occurrence=optional, type={msg, _}} -> msgmerge;
+        #field{occurrence = required}              -> overwrite;
+        #field{occurrence = optional}              -> overwrite;
+        #field{occurrence = repeated}              -> seqadd
+    end.
+
+format_msg_merger(MsgName, []) ->
+    MergeFn = mk_fn(merge_msg_, MsgName),
+    [f("~p(_Prev, New) ->~n", [MergeFn]),
+     f("    New.~n~n")];
+format_msg_merger(MsgName, MsgDef) ->
+    MergeFn = mk_fn(merge_msg_, MsgName),
+    FInfos = [{classify_field_merge_action(Field), Field} || Field <- MsgDef],
+    ToOverwrite = [Field || {overwrite, Field} <- FInfos],
+    ToMsgMerge  = [Field || {msgmerge, Field} <- FInfos],
+    ToSeqAdd    = [Field || {seqadd, Field} <- FInfos],
+
+    MatchIndent = flength("~p(#~p{", [MergeFn, MsgName]),
+    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
+
+    PFieldMatchings = string:join([f("~p=PF~s", [FName, FName])
+                                   || #field{name=FName} <- MsgDef],
+                                  MatchCommaSep),
+    NFieldMatchings = string:join([f("~p=NF~s", [FName, FName])
+                                   || #field{name=FName} <- MsgDef],
+                                  MatchCommaSep),
+
+    %% FIXME: reverse order?? ie: do NF ++ PF??
+    %%        we'll reverse _top-level_ seq fields lastly when decoding
+    UpdateIndent = flength("    #~p(", [MsgName]),
+    Overwritings = [begin
+                        FUpdateIndent = UpdateIndent + flength("~p = ",[FName]),
+                        [f("~p = if NF~s == undefined -> PF~s;~n",
+                           [FName, FName, FName]),
+                         indent(FUpdateIndent + 3, f("true -> PF~s~n", [FName])),
+                         indent(FUpdateIndent, f("end"))]
+                    end
+                    || #field{name=FName} <- ToOverwrite],
+    SeqAddings = [f("~p = PF~s ++ NF~s", [FName, FName, FName])
+                  || #field{name=FName} <- ToSeqAdd],
+    MsgMergings = [f("~p = ~p(PF~s, NF~s)", [FName, mk_fn(merge_msg_, FMsgName),
+                                             FName, FName])
+                   || #field{name=FName, type={msg,FMsgName}} <- ToMsgMerge],
+    UpdateCommaSep = f(",~n~s", [indent(UpdateIndent, "")]),
+    FieldUpdatings = string:join(Overwritings ++ SeqAddings ++ MsgMergings,
+                                 UpdateCommaSep),
+    FnIndent = flength("~p(", [MergeFn]),
+    [f("~p(undefined, New) -> New;~n", [MergeFn]),
+     f("~p(Prev, undefined) -> Prev;~n", [MergeFn]),
+     f("~p(undefined, undefined) -> undefined;~n", [MergeFn]),
+     f("~p(#~p{~s},~n", [MergeFn, MsgName, PFieldMatchings]),
+     indent(FnIndent, f("#~p{~s}) ->~n", [MsgName, NFieldMatchings])),
+     f("    #~p{~s}.~n~n", [MsgName, FieldUpdatings])].
 
 format_field_skippers(MsgName) ->
     [format_varint_skipper(MsgName),
