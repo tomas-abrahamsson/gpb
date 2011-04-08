@@ -370,6 +370,7 @@ format_msg_decoder(MsgName, MsgDef) ->
      format_msg_merger(MsgName, MsgDef)].
 
 format_msg_decoder_read_field(MsgName, MsgDef) ->
+    ReadFieldCases = format_read_field_cases(MsgName, MsgDef),
     [f("~p(Bin) ->~n", [mk_fn(d_msg_, MsgName)]),
      indent(4, f("Msg0 = ~s(),~n", [mk_fn(msg0_, MsgName)])),
      indent(4, f("~p(Bin, 0, 0, Msg0).~n", [mk_fn(d_read_field_def_, MsgName)])),
@@ -380,18 +381,28 @@ format_msg_decoder_read_field(MsgName, MsgDef) ->
         mk_fn(d_read_field_def_, MsgName)]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
        "    Key = X bsl (N*7) + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
-     f("    case Key bsr 3 of~n"
-       "~s"
-       "        _ ->~n"
-       "            case Key band 7 of  %% WireType~n"
-       "                0 -> skip_varint_~s(Rest, Msg);~n"
-       "                1 -> skip_64_~s(Rest, Msg);~n"
-       "                2 -> skip_length_delimited_~s(Rest, 0, 0, Msg);~n"
-       "                5 -> skip_32_~s(Rest, Msg)~n"
-       "            end~n"
-       "    end;~n",
-       [format_read_field_cases(MsgName, MsgDef),
-        MsgName,MsgName,MsgName,MsgName]),
+     if ReadFieldCases == [] ->
+             f("    case Key band 7 of  %% WireType~n"
+               "        0 -> skip_varint_~s(Rest, Msg);~n"
+               "        1 -> skip_64_~s(Rest, Msg);~n"
+               "        2 -> skip_length_delimited_~s(Rest, 0, 0, Msg);~n"
+               "        5 -> skip_32_~s(Rest, Msg)~n"
+               "    end;~n",
+               [MsgName,MsgName,MsgName,MsgName]);
+        true ->
+             f("    case Key bsr 3 of~n"
+               "~s"
+               "        _ ->~n"
+               "            case Key band 7 of  %% WireType~n"
+               "                0 -> skip_varint_~s(Rest, Msg);~n"
+               "                1 -> skip_64_~s(Rest, Msg);~n"
+               "                2 -> skip_length_delimited_~s(Rest,0,0,Msg);~n"
+               "                5 -> skip_32_~s(Rest, Msg)~n"
+               "            end~n"
+               "    end;~n",
+               [ReadFieldCases,
+                MsgName,MsgName,MsgName,MsgName])
+     end,
      f("~p(<<>>, 0, 0, Msg) ->~n"
        "    ~p(Msg).~n~n",
        [mk_fn(d_read_field_def_, MsgName),
