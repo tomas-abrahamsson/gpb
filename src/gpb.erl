@@ -25,7 +25,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
-%% TODO:
+%% TODO
 %%
 %% * Add a new_default_msg that sets default values according to
 %%   type (and optionalness) as docoumented on the google web:

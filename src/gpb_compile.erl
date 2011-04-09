@@ -107,7 +107,7 @@ msg_defs(Mod, Defs) ->
 %% @spec msg_defs(Mod, Defs, Opts) -> ok | {ok, Mod, Code} | {error, Reason}
 %%            Mod  = atom()
 %%            Defs = [Def]
-%%            Def = {{enum, EnumName}, Enums}} |
+%%            Def = {{enum, EnumName}, Enums} |
 %%                  {{msg, MsgName}, MsgFields}
 %%            EnumName = atom()
 %%            Enums = [{Name, integer()}]
