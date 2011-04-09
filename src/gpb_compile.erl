@@ -35,7 +35,8 @@ file(File) ->
 %%            Opt  = {i,directory()} |
 %%                   {type_specs, boolean()} |
 %%                   {o,directory()} |
-%%                   binary
+%%                   binary |
+%%                   {copy_bytes, true | false | auto | integer() | float()}
 %%            Mod  = atom()
 %%            Code = binary()
 %%
@@ -67,6 +68,26 @@ file(File) ->
 %% returned as a binary. No files will be written. The return value
 %% will be on the form `{ok,Mod,Code}' if the compilation is succesful.
 %% This option may be useful e.g. when generating test cases.
+%%
+%% The `copy_bytes' option specifies whether when decoding data of
+%% type `bytes', the decoded bytes should be copied or not. Copying
+%% requires the `binary' module, which first appeared in Erlang
+%% R14A. When not copying decoded bytes, they will become sub binaries
+%% of the larger input message binary. This may tie up the memory in
+%% the input message binary longer than necessary after it has been
+%% decoded. Copying the decoded bytes will avoid creating sub
+%% binaries, which will in make it possible to free the input message
+%% binary earlier. The `copy_bytes' option can have the following values:
+%% <dl>
+%%   <dt>`false'</dt><dd>Never copy bytes/(sub-)binaries.</dd>
+%%   <dt>`true'</dt><dd>Always copy bytes/(sub-)binaries.</dd>
+%%   <dt>`auto'</dt><dd>Copy bytes/(sub-)binaries if the beam vm,
+%%           on which the compiler (this module) is running,
+%%           has the `binary:copy/1' function.</dd>
+%%   <dt>integer() | float()</dt><dd>Copy the bytes/(sub-)binaries if the
+%%           message this many times or more larger than the size of the
+%%           bytes/(sub-)binary.</dd>
+%% </dl>
 file(File, Opts) ->
     case parse_file(File, Opts) of
         {ok, Defs} ->
@@ -97,7 +118,8 @@ msg_defs(Mod, Defs) ->
 %%            Opt  = {i,directory()} |
 %%                   {type_specs, boolean()} |
 %%                   {o,directory()} |
-%%                   binary
+%%                   binary |
+%%                   {copy_bytes, true | false | auto | integer() | float()}
 %%            Code = binary()
 %%
 %% @doc
@@ -308,10 +330,10 @@ format_decoder_topcase(Indent, Defs, BinVar, MsgNameVar) ->
      "\n",
      indent(Indent, f("end"))].
 
-format_decoders(Defs, _Opts) ->
+format_decoders(Defs, Opts) ->
     [format_enum_decoders(Defs),
      format_initial_msgs(Defs),
-     format_msg_decoders(Defs)].
+     format_msg_decoders(Defs, Opts)].
 
 format_enum_decoders(Defs) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
@@ -362,13 +384,14 @@ format_initial_msg_fields(Indent, MsgDef, Defs) ->
             end],
         ",\n")).
 
-format_msg_decoders(Defs) ->
-    [format_msg_decoder(MsgName, MsgDef) || {{msg, MsgName}, MsgDef} <- Defs].
+format_msg_decoders(Defs, Opts) ->
+    [format_msg_decoder(MsgName, MsgDef, Opts)
+     || {{msg, MsgName}, MsgDef} <- Defs].
 
-format_msg_decoder(MsgName, MsgDef) ->
+format_msg_decoder(MsgName, MsgDef, Opts) ->
     [format_msg_decoder_read_field(MsgName, MsgDef),
      format_msg_decoder_reverse_toplevel(MsgName, MsgDef),
-     format_field_decoders(MsgName, MsgDef),
+     format_field_decoders(MsgName, MsgDef, Opts),
      format_field_adders(MsgName, MsgDef),
      format_field_skippers(MsgName),
      format_msg_merger(MsgName, MsgDef)].
@@ -445,31 +468,31 @@ mk_field_decoder_vi_params(#field{is_packed=true}) ->
     "0, 0". %% length of packed bytes is varint-based
 
 
-format_field_decoders(MsgName, MsgDef) ->
-    [[format_field_decoder(MsgName, FieldDef), "\n"]
+format_field_decoders(MsgName, MsgDef, Opts) ->
+    [[format_field_decoder(MsgName, FieldDef, Opts), "\n"]
      || FieldDef <- MsgDef].
 
-format_field_decoder(MsgName, #field{is_packed=false, type=Type}=FieldDef) ->
+format_field_decoder(MsgName, #field{is_packed=false,type=Type}=FieldDef, Opts)->
     case Type of
-        sint32   -> format_vi_based_field_decoder(MsgName, FieldDef);
-        sint64   -> format_vi_based_field_decoder(MsgName, FieldDef);
-        int32    -> format_vi_based_field_decoder(MsgName, FieldDef);
-        int64    -> format_vi_based_field_decoder(MsgName, FieldDef);
-        uint32   -> format_vi_based_field_decoder(MsgName, FieldDef);
-        uint64   -> format_vi_based_field_decoder(MsgName, FieldDef);
-        bool     -> format_vi_based_field_decoder(MsgName, FieldDef);
-        {enum,_} -> format_vi_based_field_decoder(MsgName, FieldDef);
+        sint32   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        sint64   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        int32    -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        int64    -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        uint32   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        uint64   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        bool     -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        {enum,_} -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
         fixed32  -> format_uf32_field_decoder(MsgName, FieldDef);
         sfixed32 -> format_sf32_field_decoder(MsgName, FieldDef);
         float    -> format_float_field_decoder(MsgName, FieldDef);
         fixed64  -> format_uf64_field_decoder(MsgName, FieldDef);
         sfixed64 -> format_sf64_field_decoder(MsgName, FieldDef);
         double   -> format_double_field_decoder(MsgName, FieldDef);
-        string   -> format_vi_based_field_decoder(MsgName, FieldDef);
-        bytes    -> format_vi_based_field_decoder(MsgName, FieldDef);
-        {msg,_}  -> format_vi_based_field_decoder(MsgName, FieldDef)
+        string   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        bytes    -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
+        {msg,_}  -> format_vi_based_field_decoder(MsgName, FieldDef, Opts)
     end;
-format_field_decoder(MsgName, #field{is_packed=true, name=FName}=FieldDef) ->
+format_field_decoder(MsgName,#field{is_packed=true,name=FName}=FieldDef, Opts)->
     DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
      f("    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [DecodePackWrapFn]),
@@ -485,11 +508,12 @@ format_field_decoder(MsgName, #field{is_packed=true, name=FName}=FieldDef) ->
         end]),
      f("    NewMsg = Msg#~p{~p=NewSeq},~n", [MsgName, FName]),
      f("    ~p(Rest2, 0, 0, NewMsg).~n~n", [mk_fn(d_read_field_def_, MsgName)]),
-     format_packed_field_seq_decoder(MsgName, FieldDef)].
+     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
 
-format_vi_based_field_decoder(MsgName, #field{type=Type, name=FName}) ->
+format_vi_based_field_decoder(MsgName, #field{type=Type, name=FName}, Opts) ->
     BValueExpr = "X bsl (N*7) + Acc",
-    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest"),
+    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
+                                         Opts),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
        "    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n",
        [mk_fn(d_field_, MsgName, FName),
@@ -511,7 +535,7 @@ format_vi_based_field_decoder(MsgName, #field{type=Type, name=FName}) ->
 %%
 %% Indent the code to Indent spaces.
 %% The resulting code contains one or more statements that ends with comma.
-mk_unpack_vi(Indent, FValueVar, BValueExpr, Type, RestVar) ->
+mk_unpack_vi(Indent, FValueVar, BValueExpr, Type, RestVar, Opts) ->
     Rest2Var = RestVar ++ "2",
     case Type of
         sint32 ->
@@ -559,8 +583,7 @@ mk_unpack_vi(Indent, FValueVar, BValueExpr, Type, RestVar) ->
              Rest2Var};
         bytes ->
             {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
-              indent(Indent, f("<<~s:Len/binary, ~s/binary>> = ~s,~n",
-                               [FValueVar, Rest2Var, RestVar]))],
+              mk_unpack_bytes(Indent, FValueVar, RestVar, Rest2Var, Opts)],
              Rest2Var};
         {msg,Msg2Name} ->
             {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
@@ -569,6 +592,36 @@ mk_unpack_vi(Indent, FValueVar, BValueExpr, Type, RestVar) ->
               indent(Indent, f("~s = decode_msg(MsgBytes, ~p),~n",
                                [FValueVar, Msg2Name]))],
              Rest2Var}
+    end.
+
+mk_unpack_bytes(I, FValueVar, RestVar, Rest2Var, Opts) ->
+    CompilerHasBinary = (catch binary:copy(<<1>>)) == <<1>>,
+    Copy = case proplists:get_value(copy_bytes, Opts, auto) of
+               auto when not CompilerHasBinary -> false;
+               auto when CompilerHasBinary     -> true;
+               true                            -> true;
+               false                           -> false;
+               N when is_integer(N)            -> N;
+               N when is_float(N)              -> N
+           end,
+    if Copy == false ->
+            indent(I, f("<<~s:Len/binary, ~s/binary>> = ~s,~n",
+                        [FValueVar, Rest2Var, RestVar]));
+       Copy == true ->
+            [indent(I, f("<<Bytes:Len/binary, ~s/binary>> = ~s,~n",
+                         [Rest2Var, RestVar])),
+             indent(I, f("~s = binary:copy(Bytes),~n", [FValueVar]))];
+       is_integer(Copy); is_float(Copy) ->
+            I2 = I + length(FValueVar) + length(" = "),
+            [indent(I, f("<<Bytes:Len/binary, ~s/binary>> = ~s,~n",
+                         [Rest2Var, RestVar])),
+             indent(I, f("~s = case binary:referenced_byte_size(Bytes) of~n",
+                            [FValueVar])),
+             indent(I2+4, f("LB when LB >= byte_size(Bytes) * ~w ->~n", [Copy])),
+             indent(I2+4+4, f("binary:copy(Bytes);~n")),
+             indent(I2+4, f("_ ->~n")),
+             indent(I2+4+4, f("Bytes~n")),
+             indent(I2, f("end,~n"))]
     end.
 
 fmt_uint_to_int(SrcStr, ResultVar, NumBits) ->
@@ -605,7 +658,7 @@ format_f_field_decoder(MsgName, BitLen, BitType, #field{name=FName}) ->
      f("    ~p(Rest, 0, 0, NewMsg).~n",
        [mk_fn(d_read_field_def_, MsgName)])].
 
-format_packed_field_seq_decoder(MsgName, #field{type=Type}=FieldDef) ->
+format_packed_field_seq_decoder(MsgName, #field{type=Type}=FieldDef, Opts) ->
     case Type of
         fixed32  -> format_dpacked_nonvi(MsgName, FieldDef, 32, 'little');
         sfixed32 -> format_dpacked_nonvi(MsgName, FieldDef, 32, 'little-signed');
@@ -613,7 +666,7 @@ format_packed_field_seq_decoder(MsgName, #field{type=Type}=FieldDef) ->
         fixed64  -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little');
         sfixed64 -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little-signed');
         double   -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little-float');
-        _        -> format_dpacked_vi(MsgName, FieldDef)
+        _        -> format_dpacked_vi(MsgName, FieldDef, Opts)
     end.
 
 format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitType) ->
@@ -624,10 +677,11 @@ format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitType) ->
      f("~p(<<>>, AccSeq) ->~n", [FnName]),
      f("    AccSeq.~n")].
 
-format_dpacked_vi(MsgName, #field{name=FName, type=Type}) ->
+format_dpacked_vi(MsgName, #field{name=FName, type=Type}, Opts) ->
     FnName = mk_fn(d_packed_field_, MsgName, FName),
     BValueExpr = "X bsl (N*7) + Acc",
-    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest"),
+    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
+                                         Opts),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
      f("    ~p(Rest, N+1, X bsl (N*7) + Acc, AccSeq);~n", [FnName]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
