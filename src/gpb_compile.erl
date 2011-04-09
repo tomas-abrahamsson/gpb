@@ -134,7 +134,7 @@ msg_defs(Mod, Defs0, Opts0) ->
     Hrl = change_ext(Erl, ".hrl"),
     case proplists:get_bool(binary, Opts1) of
         true ->
-            compile_to_binary(Defs, format_erl(Mod, Defs, Opts1));
+            compile_to_binary(Defs, format_erl(Mod, Defs, Opts1), Opts1);
         false ->
             file_write_file(Erl, format_erl(Mod, Defs, Opts1), Opts1),
             file_write_file(Hrl, format_hrl(Mod, Defs, Opts1), Opts1)
@@ -993,7 +993,7 @@ mk_fn(Prefix, Middlefix, Suffix) ->
 
 %% ------------
 
-compile_to_binary(MsgDefs, ErlCode) ->
+compile_to_binary(MsgDefs, ErlCode, Opts) ->
     {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode)),
     FormToks = split_toks_at_dot(Toks),
     Forms = lists:map(fun(Ts) ->
@@ -1004,7 +1004,8 @@ compile_to_binary(MsgDefs, ErlCode) ->
     {AttrForms, CodeForms} = split_forms_at_first_code(Forms),
     FieldDef = field_record_to_attr_form(),
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
-    compile:forms(AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms).
+    COs = [verbose, return_errors, return_warnings | Opts],
+    compile:forms(AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms, COs).
 
 split_toks_at_dot(AllToks) ->
     case lists:splitwith(fun is_no_dot/1, AllToks) of
