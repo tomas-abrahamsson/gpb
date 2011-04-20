@@ -281,6 +281,7 @@ format_erl(Mod, Defs, Opts) ->
        "\n",
        f("-export([encode_msg/1, encode_msg/2]).~n"),
        f("-export([decode_msg/2]).~n"),
+       f("-export([merge_msgs/2]).~n"),
        f("-export([verify_msg/1]).~n"),
        f("-export([get_msg_defs/0]).~n"),
        "\n",
@@ -314,6 +315,8 @@ format_erl(Mod, Defs, Opts) ->
          [format_decoder_topcase(4, Defs, "Bin", "MsgName")]),
        "\n",
        f("~s~n", [format_decoders(Defs, Opts)]),
+       "\n",
+       f("~s~n", [format_msg_merge_code(Defs)]),
        "\n",
        f("verify_msg(Msg) ->~n"
          "    gpb:verify_msg(Msg, get_msg_defs()).~n"),
@@ -393,8 +396,7 @@ format_msg_decoder(MsgName, MsgDef, Opts) ->
      format_msg_decoder_reverse_toplevel(MsgName, MsgDef),
      format_field_decoders(MsgName, MsgDef, Opts),
      format_field_adders(MsgName, MsgDef),
-     format_field_skippers(MsgName),
-     format_msg_merger(MsgName, MsgDef)].
+     format_field_skippers(MsgName)].
 
 format_msg_decoder_read_field(MsgName, MsgDef) ->
     ReadFieldCases = format_read_field_cases(MsgName, MsgDef),
@@ -750,6 +752,30 @@ classify_field_merge_action(FieldDef) ->
         #field{occurrence = optional}              -> overwrite;
         #field{occurrence = repeated}              -> seqadd
     end.
+
+
+format_msg_merge_code(Defs) ->
+    MsgNames = [MsgName || {{msg, MsgName}, _MsgDef} <- Defs],
+    [format_merge_msgs_top_level(MsgNames),
+     [format_msg_merger(MsgName, MsgDef)
+      || {{msg, MsgName}, MsgDef} <- Defs]].
+
+format_merge_msgs_top_level([]) ->
+    [f("merge_msgs(_Prev, New) ->~n"),
+     f("    New.~n"),
+     f("~n")];
+format_merge_msgs_top_level(MsgNames) ->
+    [f("merge_msgs(Prev, New) when element(1, Prev) == element(1, New) ->~n"),
+     f("   case Prev of~n"),
+     f("       ~s~n", [format_merger_top_level_cases(MsgNames)]),
+     f("   end.~n"),
+     f("~n")].
+
+format_merger_top_level_cases(MsgNames) ->
+    string:join([f("#~p{} -> ~p(Prev, New)", [MName, mk_fn(merge_msg_, MName)])
+                 || MName <- MsgNames],
+                ";\n        ").
+
 
 format_msg_merger(MsgName, []) ->
     MergeFn = mk_fn(merge_msg_, MsgName),
