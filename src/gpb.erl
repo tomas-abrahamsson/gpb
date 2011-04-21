@@ -22,6 +22,8 @@
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
 -export([verify_msg/2]).
+-export([encode_varint/1]).
+-export([encode_wire_type/1]).
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
@@ -642,9 +644,3 @@ decode_zigzag_test() ->
     -2 = decode_zigzag(3),
     2147483647  = decode_zigzag(4294967294),
     -2147483648 = decode_zigzag(4294967295).
-
-encode_varint_test() ->
-    <<0>>      = encode_varint(0),
-    <<127>>    = encode_varint(127),
-    <<128, 1>> = encode_varint(128),
-    <<150, 1>> = encode_varint(150).

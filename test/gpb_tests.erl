@@ -23,6 +23,12 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
+encode_varint_test() ->
+    <<0>>      = gpb:encode_varint(0),
+    <<127>>    = gpb:encode_varint(127),
+    <<128, 1>> = gpb:encode_varint(128),
+    <<150, 1>> = gpb:encode_varint(150).
+
 -record(m1,{a}).
 
 skipping_unknown_varint_field_test() ->

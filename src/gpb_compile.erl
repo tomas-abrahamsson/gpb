@@ -303,12 +303,14 @@ format_erl(Mod, Defs, Opts) ->
                  "        true  -> verify_msg(Msg);~n"
                  "        false -> ok~n"
                  "    end,~n"
-                 "    gpb:encode_msg(Msg, get_msg_defs()).~n");
+                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")]);
            always ->
                f("encode_msg(Msg, _Opts) ->~n"
                  "    verify_msg(Msg),~n"
-                 "    gpb:encode_msg(Msg, get_msg_defs()).~n")
+                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")])
        end,
+       "\n",
+       f("~s~n", [format_encoders(Defs, Opts)]),
        "\n",
        f("decode_msg(Bin, MsgName) ->~n"
          "    ~s.~n",
@@ -323,6 +325,270 @@ format_erl(Mod, Defs, Opts) ->
        "\n",
        f("get_msg_defs() ->~n"
          "    [~s].~n", [outdent_first(format_msgs_and_enums(5, Defs))])]).
+
+format_encoder_topcase(Indent, Defs, MsgVar) ->
+    IndStr = indent(Indent+4, ""),
+    ["case ", MsgVar, " of\n",
+     IndStr,
+     string:join([f("#~p{} -> ~p(~s)",
+                    [MsgName, mk_fn(e_msg_, MsgName), MsgVar])
+                  || {{msg, MsgName}, _MsgDef} <- Defs],
+                 ";\n"++IndStr),
+     "\n",
+     indent(Indent, "end")].
+
+format_encoders(Defs, _Opts) ->
+    [format_enum_encoders(Defs),
+     format_msg_encoders(Defs),
+     format_special_field_encoders(Defs),
+     format_type_encoders()
+    ].
+
+format_enum_encoders(Defs) ->
+    [format_enum_encoder(EnumName, EnumDef)
+     || {{enum, EnumName}, EnumDef} <- Defs].
+
+format_enum_encoder(EnumName, EnumDef) ->
+    FnName = mk_fn(e_enum_, EnumName),
+    [string:join([f("~p(~p, Bin) -> <<Bin/binary, ~s>>",
+                    [FnName, EnumSym, encode_format_enum_value(EnumValue)])
+                  || {EnumSym, EnumValue} <- EnumDef],
+                 ";\n"),
+     ".\n\n"].
+
+encode_format_enum_value(Value) ->
+    <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
+    varint_to_byte_text(N).
+
+varint_to_byte_text(N) ->
+    Bin = gpb:encode_varint(N),
+    string:join([integer_to_list(B) || <<B:8>> <= Bin], ",").
+
+format_msg_encoders(Defs) ->
+    [format_msg_encoder(MsgName, MsgDef) || {{msg, MsgName}, MsgDef} <- Defs].
+
+format_msg_encoder(MsgName, []) ->
+    FnName = mk_fn(e_msg_, MsgName),
+    [f("~p(_Msg) ->~n", [FnName]),
+     f("    <<>>.~n~n")];
+format_msg_encoder(MsgName, MsgDef) ->
+    FnName = mk_fn(e_msg_, MsgName),
+    MatchIndent = flength("~p(#~p{", [FnName, MsgName]),
+    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
+    FieldMatchings = string:join([f("~p=F~s", [FName, FName])
+                                  || #field{name=FName} <- MsgDef],
+                                 MatchCommaSep),
+    [f("~p(#~p{~s}) ->~n", [FnName, MsgName, FieldMatchings]),
+     f("    Bin0 = <<>>,\n"),
+     string:join(
+       [begin
+            FieldEncoderFn = mk_field_encode_fn_name(MsgName, Field),
+            ResultVar = if I == length(MsgDef) -> "";
+                           true                -> f("Bin~w = ", [I])
+                        end,
+            RIndent = lists:flatlength(ResultVar),
+            KeyTxt = mk_key_txt(FNum, Type),
+            if Occurrence == optional ->
+                    f("    ~sif F~s == undefined -> Bin~w;~n"
+                      "    ~*s  true -> ~p(F~s, <<Bin~w/binary, ~s>>)~n"
+                      "    ~*send",
+                      [ResultVar, FName, I-1,
+                       RIndent, "", FieldEncoderFn, FName, I-1, KeyTxt,
+                       RIndent, ""]);
+               Occurrence == repeated ->
+                    f("    ~sif F~s == [] -> Bin~w;~n"
+                      "    ~*s  true -> ~p(F~s, Bin~w)~n"
+                      "    ~*send",
+                      [ResultVar, FName, I-1,
+                       RIndent, "", FieldEncoderFn, FName, I-1,
+                       RIndent, ""]);
+               Occurrence == required ->
+                    f("    ~s~p(F~s, <<Bin~w/binary, ~s>>)",
+                      [ResultVar, FieldEncoderFn, FName, I-1, KeyTxt])
+            end
+        end
+        || {I, #field{name=FName, occurrence=Occurrence, type=Type,
+                      fnum=FNum}=Field} <- index_seq(MsgDef)],
+       ",\n"),
+     ".\n",
+     "\n"].
+
+mk_key_txt(FNum, Type) ->
+    Key = (FNum bsl 3) bor gpb:encode_wire_type(Type),
+    varint_to_byte_text(Key).
+
+mk_field_encode_fn_name(MsgName, #field{occurrence=repeated, name=FName}) ->
+    mk_fn(e_field_, MsgName, FName);
+mk_field_encode_fn_name(MsgName, #field{type={msg,_Msg}, name=FName}) ->
+    mk_fn(e_mfield_, MsgName, FName);
+mk_field_encode_fn_name(_MsgName, #field{type={enum,EnumName}}) ->
+    mk_fn(e_enum_, EnumName);
+mk_field_encode_fn_name(_MsgName, #field{type=sint32}) ->
+    mk_fn(e_type_, sint);
+mk_field_encode_fn_name(_MsgName, #field{type=sint64}) ->
+    mk_fn(e_type_, sint);
+mk_field_encode_fn_name(_MsgName, #field{type=uint32}) ->
+    e_varint;
+mk_field_encode_fn_name(_MsgName, #field{type=uint64}) ->
+    e_varint;
+mk_field_encode_fn_name(_MsgName, #field{type=Type}) ->
+    mk_fn(e_type_, Type).
+
+format_special_field_encoders(Defs) ->
+    [[format_field_encoder(MsgName, FieldDef)
+      || #field{occurrence=Occ, type=Type}=FieldDef <- MsgDef,
+         Occ == repeated orelse is_msg_type(Type)]
+     || {{msg,MsgName}, MsgDef} <- Defs].
+
+is_msg_type({msg,_}) -> true;
+is_msg_type(_)       -> false.
+
+format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef) ->
+    [possibly_format_mfield_encoder(MsgName,
+                                    FieldDef#field{occurrence=required}),
+     case {Occurrence, FieldDef#field.is_packed} of
+         {repeated, false} -> format_repeated_field_encoder2(MsgName, FieldDef);
+         {repeated, true}  -> format_packed_field_encoder2(MsgName, FieldDef);
+         {optional, false} -> [];
+         {required, false} -> []
+     end].
+
+possibly_format_mfield_encoder(MsgName, #field{type={msg,SubMsg}}=FieldDef) ->
+    FnName = mk_field_encode_fn_name(MsgName, FieldDef),
+    [f("~p(Msg, Bin) ->~n", [FnName]),
+     f("    SubBin = ~p(Msg),~n", [mk_fn(e_msg_, SubMsg)]),
+     f("    Bin2 = e_varint(byte_size(SubBin), Bin),~n"),
+     f("    <<Bin2/binary, SubBin/binary>>.~n~n")];
+possibly_format_mfield_encoder(_MsgName, _FieldDef) ->
+    [].
+
+format_repeated_field_encoder2(MsgName, #field{fnum=FNum, type=Type}=FDef) ->
+    FnName = mk_field_encode_fn_name(MsgName, FDef),
+    ElemEncoderFn = mk_field_encode_fn_name(MsgName,
+                                            FDef#field{occurrence=required}),
+    KeyTxt = mk_key_txt(FNum, Type),
+    [f("~p([Elem | Rest], Bin) ->~n", [FnName]),
+     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
+     f("    Bin3 = ~p(Elem, Bin2),~n", [ElemEncoderFn]),
+     f("    ~p(Rest, Bin3);~n", [FnName]),
+     f("~p([], Bin) ->~n", [FnName]),
+     f("    Bin.~n~n")].
+
+format_packed_field_encoder2(MsgName, #field{type=Type}=FDef) ->
+    case packed_byte_size_can_be_computed(Type) of
+        {yes, BitLen, BitType} ->
+            format_knowsize_packed_field_encoder2(MsgName, FDef,
+                                                  BitLen, BitType);
+        no ->
+            format_unknowsize_packed_field_encoder2(MsgName, FDef)
+    end.
+
+packed_byte_size_can_be_computed(fixed32)  -> {yes, 32, 'little'};
+packed_byte_size_can_be_computed(sfixed32) -> {yes, 32, 'little-signed'};
+packed_byte_size_can_be_computed(float)    -> {yes, 32, 'little-float'};
+packed_byte_size_can_be_computed(fixed64)  -> {yes, 64, 'little'};
+packed_byte_size_can_be_computed(sfixed64) -> {yes, 64, 'little-signed'};
+packed_byte_size_can_be_computed(double)   -> {yes, 64, 'little-float'};
+packed_byte_size_can_be_computed(_)        -> no.
+
+format_knowsize_packed_field_encoder2(MsgName, #field{name=FName,
+                                                      fnum=FNum}=FDef,
+                                      BitLen, BitType) ->
+    FnName = mk_field_encode_fn_name(MsgName, FDef),
+    KeyTxt = mk_key_txt(FNum, bytes),
+    PackedFnName = mk_fn(e_pfield_, MsgName, FName),
+    [f("~p(Elems, Bin) when Elems =/= [] ->~n", [FnName]),
+     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
+     f("    Bin3 = e_varint(length(Elems) * ~w, Bin2),~n", [BitLen div 8]),
+     f("    ~p(Elems, Bin3);~n", [PackedFnName]),
+     f("~p([], Bin) ->~n", [FnName]),
+     f("    Bin.~n"),
+     f("~n"),
+     f("~p([Value | Rest], Bin) ->~n", [PackedFnName]),
+     f("    Bin2 = <<Bin/binary, Value:~w/~s>>,~n", [BitLen, BitType]),
+     f("    ~p(Rest, Bin2);~n", [PackedFnName]),
+     f("~p([], Bin) ->~n", [PackedFnName]),
+     f("    Bin.~n~n")].
+
+format_unknowsize_packed_field_encoder2(MsgName, #field{name=FName,
+                                                        fnum=FNum}=FDef) ->
+    FnName = mk_field_encode_fn_name(MsgName, FDef),
+    ElemEncoderFn = mk_field_encode_fn_name(MsgName,
+                                            FDef#field{occurrence=required}),
+    KeyTxt = mk_key_txt(FNum, bytes),
+    PackedFnName = mk_fn(e_pfield_, MsgName, FName),
+    [f("~p(Elems, Bin) when Elems =/= [] ->~n", [FnName]),
+     f("    SubBin = ~p(Elems, <<>>),~n", [PackedFnName]),
+     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
+     f("    Bin3 = e_varint(byte_size(SubBin), Bin2),~n"),
+     f("    <<Bin3/binary, SubBin/binary>>;~n"),
+     f("~p([], Bin) ->~n", [FnName]),
+     f("    Bin.~n"),
+     f("~n"),
+     f("~p([Value | Rest], Bin) ->~n", [PackedFnName]),
+     f("    Bin2 = ~p(Value, Bin),~n", [ElemEncoderFn]),
+     f("    ~p(Rest, Bin2);~n", [PackedFnName]),
+     f("~p([], Bin) ->~n", [PackedFnName]),
+     f("    Bin.~n~n")].
+
+format_type_encoders() ->
+    [format_sint_encoder(),
+     format_int_encoder(int32, 32),
+     format_int_encoder(int64, 64),
+     format_bool_encoder(),
+     format_fixed_encoder(fixed32,  32, 'little'),
+     format_fixed_encoder(sfixed32, 32, 'little-signed'),
+     format_fixed_encoder(float,    32, 'little-float'),
+     format_fixed_encoder(fixed64,  64, 'little'),
+     format_fixed_encoder(sfixed64, 64, 'little-signed'),
+     format_fixed_encoder(double,   64, 'little-float'),
+     format_string_encoder(),
+     format_bytes_encoder(),
+     format_varint_encoder()].
+
+format_sint_encoder() ->
+    [f("e_type_sint(Value, Bin) when Value >= 0 ->~n"),
+     f("    e_varint(Value * 2, Bin);~n"),
+     f("e_type_sint(Value, Bin) ->~n"),
+     f("    e_varint(Value * -2 - 1, Bin).~n~n")].
+
+format_int_encoder(Type, BitLen) ->
+    FnName = mk_fn(e_type_, Type),
+    [f("~p(Value, Bin) when 0 =< Value, Value =< 127 ->~n", [FnName]),
+     f("    <<Bin/binary, Value>>; %% fast path~n"),
+     f("~p(Value, Bin) ->~n", [FnName]),
+     f("    <<N:~w/unsigned-native>> = <<Value:~w/signed-native>>,~n",
+       [BitLen, BitLen]),
+     f("    e_varint(N, Bin).~n~n")].
+
+format_bool_encoder() ->
+    [f("e_type_bool(true, Bin)  -> <<Bin/binary, 1>>;~n"),
+     f("e_type_bool(false, Bin) -> <<Bin/binary, 0>>.~n~n")].
+
+format_fixed_encoder(Type, BitLen, BitType) ->
+    FnName = mk_fn(e_type_, Type),
+    [f("~p(Value, Bin) ->~n", [FnName]),
+     f("    <<Bin/binary, Value:~p/~s>>.~n~n", [BitLen, BitType])].
+
+format_string_encoder() ->
+    [f("e_type_string(S, Bin) ->~n"),
+     f("    Utf8 = unicode:characters_to_binary(S),~n"),
+     f("    Bin2 = e_varint(byte_size(Utf8), Bin),~n"),
+     f("    <<Bin2/binary, Utf8/binary>>.~n~n")].
+
+format_bytes_encoder() ->
+    [f("e_type_bytes(Bytes, Bin) ->~n"),
+     f("    Bin2 = e_varint(byte_size(Bytes), Bin),~n"),
+     f("    <<Bin2/binary, Bytes/binary>>.~n~n")].
+
+format_varint_encoder() ->
+    [f("e_varint(N, Bin) when N =< 127 ->~n"),
+     f("    <<Bin/binary, N>>;~n"),
+     f("e_varint(N, Bin) ->~n"),
+     f("    Bin2 = <<Bin/binary, 1:1, (N band 127):7>>,~n"),
+     f("    e_varint(N bsr 7, Bin2).~n~n")].
+
+%% -- decoders -----------------------------------------------------
 
 format_decoder_topcase(Indent, Defs, BinVar, MsgNameVar) ->
     ["case ", MsgNameVar, " of\n",
