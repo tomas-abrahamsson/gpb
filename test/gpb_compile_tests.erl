@@ -52,7 +52,7 @@ parses_importing_file_test() ->
 parses_file_to_binary_test() ->
     Contents = iolist_to_binary(
                  ["message Msg { required uint32 field1 = 1; }\n"]),
-    {ok, 'X', Code} =
+    {ok, 'X', Code, []} =
         gpb_compile:file(
           "X.proto",
           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
@@ -66,7 +66,7 @@ parses_msgdefs_to_binary_test() ->
     Defs = [{{msg,'Msg'},
              [#field{name=field1, rnum=2, fnum=1, type=uint32,
                      occurrence=required, is_packed=false, opts=[]}]}],
-    {ok, 'X', Code} = gpb_compile:msg_defs('X', Defs, [binary]),
+    {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs, [binary]),
     true = is_binary(Code).
 
 mk_fileop_opt(NonDefaults) ->
