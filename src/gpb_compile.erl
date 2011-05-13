@@ -320,11 +320,15 @@ format_erl(Mod, Defs, Opts) ->
        "\n",
        f("~s~n", [format_msg_merge_code(Defs)]),
        "\n",
-       f("verify_msg(Msg) ->~n"
-         "    gpb:verify_msg(Msg, get_msg_defs()).~n"),
+       f("verify_msg(Msg) ->~n" %% Option to use gpb:verify_msg??
+         "    ~s.~n", [format_verifier_topcase(4, Defs, "Msg")]),
+       "\n",
+       f("~s~n", [format_verifiers(Defs, Opts)]),
        "\n",
        f("get_msg_defs() ->~n"
          "    [~s].~n", [outdent_first(format_msgs_and_enums(5, Defs))])]).
+
+%% -- encoders -----------------------------------------------------
 
 format_encoder_topcase(Indent, Defs, MsgVar) ->
     IndStr = indent(Indent+4, ""),
@@ -1121,6 +1125,173 @@ format_bit_skipper(MsgName, BitLen) ->
     [f("~p(<<_:~w, Rest/binary>>, Msg) ->~n", [SkipFn, BitLen]),
      f("    ~p(Rest, 0, 0, Msg).~n~n",  [mk_fn(d_read_field_def_, MsgName)])].
 
+%% -- verifiers -----------------------------------------------------
+
+format_verifier_topcase(Indent, Defs, MsgVar) ->
+    IndStr = indent(Indent+4, ""),
+    ElseCase = "_ -> mk_type_error(not_a_known_message, Msg, [])",
+    ["case ", MsgVar, " of\n",
+     IndStr,
+     string:join([f("#~p{} -> ~p(~s, [])",
+                    [MsgName, mk_fn(v_msg_, MsgName), MsgVar])
+                  || {{msg, MsgName}, _MsgDef} <- Defs] ++ [ElseCase],
+                 ";\n"++IndStr),
+     "\n",
+     indent(Indent, "end")].
+
+format_verifiers(Defs, _Opts) ->
+    [format_msg_verifiers(Defs),
+     format_enum_verifiers(Defs),
+     format_type_verifiers(),
+     format_verifier_auxiliaries()
+    ].
+
+format_msg_verifiers(Defs) ->
+    [format_msg_verifier(MsgName, MsgDef) || {{msg,MsgName}, MsgDef} <- Defs].
+
+format_msg_verifier(MsgName, []) ->
+    FnName = mk_fn(v_msg_, MsgName),
+    [f("~p(#~p{}, _Path) ->~n", [FnName, MsgName]),
+     f("    ok;~n"),
+     f("~p(X, Path) ->~n", [FnName]),
+     f("    mk_type_error({expected_msg,~p}, X, Path).~n", [MsgName]),
+     f("~n")];
+format_msg_verifier(MsgName, MsgDef) ->
+    FnName = mk_fn(v_msg_, MsgName),
+    MatchIndent = flength("~p(#~p{", [FnName, MsgName]),
+    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
+    FieldMatchings = string:join([f("~p=F~s", [FName, FName])
+                                  || #field{name=FName} <- MsgDef],
+                                 MatchCommaSep),
+    [f("~p(#~p{~s}, Path) ->~n", [FnName, MsgName, FieldMatchings]),
+     [begin
+          FVerifierFn = case Type of
+                            {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
+                            {enum,EnumName} -> mk_fn(v_enum_, EnumName);
+                            Type            -> mk_fn(v_type_, Type)
+                        end,
+          ["    ",
+           case Occurrence of
+               required ->
+                   f("~p(F~s, [~p | Path])", [FVerifierFn, FName, FName]);
+               repeated ->
+                   f("[~p(Elem, [~p | Path]) || Elem <- F~s]",
+                     [FVerifierFn, FName, FName]);
+               optional ->
+                   f("[~p(F~s, [~p | Path]) || F~s /= undefined]~n",
+                     [FVerifierFn, FName, FName, FName])
+           end,
+           ","]
+      end
+      || #field{name=FName, type=Type, occurrence=Occurrence} <- MsgDef],
+     f("    ok;~n"),
+     f("~p(X, Path) ->~n", [FnName]),
+     f("    mk_type_error({expected_msg,~p}, X, Path).~n", [MsgName]),
+     f("~n")].
+
+format_enum_verifiers(Defs) ->
+    [format_enum_verifier(EnumName, Def) || {{enum,EnumName}, Def} <- Defs].
+
+format_enum_verifier(EnumName, EnumMembers) ->
+    FnName = mk_fn(v_enum_, EnumName),
+    [[f("~p(~p, _) -> ok;~n", [FnName, EnumSym]) || {EnumSym,_} <- EnumMembers],
+     f("~p(X, Path) ->~n", [FnName]),
+     f("    mk_type_error({invalid_enum,~p}, X, Path).~n", [EnumName]),
+     f("~n")].
+
+format_type_verifiers() ->
+    [format_int_verifier(sint32, signed, 32),
+     format_int_verifier(sint64, signed, 64),
+     format_int_verifier(int32,  signed, 32),
+     format_int_verifier(int64,  signed, 64),
+     format_int_verifier(uint32, unsigned, 32),
+     format_int_verifier(uint64, unsigned, 64),
+     format_bool_verifier(),
+     format_int_verifier(fixed32, unsigned, 32),
+     format_int_verifier(fixed64, unsigned, 64),
+     format_int_verifier(sfixed32,signed, 32),
+     format_int_verifier(sfixed64,signed, 64),
+     format_float_verifier(float),
+     format_float_verifier(double),
+     format_string_verifier(),
+     format_bytes_verifier()].
+
+format_int_verifier(IntType, Signedness, NumBits) ->
+    FnName = mk_fn(v_type_, IntType),
+    Min = case Signedness of
+              unsigned -> 0;
+              signed   -> -(1 bsl (NumBits-1))
+          end,
+    Max = case Signedness of
+              unsigned -> 1 bsl NumBits - 1;
+              signed   -> 1 bsl (NumBits-1) - 1
+          end,
+    [f("~p(N, _P) when ~w =< N, N =< ~w ->~n", [FnName, Min, Max]),
+     f("    ok;~n"),
+     f("~p(N, Path) when is_integer(N) ->~n", [FnName]),
+     f("    mk_type_error({value_out_of_range, ~p, ~p, ~w}, N, Path);~n",
+       [IntType, Signedness, NumBits]),
+     f("~p(X, Path) ->~n", [FnName]),
+     f("    mk_type_error({bad_integer, ~p, ~p, ~w}, X, Path).~n",
+       [IntType, Signedness, NumBits]),
+     f("~n")].
+
+format_bool_verifier() ->
+    FnName = mk_fn(v_type_, bool),
+    [f("~p(false, _Path) -> ok;~n", [FnName]),
+     f("~p(true, _Path)  -> ok;~n", [FnName]),
+     f("~p(X, Path)  -> mk_type_error(bad_boolean_value, X, Path).~n",
+       [FnName]),
+     f("~n")].
+
+format_float_verifier(FlType) ->
+    FnName = mk_fn(v_type_, FlType),
+    [f("~p(N, _Path) when is_float(N) -> ok;~n", [FnName]),
+     %% It seems a float for the corresponding integer value is
+     %% indeed packed when doing <<Integer:32/little-float>>.
+     %% So let verify accept integers too.
+     %% When such a value is unpacked, we get a float.
+     f("~p(N, _Path) when is_integer(N) -> ok;~n", [FnName]),
+     f("~p(X, Path)  -> mk_type_error(bad_~w_value, X, Path).~n",
+       [FnName, FlType]),
+     f("~n")].
+
+format_string_verifier() ->
+    FnName = mk_fn(v_type_, string),
+    [f("~p(S, Path) when is_list(S) ->~n", [FnName]),
+     f("    try unicode:characters_to_binary(S),~n"),
+     f("        ok~n"),
+     f("    catch error:badarg ->~n"),
+     f("        mk_type_error(bad_unicode_string, S, Path)~n"),
+     f("    end;~n"),
+     f("~p(X, Path) ->~n", [FnName]),
+     f("    mk_type_error(bad_unicode_string, X, Path).~n"),
+     f("~n")].
+
+format_bytes_verifier() ->
+    FnName = mk_fn(v_type_, bytes),
+    [f("~p(B, _Path) when is_binary(B) ->~n", [FnName]),
+     f("    ok;~n"),
+     f("~p(X, Path) ->~n", [FnName]),
+     f("    mk_type_error(bad_binary_value, X, Path).~n"),
+     f("~n")].
+
+format_verifier_auxiliaries() ->
+    [f("mk_type_error(Error, ValueSeen, Path) ->~n"),
+     f("    Path2 = prettify_path(Path),~n"),
+     f("    erlang:error({gpb_type_error,~n"),
+     f("                  {Error, [{value, ValueSeen},{path, Path2}]}}).~n"),
+     f("~n"),
+     f("prettify_path([]) ->~n"),
+     f("    top_level;~n"),
+     f("prettify_path(PathR) ->~n"),
+     f("    list_to_atom(~n"),
+     f("        string:join([atom_to_list(E) || E <- lists:reverse(PathR)],~n"),
+     f("                    \".\")).~n"),
+     f("~n")].
+
+%% -- message defs -----------------------------------------------------
+
 format_msgs_and_enums(Indent, Defs) ->
     Enums = [Item || {{enum, _}, _}=Item <- Defs],
     Msgs  = [Item || {{msg, _}, _}=Item <- Defs],
@@ -1155,6 +1326,7 @@ format_efield(I, #field{name=N, fnum=F, rnum=R, type=T,
      indent(I, f("       occurrence=~w, is_packed=~p,~n", [O, IsPacked])),
      indent(I, f("       opts=~p}", [Opts]))].
 
+%% -- hrl -----------------------------------------------------
 
 format_hrl(Mod, Defs, Opts) ->
     iolist_to_binary(
@@ -1283,7 +1455,7 @@ mk_fn(Prefix, Middlefix, Suffix) when is_integer(Middlefix) ->
 mk_fn(Prefix, Middlefix, Suffix) ->
     list_to_atom(lists:concat([Prefix, Middlefix, "_", Suffix])).
 
-%% ------------
+%% -- compile to memory -----------------------------------------------------
 
 compile_to_binary(MsgDefs, ErlCode, Opts) ->
     {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode)),
@@ -1341,9 +1513,7 @@ gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
         Default   -> {FName, Default}
     end.
 
-%% ------------
-
-
+%% -- internal utilities -----------------------------------------------------
 
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
