@@ -105,8 +105,8 @@ parse_file(FName, Opts) ->
                     {ok, gpb_parse:normalize_msg_field_options( %% Sort it?
                            gpb_parse:enumerate_msg_fields(
                              gpb_parse:extend_msgs(
-                               gpb_parse:reformat_names(
-                                 gpb_parse:resolve_refs(Defs2)))))};
+                               gpb_parse:resolve_refs(
+                                 gpb_parse:reformat_names(Defs2)))))};
                 {error, _Reasons} = Error ->
                     Error
             end;
