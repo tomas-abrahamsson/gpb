@@ -22,8 +22,8 @@
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
 -export([verify_msg/2]).
--export([encode_varint/1]).
--export([encode_wire_type/1]).
+-export([encode_varint/1, decode_varint/1]).
+-export([encode_wire_type/1, decode_wiretype/1]).
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
@@ -49,8 +49,7 @@ decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
     Msg    = new_initial_msg(MsgKey, MsgDefs),
     MsgDef = keyfetch(MsgKey, MsgDefs),
-    %decode_field(Bin, MsgDef, MsgDefs, Msg).
-    d_read_field_def(Bin, 0, 0, MsgDef, MsgDefs, Msg).
+    decode_field(Bin, MsgDef, MsgDefs, Msg).
 
 new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
     MsgDef = keyfetch(MsgKey, MsgDefs),
@@ -67,52 +66,29 @@ new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
                 erlang:make_tuple(length(MsgDef)+1, undefined, [{1,MsgName}]),
                 MsgDef).
 
-
-d_read_field_def(<<1:1, X:7, Rest/binary>>, N, Acc, MsgDef, Defs, Msg) ->
-    d_read_field_def(Rest, N+1, X bsl (N*7) + Acc, MsgDef, Defs, Msg);
-d_read_field_def(<<0:1, X:7, Rest/binary>>, N, Acc, MsgDef, Defs, Msg) ->
-    Key = X bsl (N*7) + Acc,
+decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
+    {Key, Rest} = decode_varint(Bin),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
-    case lists:keyfind(FieldNum, #field.fnum, MsgDef) of
+    case lists:keysearch(FieldNum, #field.fnum, MsgDef) of
         false ->
-            case decode_wiretype(WireType) of
-                varint ->
-                    d_skip_varint(Rest, MsgDef, Defs, Msg);
-                bits64 ->
-                    d_skip64(Rest, MsgDef, Defs, Msg);
-                length_delimited ->
-                    d_skip_length_delimited(Rest, 0, 0, MsgDef, Defs, Msg);
-                bits32 ->
-                    d_skip32(Rest, MsgDef, Defs, Msg)
-                end;
-        #field{type=Type} = FieldDef ->
-            case is_packed(FieldDef) of
-                false ->
-                    case Type of
-                        sint32   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        sint64   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        int32    -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        int64    -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        uint32   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        uint64   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        bool     -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        {enum,_} -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        fixed32  -> d_uf32(Rest,FieldDef,MsgDef,Defs,Msg);
-                        sfixed32 -> d_sf32(Rest,FieldDef,MsgDef,Defs,Msg);
-                        float    -> d_float(Rest,FieldDef,MsgDef,Defs,Msg);
-                        fixed64  -> d_uf64(Rest,FieldDef,MsgDef,Defs,Msg);
-                        sfixed64 -> d_sf64(Rest,FieldDef,MsgDef,Defs,Msg);
-                        double   -> d_double(Rest,FieldDef,MsgDef,Defs,Msg);
-                        string   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        bytes    -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
-                        {msg,_}  -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg)
-                    end;
+            Rest2 = skip_field(Rest, WireType),
+            decode_field(Rest2, MsgDef, MsgDefs, Msg);
+        {value, #field{type = FieldType, rnum=RNum, opts=Opts} = FieldDef} ->
+            case proplists:get_bool(packed, Opts) of
                 true ->
-                    d_packed(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg)
+                    AccSeq = element(RNum, Msg),
+                    {NewSeq, Rest2} = decode_packed(FieldType, Rest, MsgDefs,
+                                                   AccSeq),
+                    NewMsg = setelement(RNum, Msg, NewSeq),
+                    decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
+                false ->
+                    {NewValue, Rest2} = decode_type(FieldType, Rest, MsgDefs),
+                    NewMsg = add_field(NewValue, FieldDef, MsgDefs, Msg),
+                    decode_field(Rest2, MsgDef, MsgDefs, NewMsg)
             end
     end;
-d_read_field_def(<<>>, 0, 0, MsgDef, _Defs, Msg) ->
+decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
     %% Reverse any repeated fields, but only on the top-level, not recursively.
     RepeatedRNums = [N || #field{rnum=N, occurrence=repeated} <- MsgDef],
     lists:foldl(fun(RNum, Record) ->
@@ -120,171 +96,101 @@ d_read_field_def(<<>>, 0, 0, MsgDef, _Defs, Msg) ->
                         ReversedField = lists:reverse(OldValue),
                         setelement(RNum, Record, ReversedField)
                 end,
-                Msg,
+                Record0,
                 RepeatedRNums).
-
-d_skip64(<<_:64,Rest/binary>>, MsgDef, Defs, Msg) ->
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, Msg).
-
-d_skip32(<<_:32,Rest/binary>>, MsgDef, Defs, Msg) ->
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, Msg).
-
-d_skip_varint(<<1:1, _:7, Rest/binary>>, MsgDef, Defs, Msg) ->
-    d_skip_varint(Rest, MsgDef, Defs, Msg);
-d_skip_varint(<<0:1, _:7, Rest/binary>>, MsgDef, Defs, Msg) ->
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, Msg).
-
-d_skip_length_delimited(<<1:1, X:7, Rest/binary>>, N, Acc, MsgDef, Defs, Msg) ->
-    d_skip_length_delimited(Rest, N+1, X bsl (N*7) + Acc, MsgDef, Defs, Msg);
-d_skip_length_delimited(<<0:1, X:7, Rest/binary>>, N, Acc, MsgDef, Defs, Msg) ->
-    Length = X bsl (N*7) + Acc,
-    <<_:Length/binary, Rest2/binary>> = Rest,
-    d_read_field_def(Rest2, 0, 0, MsgDef, Defs, Msg).
-
-d_vi(<<1:1, X:7, Rest/binary>>, N, Acc, FieldDef, MsgDef, Defs, Msg) ->
-    d_vi(Rest, N+1, X bsl (N*7) + Acc, FieldDef, MsgDef, Defs, Msg);
-d_vi(<<0:1, X:7, Rest/binary>>, N, Acc, FieldDef, MsgDef, Defs, Msg) ->
-    BValue = X bsl (N*7) + Acc,
-    {Value, Rest3} =
-        case FieldDef#field.type of
-            sint32 -> {decode_zigzag(BValue), Rest};
-            sint64 -> {decode_zigzag(BValue), Rest};
-            int32  -> {uint32_to_int32(BValue), Rest};
-            int64  -> {uint64_to_int64(BValue), Rest};
-            uint32 -> {BValue, Rest};
-            uint64 -> {BValue, Rest};
-            bool   -> {BValue =/= 0, Rest};
-            {enum, _EnumName}=Key ->
-                EnumValue = uint32_to_int32(BValue),
-                {Key, EnumValues} = lists:keyfind(Key, 1, Defs),
-                {EnumName, EnumValue} = lists:keyfind(EnumValue, 2, EnumValues),
-                {EnumName, Rest};
-            string ->
-                Len = BValue,
-                <<Utf8Str:Len/binary, Rest2/binary>> = Rest,
-                {unicode:characters_to_list(Utf8Str, unicode), Rest2};
-            bytes ->
-                Len = BValue,
-                <<Bytes:Len/binary, Rest2/binary>> = Rest,
-                %% Decrease ref count of the binary we are decoding (R14+)
-                %% binary:copy(Bytes)
-                {Bytes, Rest2};
-            {msg,MsgName} ->
-                Len = BValue,
-                <<MsgBytes:Len/binary, Rest2/binary>> = Rest,
-                {decode_msg(MsgBytes, MsgName, Defs), Rest2}
-        end,
-    NewMsg = add_field(Value, FieldDef, Defs, Msg),
-    d_read_field_def(Rest3, 0, 0, MsgDef, Defs, NewMsg).
-
-d_uf32(<<Value:32/little, Rest/binary>>, FieldDef, MsgDef, Defs, Msg) ->
-    NewMsg = add_field(Value, FieldDef, Defs, Msg),
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, NewMsg).
-
-d_sf32(<<Value:32/little-signed, Rest/binary>>, FieldDef, MsgDef, Defs, Msg) ->
-    NewMsg = add_field(Value, FieldDef, Defs, Msg),
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, NewMsg).
-
-d_float(<<Value:32/little-float, Rest/binary>>, FieldDef, MsgDef, Defs, Msg) ->
-    NewMsg = add_field(Value, FieldDef, Defs, Msg),
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, NewMsg).
-
-d_double(<<Value:64/little-float, Rest/binary>>, FieldDef, MsgDef, Defs, Msg) ->
-    NewMsg = add_field(Value, FieldDef, Defs, Msg),
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, NewMsg).
-
-d_uf64(<<Value:64/little, Rest/binary>>, FieldDef, MsgDef, Defs, Msg) ->
-    NewMsg = add_field(Value, FieldDef, Defs, Msg),
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, NewMsg).
-
-d_sf64(<<Value:64/little-signed, Rest/binary>>, FieldDef, MsgDef, Defs, Msg) ->
-    NewMsg = add_field(Value, FieldDef, Defs, Msg),
-    d_read_field_def(Rest, 0, 0, MsgDef, Defs, NewMsg).
-
-d_packed(<<1:1, X:7, Rest/binary>>, N, Acc, FieldDef, MsgDef, Defs, Msg) ->
-    d_packed(Rest, N+1, X bsl (N*7) + Acc, FieldDef, MsgDef, Defs, Msg);
-d_packed(<<0:1, X:7, Rest/binary>>, N, Acc, FieldDef, MsgDef, Defs, Msg) ->
-    Len = (X bsl (N*7) + Acc),
-    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,
-    #field{type=Type, rnum=RNum} = FieldDef,
-    AccSeq = element(RNum, Msg),
-    NewSeq = case Type of
-                 fixed32  -> dpfixed32(PackedBytes, AccSeq);
-                 sfixed32 -> dpsfixed32(PackedBytes, AccSeq);
-                 float    -> dpfloat(PackedBytes, AccSeq);
-                 fixed64  -> dpfixed64(PackedBytes, AccSeq);
-                 sfixed64 -> dpsfixed64(PackedBytes, AccSeq);
-                 double   -> dpdouble(PackedBytes, AccSeq);
-                 _        -> dpvi(PackedBytes, 0, 0, Type, AccSeq, Defs)
-             end,
-    NewMsg = setelement(RNum, Msg, NewSeq),
-    d_read_field_def(Rest2, 0, 0, MsgDef, Defs, NewMsg).
-
-uint32_to_int32(N) ->
-    <<Result:32/signed-native>> = <<N:32/unsigned-native>>,
-    Result.
-
-uint64_to_int64(N) ->
-    <<Result:64/signed-native>> = <<N:64/unsigned-native>>,
-    Result.
-
-dpvi(<<1:1, X:7, Rest/binary>>, N, Acc, Type, AccSeq, Defs) ->
-    dpvi(Rest, N+1, X bsl (N*7) + Acc, Type, AccSeq, Defs);
-dpvi(<<0:1, X:7, Rest/binary>>, N, Acc, Type, AccSeq, Defs) ->
-    BValue = X bsl (N*7) + Acc,
-    Value =
-        case Type of
-            sint32 -> decode_zigzag(BValue);
-            sint64 -> decode_zigzag(BValue);
-            int32  -> uint32_to_int32(BValue);
-            int64  -> uint64_to_int64(BValue);
-            uint32 -> BValue;
-            uint64 -> BValue;
-            bool   -> BValue =/= 0;
-            {enum,_}=Key ->
-                EnumValue = uint32_to_int32(BValue),
-                {Key, EnumValues} = lists:keyfind(Key, 1, Defs),
-                {EnumName, EnumValue} = lists:keyfind(EnumValue, 2, EnumValues),
-                EnumName
-        end,
-    dpvi(Rest, 0, 0, Type, [Value | AccSeq], Defs);
-dpvi(<<>>, 0, 0, _Type, AccSeq, _Defs) ->
-    AccSeq.
-
-dpfixed32(<<Value:32/little, Rest/binary>>, AccSeq) ->
-    dpfixed32(Rest, [Value | AccSeq]);
-dpfixed32(<<>>, AccSeq) ->
-    AccSeq.
-
-dpsfixed32(<<Value:32/little-signed, Rest/binary>>, AccSeq) ->
-    dpsfixed32(Rest, [Value | AccSeq]);
-dpsfixed32(<<>>, AccSeq) ->
-    AccSeq.
-
-dpfixed64(<<Value:64/little, Rest/binary>>, AccSeq) ->
-    dpfixed64(Rest, [Value | AccSeq]);
-dpfixed64(<<>>, AccSeq) ->
-    AccSeq.
-
-dpsfixed64(<<Value:64/little-signed, Rest/binary>>, AccSeq) ->
-    dpsfixed64(Rest, [Value | AccSeq]);
-dpsfixed64(<<>>, AccSeq) ->
-    AccSeq.
-
-dpfloat(<<Value:32/little-float, Rest/binary>>, AccSeq) ->
-    dpfloat(Rest, [Value | AccSeq]);
-dpfloat(<<>>, AccSeq) ->
-    AccSeq.
-
-dpdouble(<<Value:64/little-float, Rest/binary>>, AccSeq) ->
-    dpdouble(Rest, [Value | AccSeq]);
-dpdouble(<<>>, AccSeq) ->
-    AccSeq.
 
 decode_wiretype(0) -> varint;
 decode_wiretype(1) -> bits64;
 decode_wiretype(2) -> length_delimited;
 decode_wiretype(5) -> bits32.
+
+skip_field(Bin, WireType) ->
+    case decode_wiretype(WireType) of
+        varint ->
+            {_N, Rest} = decode_varint(Bin),
+            Rest;
+        bits64 ->
+            <<_:64, Rest/binary>> = Bin,
+            Rest;
+        length_delimited ->
+            {Len, Rest} = decode_varint(Bin),
+            <<_:Len/binary, Rest2/binary>> = Rest,
+            Rest2;
+        bits32 ->
+            <<_:32, Rest/binary>> = Bin,
+            Rest
+    end.
+
+decode_packed(FieldType, Bin, MsgDefs, Seq0) ->
+    {Len, Rest} = decode_varint(Bin),
+    <<Bytes:Len/binary, Rest2/binary>> = Rest,
+    {decode_packed_aux(Bytes, FieldType, MsgDefs, Seq0), Rest2}.
+
+decode_packed_aux(Bytes, FieldType, MsgDefs, Acc) when byte_size(Bytes) > 0 ->
+    {NewValue, Rest} = decode_type(FieldType, Bytes, MsgDefs),
+    decode_packed_aux(Rest, FieldType, MsgDefs, [NewValue | Acc]);
+decode_packed_aux(<<>>, _FieldType, _MsgDefs, Acc) ->
+    Acc.
+
+decode_type(FieldType, Bin, MsgDefs) ->
+    case FieldType of
+        sint32 ->
+            {NV, T} = decode_varint(Bin),
+            {decode_zigzag(NV), T};
+        sint64 ->
+            {NV, T} = decode_varint(Bin),
+            {decode_zigzag(NV), T};
+        int32 ->
+            {NV, T} = decode_varint(Bin),
+            <<N:32/signed>> = <<NV:32>>,
+            {N, T};
+        int64 ->
+            {NV, T} = decode_varint(Bin),
+            <<N:64/signed>> = <<NV:64>>,
+            {N, T};
+        uint32 ->
+            {_N, _Rest} = decode_varint(Bin);
+        uint64 ->
+            {_N, _Rest} = decode_varint(Bin);
+        bool ->
+            {N, Rest} = decode_varint(Bin),
+            {N =/= 0, Rest};
+        {enum, _EnumName}=Key ->
+            {N, Rest} = decode_type(int32, Bin, MsgDefs),
+            {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
+            {value, {EnumName, N}} = lists:keysearch(N, 2, EnumValues),
+            {EnumName, Rest};
+        fixed64 ->
+            <<N:64/little, Rest/binary>> = Bin,
+            {N, Rest};
+        sfixed64 ->
+            <<N:64/little-signed, Rest/binary>> = Bin,
+            {N, Rest};
+        double ->
+            <<N:64/little-float, Rest/binary>> = Bin,
+            {N, Rest};
+        string ->
+            {Len, Rest} = decode_varint(Bin),
+            <<Utf8Str:Len/binary, Rest2/binary>> = Rest,
+            {unicode:characters_to_list(Utf8Str, unicode), Rest2};
+        bytes ->
+            {Len, Rest} = decode_varint(Bin),
+            <<Bytes:Len/binary, Rest2/binary>> = Rest,
+            {Bytes, Rest2};
+        {msg,MsgName} ->
+            {Len, Rest} = decode_varint(Bin),
+            <<MsgBytes:Len/binary, Rest2/binary>> = Rest,
+            {decode_msg(MsgBytes, MsgName, MsgDefs), Rest2};
+        fixed32 ->
+            <<N:32/little, Rest/binary>> = Bin,
+            {N, Rest};
+        sfixed32 ->
+            <<N:32/little-signed, Rest/binary>> = Bin,
+            {N, Rest};
+        float ->
+            <<N:32/little-float, Rest/binary>> = Bin,
+            {N, Rest}
+    end.
 
 add_field(Value, FieldDef, MsgDefs, Record) ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
@@ -482,6 +388,12 @@ encode_wire_type({msg,_MsgName})    -> 2;
 encode_wire_type(fixed32)           -> 5;
 encode_wire_type(sfixed32)          -> 5;
 encode_wire_type(float)             -> 5.
+
+
+decode_varint(Bin) -> de_vi(Bin, 0, 0).
+
+de_vi(<<1:1, X:7, Rest/binary>>, N, Acc) -> de_vi(Rest, N+1, X bsl (N*7) + Acc);
+de_vi(<<0:1, X:7, Rest/binary>>, N, Acc) -> {X bsl (N*7) + Acc, Rest}.
 
 
 encode_varint(N) -> en_vi(N).
