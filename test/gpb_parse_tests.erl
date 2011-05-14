@@ -215,13 +215,13 @@ field_opt_normalization_test() ->
                              "  required uint32 f6=5 [deprecated];",
                              "  required bool   f7=7 [packed,default=true];",
                              "}"]),
-    [{{msg,m1}, [#field{name=f1, opts=[{default,1}], is_packed=true},
+    [{{msg,m1}, [#field{name=f1, opts=[packed, {default,1}]},
                  #field{name=f2, opts=[]},
-                 #field{name=f3, opts=[{default,2}], is_packed=true},
+                 #field{name=f3, opts=[packed, {default,2}]},
                  #field{name=f4, opts=[deprecated]},
                  #field{name=f5, opts=[]},
                  #field{name=f6, opts=[deprecated]},
-                 #field{name=f7, opts=[{default,true}], is_packed=true}]}] =
+                 #field{name=f7, opts=[packed, {default,true}]}]}] =
         do_process_sort_defs(Defs).
 
 parses_empty_msg_field_options_test() ->

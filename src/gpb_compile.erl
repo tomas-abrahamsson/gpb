@@ -450,7 +450,7 @@ is_msg_type(_)       -> false.
 format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef) ->
     [possibly_format_mfield_encoder(MsgName,
                                     FieldDef#field{occurrence=required}),
-     case {Occurrence, FieldDef#field.is_packed} of
+     case {Occurrence, is_packed(FieldDef)} of
          {repeated, false} -> format_repeated_field_encoder2(MsgName, FieldDef);
          {repeated, true}  -> format_packed_field_encoder2(MsgName, FieldDef);
          {optional, false} -> [];
@@ -716,35 +716,44 @@ format_read_field_cases(MsgName, MsgDef) ->
                   end]))
      || #field{fnum=FNum, name=FName}=FieldDef <- MsgDef].
 
-mk_field_decoder_vi_params(#field{type=Type, is_packed=false}) ->
-    case Type of
-        sint32   -> "0, 0"; %% varint-based
-        sint64   -> "0, 0"; %% varint-based
-        int32    -> "0, 0"; %% varint-based
-        int64    -> "0, 0"; %% varint-based
-        uint32   -> "0, 0"; %% varint-based
-        uint64   -> "0, 0"; %% varint-based
-        bool     -> "0, 0"; %% varint-based
-        {enum,_} -> "0, 0"; %% varint-based
-        fixed32  -> "";
-        sfixed32 -> "";
-        float    -> "";
-        fixed64  -> "";
-        sfixed64 -> "";
-        double   -> "";
-        string   -> "0, 0"; %% varint-based
-        bytes    -> "0, 0"; %% varint-based
-        {msg,_}  -> "0, 0"  %% varint-based
-    end;
-mk_field_decoder_vi_params(#field{is_packed=true}) ->
-    "0, 0". %% length of packed bytes is varint-based
 
+mk_field_decoder_vi_params(#field{type=Type}=FieldDef) ->
+    case is_packed(FieldDef) of
+        false ->
+            case Type of
+                sint32   -> "0, 0"; %% varint-based
+                sint64   -> "0, 0"; %% varint-based
+                int32    -> "0, 0"; %% varint-based
+                int64    -> "0, 0"; %% varint-based
+                uint32   -> "0, 0"; %% varint-based
+                uint64   -> "0, 0"; %% varint-based
+                bool     -> "0, 0"; %% varint-based
+                {enum,_} -> "0, 0"; %% varint-based
+                fixed32  -> "";
+                sfixed32 -> "";
+                float    -> "";
+                fixed64  -> "";
+                sfixed64 -> "";
+                double   -> "";
+                string   -> "0, 0"; %% varint-based
+                bytes    -> "0, 0"; %% varint-based
+                {msg,_}  -> "0, 0"  %% varint-based
+            end;
+        true ->
+            "0, 0" %% length of packed bytes is varint-based
+    end.
 
 format_field_decoders(MsgName, MsgDef, Opts) ->
     [[format_field_decoder(MsgName, FieldDef, Opts), "\n"]
      || FieldDef <- MsgDef].
 
-format_field_decoder(MsgName, #field{is_packed=false,type=Type}=FieldDef, Opts)->
+format_field_decoder(MsgName, FieldDef, Opts) ->
+    case is_packed(FieldDef) of
+        false -> format_non_packed_field_decoder(MsgName, FieldDef, Opts);
+        true  -> format_packed_field_decoder(MsgName, FieldDef, Opts)
+    end.
+
+format_non_packed_field_decoder(MsgName, #field{type=Type}=FieldDef, Opts)->
     case Type of
         sint32   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
         sint64   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
@@ -763,9 +772,12 @@ format_field_decoder(MsgName, #field{is_packed=false,type=Type}=FieldDef, Opts)-
         string   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
         bytes    -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
         {msg,_}  -> format_vi_based_field_decoder(MsgName, FieldDef, Opts)
-    end;
-format_field_decoder(MsgName,#field{is_packed=true,name=FName}=FieldDef, Opts)->
+    end.
+
+format_packed_field_decoder(MsgName,#field{name=FName}=FieldDef, Opts)->
     DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
+    #field{opts=FOpts} = FieldDef,
+    FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
      f("    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [DecodePackWrapFn]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, #~p{~p=AccSeq}=Msg) ->~n",
@@ -774,7 +786,7 @@ format_field_decoder(MsgName,#field{is_packed=true,name=FName}=FieldDef, Opts)->
      f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
      f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
        [mk_fn(d_packed_field_, MsgName, FName),
-        case mk_field_decoder_vi_params(FieldDef#field{is_packed=false}) of
+        case mk_field_decoder_vi_params(FieldDefAsNonpacked) of
             ""     -> [", "];
             Params -> [", ", Params, ", "]
         end]),
@@ -1319,11 +1331,10 @@ format_efields(Indent, Fields) ->
                 ",\n").
 
 format_efield(I, #field{name=N, fnum=F, rnum=R, type=T,
-                        occurrence=O, is_packed=IsPacked,
-                        opts=Opts}) ->
+                        occurrence=Occurrence, opts=Opts}) ->
 
     [indent(I, f("#field{name=~w, fnum=~w, rnum=~w, type=~w,~n", [N,F,R,T])),
-     indent(I, f("       occurrence=~w, is_packed=~p,~n", [O, IsPacked])),
+     indent(I, f("       occurrence=~w,~n", [Occurrence])),
      indent(I, f("       opts=~p}", [Opts]))].
 
 %% -- hrl -----------------------------------------------------
@@ -1514,6 +1525,9 @@ gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
     end.
 
 %% -- internal utilities -----------------------------------------------------
+
+is_packed(#field{opts=Opts}) ->
+    lists:member(packed, Opts).
 
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).

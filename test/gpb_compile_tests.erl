@@ -65,7 +65,7 @@ parses_file_to_binary_test() ->
 parses_msgdefs_to_binary_test() ->
     Defs = [{{msg,'Msg'},
              [#field{name=field1, rnum=2, fnum=1, type=uint32,
-                     occurrence=required, is_packed=false, opts=[]}]}],
+                     occurrence=required, opts=[]}]}],
     {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs, [binary]),
     true = is_binary(Code).
 

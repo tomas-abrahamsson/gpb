@@ -438,10 +438,7 @@ normalize_msg_field_options(Defs) ->
 normalize_field_options(Fields) ->
     lists:map(fun(#field{opts=Opts}=F) ->
                       Opts1    = normalize_field_options_2(Opts),
-                      IsPacked = lists:member(packed, Opts1),
-                      Opts2    = Opts1 -- [packed],
-                      F#field{opts      = Opts2,
-                              is_packed = IsPacked}
+                      F#field{opts = Opts1}
               end,
               Fields).
 

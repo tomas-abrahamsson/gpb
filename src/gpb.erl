@@ -86,27 +86,30 @@ d_read_field_def(<<0:1, X:7, Rest/binary>>, N, Acc, MsgDef, Defs, Msg) ->
                 bits32 ->
                     d_skip32(Rest, MsgDef, Defs, Msg)
                 end;
-        #field{is_packed=true} = FieldDef ->
-            d_packed(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
         #field{type=Type} = FieldDef ->
-            case Type of
-                sint32   -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                sint64   -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                int32    -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                int64    -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                uint32   -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                uint64   -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                bool     -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                {enum,_} -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                fixed32  -> d_uf32(Rest, FieldDef, MsgDef, Defs, Msg);
-                sfixed32 -> d_sf32(Rest, FieldDef, MsgDef, Defs, Msg);
-                float    -> d_float(Rest, FieldDef, MsgDef, Defs, Msg);
-                fixed64  -> d_uf64(Rest, FieldDef, MsgDef, Defs, Msg);
-                sfixed64 -> d_sf64(Rest, FieldDef, MsgDef, Defs, Msg);
-                double   -> d_double(Rest, FieldDef, MsgDef, Defs, Msg);
-                string   -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                bytes    -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg);
-                {msg,_}  -> d_vi_based(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg)
+            case is_packed(FieldDef) of
+                false ->
+                    case Type of
+                        sint32   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        sint64   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        int32    -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        int64    -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        uint32   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        uint64   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        bool     -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        {enum,_} -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        fixed32  -> d_uf32(Rest,FieldDef,MsgDef,Defs,Msg);
+                        sfixed32 -> d_sf32(Rest,FieldDef,MsgDef,Defs,Msg);
+                        float    -> d_float(Rest,FieldDef,MsgDef,Defs,Msg);
+                        fixed64  -> d_uf64(Rest,FieldDef,MsgDef,Defs,Msg);
+                        sfixed64 -> d_sf64(Rest,FieldDef,MsgDef,Defs,Msg);
+                        double   -> d_double(Rest,FieldDef,MsgDef,Defs,Msg);
+                        string   -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        bytes    -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg);
+                        {msg,_}  -> d_vi(Rest,0,0,FieldDef,MsgDef,Defs,Msg)
+                    end;
+                true ->
+                    d_packed(Rest, 0, 0, FieldDef, MsgDef, Defs, Msg)
             end
     end;
 d_read_field_def(<<>>, 0, 0, MsgDef, _Defs, Msg) ->
@@ -138,9 +141,9 @@ d_skip_length_delimited(<<0:1, X:7, Rest/binary>>, N, Acc, MsgDef, Defs, Msg) ->
     <<_:Length/binary, Rest2/binary>> = Rest,
     d_read_field_def(Rest2, 0, 0, MsgDef, Defs, Msg).
 
-d_vi_based(<<1:1, X:7, Rest/binary>>, N, Acc, FieldDef, MsgDef, Defs, Msg) ->
-    d_vi_based(Rest, N+1, X bsl (N*7) + Acc, FieldDef, MsgDef, Defs, Msg);
-d_vi_based(<<0:1, X:7, Rest/binary>>, N, Acc, FieldDef, MsgDef, Defs, Msg) ->
+d_vi(<<1:1, X:7, Rest/binary>>, N, Acc, FieldDef, MsgDef, Defs, Msg) ->
+    d_vi(Rest, N+1, X bsl (N*7) + Acc, FieldDef, MsgDef, Defs, Msg);
+d_vi(<<0:1, X:7, Rest/binary>>, N, Acc, FieldDef, MsgDef, Defs, Msg) ->
     BValue = X bsl (N*7) + Acc,
     {Value, Rest3} =
         case FieldDef#field.type of
@@ -353,7 +356,7 @@ encode_msg(Msg, MsgDefs) ->
 
 encode_2([Field | Rest], Msg, MsgDefs, Acc) ->
     EncodedField =
-        case {Field#field.occurrence, Field#field.is_packed} of
+        case {Field#field.occurrence, is_packed(Field)} of
             {repeated, true} ->
                 encode_packed(Field, Msg, MsgDefs);
             _ ->
@@ -619,6 +622,9 @@ mk_type_error(Error, ValueSeen, Path) ->
                                                 "."))
             end,
     erlang:error({gpb_type_error, {Error, [{value, ValueSeen},{path, Path2}]}}).
+
+is_packed(#field{opts=Opts}) ->
+    lists:member(packed, Opts).
 
 keyfetch(Key, KVPairs) ->
     case lists:keysearch(Key, 1, KVPairs) of

@@ -169,7 +169,7 @@ decoding_zero_instances_of_packed_varints_test() ->
         decode_msg(<<>>,
                    m1,
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=int32,
-                                       occurrence=repeated, is_packed=true}]}]).
+                                       occurrence=repeated, opts=[packed]}]}]).
 
 decoding_one_packed_chunk_of_varints_test() ->
     #m1{a = [3, 270, 86942]} =
@@ -180,7 +180,7 @@ decoding_one_packed_chunk_of_varints_test() ->
                      16#9E, 16#a7, 16#05>>, % third element (varint 86942)
                    m1,
                    [{{msg,m1}, [#field{name=a, fnum=4, rnum=#m1.a, type=int32,
-                                       occurrence=repeated, is_packed=true}]}]).
+                                       occurrence=repeated, opts=[packed]}]}]).
 
 decoding_two_packed_chunks_of_varints_test() ->
     %%    "Note that although there's usually no reason to encode more
@@ -194,7 +194,7 @@ decoding_two_packed_chunks_of_varints_test() ->
                      16#22, 16#06, 16#04, 16#8F, 16#02, 16#9F, 16#a7, 16#05>>,
                    m1,
                    [{{msg,m1}, [#field{name=a, fnum=4, rnum=#m1.a, type=int32,
-                                       occurrence=repeated, is_packed=true}]}]),
+                                       occurrence=repeated, opts=[packed]}]}]),
     ok.
 
 %% -------------------------------------------------------------
@@ -215,7 +215,7 @@ encode_repeated_empty_field_test() ->
     <<>> =
         encode_msg(#m1{a=[]},
                    [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
-                                      occurrence=repeated, is_packed=true}]}]),
+                                      occurrence=repeated, opts=[packed]}]}]),
     <<>> =
         encode_msg(#m1{a=[]},
                    [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
@@ -225,7 +225,7 @@ encode_repeated_nonempty_field_test() ->
     <<10,4, 150,1, 151,1>> =
         encode_msg(#m1{a=[150,151]},
                    [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
-                                      occurrence=repeated, is_packed=true}]}]),
+                                      occurrence=repeated, opts=[packed]}]}]),
     <<8,150,1, 8,151,1>> =
         encode_msg(#m1{a=[150,151]},
                    [{{msg,m1},[#field{name=a,fnum=1,rnum=#m1.a, type=int32,
@@ -280,13 +280,13 @@ encode_packed_repeated_bools_test() ->
     <<16#22,1,1>> =
         encode_msg(#m1{a=[true]},
                    [{{msg,m1},[#field{name=a,fnum=4,rnum=#m1.a, type=bool,
-                                      occurrence=repeated, is_packed=true}]}]).
+                                      occurrence=repeated, opts=[packed]}]}]).
 decode_packed_repeated_bools_test() ->
     #m1{a=[true]} =
         decode_msg(<<16#22,1,1>>,
                    m1,
                    [{{msg,m1},[#field{name=a,fnum=4,rnum=#m1.a, type=bool,
-                                      occurrence=repeated, is_packed=true}]}]).
+                                      occurrence=repeated, opts=[packed]}]}]).
 
 
 
