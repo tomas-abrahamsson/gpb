@@ -23,6 +23,18 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
+decode_varint_test() ->
+    {0, <<255>>}   = gpb:decode_varint(<<0,255>>),
+    {127, <<255>>} = gpb:decode_varint(<<127,255>>),
+    {128, <<255>>} = gpb:decode_varint(<<128, 1, 255>>),
+    {150, <<255>>} = gpb:decode_varint(<<150, 1, 255>>).
+
+encode_varint_test() ->
+    <<0>>      = gpb:encode_varint(0),
+    <<127>>    = gpb:encode_varint(127),
+    <<128, 1>> = gpb:encode_varint(128),
+    <<150, 1>> = gpb:encode_varint(150).
+
 -record(m1,{a}).
 
 skipping_unknown_varint_field_test() ->

@@ -585,7 +585,8 @@ normalize_msg_field_options(Defs) ->
 
 normalize_field_options(Fields) ->
     lists:map(fun(#field{opts=Opts}=F) ->
-                      F#field{opts=normalize_field_options_2(Opts)}
+                      Opts1    = normalize_field_options_2(Opts),
+                      F#field{opts = Opts1}
               end,
               Fields).
 

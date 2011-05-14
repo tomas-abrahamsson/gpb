@@ -15,12 +15,12 @@
         | {'msg',atom()}.         % record()     the msg name is record name
 
 -record(field,
-        {name       :: atom(),
-         fnum       :: integer(),
-         rnum       :: pos_integer(), %% field number in the record
-         type       :: gpb_field_type(),
-         occurrence :: 'required' | 'optional' | 'repeated',
-         opts       :: [term()]
+        {name               :: atom(),
+         fnum               :: integer(),
+         rnum               :: pos_integer(), %% field number in the record
+         type               :: gpb_field_type(),
+         occurrence         :: 'required' | 'optional' | 'repeated',
+         opts      = []     :: [term()]
         }).
 
 -endif.

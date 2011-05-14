@@ -22,6 +22,8 @@
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
 -export([verify_msg/2, check_scalar/2]).
+-export([encode_varint/1, decode_varint/1]).
+-export([encode_wire_type/1, decode_wiretype/1]).
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
@@ -260,7 +262,7 @@ encode_msg(Msg, MsgDefs) ->
 
 encode_2([Field | Rest], Msg, MsgDefs, Acc) ->
     EncodedField =
-        case {Field#field.occurrence, lists:member(packed,Field#field.opts)} of
+        case {Field#field.occurrence, is_packed(Field)} of
             {repeated, true} ->
                 encode_packed(Field, Msg, MsgDefs);
             _ ->
@@ -541,6 +543,9 @@ mk_type_error(Error, ValueSeen, Path) ->
             end,
     erlang:error({gpb_type_error, {Error, [{value, ValueSeen},{path, Path2}]}}).
 
+is_packed(#field{opts=Opts}) ->
+    lists:member(packed, Opts).
+
 keyfetch(Key, KVPairs) ->
     case lists:keysearch(Key, 1, KVPairs) of
         {value, {Key, Value}} ->
@@ -565,15 +570,3 @@ decode_zigzag_test() ->
     -2 = decode_zigzag(3),
     2147483647  = decode_zigzag(4294967294),
     -2147483648 = decode_zigzag(4294967295).
-
-encode_varint_test() ->
-    <<0>>      = encode_varint(0),
-    <<127>>    = encode_varint(127),
-    <<128, 1>> = encode_varint(128),
-    <<150, 1>> = encode_varint(150).
-
-decode_varint_test() ->
-    {0, <<255>>}   = decode_varint(<<0,255>>),
-    {127, <<255>>} = decode_varint(<<127,255>>),
-    {128, <<255>>} = decode_varint(<<128, 1, 255>>),
-    {150, <<255>>} = decode_varint(<<150, 1, 255>>).
