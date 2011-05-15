@@ -1210,10 +1210,10 @@ format_msg_verifier(MsgName, MsgDef) ->
                    f("[~p(Elem, [~p | Path]) || Elem <- F~s]",
                      [FVerifierFn, FName, FName]);
                optional ->
-                   f("[~p(F~s, [~p | Path]) || F~s /= undefined]~n",
+                   f("[~p(F~s, [~p | Path]) || F~s /= undefined]",
                      [FVerifierFn, FName, FName, FName])
            end,
-           ","]
+           f(",~n")]
       end
       || #field{name=FName, type=Type, occurrence=Occurrence} <- MsgDef],
      f("    ok;~n"),
