@@ -61,24 +61,20 @@ file(File) ->
 %% messages referencing other messages, when compiling the generated
 %% files. The `type_specs' option is equivalent to `{type_specs,true}'.
 %%
-%% The `{verify,Value}' option concerns encoding of Erlang values to
-%% binary messages. It specifies whether the Erlang value are to be
-%% verified against the data types of the fields as declared in the
-%% proto files.
-%%
-%% The `{verify,always}' option instructs the compiler to generate
-%% code that unconditionally verifies Erlang values at encoding time.
-%%
-%% The `{verify,optionally}' option instructs the compiler to generate
-%% an `encode_msg/2' function with an Opts parameter, and if you call
-%% this function with the `verify' option set, the Erlang values will
-%% be verified.
+%% The `verify' option whether or not to generate code for verifying
+%% that, during encoding, values are of correct type and within range.
+%% The `verify' option can have the following values:
+%% <dl>
+%%    <dt>`always'</dt><dd>Generate code that unconditionally
+%%        verifies values.</dd>
+%%    <dt>`optionally'</dt><dd>Generate an `encode_msg/2' that accepts
+%%        the run-time option `verify' or `{verify,boolean()}' for specifying
+%%        whether or not to verify values.</dd>
+%% </dl>
 %%
 %% Erlang value verfication either succeeds or crashes with the `error'
-%% `{gpb_type_error,Reason}'.
-%% Note that it is also possible to call `verify_msg/1' in the
-%% generated code to verify Erlang messages if you do not want to
-%% encode them.
+%% `{gpb_type_error,Reason}'. Regardless of the `verify' option,
+%% a function, `verify_msg/1' is always generated.
 %%
 %% The `{o,directory()}' option specifies directory to use for storing
 %% the generated `.erl' and `.hrl' files. Default is the same
