@@ -217,8 +217,9 @@ scan_and_parse_string(S) ->
                 {error, {_LNum,_Module,_EMsg}=Reason} ->
                     {error, {parse_error,S,Reason}}
             end;
-        {error,Reason} ->
-            {error, {scan_error,S,Reason}}
+        {error, ErrInfo, Line} ->
+            Reason = leex:format_error(ErrInfo),
+            {error, {scan_error,Reason,Line}}
     end.
 
 
