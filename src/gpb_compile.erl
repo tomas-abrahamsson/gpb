@@ -1209,8 +1209,14 @@ format_msg_verifier(MsgName, MsgDef) ->
           ["    ",
            case Occurrence of
                required ->
+                   %% FIXME: check especially for `undefined'
+                   %% and if found, error out with required_field_not_set
+                   %% specifying expected type
                    f("~p(F~s, [~p | Path])", [FVerifierFn, FName, FName]);
                repeated ->
+                   %% FIXME: verify that the field is a list!
+                   %% when verifying elements, include the faulty
+                   %% element's index (what about a finite atom space?)
                    f("[~p(Elem, [~p | Path]) || Elem <- F~s]",
                      [FVerifierFn, FName, FName]);
                optional ->
