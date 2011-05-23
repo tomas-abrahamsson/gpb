@@ -67,6 +67,11 @@ file(File) ->
 %% <dl>
 %%    <dt>`always'</dt><dd>Generate code that unconditionally
 %%        verifies values.</dd>
+%%    <dt>`never'</dt><dd>Generate code that never verifies
+%%        values time. Encoding will fail if a value of the wrong
+%%        type is supplied. This includes forgetting to set a required
+%%        message field. Encoding may silently truncate values out of
+%%        range for some types.</dd>
 %%    <dt>`optionally'</dt><dd>Generate an `encode_msg/2' that accepts
 %%        the run-time option `verify' or `{verify,boolean()}' for specifying
 %%        whether or not to verify values.</dd>
@@ -323,6 +328,9 @@ format_erl(Mod, Defs, Opts) ->
            always ->
                f("encode_msg(Msg, _Opts) ->~n"
                  "    verify_msg(Msg),~n"
+                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")]);
+           never ->
+               f("encode_msg(Msg, _Opts) ->~n"
                  "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")])
        end,
        "\n",
