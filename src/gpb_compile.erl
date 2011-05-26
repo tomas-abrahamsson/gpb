@@ -407,8 +407,10 @@ format_msg_encoder(MsgName, MsgDef) ->
     FieldMatchings = string:join([f("~p=F~s", [FName, FName])
                                   || #field{name=FName} <- MsgDef],
                                  MatchCommaSep),
-    [f("~p(#~p{~s}) ->~n", [FnName, MsgName, FieldMatchings]),
-     f("    Bin0 = <<>>,\n"),
+    [f("~p(Msg) ->~n", [FnName]),
+     f("    ~p(Msg, <<>>).~n", [FnName]),
+     f("~n"),
+     f("~p(#~p{~s}, Bin0) ->~n", [FnName, MsgName, FieldMatchings]),
      string:join(
        [begin
             FieldEncoderFn = mk_field_encode_fn_name(MsgName, Field),
@@ -464,7 +466,7 @@ mk_field_encode_fn_name(_MsgName, #field{type=Type}) ->
     mk_fn(e_type_, Type).
 
 format_special_field_encoders(Defs) ->
-    [[format_field_encoder(MsgName, FieldDef)
+    [[format_field_encoder(MsgName, FieldDef, Defs)
       || #field{occurrence=Occ, type=Type}=FieldDef <- MsgDef,
          Occ == repeated orelse is_msg_type(Type)]
      || {{msg,MsgName}, MsgDef} <- Defs].
@@ -472,9 +474,10 @@ format_special_field_encoders(Defs) ->
 is_msg_type({msg,_}) -> true;
 is_msg_type(_)       -> false.
 
-format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef) ->
+format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef, Defs) ->
     [possibly_format_mfield_encoder(MsgName,
-                                    FieldDef#field{occurrence=required}),
+                                    FieldDef#field{occurrence=required},
+                                    Defs),
      case {Occurrence, is_packed(FieldDef)} of
          {repeated, false} -> format_repeated_field_encoder2(MsgName, FieldDef);
          {repeated, true}  -> format_packed_field_encoder2(MsgName, FieldDef);
@@ -482,14 +485,86 @@ format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef) ->
          {required, false} -> []
      end].
 
-possibly_format_mfield_encoder(MsgName, #field{type={msg,SubMsg}}=FieldDef) ->
+possibly_format_mfield_encoder(MsgName, #field{type={msg,SubMsg}}=FieldDef,
+                               Defs) ->
     FnName = mk_field_encode_fn_name(MsgName, FieldDef),
-    [f("~p(Msg, Bin) ->~n", [FnName]),
-     f("    SubBin = ~p(Msg),~n", [mk_fn(e_msg_, SubMsg)]),
-     f("    Bin2 = e_varint(byte_size(SubBin), Bin),~n"),
-     f("    <<Bin2/binary, SubBin/binary>>.~n~n")];
-possibly_format_mfield_encoder(_MsgName, _FieldDef) ->
+    case is_msgsize_known_at_compiletime(SubMsg, Defs) of
+        no ->
+            [f("~p(Msg, Bin) ->~n", [FnName]),
+             f("    SubBin = ~p(Msg),~n", [mk_fn(e_msg_, SubMsg)]),
+             f("    Bin2 = e_varint(byte_size(SubBin), Bin),~n"),
+             f("    <<Bin2/binary, SubBin/binary>>.~n~n")];
+        {yes, MsgSize} when MsgSize > 0 ->
+            MsgSizeTxt = varint_to_byte_text(MsgSize),
+            [f("~p(Msg, Bin) ->~n", [FnName]),
+             f("    Bin2 = <<Bin/binary, ~s>>,~n", [MsgSizeTxt]),
+             f("    ~p(Msg, Bin2).~n~n", [mk_fn(e_msg_, SubMsg)])];
+        {yes, 0} ->
+            %% special case, there will not be any e_msg_<MsgName>/2 function
+            %% generated, so don't call it.
+            [f("~p(_Msg, Bin) ->~n", [FnName]),
+             f("    <<Bin/binary, 0>>.~n~n")]
+    end;
+possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].
+
+is_msgsize_known_at_compiletime(MsgName, Defs) ->
+    {{msg,MsgName}, Fields} = lists:keyfind({msg,MsgName}, 1, Defs),
+    is_msgsize_known_2(Fields, 0, Defs).
+
+is_msgsize_known_2([#field{occurrence=repeated} | _Rest], _AccSize, _Defs) ->
+    no;
+is_msgsize_known_2([#field{occurrence=optional} | _Rest], _AccSize, _Defs) ->
+    no;
+is_msgsize_known_2([#field{type=Type, fnum=FNum} | Rest], AccSize, Defs) ->
+    FKey = gpb:encode_varint((FNum bsl 3) bor gpb:encode_wire_type(Type)),
+    FKeySize = byte_size(FKey),
+    case Type of
+        sint32   -> no;
+        sint64   -> no;
+        int32    -> no;
+        int64    -> no;
+        uint32   -> no;
+        uint64   -> no;
+        bool     -> is_msgsize_known_2(Rest, AccSize+FKeySize+1, Defs);
+        {enum,EnumName} ->
+            case all_enum_values_encode_to_same_size(EnumName, Defs) of
+                {yes, ESize} ->
+                    is_msgsize_known_2(Rest, AccSize+FKeySize+ESize, Defs);
+                no ->
+                    no
+            end;
+        fixed64  -> is_msgsize_known_2(Rest, AccSize+FKeySize+8, Defs);
+        sfixed64 -> is_msgsize_known_2(Rest, AccSize+FKeySize+8, Defs);
+        double   -> is_msgsize_known_2(Rest, AccSize+FKeySize+8, Defs);
+        string   -> no;
+        bytes    -> no;
+        {msg,MsgName} ->
+            case is_msgsize_known_at_compiletime(MsgName, Defs) of
+                {yes, MsgSize} ->
+                    is_msgsize_known_2(Rest, AccSize+FKeySize+MsgSize, Defs);
+                no ->
+                    no
+            end;
+        fixed32  -> is_msgsize_known_2(Rest, AccSize+FKeySize+4, Defs);
+        sfixed32 -> is_msgsize_known_2(Rest, AccSize+FKeySize+4, Defs);
+        float    -> is_msgsize_known_2(Rest, AccSize+FKeySize+4, Defs)
+    end;
+is_msgsize_known_2([], AccSize, _Defs) ->
+    {yes, AccSize}.
+
+
+all_enum_values_encode_to_same_size(EnumName, Defs) ->
+    {{enum,EnumName}, EnumDef} = lists:keyfind({enum,EnumName}, 1, Defs),
+    EnumSizes = [begin
+                     <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
+                     byte_size(gpb:encode_varint(N))
+                 end
+                 || {_EnumSym, Value} <- EnumDef],
+    case lists:usort(EnumSizes) of
+        [Size] -> {yes, Size};
+        _      -> no
+    end.
 
 format_repeated_field_encoder2(MsgName, #field{fnum=FNum, type=Type}=FDef) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
