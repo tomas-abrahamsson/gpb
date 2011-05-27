@@ -26,7 +26,7 @@
 
 -record(anres, %% result of analysis
         {
-          reachable_enums = sets:new()
+          used_types = sets:new()
         }).
 
 
@@ -305,21 +305,28 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 %% -- encoders -----------------------------------------------------
 
 analyze_defs(Defs) ->
-    #anres{reachable_enums = find_reacable_enums(Defs)}.
+    UsedTypes = find_used_types(Defs),
+    #anres{used_types      = UsedTypes
+          }.
 
-find_reacable_enums(Defs) ->
-    lists:foldl(fun({{msg, _MsgName}, Fields}, Acc) ->
-                        lists:foldl(fun(#field{type={enum,EnumName}}, FAcc) ->
-                                            sets:add_element(EnumName, FAcc);
-                                       (_Field, FAcc) ->
-                                            FAcc
+find_used_types(Defs) ->
+    fold_msg_fields(fun(_MsgName, #field{type=Type}, Acc) ->
+                            sets:add_element(Type, Acc)
+                    end,
+                    sets:new(),
+                    Defs).
+
+fold_msg_fields(Fun, InitAcc, Defs) ->
+    lists:foldl(fun({{msg, MsgName}, Fields}, Acc) ->
+                        lists:foldl(fun(Field, FAcc) ->
+                                            Fun(MsgName, Field, FAcc)
                                     end,
                                     Acc,
                                     Fields);
                    (_Def, Acc) ->
                         Acc
                 end,
-                sets:new(),
+                InitAcc,
                 Defs).
 
 %% -- generating code ----------------------------------------------
@@ -402,10 +409,10 @@ format_encoders(Defs, AnRes, _Opts) ->
      format_type_encoders()
     ].
 
-format_enum_encoders(Defs, #anres{reachable_enums=ReachableEnums}) ->
+format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
     [format_enum_encoder(EnumName, EnumDef)
      || {{enum, EnumName}, EnumDef} <- Defs,
-        sets:is_element(EnumName, ReachableEnums)].
+        smember({enum,EnumName}, UsedTypes)].
 
 format_enum_encoder(EnumName, EnumDef) ->
     FnName = mk_fn(e_enum_, EnumName),
@@ -738,7 +745,7 @@ format_decoders(Defs, AnRes, Opts) ->
      format_initial_msgs(Defs),
      format_msg_decoders(Defs, Opts)].
 
-format_enum_decoders(Defs, #anres{reachable_enums=ReachableEnums}) ->
+format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
     %%        insert a 2-complement in the mapping in order to move computations
     %%        from runtime to compiletime??
@@ -748,7 +755,7 @@ format_enum_decoders(Defs, #anres{reachable_enums=ReachableEnums}) ->
                   ";\n"),
       ".\n\n"]
      || {{enum, EnumName}, EnumDef} <- Defs,
-        sets:is_element(EnumName, ReachableEnums)].
+        smember({enum,EnumName}, UsedTypes)].
 
 format_initial_msgs(Defs) ->
     [format_initial_msg(MsgName, MsgDef, Defs)
@@ -1285,7 +1292,7 @@ format_verifier_topcase(Indent, Defs, MsgVar) ->
 format_verifiers(Defs, AnRes, _Opts) ->
     [format_msg_verifiers(Defs),
      format_enum_verifiers(Defs, AnRes),
-     format_type_verifiers(),
+     format_type_verifiers(AnRes),
      format_verifier_auxiliaries()
     ].
 
@@ -1338,10 +1345,10 @@ format_msg_verifier(MsgName, MsgDef) ->
      f("    mk_type_error({expected_msg,~p}, X, Path).~n", [MsgName]),
      f("~n")].
 
-format_enum_verifiers(Defs, #anres{reachable_enums=ReachableEnums}) ->
-    [format_enum_verifier(EnumName, Def) || {{enum,EnumName}, Def} <- Defs,
-                                            sets:is_element(EnumName,
-                                                            ReachableEnums)].
+format_enum_verifiers(Defs, #anres{used_types=UsedTypes}) ->
+    [format_enum_verifier(EnumName, Def)
+     || {{enum,EnumName}, Def} <- Defs,
+        smember({enum, EnumName}, UsedTypes)].
 
 format_enum_verifier(EnumName, EnumMembers) ->
     FnName = mk_fn(v_enum_, EnumName),
@@ -1667,6 +1674,9 @@ gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
 
 is_packed(#field{opts=Opts}) ->
     lists:member(packed, Opts).
+
+smember(Type, UsedTypes) -> %% set-member
+    sets:is_element(Type, UsedTypes).
 
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
