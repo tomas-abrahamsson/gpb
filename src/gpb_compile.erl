@@ -346,12 +346,11 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("-include(\"~s.hrl\").~n", [Mod]),
        f("-include(\"gpb.hrl\").~n"),
        "\n",
-       f("-compile(nowarn_unused_function).~n"),
        %% Enabling inlining seems to cause performance to drop drastically
        %% I've seen decoding performance go down from 76000 msgs/s
        %% to about 10000 msgs/s for a set of mixed message samples.
        %% f("-compile(inline).~n"),
-       "\n",
+       %%
        f("encode_msg(Msg) ->~n"
          "    encode_msg(Msg, []).~n~n"),
        case proplists:get_value(verify, Opts, optionally) of
@@ -406,7 +405,7 @@ format_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
      format_msg_encoders(Defs),
      format_special_field_encoders(Defs),
-     format_type_encoders()
+     format_type_encoders(AnRes)
     ].
 
 format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
@@ -672,19 +671,25 @@ format_unknowsize_packed_field_encoder2(MsgName, #field{name=FName,
      f("~p([], Bin) ->~n", [PackedFnName]),
      f("    Bin.~n~n")].
 
-format_type_encoders() ->
-    [format_sint_encoder(),
-     format_int_encoder(int32, 32),
-     format_int_encoder(int64, 64),
-     format_bool_encoder(),
-     format_fixed_encoder(fixed32,  32, 'little'),
-     format_fixed_encoder(sfixed32, 32, 'little-signed'),
-     format_fixed_encoder(float,    32, 'little-float'),
-     format_fixed_encoder(fixed64,  64, 'little'),
-     format_fixed_encoder(sfixed64, 64, 'little-signed'),
-     format_fixed_encoder(double,   64, 'little-float'),
-     format_string_encoder(),
-     format_bytes_encoder(),
+format_type_encoders(#anres{used_types = UsedTypes}) ->
+    [[format_sint_encoder() || smember_any([sint32 ,sint64], UsedTypes)],
+     [format_int_encoder(int32, 32) || smember(int32, UsedTypes)],
+     [format_int_encoder(int64, 64) || smember(int64, UsedTypes)],
+     [format_bool_encoder() || smember(bool, UsedTypes)],
+     [format_fixed_encoder(fixed32,  32, 'little')
+      || smember(fixed32, UsedTypes)],
+     [format_fixed_encoder(sfixed32, 32, 'little-signed')
+      || smember(sfixed32, UsedTypes)],
+     [format_fixed_encoder(float,    32, 'little-float')
+      || smember(float, UsedTypes)],
+     [format_fixed_encoder(fixed64,  64, 'little')
+      || smember(fixed64, UsedTypes)],
+     [format_fixed_encoder(sfixed64, 64, 'little-signed')
+      || smember(sfixed64, UsedTypes)],
+     [format_fixed_encoder(double,   64, 'little-float')
+      || smember(double, UsedTypes)],
+     [format_string_encoder() || smember(string, UsedTypes)],
+     [format_bytes_encoder()  || smember(bytes, UsedTypes)],
      format_varint_encoder()].
 
 format_sint_encoder() ->
@@ -1675,8 +1680,12 @@ gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
 is_packed(#field{opts=Opts}) ->
     lists:member(packed, Opts).
 
-smember(Type, UsedTypes) -> %% set-member
-    sets:is_element(Type, UsedTypes).
+smember(Elem, Set) -> %% set-member
+    sets:is_element(Elem, Set).
+
+smember_any(Elems, Set) -> %% is any elem a member in the set
+    lists:any(fun(Elem) -> smember(Elem, Set) end,
+              Elems).
 
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
