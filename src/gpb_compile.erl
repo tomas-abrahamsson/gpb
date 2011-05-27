@@ -690,6 +690,9 @@ format_type_encoders(#anres{used_types = UsedTypes}) ->
       || smember(double, UsedTypes)],
      [format_string_encoder() || smember(string, UsedTypes)],
      [format_bytes_encoder()  || smember(bytes, UsedTypes)],
+     %% FIXME: there might be cases when e_varint is not called:
+     %% only known-size (sub-)messages, no fields of type
+     %% string, bytes sint32, int32, sint64 or int64
      format_varint_encoder()].
 
 format_sint_encoder() ->
