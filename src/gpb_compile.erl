@@ -617,10 +617,10 @@ format_repeated_field_encoder2(MsgName, #field{fnum=FNum, type=Type}=FDef) ->
 format_packed_field_encoder2(MsgName, #field{type=Type}=FDef) ->
     case packed_byte_size_can_be_computed(Type) of
         {yes, BitLen, BitType} ->
-            format_knowsize_packed_field_encoder2(MsgName, FDef,
+            format_knownsize_packed_field_encoder2(MsgName, FDef,
                                                   BitLen, BitType);
         no ->
-            format_unknowsize_packed_field_encoder2(MsgName, FDef)
+            format_unknownsize_packed_field_encoder2(MsgName, FDef)
     end.
 
 packed_byte_size_can_be_computed(fixed32)  -> {yes, 32, 'little'};
@@ -631,8 +631,8 @@ packed_byte_size_can_be_computed(sfixed64) -> {yes, 64, 'little-signed'};
 packed_byte_size_can_be_computed(double)   -> {yes, 64, 'little-float'};
 packed_byte_size_can_be_computed(_)        -> no.
 
-format_knowsize_packed_field_encoder2(MsgName, #field{name=FName,
-                                                      fnum=FNum}=FDef,
+format_knownsize_packed_field_encoder2(MsgName, #field{name=FName,
+                                                       fnum=FNum}=FDef,
                                       BitLen, BitType) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     KeyTxt = mk_key_txt(FNum, bytes),
@@ -650,8 +650,8 @@ format_knowsize_packed_field_encoder2(MsgName, #field{name=FName,
      f("~p([], Bin) ->~n", [PackedFnName]),
      f("    Bin.~n~n")].
 
-format_unknowsize_packed_field_encoder2(MsgName, #field{name=FName,
-                                                        fnum=FNum}=FDef) ->
+format_unknownsize_packed_field_encoder2(MsgName, #field{name=FName,
+                                                         fnum=FNum}=FDef) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     ElemEncoderFn = mk_field_encode_fn_name(MsgName,
                                             FDef#field{occurrence=required}),
