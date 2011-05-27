@@ -1357,22 +1357,22 @@ format_enum_verifier(EnumName, EnumMembers) ->
      f("    mk_type_error({invalid_enum,~p}, X, Path).~n", [EnumName]),
      f("~n")].
 
-format_type_verifiers() ->
-    [format_int_verifier(sint32, signed, 32),
-     format_int_verifier(sint64, signed, 64),
-     format_int_verifier(int32,  signed, 32),
-     format_int_verifier(int64,  signed, 64),
-     format_int_verifier(uint32, unsigned, 32),
-     format_int_verifier(uint64, unsigned, 64),
-     format_bool_verifier(),
-     format_int_verifier(fixed32, unsigned, 32),
-     format_int_verifier(fixed64, unsigned, 64),
-     format_int_verifier(sfixed32,signed, 32),
-     format_int_verifier(sfixed64,signed, 64),
-     format_float_verifier(float),
-     format_float_verifier(double),
-     format_string_verifier(),
-     format_bytes_verifier()].
+format_type_verifiers(#anres{used_types=UsedTypes}) ->
+    [[format_int_verifier(sint32, signed, 32)   || smember(sint32, UsedTypes)],
+     [format_int_verifier(sint64, signed, 64)   || smember(sint64, UsedTypes)],
+     [format_int_verifier(int32,  signed, 32)   || smember(int32, UsedTypes)],
+     [format_int_verifier(int64,  signed, 64)   || smember(int64, UsedTypes)],
+     [format_int_verifier(uint32, unsigned, 32) || smember(uint32, UsedTypes)],
+     [format_int_verifier(uint64, unsigned, 64) || smember(uint64, UsedTypes)],
+     [format_bool_verifier()                    || smember(bool, UsedTypes)],
+     [format_int_verifier(fixed32, unsigned, 32)|| smember(fixed32, UsedTypes)],
+     [format_int_verifier(fixed64, unsigned, 64)|| smember(fixed64, UsedTypes)],
+     [format_int_verifier(sfixed32,signed, 32)  || smember(sfixed32, UsedTypes)],
+     [format_int_verifier(sfixed64,signed, 64)  || smember(sfixed64, UsedTypes)],
+     [format_float_verifier(float)              || smember(float, UsedTypes)],
+     [format_float_verifier(double)             || smember(double, UsedTypes)],
+     [format_string_verifier()                  || smember(string, UsedTypes)],
+     [format_bytes_verifier()                   || smember(bytes, UsedTypes)]].
 
 format_int_verifier(IntType, Signedness, NumBits) ->
     FnName = mk_fn(v_type_, IntType),
