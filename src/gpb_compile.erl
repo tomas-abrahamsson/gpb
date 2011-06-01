@@ -225,9 +225,9 @@ scan_and_parse_string(S) ->
                 {error, {_LNum,_Module,_EMsg}=Reason} ->
                     {error, {parse_error,S,Reason}}
             end;
-        {error, ErrInfo, Line} ->
-            Reason = leex:format_error(ErrInfo),
-            {error, {scan_error,Reason,Line}}
+        {error, {Line0, Module, ErrInfo}, _Line1} ->
+            Reason = Module:format_error(ErrInfo),
+            {error, {scan_error, Reason, Line0}}
     end.
 
 
