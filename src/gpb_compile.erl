@@ -24,11 +24,14 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
+-record(ft, {type, occurrence, is_packed}).
 -record(anres, %% result of analysis
         {
-          used_types      :: set(),  %% field_type()
+          used_types      :: set(),  %% gpb_field_type()
           known_msg_size  :: dict(), %% MsgName -> Size | undefined
-          msg_occurrences :: dict()  %% MsgName -> [occurrence()]
+          msg_occurrences :: dict(), %% MsgName -> [occurrence()]
+          fixlen_types    :: set(),  %% #ft{}
+          packed_fields   :: set()   %% {MsgName,FieldName}
         }).
 
 
@@ -309,7 +312,9 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 analyze_defs(Defs) ->
     #anres{used_types      = find_used_types(Defs),
            known_msg_size  = find_msgsizes_known_at_compile_time(Defs),
-           msg_occurrences = find_msg_occurrences(Defs)}.
+           msg_occurrences = find_msg_occurrences(Defs),
+           fixlen_types    = find_fixlen_types(Defs),
+           packed_fields   = find_packed_fields(Defs)}.
 
 find_used_types(Defs) ->
     fold_msg_fields(fun(_MsgName, #field{type=Type}, Acc) ->
@@ -338,6 +343,35 @@ add_occurrence(MsgName, Occurrence, D) ->
             dict:store(MsgName, [Occurrence], D)
     end.
 
+find_fixlen_types(Defs) ->
+    fold_msg_fields(
+      fun(_, #field{type=Type, occurrence=Occ}=FieldDef, Acc) ->
+              IsPacked = is_packed(FieldDef),
+              FixlenTypeInfo = #ft{type       = Type,
+                                   occurrence = Occ,
+                                   is_packed  = IsPacked},
+              case Type of
+                  fixed32  -> sets:add_element(FixlenTypeInfo, Acc);
+                  sfixed32 -> sets:add_element(FixlenTypeInfo, Acc);
+                  float    -> sets:add_element(FixlenTypeInfo, Acc);
+                  fixed64  -> sets:add_element(FixlenTypeInfo, Acc);
+                  sfixed64 -> sets:add_element(FixlenTypeInfo, Acc);
+                  double   -> sets:add_element(FixlenTypeInfo, Acc);
+                  _        -> Acc
+              end
+      end,
+      sets:new(),
+      Defs).
+
+find_packed_fields(Defs) ->
+    fold_msg_fields(fun(MsgName, #field{name=FName}=FieldDef, Acc) ->
+                            case is_packed(FieldDef) of
+                                true  -> sets:add_element({MsgName,FName}, Acc);
+                                false -> Acc
+                            end
+                    end,
+                    sets:new(),
+                    Defs).
 
 fold_msg_fields(Fun, InitAcc, Defs) ->
     lists:foldl(fun({{msg, MsgName}, Fields}, Acc) ->
@@ -716,29 +750,60 @@ format_unknownsize_packed_field_encoder2(MsgName, #field{name=FName,
      f("~p([], Bin) ->~n", [PackedFnName]),
      f("    Bin.~n~n")].
 
-format_type_encoders(#anres{used_types = UsedTypes}) ->
-    [[format_sint_encoder() || smember_any([sint32 ,sint64], UsedTypes)],
+format_type_encoders(AnRes) ->
+    [format_varlength_field_encoders(AnRes),
+     format_fixlength_field_encoders(AnRes),
+     [format_varint_encoder() || is_varint_encoder_needed(AnRes)]].
+
+format_varlength_field_encoders(#anres{used_types=UsedTypes}) ->
+    [[format_sint_encoder()         || smember_any([sint32,sint64], UsedTypes)],
      [format_int_encoder(int32, 32) || smember(int32, UsedTypes)],
      [format_int_encoder(int64, 64) || smember(int64, UsedTypes)],
-     [format_bool_encoder() || smember(bool, UsedTypes)],
-     [format_fixed_encoder(fixed32,  32, 'little')
-      || smember(fixed32, UsedTypes)],
-     [format_fixed_encoder(sfixed32, 32, 'little-signed')
-      || smember(sfixed32, UsedTypes)],
-     [format_fixed_encoder(float,    32, 'little-float')
-      || smember(float, UsedTypes)],
-     [format_fixed_encoder(fixed64,  64, 'little')
-      || smember(fixed64, UsedTypes)],
-     [format_fixed_encoder(sfixed64, 64, 'little-signed')
-      || smember(sfixed64, UsedTypes)],
-     [format_fixed_encoder(double,   64, 'little-float')
-      || smember(double, UsedTypes)],
-     [format_string_encoder() || smember(string, UsedTypes)],
-     [format_bytes_encoder()  || smember(bytes, UsedTypes)],
-     %% FIXME: there might be cases when e_varint is not called:
-     %% only known-size (sub-)messages, no fields of type
-     %% string, bytes sint32, int32, sint64 or int64
-     format_varint_encoder()].
+     [format_bool_encoder()         || smember(bool, UsedTypes)],
+     [format_string_encoder()       || smember(string, UsedTypes)],
+     [format_bytes_encoder()        || smember(bytes, UsedTypes)]].
+
+format_fixlength_field_encoders(AnRes) ->
+    NeedsFixed32  = needs_f_enc(fixed32, AnRes),
+    NeedsSFixed32 = needs_f_enc(sfixed32, AnRes),
+    NeedsFloat    = needs_f_enc(float, AnRes),
+    NeedsFixed64  = needs_f_enc(fixed64, AnRes),
+    NeedsSFixed64 = needs_f_enc(sfixed64, AnRes),
+    NeedsDouble   = needs_f_enc(double, AnRes),
+    [[format_fixed_encoder(fixed32,  32, 'little')        || NeedsFixed32],
+     [format_fixed_encoder(sfixed32, 32, 'little-signed') || NeedsSFixed32],
+     [format_fixed_encoder(float,    32, 'little-float')  || NeedsFloat],
+     [format_fixed_encoder(fixed64,  64, 'little')        || NeedsFixed64],
+     [format_fixed_encoder(sfixed64, 64, 'little-signed') || NeedsSFixed64],
+     [format_fixed_encoder(double,   64, 'little-float')  || NeedsDouble]].
+
+needs_f_enc(FixedType, #anres{used_types=UsedTypes, fixlen_types=FTypes}) ->
+    %% If a fixlength-type occurs _only_ as a packed repeated field,
+    %% we need not generate a special encoder-function for it
+    case [FT || FT <- sets:to_list(FTypes), FT#ft.type == FixedType] of
+        [#ft{occurrence=repeated, is_packed=true}] ->
+            false;
+        _ ->
+            smember(FixedType, UsedTypes)
+    end.
+
+is_varint_encoder_needed(#anres{used_types=UsedTypes}=AnRes) ->
+    TypesNeedingAVarintEncoder = [int32, int64, uint32, uint64, sint32, sint64,
+                                  string, bytes],
+    smember_any(TypesNeedingAVarintEncoder, UsedTypes) orelse
+        any_packed_field_exists(AnRes) orelse
+        at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes).
+
+any_packed_field_exists(#anres{packed_fields=PackedFields}) ->
+    sets:size(PackedFields) >= 1.
+
+at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
+    #anres{used_types=UsedTypes,
+           known_msg_size=KnownSize} = AnRes,
+    SubMsgNames = [MsgName || {msg,MsgName} <- sets:to_list(UsedTypes)],
+    lists:any(fun(SubMsgName) -> dict:fetch(SubMsgName, KnownSize) == undefined
+              end,
+              SubMsgNames).
 
 format_sint_encoder() ->
     [f("e_type_sint(Value, Bin) when Value >= 0 ->~n"),
@@ -1192,9 +1257,15 @@ format_msg_decoder_reverse_toplevel(MsgName, MsgDef) ->
 
 format_field_adders(MsgName, MsgDef) ->
     [case classify_field_merge_action(FieldDef) of
-        msgmerge  -> format_field_msgmerge_adder(MsgName, FieldDef);
-        overwrite -> format_field_overwrite_adder(MsgName, FieldDef);
-        seqadd    -> format_field_seqappend_adder(MsgName, FieldDef)
+         msgmerge  ->
+             format_field_msgmerge_adder(MsgName, FieldDef);
+         overwrite ->
+             format_field_overwrite_adder(MsgName, FieldDef);
+         seqadd ->
+             case is_packed(FieldDef) of
+                 false -> format_field_seqappend_adder(MsgName, FieldDef);
+                 true  -> ""
+             end
      end
      || FieldDef <- MsgDef].
 
@@ -1221,9 +1292,9 @@ classify_field_merge_action(FieldDef) ->
     case FieldDef of
         #field{occurrence=required, type={msg, _}} -> msgmerge;
         #field{occurrence=optional, type={msg, _}} -> msgmerge;
-        #field{occurrence = required}              -> overwrite;
-        #field{occurrence = optional}              -> overwrite;
-        #field{occurrence = repeated}              -> seqadd
+        #field{occurrence=required}                -> overwrite;
+        #field{occurrence=optional}                -> overwrite;
+        #field{occurrence=repeated}                -> seqadd
     end.
 
 
