@@ -93,3 +93,49 @@ mk_defs_probe_sender_opt(SendTo) ->
 
 receive_filter_sort_msgs_defs() ->
     lists:sort([Msg || {{msg,_},_} = Msg <- receive {defs, Defs} -> Defs end]).
+
+-record(m1,{f1}).
+-record(m2,{f11, f12, f13}).
+
+code_generation_when_submsg_size_is_known_at_compile_time_test() ->
+    KnownSizeM2 =
+        [{{msg,m2}, [#field{name=f11, type={enum,e}, occurrence=required,
+                            fnum=1, rnum=2, opts=[]},
+                     #field{name=f12, type=fixed32, occurrence=required,
+                            fnum=2, rnum=3, opts=[]},
+                     #field{name=f13, type=fixed64, occurrence=required,
+                            fnum=3, rnum=4, opts=[]}]}],
+    UnknownSizeM2 =
+        [{{msg,m2}, [#field{name=f11, type={enum,e}, occurrence=optional,
+                            fnum=1, rnum=2, opts=[]},
+                     #field{name=f12, type=fixed32, occurrence=optional,
+                            fnum=2, rnum=3, opts=[]},
+                     #field{name=f13, type=fixed64, occurrence=optional,
+                            fnum=3, rnum=4, opts=[]}]}],
+
+    CommonDefs =
+        [{{msg,m1}, [#field{name=f1, type={msg,m2}, occurrence=required,
+                            fnum=1, rnum=2, opts=[]}]},
+         {{enum,e}, [{x1, 1}, {x2, 2}]} %% all enum values same encode size
+        ],
+    {ok, 'X', Code1, []} = gpb_compile:msg_defs('X', CommonDefs++KnownSizeM2,
+                                                [binary]),
+    {ok, 'X', Code2, []} = gpb_compile:msg_defs('X', CommonDefs++UnknownSizeM2,
+                                                [binary]),
+    Msg = #m1{f1=#m2{f11=x1, f12=33, f13=44}},
+    load_code('X',Code1),
+    Encoded1 = 'X':encode_msg(Msg),
+    load_code('X',Code2),
+    Encoded2 = 'X':encode_msg(Msg),
+    Encoded1 = Encoded2.
+
+load_code(Mod, Code) ->
+    delete_old_versions_of_code(Mod),
+    {module, Mod} = code:load_binary(Mod, "<nofile>", Code).
+
+delete_old_versions_of_code(Mod) ->
+    code:purge(Mod),
+    code:delete(Mod),
+    code:purge(Mod),
+    code:delete(Mod),
+    ok.
