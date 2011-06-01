@@ -26,8 +26,9 @@
 
 -record(anres, %% result of analysis
         {
-          used_types     :: set(),
-          known_msg_size :: dict() %% MsgName() --> Size | undefined
+          used_types      :: set(),  %% field_type()
+          known_msg_size  :: dict(), %% MsgName -> Size | undefined
+          msg_occurrences :: dict()  %% MsgName -> [occurrence()]
         }).
 
 
@@ -307,7 +308,8 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 
 analyze_defs(Defs) ->
     #anres{used_types      = find_used_types(Defs),
-           known_msg_size  = find_msgsizes_known_at_compile_time(Defs)}.
+           known_msg_size  = find_msgsizes_known_at_compile_time(Defs),
+           msg_occurrences = find_msg_occurrences(Defs)}.
 
 find_used_types(Defs) ->
     fold_msg_fields(fun(_MsgName, #field{type=Type}, Acc) ->
@@ -315,6 +317,27 @@ find_used_types(Defs) ->
                     end,
                     sets:new(),
                     Defs).
+
+find_msg_occurrences(Defs) ->
+    fold_msg_fields(fun(_MsgName, #field{type=Type, occurrence=Occ}, Acc) ->
+                            case Type of
+                                {msg,SubMsgName} ->
+                                    add_occurrence(SubMsgName, Occ, Acc);
+                                _Other ->
+                                    Acc
+                            end
+                    end,
+                    dict:new(),
+                    Defs).
+
+add_occurrence(MsgName, Occurrence, D) ->
+    case dict:find(MsgName, D) of
+        {ok, Occurrences0} ->
+            dict:store(MsgName, lists:usort([Occurrence | Occurrences0]), D);
+        error ->
+            dict:store(MsgName, [Occurrence], D)
+    end.
+
 
 fold_msg_fields(Fun, InitAcc, Defs) ->
     lists:foldl(fun({{msg, MsgName}, Fields}, Acc) ->
@@ -450,7 +473,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        "\n",
        f("~s~n", [format_decoders(Defs, AnRes, Opts)]),
        "\n",
-       f("~s~n", [format_msg_merge_code(Defs)]),
+       f("~s~n", [format_msg_merge_code(Defs, AnRes)]),
        "\n",
        f("verify_msg(Msg) ->~n" %% Option to use gpb:verify_msg??
          "    ~s.~n", [format_verifier_topcase(4, Defs, "Msg")]),
@@ -1204,10 +1227,10 @@ classify_field_merge_action(FieldDef) ->
     end.
 
 
-format_msg_merge_code(Defs) ->
+format_msg_merge_code(Defs, AnRes) ->
     MsgNames = [MsgName || {{msg, MsgName}, _MsgDef} <- Defs],
     [format_merge_msgs_top_level(MsgNames),
-     [format_msg_merger(MsgName, MsgDef)
+     [format_msg_merger(MsgName, MsgDef, AnRes)
       || {{msg, MsgName}, MsgDef} <- Defs]].
 
 format_merge_msgs_top_level([]) ->
@@ -1227,11 +1250,11 @@ format_merger_top_level_cases(MsgNames) ->
                 ";\n        ").
 
 
-format_msg_merger(MsgName, []) ->
+format_msg_merger(MsgName, [], _AnRes) ->
     MergeFn = mk_fn(merge_msg_, MsgName),
     [f("~p(_Prev, New) ->~n", [MergeFn]),
      f("    New.~n~n")];
-format_msg_merger(MsgName, MsgDef) ->
+format_msg_merger(MsgName, MsgDef, AnRes) ->
     MergeFn = mk_fn(merge_msg_, MsgName),
     FInfos = [{classify_field_merge_action(Field), Field} || Field <- MsgDef],
     ToOverwrite = [Field || {overwrite, Field} <- FInfos],
@@ -1268,11 +1291,18 @@ format_msg_merger(MsgName, MsgDef) ->
     FieldUpdatings = string:join(Overwritings ++ SeqAddings ++ MsgMergings,
                                  UpdateCommaSep),
     FnIndent = flength("~p(", [MergeFn]),
-    [f("~p(Prev, undefined) -> Prev;~n", [MergeFn]),
-     f("~p(undefined, New) -> New;~n", [MergeFn]),
+    [[[f("~p(Prev, undefined) -> Prev;~n", [MergeFn]),
+       f("~p(undefined, New) -> New;~n", [MergeFn])]
+      || occurs_as_optional_submsg(MsgName, AnRes)],
      f("~p(#~p{~s},~n", [MergeFn, MsgName, PFieldMatchings]),
      indent(FnIndent, f("#~p{~s}) ->~n", [MsgName, NFieldMatchings])),
      f("    #~p{~s}.~n~n", [MsgName, FieldUpdatings])].
+
+occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
+    %% Note: order of evaluation below is important (the exprs of `andalso'):
+    %% Messages are present in Occurrences only if they are sub-messages
+    can_occur_as_sub_msg(MsgName, AnRes) andalso
+        lists:member(optional, dict:fetch(MsgName, Occurrences)).
 
 format_field_skippers(MsgName) ->
     [format_varint_skipper(MsgName),
