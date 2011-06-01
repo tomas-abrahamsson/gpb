@@ -1320,23 +1320,26 @@ format_verifier_topcase(Indent, Defs, MsgVar) ->
      indent(Indent, "end")].
 
 format_verifiers(Defs, AnRes, _Opts) ->
-    [format_msg_verifiers(Defs),
+    [format_msg_verifiers(Defs, AnRes),
      format_enum_verifiers(Defs, AnRes),
      format_type_verifiers(AnRes),
      format_verifier_auxiliaries()
     ].
 
-format_msg_verifiers(Defs) ->
-    [format_msg_verifier(MsgName, MsgDef) || {{msg,MsgName}, MsgDef} <- Defs].
+format_msg_verifiers(Defs, AnRes) ->
+    [format_msg_verifier(MsgName, MsgDef, AnRes)
+     || {{msg,MsgName}, MsgDef} <- Defs].
 
-format_msg_verifier(MsgName, []) ->
+format_msg_verifier(MsgName, [], AnRes) ->
     FnName = mk_fn(v_msg_, MsgName),
     [f("~p(#~p{}, _Path) ->~n", [FnName, MsgName]),
-     f("    ok;~n"),
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error({expected_msg,~p}, X, Path).~n", [MsgName]),
-     f("~n")];
-format_msg_verifier(MsgName, MsgDef) ->
+     f("    ok"),
+     [[f(     ";~n"),
+       f("~p(X, Path) ->~n", [FnName]),
+       f("    mk_type_error({expected_msg,~p}, X, Path)", [MsgName])]
+      || can_occur_as_sub_msg(MsgName, AnRes)],
+     f(".~n~n")];
+format_msg_verifier(MsgName, MsgDef, AnRes) ->
     FnName = mk_fn(v_msg_, MsgName),
     MatchIndent = flength("~p(#~p{", [FnName, MsgName]),
     MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
@@ -1370,10 +1373,15 @@ format_msg_verifier(MsgName, MsgDef) ->
            f(",~n")]
       end
       || #field{name=FName, type=Type, occurrence=Occurrence} <- MsgDef],
-     f("    ok;~n"),
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error({expected_msg,~p}, X, Path).~n", [MsgName]),
-     f("~n")].
+     f("    ok"),
+     [[f(     ";~n"),
+       f("~p(X, Path) ->~n", [FnName]),
+       f("    mk_type_error({expected_msg,~p}, X, Path)", [MsgName])]
+      || can_occur_as_sub_msg(MsgName, AnRes)],
+     f(".~n~n")].
+
+can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
+    sets:is_element({msg,MsgName}, UsedTypes).
 
 format_enum_verifiers(Defs, #anres{used_types=UsedTypes}) ->
     [format_enum_verifier(EnumName, Def)
