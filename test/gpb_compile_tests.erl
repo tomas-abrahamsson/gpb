@@ -129,6 +129,14 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     Encoded2 = 'X':encode_msg(Msg),
     Encoded1 = Encoded2.
 
+decodes_overly_long_varints_test() ->
+    Defs = [{{msg,m1}, [#field{name=f1, type=int32, occurrence=required,
+                               fnum=1, rnum=2, opts=[]}]}],
+    {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs, [binary]),
+    load_code('X',Code),
+    #m1{f1=54} = 'X':decode_msg(<<8, 54>>, m1), %% canonically encoded
+    #m1{f1=54} = 'X':decode_msg(<<8, (128+54), 128, 128, 0>>, m1).
+
 load_code(Mod, Code) ->
     delete_old_versions_of_code(Mod),
     {module, Mod} = code:load_binary(Mod, "<nofile>", Code).
