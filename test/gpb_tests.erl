@@ -29,6 +29,12 @@ decode_varint_test() ->
     {128, <<255>>} = gpb:decode_varint(<<128, 1, 255>>),
     {150, <<255>>} = gpb:decode_varint(<<150, 1, 255>>).
 
+decode_overly_long_noncanonical_varints_test() ->
+    {0, <<255>>}   = gpb:decode_varint(<<128, 0, 255>>),
+    {0, <<255>>}   = gpb:decode_varint(<<128, 128, 128, 128, 0, 255>>),
+    {1, <<255>>}   = gpb:decode_varint(<<129, 128, 128, 128, 0, 255>>),
+    {20394, <<255>>} = gpb:decode_varint(<<170,159,(128+1), 128, 128, 0, 255>>).
+
 encode_varint_test() ->
     <<0>>      = gpb:encode_varint(0),
     <<127>>    = gpb:encode_varint(127),
