@@ -26,7 +26,8 @@
 
 -record(anres, %% result of analysis
         {
-          used_types = sets:new()
+          used_types     :: set(),
+          known_msg_size :: dict() %% MsgName() --> Size | undefined
         }).
 
 
@@ -305,9 +306,8 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 %% -- encoders -----------------------------------------------------
 
 analyze_defs(Defs) ->
-    UsedTypes = find_used_types(Defs),
-    #anres{used_types      = UsedTypes
-          }.
+    #anres{used_types      = find_used_types(Defs),
+           known_msg_size  = find_msgsizes_known_at_compile_time(Defs)}.
 
 find_used_types(Defs) ->
     fold_msg_fields(fun(_MsgName, #field{type=Type}, Acc) ->
@@ -328,6 +328,78 @@ fold_msg_fields(Fun, InitAcc, Defs) ->
                 end,
                 InitAcc,
                 Defs).
+
+find_msgsizes_known_at_compile_time(Defs) ->
+    T = ets:new(gpb_msg_sizes, [set, public]),
+    [find_msgsize(MsgName, Defs, T) || {{msg,MsgName},_Fields} <- Defs],
+    Result = dict:from_list(ets:tab2list(T)),
+    ets:delete(T),
+    Result.
+
+find_msgsize(MsgName, Defs, T) ->
+    case ets:lookup(T, MsgName) of
+        [] ->
+            {{msg,MsgName}, Fields} = lists:keyfind({msg,MsgName}, 1, Defs),
+            Result = find_msgsize_2(Fields, 0, Defs, T),
+            ets:insert(T, {MsgName, Result}),
+            Result;
+        [{MsgName, Result}] ->
+            Result
+    end.
+
+find_msgsize_2([#field{occurrence=repeated} | _Rest], _AccSize, _Defs, _T) ->
+    undefined;
+find_msgsize_2([#field{occurrence=optional} | _Rest], _AccSize, _Defs, _T) ->
+    undefined;
+find_msgsize_2([#field{type=Type, fnum=FNum} | Rest], AccSize, Defs, T) ->
+    FKey = gpb:encode_varint((FNum bsl 3) bor gpb:encode_wire_type(Type)),
+    FKeySize = byte_size(FKey),
+    case Type of
+        sint32   -> undefined;
+        sint64   -> undefined;
+        int32    -> undefined;
+        int64    -> undefined;
+        uint32   -> undefined;
+        uint64   -> undefined;
+        bool     -> find_msgsize_2(Rest, AccSize+FKeySize+1, Defs, T);
+        {enum,EnumName} ->
+            case all_enum_values_encode_to_same_size(EnumName, Defs) of
+                {yes, ESize} ->
+                    find_msgsize_2(Rest, AccSize+FKeySize+ESize, Defs, T);
+                no ->
+                    undefined
+            end;
+        fixed64  -> find_msgsize_2(Rest, AccSize+FKeySize+8, Defs, T);
+        sfixed64 -> find_msgsize_2(Rest, AccSize+FKeySize+8, Defs, T);
+        double   -> find_msgsize_2(Rest, AccSize+FKeySize+8, Defs, T);
+        string   -> undefined;
+        bytes    -> undefined;
+        {msg,MsgName} ->
+            case find_msgsize(MsgName, Defs, T) of
+                MsgSize when is_integer(MsgSize) ->
+                    find_msgsize_2(Rest, AccSize+FKeySize+MsgSize, Defs, T);
+                undefined ->
+                    undefined
+            end;
+        fixed32  -> find_msgsize_2(Rest, AccSize+FKeySize+4, Defs, T);
+        sfixed32 -> find_msgsize_2(Rest, AccSize+FKeySize+4, Defs, T);
+        float    -> find_msgsize_2(Rest, AccSize+FKeySize+4, Defs, T)
+    end;
+find_msgsize_2([], AccSize, _Defs, _T) ->
+    AccSize.
+
+
+all_enum_values_encode_to_same_size(EnumName, Defs) ->
+    {{enum,EnumName}, EnumDef} = lists:keyfind({enum,EnumName}, 1, Defs),
+    EnumSizes = [begin
+                     <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
+                     byte_size(gpb:encode_varint(N))
+                 end
+                 || {_EnumSym, Value} <- EnumDef],
+    case lists:usort(EnumSizes) of
+        [Size] -> {yes, Size};
+        _      -> no
+    end.
 
 %% -- generating code ----------------------------------------------
 
@@ -404,7 +476,7 @@ format_encoder_topcase(Indent, Defs, MsgVar) ->
 format_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
      format_msg_encoders(Defs),
-     format_special_field_encoders(Defs),
+     format_special_field_encoders(Defs, AnRes),
      format_type_encoders(AnRes)
     ].
 
@@ -501,8 +573,8 @@ mk_field_encode_fn_name(_MsgName, #field{type=uint64}) ->
 mk_field_encode_fn_name(_MsgName, #field{type=Type}) ->
     mk_fn(e_type_, Type).
 
-format_special_field_encoders(Defs) ->
-    [[format_field_encoder(MsgName, FieldDef, Defs)
+format_special_field_encoders(Defs, AnRes) ->
+    [[format_field_encoder(MsgName, FieldDef, AnRes)
       || #field{occurrence=Occ, type=Type}=FieldDef <- MsgDef,
          Occ == repeated orelse is_msg_type(Type)]
      || {{msg,MsgName}, MsgDef} <- Defs].
@@ -510,10 +582,10 @@ format_special_field_encoders(Defs) ->
 is_msg_type({msg,_}) -> true;
 is_msg_type(_)       -> false.
 
-format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef, Defs) ->
+format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef, AnRes) ->
     [possibly_format_mfield_encoder(MsgName,
                                     FieldDef#field{occurrence=required},
-                                    Defs),
+                                    AnRes),
      case {Occurrence, is_packed(FieldDef)} of
          {repeated, false} -> format_repeated_field_encoder2(MsgName, FieldDef);
          {repeated, true}  -> format_packed_field_encoder2(MsgName, FieldDef);
@@ -522,9 +594,9 @@ format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef, Defs) ->
      end].
 
 possibly_format_mfield_encoder(MsgName, #field{type={msg,SubMsg}}=FieldDef,
-                               Defs) ->
+                               AnRes) ->
     FnName = mk_field_encode_fn_name(MsgName, FieldDef),
-    case is_msgsize_known_at_compiletime(SubMsg, Defs) of
+    case is_msgsize_known_at_compiletime(SubMsg, AnRes) of
         no ->
             [f("~p(Msg, Bin) ->~n", [FnName]),
              f("    SubBin = ~p(Msg, <<>>),~n", [mk_fn(e_msg_, SubMsg)]),
@@ -544,62 +616,12 @@ possibly_format_mfield_encoder(MsgName, #field{type={msg,SubMsg}}=FieldDef,
 possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].
 
-is_msgsize_known_at_compiletime(MsgName, Defs) ->
-    {{msg,MsgName}, Fields} = lists:keyfind({msg,MsgName}, 1, Defs),
-    is_msgsize_known_2(Fields, 0, Defs).
-
-is_msgsize_known_2([#field{occurrence=repeated} | _Rest], _AccSize, _Defs) ->
-    no;
-is_msgsize_known_2([#field{occurrence=optional} | _Rest], _AccSize, _Defs) ->
-    no;
-is_msgsize_known_2([#field{type=Type, fnum=FNum} | Rest], AccSize, Defs) ->
-    FKey = gpb:encode_varint((FNum bsl 3) bor gpb:encode_wire_type(Type)),
-    FKeySize = byte_size(FKey),
-    case Type of
-        sint32   -> no;
-        sint64   -> no;
-        int32    -> no;
-        int64    -> no;
-        uint32   -> no;
-        uint64   -> no;
-        bool     -> is_msgsize_known_2(Rest, AccSize+FKeySize+1, Defs);
-        {enum,EnumName} ->
-            case all_enum_values_encode_to_same_size(EnumName, Defs) of
-                {yes, ESize} ->
-                    is_msgsize_known_2(Rest, AccSize+FKeySize+ESize, Defs);
-                no ->
-                    no
-            end;
-        fixed64  -> is_msgsize_known_2(Rest, AccSize+FKeySize+8, Defs);
-        sfixed64 -> is_msgsize_known_2(Rest, AccSize+FKeySize+8, Defs);
-        double   -> is_msgsize_known_2(Rest, AccSize+FKeySize+8, Defs);
-        string   -> no;
-        bytes    -> no;
-        {msg,MsgName} ->
-            case is_msgsize_known_at_compiletime(MsgName, Defs) of
-                {yes, MsgSize} ->
-                    is_msgsize_known_2(Rest, AccSize+FKeySize+MsgSize, Defs);
-                no ->
-                    no
-            end;
-        fixed32  -> is_msgsize_known_2(Rest, AccSize+FKeySize+4, Defs);
-        sfixed32 -> is_msgsize_known_2(Rest, AccSize+FKeySize+4, Defs);
-        float    -> is_msgsize_known_2(Rest, AccSize+FKeySize+4, Defs)
-    end;
-is_msgsize_known_2([], AccSize, _Defs) ->
-    {yes, AccSize}.
-
-
-all_enum_values_encode_to_same_size(EnumName, Defs) ->
-    {{enum,EnumName}, EnumDef} = lists:keyfind({enum,EnumName}, 1, Defs),
-    EnumSizes = [begin
-                     <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
-                     byte_size(gpb:encode_varint(N))
-                 end
-                 || {_EnumSym, Value} <- EnumDef],
-    case lists:usort(EnumSizes) of
-        [Size] -> {yes, Size};
-        _      -> no
+is_msgsize_known_at_compiletime(MsgName, #anres{known_msg_size=MsgSizes}) ->
+    case dict:fetch(MsgName, MsgSizes) of
+        MsgSize when is_integer(MsgSize) ->
+            {yes, MsgSize};
+        undefined ->
+            no
     end.
 
 format_repeated_field_encoder2(MsgName, #field{fnum=FNum, type=Type}=FDef) ->
