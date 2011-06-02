@@ -1454,23 +1454,26 @@ format_msg_verifier(MsgName, MsgDef, AnRes) ->
                             {enum,EnumName} -> mk_fn(v_enum_, EnumName);
                             Type            -> mk_fn(v_type_, Type)
                         end,
-          ["    ",
-           case Occurrence of
-               required ->
-                   %% FIXME: check especially for `undefined'
-                   %% and if found, error out with required_field_not_set
-                   %% specifying expected type
-                   f("~p(F~s, [~p | Path])", [FVerifierFn, FName, FName]);
-               repeated ->
-                   %% FIXME: verify that the field is a list!
-                   %% when verifying elements, include the faulty
-                   %% element's index (what about a finite atom space?)
-                   f("[~p(Elem, [~p | Path]) || Elem <- F~s]",
-                     [FVerifierFn, FName, FName]);
-               optional ->
-                   f("[~p(F~s, [~p | Path]) || F~s /= undefined]",
-                     [FVerifierFn, FName, FName, FName])
-           end,
+          [indent_lines(
+             4,
+             case Occurrence of
+                 required ->
+                     %% FIXME: check especially for `undefined'
+                     %% and if found, error out with required_field_not_set
+                     %% specifying expected type
+                     [f("~p(F~s, [~p | Path])", [FVerifierFn, FName, FName])];
+                 repeated ->
+                     [f("if is_list(F~s) ->~n", [FName]),
+                      f("       [~p(Elem, [~p | Path]) || Elem <- F~s];~n",
+                        [FVerifierFn, FName, FName]),
+                      f("   true ->~n"),
+                      f("       mk_type_error({invalid_list_of,~p},F~s,Path)~n",
+                        [Type, FName]),
+                      f("end")];
+                 optional ->
+                     [f("[~p(F~s, [~p | Path]) || F~s /= undefined]",
+                        [FVerifierFn, FName, FName, FName])]
+             end),
            f(",~n")]
       end
       || #field{name=FName, type=Type, occurrence=Occurrence} <- MsgDef],
@@ -1739,6 +1742,9 @@ lineup(_, _) ->
 
 indent(Indent, Str) ->
     lists:duplicate(Indent, $\s) ++ Str.
+
+indent_lines(Indent, Lines) ->
+    [indent(Indent, Line) || Line <- Lines].
 
 outdent_first(IoList) ->
     lists:dropwhile(fun(C) -> C == $\s end,

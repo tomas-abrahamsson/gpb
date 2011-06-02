@@ -137,6 +137,16 @@ decodes_overly_long_varints_test() ->
     #m1{f1=54} = 'X':decode_msg(<<8, 54>>, m1), %% canonically encoded
     #m1{f1=54} = 'X':decode_msg(<<8, (128+54), 128, 128, 0>>, m1).
 
+verifies_sequences_test() ->
+    Defs = [{{msg,m1}, [#field{name=f1, type=int32, occurrence=repeated,
+                               fnum=1, rnum=2, opts=[]}]}],
+    {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs,
+                                               [binary, {verify, always}]),
+    load_code('X',Code),
+    <<8,54>> = 'X':encode_msg(#m1{f1=[54]}),
+    ?assertError({gpb_type_error, _},
+                 'X':encode_msg(#m1{f1=gurka})).
+
 load_code(Mod, Code) ->
     delete_old_versions_of_code(Mod),
     {module, Mod} = code:load_binary(Mod, "<nofile>", Code).
