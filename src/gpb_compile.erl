@@ -45,7 +45,7 @@ file(File) ->
 %%            Opts = [Opt]
 %%            Opt  = {i,directory()} |
 %%                   {type_specs, boolean()} | type_specs |
-%%                   {verify, optionally | always} |
+%%                   {verify, optionally | always | never} |
 %%                   {o,directory()} |
 %%                   binary |
 %%                   {copy_bytes, true | false | auto | integer() | float()}
