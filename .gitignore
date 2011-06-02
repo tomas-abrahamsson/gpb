@@ -1,8 +1,11 @@
 ebin/*.beam
 test/*.beam
+erl_crash.dump
 # Rebar compiles tests and more to .eunit/
 .eunit
 # Generated from src/gpb_parse.xrl
 src/gpb_parse.erl
 # Generated from src/gpb_scan.yrl
 src/gpb_scan.erl
+# Dest dir for benchmarking artifacts
+benchmarks/tmp/
