@@ -20,6 +20,7 @@
 %-compile(export_all).
 -export([file/1, file/2]).
 -export([msg_defs/2, msg_defs/3]).
+-export([c/0, c/1]). % Command line interface, halts vm---don't use from shell!
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
@@ -172,6 +173,110 @@ msg_defs(Mod, Defs0, Opts0) ->
             file_write_file(Erl, format_erl(Mod, Defs, AnRes, Opts1), Opts1),
             file_write_file(Hrl, format_hrl(Mod, Defs, Opts1), Opts1)
     end.
+
+c() ->
+    show_help(),
+    init:stop(1),
+    timer:sleep(infinity).
+
+c([File]) when is_atom(File); is_list(File) -> %% invoked with -s or -run
+    FileName = if is_atom(File) -> atom_to_list(File);
+                  is_list(File) -> File
+               end,
+    Args = init:get_arguments(),
+    PlainArgs = init:get_plain_arguments(),
+    Opts = parse_opts(Args, PlainArgs),
+    case is_help_requested(Opts, FileName) of
+        true  ->
+            show_help(),
+            init:stop(0);
+        false ->
+            case file(FileName, Opts) of
+                ok ->
+                    init:stop(0);
+                {error, Reason} ->
+                    io:format("Error: ~p~n", [Reason]),
+                    init:stop(1)
+            end
+    end,
+    timer:sleep(infinity). %% give init:stop time to do its work
+
+is_help_requested(Opts, FileName) ->
+    lists:member(help, Opts) orelse
+        FileName == "-h" orelse
+        FileName == "--help".
+
+show_help() ->
+    io:format(
+      "Usage: erl <erlargs> [gpb-opts] -s ~p c <ProtoFile>.proto~n"
+      "   or: erl <erlargs> -s ~p c <ProtoFile>.proto -extra [gpb-opts]~n"
+      "Typical erlargs = -noshell -noinput +B -boot start_clean -pa SomeDir~n"
+      "~n"
+      "Recognized gpb-opts: (see the edoc for ~p for further details)~n"
+      "    -IDir   -I Dir~n"
+      "          Specify include directory.~n"
+      "          Option may be specified more than once to specify~n"
+      "          several include directories.~n"
+      "    -o Dir~n"
+      "          Specify output directory for where to generate~n"
+      "          the <Protofile>.erl and <Protofile>.hrl~n"
+      "    -v optionally | always | never~n"
+      "          Specify how the generated encoder should~n"
+      "          verify the message to be encoded.~n"
+      "    -c true | false | auto | integer() | float()~n"
+      "          Specify how or when the generated decoder should~n"
+      "          copy fields of type `bytes'.~n"
+      , [?MODULE, ?MODULE, ?MODULE]).
+
+parse_opts(Args, PlainArgs) ->
+    arg_zf(fun parse_opt/1, Args) ++ plain_arg_zf(fun parse_opt/1, PlainArgs).
+
+parse_opt({"I", [Dir]})          -> {true, {i,Dir}};
+parse_opt({"I"++Dir, []})        -> {true, {i,Dir}};
+parse_opt({"o", [Dir]})          -> {true, {o,Dir}};
+parse_opt({"v", ["optionally"]}) -> {true, {verify,optionally}};
+parse_opt({"v", ["always"]})     -> {true, {verify,always}};
+parse_opt({"v", ["never"]})      -> {true, {verify,never}};
+parse_opt({"c", ["true"]})       -> {true, {copy_bytes,true}};
+parse_opt({"c", ["false"]})      -> {true, {copy_bytes,false}};
+parse_opt({"c", ["auto"]})       -> {true, {copy_bytes,auto}};
+parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
+                                        {ok, Num} -> {true, {copy_bytes,Num}};
+                                        error     -> false
+                                    end;
+parse_opt({"h", _})              -> {true, help};
+parse_opt({"-help", _})          -> {true, help};
+parse_opt(_)                     -> false.
+
+string_to_number(S) ->
+    try {ok, list_to_integer(S)}
+    catch error:badarg ->
+            try {ok, list_to_float(S)}
+            catch error:badarg -> error
+            end
+    end.
+
+arg_zf(ZFFun, Args) ->
+    lists:zf(ZFFun, [{atom_to_list(Opt), OptArgs} || {Opt, OptArgs} <- Args]).
+
+plain_arg_zf(ZFFun, PlainArgs) ->
+    lists:zf(ZFFun, plainargs_to_args(PlainArgs)).
+
+plainargs_to_args(["-"++_=Opt1, "-"++_=Opt2 | Rest]) ->
+    [{Opt1, []} | plainargs_to_args([Opt2 | Rest])];
+plainargs_to_args(["-"++_ =Opt | OptArgsAndRest]) ->
+    {OptArgs, Rest} = plainoptargs_to_args(OptArgsAndRest, []),
+    [{Opt, OptArgs} | plainargs_to_args(Rest)];
+plainargs_to_args([]) ->
+    [].
+
+plainoptargs_to_args(["-"++_ | _]=Rest, Acc) ->
+    {lists:reverse(Acc), Rest};
+plainoptargs_to_args([OptArg | Rest], Acc) ->
+    plainoptargs_to_args(Rest, [OptArg | Acc]);
+plainoptargs_to_args([], Acc) ->
+    {lists:reverse(Acc), []}.
+
 
 change_ext(File, NewExt) ->
     filename:join(filename:dirname(File),
