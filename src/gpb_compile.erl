@@ -27,11 +27,11 @@
 -record(ft, {type, occurrence, is_packed}).
 -record(anres, %% result of analysis
         {
-          used_types      :: set(),  %% gpb_field_type()
-          known_msg_size  :: dict(), %% MsgName -> Size | undefined
-          msg_occurrences :: dict(), %% MsgName -> [occurrence()]
-          fixlen_types    :: set(),  %% #ft{}
-          packed_fields   :: set()   %% {MsgName,FieldName}
+          used_types          :: set(),  %% gpb_field_type()
+          known_msg_size      :: dict(), %% MsgName -> Size | undefined
+          msg_occurrences     :: dict(), %% MsgName -> [occurrence()]
+          fixlen_types        :: set(),  %% #ft{}
+          num_packed_fields   :: integer()
         }).
 
 
@@ -310,11 +310,11 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 %% -- encoders -----------------------------------------------------
 
 analyze_defs(Defs) ->
-    #anres{used_types      = find_used_types(Defs),
-           known_msg_size  = find_msgsizes_known_at_compile_time(Defs),
-           msg_occurrences = find_msg_occurrences(Defs),
-           fixlen_types    = find_fixlen_types(Defs),
-           packed_fields   = find_packed_fields(Defs)}.
+    #anres{used_types          = find_used_types(Defs),
+           known_msg_size      = find_msgsizes_known_at_compile_time(Defs),
+           msg_occurrences     = find_msg_occurrences(Defs),
+           fixlen_types        = find_fixlen_types(Defs),
+           num_packed_fields   = find_num_packed_fields(Defs)}.
 
 find_used_types(Defs) ->
     fold_msg_fields(fun(_MsgName, #field{type=Type}, Acc) ->
@@ -363,14 +363,14 @@ find_fixlen_types(Defs) ->
       sets:new(),
       Defs).
 
-find_packed_fields(Defs) ->
-    fold_msg_fields(fun(MsgName, #field{name=FName}=FieldDef, Acc) ->
+find_num_packed_fields(Defs) ->
+    fold_msg_fields(fun(_MsgName, FieldDef, Acc) ->
                             case is_packed(FieldDef) of
-                                true  -> sets:add_element({MsgName,FName}, Acc);
+                                true  -> Acc + 1;
                                 false -> Acc
                             end
                     end,
-                    sets:new(),
+                    0,
                     Defs).
 
 fold_msg_fields(Fun, InitAcc, Defs) ->
@@ -794,8 +794,8 @@ is_varint_encoder_needed(#anres{used_types=UsedTypes}=AnRes) ->
         any_packed_field_exists(AnRes) orelse
         at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes).
 
-any_packed_field_exists(#anres{packed_fields=PackedFields}) ->
-    sets:size(PackedFields) >= 1.
+any_packed_field_exists(#anres{num_packed_fields=0}) -> false;
+any_packed_field_exists(#anres{num_packed_fields=_}) -> true.
 
 at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
     #anres{used_types=UsedTypes,
@@ -1583,8 +1583,9 @@ format_verifier_auxiliaries() ->
      f("    top_level;~n"),
      f("prettify_path(PathR) ->~n"),
      f("    list_to_atom(~n"),
-     f("        string:join([atom_to_list(E) || E <- lists:reverse(PathR)],~n"),
-     f("                    \".\")).~n"),
+     f("      string:join(~n"),
+     f("        lists:map(fun atom_to_list/1, lists:reverse(PathR)),~n"),
+     f("        \".\")).~n"),
      f("~n")].
 
 %% -- message defs -----------------------------------------------------
