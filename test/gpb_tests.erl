@@ -328,23 +328,26 @@ encode_double_test() ->
 
 merging_second_required_integer_overrides_first_test() ->
     #m1{a=20} = merge_msgs(#m1{a=10}, #m1{a=20},
-                           [{{msg,m1},[#field{name=a,rnum=#m1.a,type=uint32,
-                                              occurrence=required,opts=[]}]}]).
+                           [{{msg,m1},[#field{name=a, fnum=1, rnum=#m1.a,
+                                              type=uint32, occurrence=required,
+                                              opts=[]}]}]).
 
 merging_second_optional_integer_overrides_undefined_test() ->
     #m1{a=22} = merge_msgs(#m1{a=undefined}, #m1{a=22},
-                           [{{msg,m1},[#field{name=a,rnum=#m1.a,type=uint32,
-                                              occurrence=optional,opts=[]}]}]).
+                           [{{msg,m1},[#field{name=a, fnum=1, rnum=#m1.a,
+                                              type=uint32, occurrence=optional,
+                                              opts=[]}]}]).
 
 merging_undefined_does_not_overrides_defined_integer_test() ->
     #m1{a=25} = merge_msgs(#m1{a=25}, #m1{a=undefined},
-                           [{{msg,m1},[#field{name=a,rnum=#m1.a,type=uint32,
-                                              occurrence=optional,opts=[]}]}]).
+                           [{{msg,m1},[#field{name=a, fnum=1, rnum=#m1.a,
+                                              type=uint32, occurrence=optional,
+                                              opts=[]}]}]).
 
 merging_sequences_test() ->
     #m1{a=[11,12, 21,22]} =
         merge_msgs(#m1{a=[11,12]}, #m1{a=[21,22]},
-                   [{{msg,m1},[#field{name=a,rnum=#m1.a,type=uint32,
+                   [{{msg,m1},[#field{name=a, fnum=1, rnum=#m1.a, type=uint32,
                                       occurrence=repeated,opts=[]}]}]).
 
 -record(m4, {x,y}).
@@ -599,7 +602,7 @@ verify_path_when_failure_test() ->
                                   occurrence=required}]}],
     ?assertError({gpb_type_error, {_, [_, {path, top_level}]}},
                  verify_msg(bad_msg, MsgDefs)),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, top_level}]}},
                  verify_msg({m1}, MsgDefs)),
     ?assertError({gpb_type_error, {_, [_, {path, 'm1.a'}]}},
                  verify_msg(#m1{a = bad_msg}, MsgDefs)),

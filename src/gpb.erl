@@ -425,9 +425,9 @@ verify_msg(Msg, MsgDefs) when is_tuple(Msg), tuple_size(Msg) >= 1 ->
     MsgName = element(1, Msg),
     case lists:keysearch({msg,MsgName}, 1, MsgDefs) of
         {value, _} ->
-            verify_msg2(Msg, MsgName, MsgDefs, [MsgName]);
+            verify_msg2(Msg, MsgName, MsgDefs, [top_level]);
         false ->
-            mk_type_error(undefined_msg, MsgName, [])
+            mk_type_error(not_a_known_message, MsgName, [top_level])
     end;
 verify_msg(Msg, _MsgDefs) ->
     mk_type_error(expected_a_message, Msg, []).
@@ -438,7 +438,10 @@ verify_msg2(Msg, MsgName, MsgDefs, Path) when is_tuple(Msg),
     MsgKey = {msg, MsgName},
     {value, {MsgKey, Fields}} = lists:keysearch(MsgKey, 1, MsgDefs),
     if tuple_size(Msg) == length(Fields) + 1 ->
-            verify_fields(Msg, Fields, Path, MsgDefs);
+            Path2 = if Path == [top_level] -> [MsgName];
+                       true                -> Path
+                    end,
+            verify_fields(Msg, Fields, Path2, MsgDefs);
        true ->
             mk_type_error({bad_record,MsgName}, Msg, Path)
     end;

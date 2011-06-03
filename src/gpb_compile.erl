@@ -1524,8 +1524,8 @@ format_verifier_topcase(Indent, Defs, MsgVar) ->
     ElseCase = "_ -> mk_type_error(not_a_known_message, Msg, [])",
     ["case ", MsgVar, " of\n",
      IndStr,
-     string:join([f("#~p{} -> ~p(~s, [])",
-                    [MsgName, mk_fn(v_msg_, MsgName), MsgVar])
+     string:join([f("#~p{} -> ~p(~s, [~p])",
+                    [MsgName, mk_fn(v_msg_, MsgName), MsgVar, MsgName])
                   || {{msg, MsgName}, _MsgDef} <- Defs] ++ [ElseCase],
                  ";\n"++IndStr),
      "\n",
