@@ -94,27 +94,27 @@ mk_defs_probe_sender_opt(SendTo) ->
 receive_filter_sort_msgs_defs() ->
     lists:sort([Msg || {{msg,_},_} = Msg <- receive {defs, Defs} -> Defs end]).
 
--record(m1,{f1}).
--record(m2,{f11, f12, f13}).
+-record(m1,{a}).
+-record(m2,{aa, bb, cc}).
 
 code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     KnownSizeM2 =
-        [{{msg,m2}, [#field{name=f11, type={enum,e}, occurrence=required,
+        [{{msg,m2}, [#field{name=aa, type={enum,e}, occurrence=required,
                             fnum=1, rnum=2, opts=[]},
-                     #field{name=f12, type=fixed32, occurrence=required,
+                     #field{name=bb, type=fixed32, occurrence=required,
                             fnum=2, rnum=3, opts=[]},
-                     #field{name=f13, type=fixed64, occurrence=required,
+                     #field{name=cc, type=fixed64, occurrence=required,
                             fnum=3, rnum=4, opts=[]}]}],
     UnknownSizeM2 =
-        [{{msg,m2}, [#field{name=f11, type={enum,e}, occurrence=optional,
+        [{{msg,m2}, [#field{name=aa, type={enum,e}, occurrence=optional,
                             fnum=1, rnum=2, opts=[]},
-                     #field{name=f12, type=fixed32, occurrence=optional,
+                     #field{name=bb, type=fixed32, occurrence=optional,
                             fnum=2, rnum=3, opts=[]},
-                     #field{name=f13, type=fixed64, occurrence=optional,
+                     #field{name=cc, type=fixed64, occurrence=optional,
                             fnum=3, rnum=4, opts=[]}]}],
 
     CommonDefs =
-        [{{msg,m1}, [#field{name=f1, type={msg,m2}, occurrence=required,
+        [{{msg,m1}, [#field{name=a, type={msg,m2}, occurrence=required,
                             fnum=1, rnum=2, opts=[]}]},
          {{enum,e}, [{x1, 1}, {x2, 2}]} %% all enum values same encode size
         ],
@@ -122,7 +122,7 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
                                                 [binary]),
     {ok, 'X', Code2, []} = gpb_compile:msg_defs('X', CommonDefs++UnknownSizeM2,
                                                 [binary]),
-    Msg = #m1{f1=#m2{f11=x1, f12=33, f13=44}},
+    Msg = #m1{a=#m2{aa=x1, bb=33, cc=44}},
     load_code('X',Code1),
     Encoded1 = 'X':encode_msg(Msg),
     load_code('X',Code2),
@@ -130,22 +130,22 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     Encoded1 = Encoded2.
 
 decodes_overly_long_varints_test() ->
-    Defs = [{{msg,m1}, [#field{name=f1, type=int32, occurrence=required,
+    Defs = [{{msg,m1}, [#field{name=a, type=int32, occurrence=required,
                                fnum=1, rnum=2, opts=[]}]}],
     {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs, [binary]),
     load_code('X',Code),
-    #m1{f1=54} = 'X':decode_msg(<<8, 54>>, m1), %% canonically encoded
-    #m1{f1=54} = 'X':decode_msg(<<8, (128+54), 128, 128, 0>>, m1).
+    #m1{a=54} = 'X':decode_msg(<<8, 54>>, m1), %% canonically encoded
+    #m1{a=54} = 'X':decode_msg(<<8, (128+54), 128, 128, 0>>, m1).
 
 verifies_sequences_test() ->
-    Defs = [{{msg,m1}, [#field{name=f1, type=int32, occurrence=repeated,
+    Defs = [{{msg,m1}, [#field{name=a, type=int32, occurrence=repeated,
                                fnum=1, rnum=2, opts=[]}]}],
     {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs,
                                                [binary, {verify, always}]),
     load_code('X',Code),
-    <<8,54>> = 'X':encode_msg(#m1{f1=[54]}),
+    <<8,54>> = 'X':encode_msg(#m1{a=[54]}),
     ?assertError({gpb_type_error, _},
-                 'X':encode_msg(#m1{f1=gurka})).
+                 'X':encode_msg(#m1{a=gurka})).
 
 load_code(Mod, Code) ->
     delete_old_versions_of_code(Mod),
