@@ -23,7 +23,7 @@
 -export([merge_msgs/3]).
 -export([verify_msg/2, check_scalar/2]).
 -export([encode_varint/1, decode_varint/1]).
--export([encode_wire_type/1, decode_wiretype/1]).
+-export([encode_wiretype/1, decode_wiretype/1]).
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
@@ -104,8 +104,8 @@ decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
 
 fielddef_matches_wiretype_get_packed(WireType, #field{type=Type}=FieldDef) ->
     IsPacked = is_packed(FieldDef),
-    ExpectedWireType = if IsPacked     -> encode_wire_type(bytes);
-                          not IsPacked -> encode_wire_type(Type)
+    ExpectedWireType = if IsPacked     -> encode_wiretype(bytes);
+                          not IsPacked -> encode_wiretype(Type)
                        end,
     if WireType == ExpectedWireType -> {yes, IsPacked};
        WireType /= ExpectedWireType -> no
@@ -326,7 +326,7 @@ encode_field_value(Value, FNum, Type, MsgDefs) ->
       (encode_value(Value, Type, MsgDefs))/binary>>.
 
 encode_fnum_type(FNum, Type) ->
-    encode_varint((FNum bsl 3) bor encode_wire_type(Type)).
+    encode_varint((FNum bsl 3) bor encode_wiretype(Type)).
 
 encode_value(Value, Type, MsgDefs) ->
     case Type of
@@ -383,23 +383,23 @@ encode_value(Value, Type, MsgDefs) ->
     end.
 
 
-encode_wire_type(sint32)            -> 0;
-encode_wire_type(sint64)            -> 0;
-encode_wire_type(int32)             -> 0;
-encode_wire_type(int64)             -> 0;
-encode_wire_type(uint32)            -> 0;
-encode_wire_type(uint64)            -> 0;
-encode_wire_type(bool)              -> 0;
-encode_wire_type({enum, _EnumName}) -> 0;
-encode_wire_type(fixed64)           -> 1;
-encode_wire_type(sfixed64)          -> 1;
-encode_wire_type(double)            -> 1;
-encode_wire_type(string)            -> 2;
-encode_wire_type(bytes)             -> 2;
-encode_wire_type({msg,_MsgName})    -> 2;
-encode_wire_type(fixed32)           -> 5;
-encode_wire_type(sfixed32)          -> 5;
-encode_wire_type(float)             -> 5.
+encode_wiretype(sint32)            -> 0;
+encode_wiretype(sint64)            -> 0;
+encode_wiretype(int32)             -> 0;
+encode_wiretype(int64)             -> 0;
+encode_wiretype(uint32)            -> 0;
+encode_wiretype(uint64)            -> 0;
+encode_wiretype(bool)              -> 0;
+encode_wiretype({enum, _EnumName}) -> 0;
+encode_wiretype(fixed64)           -> 1;
+encode_wiretype(sfixed64)          -> 1;
+encode_wiretype(double)            -> 1;
+encode_wiretype(string)            -> 2;
+encode_wiretype(bytes)             -> 2;
+encode_wiretype({msg,_MsgName})    -> 2;
+encode_wiretype(fixed32)           -> 5;
+encode_wiretype(sfixed32)          -> 5;
+encode_wiretype(float)             -> 5.
 
 
 decode_varint(Bin) -> de_vi(Bin, 0, 0).

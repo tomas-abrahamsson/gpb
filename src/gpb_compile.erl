@@ -514,7 +514,7 @@ find_msgsize_2([#field{occurrence=repeated} | _Rest], _AccSize, _Defs, _T) ->
 find_msgsize_2([#field{occurrence=optional} | _Rest], _AccSize, _Defs, _T) ->
     undefined;
 find_msgsize_2([#field{type=Type, fnum=FNum} | Rest], AccSize, Defs, T) ->
-    FKey = gpb:encode_varint((FNum bsl 3) bor gpb:encode_wire_type(Type)),
+    FKey = gpb:encode_varint((FNum bsl 3) bor gpb:encode_wiretype(Type)),
     FKeySize = byte_size(FKey),
     case Type of
         sint32   -> undefined;
@@ -715,7 +715,7 @@ format_msg_encoder(MsgName, MsgDef) ->
      "\n"].
 
 mk_key_txt(FNum, Type) ->
-    Key = (FNum bsl 3) bor gpb:encode_wire_type(Type),
+    Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
     varint_to_byte_text(Key).
 
 mk_field_encode_fn_name(MsgName, #field{occurrence=repeated, name=FName}) ->
@@ -1073,8 +1073,8 @@ format_read_field_cases(MsgName, MsgDef) ->
     [indent(8, f("{~p,~p} -> ~p(Rest~sMsg);~n",
                  [FNum,
                   case is_packed(FieldDef) of
-                      true  -> gpb:encode_wire_type(bytes);
-                      false -> gpb:encode_wire_type(Type)
+                      true  -> gpb:encode_wiretype(bytes);
+                      false -> gpb:encode_wiretype(Type)
                   end,
                   mk_fn(d_field_, MsgName, FName),
                   case mk_field_decoder_vi_params(FieldDef) of
