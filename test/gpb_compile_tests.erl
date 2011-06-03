@@ -28,7 +28,12 @@
 %% (I know it is a bit unorthodox to include .erl files,
 %% but actually seems to work. Better than duplicating tests)
 -define(gpb_compile_common_tests, true).
+-ifdef(gpb_compile_common_tests).
 -include("gpb_tests.erl").
+-else.  %% gpb_compile_common_tests
+-record(m1,{a}).
+-endif. %% gpb_compile_common_tests
+
 
 parses_non_importing_file_test() ->
     Contents = iolist_to_binary(
@@ -136,7 +141,7 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     unload_code(M1),
     unload_code(M2).
 
-%% --- decoder tests -----------------
+%% --- decoder tests ---------------
 
 decodes_overly_long_varints_test() ->
     M = compile_defs([{{msg,m1}, [#field{name=a, type=int32, fnum=1, rnum=#m1.a,
@@ -145,11 +150,94 @@ decodes_overly_long_varints_test() ->
     #m1{a=54} = M:decode_msg(<<8, (128+54), 128, 128, 0>>, m1),
     unload_code(M).
 
+%% --- format_error tests ----------
+
+format_error_works_for_scan_errors_test() ->
+    compile_and_assert_that_format_error_produces_iolist(
+      ["message Msg ~~ required uint32 field1 = & }\n"],
+      ["parse"]).
+
+format_error_works_for_parse_errors_test() ->
+    compile_and_assert_that_format_error_produces_iolist(
+      ["message Msg { required uint32 field1 = }\n"],
+      ["parse"]).
+
+format_error_works_when_failed_to_read_import_file_test() ->
+    compile_and_assert_that_format_error_produces_iolist(
+      ["import \"ZZ.proto\";\n",
+       "message Msg { required uint32 field1 = 2;}\n"],
+      [{read_file, [{"ZZ.proto", {error, eacces}}]}],
+      ["read", "permission denied"]).
+
+format_error_works_when_import_file_not_found_test() ->
+    compile_and_assert_that_format_error_produces_iolist(
+      ["import \"ZZ.proto\";\n",
+       "message Msg { required uint32 field1 = 2;}\n"],
+      [{read_file_info, [{"ZZ.proto", {error, enoent}}]}],
+      ["import", "not"]).
+
+format_error_works_for_verification_erros_test() ->
+    compile_and_assert_that_format_error_produces_iolist(
+      ["message Msg1 { required Msg2 field1 = 2;}\n"],
+      ["Msg2", "Msg1", "field1"]).
+
+compile_and_assert_that_format_error_produces_iolist(Contents, ExpectedWords) ->
+    compile_and_assert_that_format_error_produces_iolist(
+      Contents, [], ExpectedWords).
+
+compile_and_assert_that_format_error_produces_iolist(Contents,
+                                                     ExtraFileOpReturnValues,
+                                                     ExpectedPhrases) ->
+    FileContents = iolist_to_binary(Contents),
+    FileRetriever = mk_file_retriever(FileContents, ExtraFileOpReturnValues),
+    FileInfoReader = mk_read_file_info("X.proto", ExtraFileOpReturnValues),
+    Res = gpb_compile:file(
+            "X.proto",
+            [mk_fileop_opt([{read_file, FileRetriever},
+                            {read_file_info, FileInfoReader}]),
+             mk_defs_probe_sender_opt(self()),
+             {i,"."}]),
+    ?assertMatch({error,_}, Res),
+    Txt = gpb_compile:format_error(Res),
+    IsIoList = io_lib:deep_char_list(Txt),
+    ?assertMatch({true, _}, {IsIoList, Txt}),
+    FlatTxt = lists:flatten(Txt),
+    PhrasesFound = [string:str(FlatTxt, Word) > 0 || Word <- ExpectedPhrases],
+    AllPhrasesFound = lists:all(fun id/1, PhrasesFound),
+    ?assertMatch({true,_,_}, {AllPhrasesFound, FlatTxt, PhrasesFound}).
+
+mk_file_retriever(MainProtoFileContents, ExtraFileOpReturnValues) ->
+    ExtraFileReturnValues =
+        proplists:get_value(read_file, ExtraFileOpReturnValues, []),
+    fun(FileName) ->
+            case lists:keysearch(FileName, 1, ExtraFileReturnValues) of
+                {value, {FileName, ReturnValue}} ->
+                    ReturnValue;
+                false ->
+                    {ok, MainProtoFileContents}
+            end
+    end.
+
+mk_read_file_info(_MainProtoFileName, ExtraFileOpReturnValues) ->
+    ExtraFileReturnValues =
+        proplists:get_value(read_file_info, ExtraFileOpReturnValues, []),
+    fun(FileName) ->
+            case lists:keysearch(FileName, 1, ExtraFileReturnValues) of
+                {value, {FileName, ReturnValue}} ->
+                    ReturnValue;
+                false ->
+                    {ok, #file_info{access=read}}
+            end
+    end.
+
+
+
 %% --- auxiliaries -----------------
 
 %% vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 %% begin functions that imitates the interface of the gpb module
 %% needed by the common/shared tests included above from gpb_tests.erl
+-ifdef(gpb_compile_common_tests).
 decode_msg(Bin, MsgName, MsgDefs) ->
     M = compile_defs(MsgDefs),
     try M:decode_msg(Bin, MsgName)
@@ -173,6 +261,7 @@ verify_msg(Msg, MsgDefs) ->
     try M:verify_msg(Msg)
     after unload_code(M)
     end.
+-endif. %% gpb_compile_common_tests
 %% end of functions that imitates the interface of the gpb module
 %% ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -206,5 +295,7 @@ find_unused_module(N) ->
         false    -> ModNameCandidate;
         {file,_} -> find_unused_module(N+1)
     end.
+
+id(X) -> X.
 
 f(Fmt, Args) -> lists:flatten(io_lib:format(Fmt, Args)).

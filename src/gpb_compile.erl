@@ -20,6 +20,7 @@
 %-compile(export_all).
 -export([file/1, file/2]).
 -export([msg_defs/2, msg_defs/3]).
+-export([format_error/1]).
 -export([c/0, c/1]). % Command line interface, halts vm---don't use from shell!
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -121,6 +122,9 @@ file(File) ->
 %%           message this many times or more larger than the size of the
 %%           bytes/(sub-)binary.</dd>
 %% </dl>
+%%
+%% See {@link format_error/1} for a way to turn an error <i>Reason</i> to
+%% plain text.
 file(File, Opts) ->
     case parse_file(File, Opts) of
         {ok, Defs} ->
@@ -174,6 +178,28 @@ msg_defs(Mod, Defs0, Opts0) ->
             file_write_file(Hrl, format_hrl(Mod, Defs, Opts1), Opts1)
     end.
 
+%% @spec format_error({error, Reason} | Reason) -> io_list()
+%%           Reason = term()
+%%
+%% @doc Produce a plain-text error message from a reason returned by
+%% for instance {@link file/2} or {@link msg_defs/2}.
+format_error({error, Reason}) -> fmt_err(Reason);
+format_error(Reason)          -> fmt_err(Reason).
+
+%% Note: do NOT include trailing newline (\n or ~n)
+fmt_err({parse_error, PlainText, _Reason}) ->
+    "parse error: " ++ PlainText;
+fmt_err({scan_error, PlainText, _Line}) ->
+    "parse error: " ++ PlainText;
+fmt_err({import_not_found, Import}) ->
+    f("Could not find import file ~p", [Import]);
+fmt_err({read_failed, File, Reason}) ->
+    f("failed to read ~p: ~s (~p)", [File, file:format_error(Reason), Reason]);
+fmt_err({verification, Reasons}) ->
+    gpb_parse:format_verification_error({error, Reasons});
+fmt_err(X) ->
+    f("Unexpected error ~p", [X]).
+
 %% @doc Command line interface for the compiler.
 %% With no proto file to compile, print a help message and exit.
 -spec c() -> no_return().
@@ -223,7 +249,7 @@ c([File]) when is_atom(File); is_list(File) -> %% invoked with -s or -run
                 ok ->
                     init:stop(0);
                 {error, Reason} ->
-                    io:format("Error: ~p~n", [Reason]),
+                    io:format("~s~n", [format_error(Reason)]),
                     init:stop(1)
             end
     end,
@@ -324,8 +350,8 @@ parse_file(FName, Opts) ->
                              gpb_parse:extend_msgs(
                                gpb_parse:resolve_refs(
                                  gpb_parse:reformat_names(Defs2)))))};
-                {error, _Reasons} = Error ->
-                    Error
+                {error, Reasons} ->
+                    {error, {verification, Reasons}}
             end;
         {error, Reason} ->
             {error, Reason}
@@ -336,13 +362,12 @@ parse_file_and_imports(FName, Opts) ->
 
 parse_file_and_imports(FName, AlreadyImported, Opts) ->
     case locate_import(FName, Opts) of
-        {ok, FName2} ->
-            {ok,B} = file_read_file(FName2, Opts),
+        {ok, Contents} ->
             %% Add to AlreadyImported to prevent trying to import it again: in
             %% case we get an error we don't want to try to reprocess it later
             %% (in case it is multiply imported) and get the error again.
             AlreadyImported2 = [FName | AlreadyImported],
-            case scan_and_parse_string(binary_to_list(B)) of
+            case scan_and_parse_string(binary_to_list(Contents)) of
                 {ok, Defs} ->
                     Imports = gpb_parse:fetch_imports(Defs),
                     read_and_parse_imports(Imports,AlreadyImported2,Defs,Opts);
@@ -403,7 +428,12 @@ locate_import_aux([Path | Rest], Import, Opts) ->
     File = filename:join(Path, Import),
     case file_read_file_info(File, Opts) of
         {ok, #file_info{access = A}} when A == read; A == read_write ->
-            {ok, File};
+            case file_read_file(File, Opts) of
+                {ok,B} ->
+                    {ok, B};
+                {error, Reason} ->
+                    {error, {read_failed, File, Reason}}
+            end;
         {ok, #file_info{}} ->
             locate_import_aux(Rest, Import, Opts);
         {error, _Reason} ->
