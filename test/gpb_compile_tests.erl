@@ -66,7 +66,8 @@ parses_msgdefs_to_binary_test() ->
     Defs = [{{msg,'Msg'},
              [#field{name=field1, rnum=2, fnum=1, type=uint32,
                      occurrence=required, opts=[]}]}],
-    {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs, [binary]),
+    M = find_unused_module(),
+    {ok, M, Code, []} = gpb_compile:msg_defs(M, Defs, [binary]),
     true = is_binary(Code).
 
 mk_fileop_opt(NonDefaults) ->
@@ -118,24 +119,22 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
                             fnum=1, rnum=2, opts=[]}]},
          {{enum,e}, [{x1, 1}, {x2, 2}]} %% all enum values same encode size
         ],
-    {ok, 'X', Code1, []} = gpb_compile:msg_defs('X', CommonDefs++KnownSizeM2,
-                                                [binary]),
-    {ok, 'X', Code2, []} = gpb_compile:msg_defs('X', CommonDefs++UnknownSizeM2,
-                                                [binary]),
+
+    M1 = compile_defs(CommonDefs++KnownSizeM2),
+    M2 = compile_defs(CommonDefs++UnknownSizeM2),
     Msg = #m1{a=#m2{aa=x1, bb=33, cc=44}},
-    load_code('X',Code1),
-    Encoded1 = 'X':encode_msg(Msg),
-    load_code('X',Code2),
-    Encoded2 = 'X':encode_msg(Msg),
-    Encoded1 = Encoded2.
+    Encoded1 = M1:encode_msg(Msg),
+    Encoded2 = M2:encode_msg(Msg),
+    Encoded1 = Encoded2,
+    unload_code(M1),
+    unload_code(M2).
 
 decodes_overly_long_varints_test() ->
-    Defs = [{{msg,m1}, [#field{name=a, type=int32, occurrence=required,
-                               fnum=1, rnum=2, opts=[]}]}],
-    {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs, [binary]),
-    load_code('X',Code),
-    #m1{a=54} = 'X':decode_msg(<<8, 54>>, m1), %% canonically encoded
-    #m1{a=54} = 'X':decode_msg(<<8, (128+54), 128, 128, 0>>, m1).
+    M = compile_defs([{{msg,m1}, [#field{name=a, type=int32, fnum=1, rnum=#m1.a,
+                                         occurrence=required, opts=[]}]}]),
+    #m1{a=54} = M:decode_msg(<<8, 54>>, m1), %% canonically encoded
+    #m1{a=54} = M:decode_msg(<<8, (128+54), 128, 128, 0>>, m1),
+    unload_code(M).
 
 decode_skips_nonpacked_fields_if_wiretype_mismatches_test() ->
     #m1{a=undefined} =
@@ -154,28 +153,47 @@ decode_skips_packed_fields_if_wiretype_mismatches_test() ->
                                        occurrence=repeated, opts=[packed]}]}]).
 
 verifies_sequences_test() ->
-    Defs = [{{msg,m1}, [#field{name=a, type=int32, occurrence=repeated,
-                               fnum=1, rnum=2, opts=[]}]}],
-    {ok, 'X', Code, []} = gpb_compile:msg_defs('X', Defs,
-                                               [binary, {verify, always}]),
-    load_code('X',Code),
-    <<8,54>> = 'X':encode_msg(#m1{a=[54]}),
-    ?assertError({gpb_type_error, _},
-                 'X':encode_msg(#m1{a=gurka})).
+    M = compile_defs([{{msg,m1}, [#field{name=a, type=int32, fnum=1, rnum=#m1.a,
+                                         occurrence=repeated, opts=[]}]}]),
+    <<8,54>> = M:encode_msg(#m1{a=[54]}),
+    ?assertError({gpb_type_error, _},  M:encode_msg(#m1{a=gurka})),
+    unload_code(M).
 
 decode_msg(Bin, MsgName, MsgDefs) ->
-    Opts = [binary, {verify, always}],
-    {ok, 'X', Code, []} = gpb_compile:msg_defs('X', MsgDefs, Opts),
-    load_code('X', Code),
-    'X':decode_msg(Bin, MsgName).
+    M = compile_defs(MsgDefs),
+    Result = M:decode_msg(Bin, MsgName),
+    unload_code(M),
+    Result.
+
+compile_defs(MsgDefs) ->
+    compile_defs(MsgDefs, [{verify, always}]).
+
+compile_defs(MsgDefs, ExtraOpts) ->
+    Mod = find_unused_module(),
+    Opts = [binary | ExtraOpts],
+    {ok, Mod, Code, []} = gpb_compile:msg_defs(Mod, MsgDefs, Opts),
+    load_code(Mod, Code),
+    Mod.
 
 load_code(Mod, Code) ->
-    delete_old_versions_of_code(Mod),
-    {module, Mod} = code:load_binary(Mod, "<nofile>", Code).
+    unload_code(Mod),
+    {module, Mod} = code:load_binary(Mod, "<nofile>", Code),
+    ok.
 
-delete_old_versions_of_code(Mod) ->
+unload_code(Mod) ->
     code:purge(Mod),
     code:delete(Mod),
     code:purge(Mod),
     code:delete(Mod),
     ok.
+
+find_unused_module() -> find_unused_module(1).
+
+find_unused_module(N) ->
+    ModNameCandidate = list_to_atom(f("~s-tmp-~w", [?MODULE, N])),
+    case code:is_loaded(ModNameCandidate) of
+        false    -> ModNameCandidate;
+        {file,_} -> find_unused_module(N+1)
+    end.
+
+f(Fmt, Args) -> lists:flatten(io_lib:format(Fmt, Args)).
