@@ -74,18 +74,21 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
         false ->
             Rest2 = skip_field(Rest, WireType),
             decode_field(Rest2, MsgDef, MsgDefs, Msg);
-        {value, #field{type = FieldType, rnum=RNum, opts=Opts} = FieldDef} ->
-            case proplists:get_bool(packed, Opts) of
-                true ->
+        {value, #field{type = FieldType, rnum=RNum} = FieldDef} ->
+            case fielddef_matches_wiretype_get_packed(WireType, FieldDef) of
+                {yes,true} ->
                     AccSeq = element(RNum, Msg),
                     {NewSeq, Rest2} = decode_packed(FieldType, Rest, MsgDefs,
                                                    AccSeq),
                     NewMsg = setelement(RNum, Msg, NewSeq),
                     decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
-                false ->
+                {yes,false} ->
                     {NewValue, Rest2} = decode_type(FieldType, Rest, MsgDefs),
                     NewMsg = add_field(NewValue, FieldDef, MsgDefs, Msg),
-                    decode_field(Rest2, MsgDef, MsgDefs, NewMsg)
+                    decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
+                no ->
+                    Rest2 = skip_field(Rest, WireType),
+                    decode_field(Rest2, MsgDef, MsgDefs, Msg)
             end
     end;
 decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
@@ -98,6 +101,15 @@ decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
                 end,
                 Record0,
                 RepeatedRNums).
+
+fielddef_matches_wiretype_get_packed(WireType, #field{type=Type}=FieldDef) ->
+    IsPacked = is_packed(FieldDef),
+    ExpectedWireType = if IsPacked     -> encode_wire_type(bytes);
+                          not IsPacked -> encode_wire_type(Type)
+                       end,
+    if WireType == ExpectedWireType -> {yes, IsPacked};
+       WireType /= ExpectedWireType -> no
+    end.
 
 decode_wiretype(0) -> varint;
 decode_wiretype(1) -> bits64;

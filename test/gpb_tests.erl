@@ -209,6 +209,22 @@ decoding_two_packed_chunks_of_varints_test() ->
                                        occurrence=repeated, opts=[packed]}]}]),
     ok.
 
+decode_skips_nonpacked_fields_if_wiretype_mismatches_test() ->
+    #m1{a=undefined} =
+        decode_msg(<<9, %% 9 means wiretype=bits64 instead of expected varint
+                     0:64>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
+                                       occurrence=optional, opts=[]}]}]).
+
+decode_skips_packed_fields_if_wiretype_mismatches_test() ->
+    #m1{a=[]} =
+        decode_msg(<<9, %% 9 means wiretype=bits64 instead of expected varint
+                     0:64>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
+                                       occurrence=repeated, opts=[packed]}]}]).
+
 %% -------------------------------------------------------------
 
 encode_required_varint_field_test() ->

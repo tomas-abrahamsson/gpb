@@ -137,6 +137,22 @@ decodes_overly_long_varints_test() ->
     #m1{a=54} = 'X':decode_msg(<<8, 54>>, m1), %% canonically encoded
     #m1{a=54} = 'X':decode_msg(<<8, (128+54), 128, 128, 0>>, m1).
 
+decode_skips_nonpacked_fields_if_wiretype_mismatches_test() ->
+    #m1{a=undefined} =
+        decode_msg(<<9, %% 9 means wiretype=bits64 instead of expected varint
+                     0:64>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
+                                       occurrence=optional, opts=[]}]}]).
+
+decode_skips_packed_fields_if_wiretype_mismatches_test() ->
+    #m1{a=[]} =
+        decode_msg(<<9, %% 9 means wiretype=bits64 instead of expected varint
+                     0:64>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
+                                       occurrence=repeated, opts=[packed]}]}]).
+
 verifies_sequences_test() ->
     Defs = [{{msg,m1}, [#field{name=a, type=int32, occurrence=repeated,
                                fnum=1, rnum=2, opts=[]}]}],
@@ -146,6 +162,12 @@ verifies_sequences_test() ->
     <<8,54>> = 'X':encode_msg(#m1{a=[54]}),
     ?assertError({gpb_type_error, _},
                  'X':encode_msg(#m1{a=gurka})).
+
+decode_msg(Bin, MsgName, MsgDefs) ->
+    Opts = [binary, {verify, always}],
+    {ok, 'X', Code, []} = gpb_compile:msg_defs('X', MsgDefs, Opts),
+    load_code('X', Code),
+    'X':decode_msg(Bin, MsgName).
 
 load_code(Mod, Code) ->
     delete_old_versions_of_code(Mod),
