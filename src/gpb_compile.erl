@@ -174,11 +174,39 @@ msg_defs(Mod, Defs0, Opts0) ->
             file_write_file(Hrl, format_hrl(Mod, Defs, Opts1), Opts1)
     end.
 
+%% @doc Command line interface for the compiler.
+%% With no proto file to compile, print a help message and exit.
+-spec c() -> no_return().
 c() ->
     show_help(),
     init:stop(1),
     timer:sleep(infinity).
 
+%% @doc This function is intended as a command line interface for the compiler.
+%% Call it from the command line as follows:
+%% ```
+%%    erl <erlargs> [gpb-opts] -s gpb_compile c ProtoFile.proto
+%%    erl <erlargs> -s gpb_compile c ProtoFile.proto -extra [gpb-opts]
+%% '''
+%% The `<erlargs>' can be `-noshell -noinput +B -boot start_clean -pa SomeDir'
+%%
+%% The following options are supported:
+%% <dl>
+%%   <dt>`-IDir' `-I Dir'</dt>
+%%   <dd>Specify include directory.
+%%       Option may be specified more than once to specify
+%%       several include directories.</dd>
+%%   <dt>`-o Dir'</dt>
+%%   <dd>Specify output directory for where to generate
+%%       the <i>Protofile</i>.erl and <i>Protofile</i>.hrl</dd>
+%%   <dt>`-v optionally | always | never'</dt>
+%%   <dd>Specify how the generated encoder should
+%%       verify the message to be encoded.</dd>
+%%   <dt>`-c true | false | auto | integer() | float()'</dt>
+%%   <dd>Specify how or when the generated decoder should
+%%       copy fields of type `bytes'.</dd>
+%% </dl>
+-spec c([string() | atom()]) -> no_return().
 c([File]) when is_atom(File); is_list(File) -> %% invoked with -s or -run
     FileName = if is_atom(File) -> atom_to_list(File);
                   is_list(File) -> File
