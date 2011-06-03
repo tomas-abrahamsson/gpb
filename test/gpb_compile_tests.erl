@@ -155,12 +155,12 @@ decodes_overly_long_varints_test() ->
 format_error_works_for_scan_errors_test() ->
     compile_and_assert_that_format_error_produces_iolist(
       ["message Msg ~~ required uint32 field1 = & }\n"],
-      ["parse"]).
+      [".proto:1: "]).
 
 format_error_works_for_parse_errors_test() ->
     compile_and_assert_that_format_error_produces_iolist(
       ["message Msg { required uint32 field1 = }\n"],
-      ["parse"]).
+      [".proto:1: ", "syntax error"]).
 
 format_error_works_when_failed_to_read_import_file_test() ->
     compile_and_assert_that_format_error_produces_iolist(

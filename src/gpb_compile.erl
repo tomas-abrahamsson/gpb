@@ -187,10 +187,10 @@ format_error({error, Reason}) -> fmt_err(Reason);
 format_error(Reason)          -> fmt_err(Reason).
 
 %% Note: do NOT include trailing newline (\n or ~n)
-fmt_err({parse_error, PlainText, _Reason}) ->
-    "parse error: " ++ PlainText;
-fmt_err({scan_error, PlainText, _Line}) ->
-    "parse error: " ++ PlainText;
+fmt_err({parse_error, FileName, {Line, Module, ErrInfo}}) ->
+    f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
+fmt_err({scan_error, FileName, {Line, Module, ErrInfo}}) ->
+    f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
 fmt_err({import_not_found, Import}) ->
     f("Could not find import file ~p", [Import]);
 fmt_err({read_failed, File, Reason}) ->
@@ -367,7 +367,7 @@ parse_file_and_imports(FName, AlreadyImported, Opts) ->
             %% case we get an error we don't want to try to reprocess it later
             %% (in case it is multiply imported) and get the error again.
             AlreadyImported2 = [FName | AlreadyImported],
-            case scan_and_parse_string(binary_to_list(Contents)) of
+            case scan_and_parse_string(binary_to_list(Contents), FName) of
                 {ok, Defs} ->
                     Imports = gpb_parse:fetch_imports(Defs),
                     read_and_parse_imports(Imports,AlreadyImported2,Defs,Opts);
@@ -378,18 +378,17 @@ parse_file_and_imports(FName, AlreadyImported, Opts) ->
             {error, Reason}
     end.
 
-scan_and_parse_string(S) ->
+scan_and_parse_string(S, FName) ->
     case gpb_scan:string(S) of
         {ok, Tokens, _} ->
             case gpb_parse:parse(Tokens++[{'$end', 999}]) of
                 {ok, Result} ->
                     {ok, Result};
-                {error, {_LNum,_Module,_EMsg}=Reason} ->
-                    {error, {parse_error,S,Reason}}
+                {error, {_Line, _Module, _ErrInfo}=Reason} ->
+                    {error, {parse_error, FName, Reason}}
             end;
-        {error, {Line0, Module, ErrInfo}, _Line1} ->
-            Reason = Module:format_error(ErrInfo),
-            {error, {scan_error, Reason, Line0}}
+        {error, {_Line0, _Module, _ErrInfo}=Reason, _Line1} ->
+            {error, {scan_error, FName, Reason}}
     end.
 
 
