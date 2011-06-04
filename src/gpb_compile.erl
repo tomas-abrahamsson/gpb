@@ -1107,11 +1107,10 @@ format_msg_decoder_read_field(MsgName, MsgDef) ->
                "    end;~n",
                [MsgName,MsgName,MsgName,MsgName]);
         true ->
-             f("    WireType = Key band 7,~n"
-               "    case {Key bsr 3, WireType} of~n"
+             f("    case Key of~n"
                "~s"
                "        _ ->~n"
-               "            case WireType of~n"
+               "            case Key band 7 of %% wiretype~n"
                "                0 -> skip_varint_~s(Rest, Msg);~n"
                "                1 -> skip_64_~s(Rest, Msg);~n"
                "                2 -> skip_length_delimited_~s(Rest,0,0,Msg);~n"
@@ -1127,17 +1126,19 @@ format_msg_decoder_read_field(MsgName, MsgDef) ->
         mk_fn(d_reverse_toplevel_fields_, MsgName)])].
 
 format_read_field_cases(MsgName, MsgDef) ->
-    [indent(8, f("{~p,~p} -> ~p(Rest~sMsg);~n",
-                 [FNum,
-                  case is_packed(FieldDef) of
-                      true  -> gpb:encode_wiretype(bytes);
-                      false -> gpb:encode_wiretype(Type)
-                  end,
-                  mk_fn(d_field_, MsgName, FName),
+    [begin
+         Wiretype = case is_packed(FieldDef) of
+                        true  -> gpb:encode_wiretype(bytes);
+                        false -> gpb:encode_wiretype(Type)
+                    end,
+         Key = (FNum bsl 3) bor Wiretype,
+         indent(8, f("~w -> ~p(Rest~sMsg);~n",
+                 [Key, mk_fn(d_field_, MsgName, FName),
                   case mk_field_decoder_vi_params(FieldDef) of
                       ""     -> [", "];
                       Params -> [", ", Params, ", "]
                   end]))
+     end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
 
