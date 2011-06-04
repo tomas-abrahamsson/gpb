@@ -83,6 +83,14 @@ parses_msgdefs_to_binary_test() ->
     {ok, M, Code, []} = gpb_compile:msg_defs(M, Defs, [binary]),
     true = is_binary(Code).
 
+parses_and_generates_good_code_also_for_reserved_keywords_test() ->
+    %% use erlang reserved words on as many .proto locations as possible
+    %% to verify that the generated code compiles and works.
+    M = compile_iolist(["enum if { begin=1; end=2; }"
+                        "message catch { required if case = 1; }\n"]),
+    ?assertMatch(true, is_binary(M:encode_msg({'catch', 'begin'}))),
+    unload_code(M).
+
 mk_fileop_opt(NonDefaults) ->
     {file_op,
      fun(read_file_info, [FileName]) ->
@@ -272,6 +280,18 @@ compile_defs(MsgDefs, ExtraOpts) ->
     Mod = find_unused_module(),
     Opts = [binary | ExtraOpts],
     {ok, Mod, Code, []} = gpb_compile:msg_defs(Mod, MsgDefs, Opts),
+    load_code(Mod, Code),
+    Mod.
+
+compile_iolist(IoList) ->
+    Mod = find_unused_module(),
+    Contents = iolist_to_binary(IoList),
+    {ok, Mod, Code, []} =
+        gpb_compile:file(
+          f("~s.proto", [Mod]),
+          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+           {i,"."},
+           binary]),
     load_code(Mod, Code),
     Mod.
 
