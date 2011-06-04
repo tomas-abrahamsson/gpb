@@ -35,6 +35,7 @@ Nonterminals
         constant
         integer
         string_expr
+        fidentifier
         .
 
 Terminals
@@ -121,13 +122,13 @@ msg_elems -> msg_elem msg_elems:        ['$1' | '$2'].
 msg_elems -> ';' msg_elems:             '$2'.
 msg_elems -> '$empty':                  [].
 
-msg_elem -> cardinality type identifier '=' dec_lit ';':
+msg_elem -> cardinality type fidentifier '=' dec_lit ';':
                                         #field{occurrence='$1',
                                                type='$2',
                                                name=identifier_name('$3'),
                                                fnum=literal_value('$5'),
                                                opts=[]}.
-msg_elem -> cardinality type identifier '=' dec_lit '[' opt_field_opts ']' ';':
+msg_elem -> cardinality type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
                                         #field{occurrence='$1',
                                                type='$2',
                                                name=identifier_name('$3'),
@@ -136,6 +137,42 @@ msg_elem -> cardinality type identifier '=' dec_lit '[' opt_field_opts ']' ';':
 msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
 msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
+
+fidentifier -> identifier:              '$1'.
+fidentifier -> package:                 kw_to_identifier('$1').
+fidentifier -> service:                 kw_to_identifier('$1').
+fidentifier -> enum:                    kw_to_identifier('$1').
+fidentifier -> message:                 kw_to_identifier('$1').
+fidentifier -> required:                kw_to_identifier('$1').
+fidentifier -> optional:                kw_to_identifier('$1').
+fidentifier -> repeated:                kw_to_identifier('$1').
+fidentifier -> double:                  kw_to_identifier('$1').
+fidentifier -> 'float':                 kw_to_identifier('$1').
+fidentifier -> int32:                   kw_to_identifier('$1').
+fidentifier -> int64:                   kw_to_identifier('$1').
+fidentifier -> uint32:                  kw_to_identifier('$1').
+fidentifier -> uint64:                  kw_to_identifier('$1').
+fidentifier -> sint32:                  kw_to_identifier('$1').
+fidentifier -> sint64:                  kw_to_identifier('$1').
+fidentifier -> fixed32:                 kw_to_identifier('$1').
+fidentifier -> fixed64:                 kw_to_identifier('$1').
+fidentifier -> sfixed32:                kw_to_identifier('$1').
+fidentifier -> sfixed64:                kw_to_identifier('$1').
+fidentifier -> bool:                    kw_to_identifier('$1').
+fidentifier -> string:                  kw_to_identifier('$1').
+fidentifier -> bytes:                   kw_to_identifier('$1').
+fidentifier -> bool_lit:                kw_to_identifier(literal_value('$1')).
+fidentifier -> default:                 kw_to_identifier('$1').
+fidentifier -> import:                  kw_to_identifier('$1').
+fidentifier -> option:                  kw_to_identifier('$1').
+fidentifier -> extensions:              kw_to_identifier('$1').
+fidentifier -> extend:                  kw_to_identifier('$1').
+fidentifier -> max:                     kw_to_identifier('$1').
+fidentifier -> to:                      kw_to_identifier('$1').
+fidentifier -> rpc:                     kw_to_identifier('$1').
+fidentifier -> returns:                 kw_to_identifier('$1').
+fidentifier -> packed:                  kw_to_identifier('$1').
+fidentifier -> deprecated:              kw_to_identifier('$1').
 
 opt_field_opts -> field_opts:           '$1'.
 opt_field_opts -> '$empty':             [].
@@ -232,6 +269,9 @@ Erlang code.
 -export([fetch_imports/1]).
 
 identifier_name({identifier, _Line, Name}) -> list_to_atom(Name).
+
+kw_to_identifier({Kw, Line}) ->
+    {identifier, Line, atom_to_list(Kw)}.
 
 literal_value({_TokenType, _Line, Value}) -> Value.
 
