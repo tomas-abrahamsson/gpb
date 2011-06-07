@@ -175,8 +175,11 @@ report_or_return_warnings_or_errors_test() ->
                       ],
         CompileTo  <- [to_binary, to_file],
         SrcType    <- [from_file, from_defs],
-        SrcQuality <- [clean_code, warningful_code, erroneous_code],
-        not (SrcQuality == erroneous_code andalso SrcType == from_defs)].
+        SrcQuality <- [clean_code, warningful_code, erroneous_code,
+                       write_fails],
+        %% Exclude a few combos
+        not (SrcQuality == erroneous_code andalso SrcType == from_defs),
+        not (SrcQuality == write_fails andalso CompileTo == to_binary)].
 
 rwre_go(Options, CompileTo, SrcType, SrcQuality) ->
     ExpectedReturn = compute_expected_return(Options, CompileTo, SrcQuality),
@@ -190,6 +193,8 @@ rwre_go(Options, CompileTo, SrcType, SrcQuality) ->
                 Options, CompileTo, SrcType, SrcQuality),
     ok.
 
+compute_expected_return(Options, CompileTo, write_fails) ->
+    compute_expected_return(Options, CompileTo, erroneous_code);
 compute_expected_return(Options, to_file, SrcQuality) ->
     WarnOpt = get_warning_opt(Options),
     ErrOpt = get_error_opt(Options),
@@ -236,6 +241,8 @@ compute_expected_output(Options, warningful_code) ->
         {return, report} -> "";
         {return, return} -> ""
     end;
+compute_expected_output(Options, write_fails) ->
+    compute_expected_output(Options, erroneous_code);
 compute_expected_output(Options, erroneous_code) ->
     WarnOpt = get_warning_opt(Options),
     ErrOpt = get_error_opt(Options),
@@ -265,10 +272,12 @@ member(Elem, List) ->
 
 compile_the_code(Options, CompileTo, from_defs, SrcQuality) ->
     compile_msg_defs_get_output(get_proto_defs(SrcQuality),
-                                compute_compile_opts(Options, CompileTo));
+                                compute_compile_opts(Options, CompileTo,
+                                                     SrcQuality));
 compile_the_code(Options, CompileTo, from_file, SrcQuality) ->
     compile_file_get_output(get_proto_file(SrcQuality),
-                            compute_compile_opts(Options, CompileTo)).
+                            compute_compile_opts(Options, CompileTo,
+                                                 SrcQuality)).
 
 get_proto_defs(clean_code) ->
     [{{msg,m1}, [#field{name=field11, type=uint32, occurrence=optional,
@@ -278,7 +287,9 @@ get_proto_defs(warningful_code) ->
     [{{msg,m1}, [#field{name=field11, type={msg,m2}, occurrence=optional,
                         fnum=1, rnum=2, opts=[]}]},
      {{msg,m2}, [#field{name=field22, type={msg,m1}, occurrence=optional,
-                        fnum=2, rnum=2, opts=[]}]}].
+                        fnum=2, rnum=2, opts=[]}]}];
+get_proto_defs(write_fails) ->
+    get_proto_defs(clean_code).
 
 get_proto_file(clean_code) ->
     "message m1 { optional uint32 field11 = 1; }\n";
@@ -287,22 +298,47 @@ get_proto_file(warningful_code) ->
     ["message m1 { optional m2 field11 = 1; }\n"
      "message m2 { optional m1 field22 = 2; }\n"];
 get_proto_file(erroneous_code) ->
-    "g&~#".
+    "g&~#";
+get_proto_file(write_fails) ->
+    get_proto_file(clean_code).
 
-compute_compile_opts(Options, to_binary) -> [binary, type_specs | Options];
-compute_compile_opts(Options, to_file)   -> [type_specs | Options].
+compute_compile_opts(Options, CompileTo, write_fails) ->
+    compute_compile_opts_2(Options, CompileTo) ++ mk_failing_write_option();
+compute_compile_opts(Options, CompileTo, _SrcQuality) ->
+    compute_compile_opts_2(Options, CompileTo).
+
+compute_compile_opts_2(Options, to_binary) -> [binary, type_specs | Options];
+compute_compile_opts_2(Options, to_file)   -> [type_specs | Options].
+
+mk_failing_write_option() ->
+    [fail_write].
 
 compile_msg_defs_get_output(MsgDefs, Opts) ->
-    capture_stdout(fun() -> gpb_compile:msg_defs('x', MsgDefs, Opts) end).
+    Opts2 = case lists:member(fail_write, Opts) of
+                false ->
+                    Opts;
+                true ->
+                    RestOpts = Opts -- [fail_write],
+                    FOpt = mk_fileop_opt([{write_file,fun(_,_) -> {error,eacces}
+                                                      end}]),
+                    [FOpt | RestOpts]
+            end,
+    capture_stdout(fun() -> gpb_compile:msg_defs('x', MsgDefs, Opts2) end).
 
 compile_file_get_output(Txt, Opts) ->
     Contents = iolist_to_binary(Txt),
+    FailWrite = lists:member(fail_write, Opts),
+    RestOpts = Opts -- [fail_write],
+    FileOpOpts = if FailWrite -> mk_fileop_opt(
+                                   [{read_file, fun(_) -> {ok, Contents} end},
+                                    {write_file,fun(_, _) -> {error,eacces} end}
+                                   ]);
+                    true -> mk_fileop_opt(
+                              [{read_file, fun(_) -> {ok, Contents} end}])
+                 end,
     capture_stdout(
       fun() ->
-              gpb_compile:file(
-                "X.proto",
-                [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
-                 {i,"."} | Opts])
+              gpb_compile:file("X.proto", [FileOpOpts, {i,"."} | RestOpts])
       end).
 
 eval_return(Expected, Actual, Output,
@@ -419,6 +455,23 @@ handle_io_reqs([Req | Rest], Acc) ->
     handle_io_reqs(Rest, [Output | Acc]);
 handle_io_reqs([], Acc) ->
     {ok, lists:flatten(lists:reverse(Acc))}.
+
+failure_to_write_output_files_not_ignored_test() ->
+    Contents = <<"message m1 { optional uint32 field11 = 1; }\n">>,
+    CommonFileOpOpts = [{read_file, fun(_) -> {ok, Contents} end}],
+    CommonOpts = [{i,"."}, return],
+    WriteErlFailsOpts =
+        [mk_fileop_opt([{write_file, fun("X.erl", _) -> ok;
+                                        ("X.hrl", _) -> {error, eacces}
+                                     end} | CommonFileOpOpts]) | CommonOpts],
+    WriteHrlFailsOpts =
+        [mk_fileop_opt([{write_file, fun("X.erl", _) -> ok;
+                                        ("X.hrl", _) -> {error, eacces}
+                                     end} | CommonFileOpOpts]) | CommonOpts],
+    {error, _Reason, []}=Err1 = gpb_compile:file("X.proto", WriteErlFailsOpts),
+    {error, _Reason, []}=Err2 = gpb_compile:file("X.proto", WriteHrlFailsOpts),
+    gpb_compile:format_error(Err1),
+    gpb_compile:format_error(Err2).
 
 %% --- format_error tests ----------
 

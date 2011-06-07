@@ -164,12 +164,6 @@ file(File, Opts1) ->
             end
     end.
 
-possibly_report_error(Error, Opts) ->
-    case proplists:get_bool(report_errors, Opts) of
-        true  -> io:format("~s~n", [format_error(Error)]);
-        false -> ok
-    end.
-
 normalize_return_report_opts(Opts1) ->
     Opts2 = expand_opt(return, [return_warnings, return_errors], Opts1),
     Opts3 = expand_opt(report, [report_warnings, report_errors], Opts2),
@@ -220,9 +214,8 @@ msg_defs(Mod, Defs0, Opts0) ->
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs),
-    possibly_report_warnings(Warns, Opts2),
     Res1 = do_msg_defs(Defs, Mod, AnRes, Opts2),
-    possibly_return_warnings(Res1, Warns, Opts2).
+    return_or_report_warnings_or_errors(Res1, Warns, Opts2).
 
 do_msg_defs(Defs, Mod, AnRes, Opts) ->
     ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
@@ -234,12 +227,33 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
             Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
             Hrl = change_ext(Erl, ".hrl"),
             HrlTxt = format_hrl(Mod, Defs, Opts),
-            %% FIXME: verify that writing both files succeeds
-            file_write_file(Erl, ErlTxt, Opts),
-            file_write_file(Hrl, HrlTxt, Opts)
+            case {file_write_file(Erl, ErlTxt, Opts),
+                  file_write_file(Hrl, HrlTxt, Opts)} of
+                {ok, ok}        -> ok;
+                {{error, R}, _} -> {error, {write_failed, Erl, R}};
+                {_, {error, R}} -> {error, {write_failed, Hrl, R}}
+            end
     end.
 
-possibly_report_warnings(Warns, Opts) ->
+return_or_report_warnings_or_errors(Res, ExtraWarns, Opts) ->
+    Res2 = merge_res_warns(Res, ExtraWarns),
+    possibly_report_warnings(Res2, Opts),
+    possibly_report_error(Res2, Opts),
+    return_warnings_or_errors(Res2, Opts).
+
+merge_res_warns(ok, Warns)                  -> {ok, Warns};
+merge_res_warns({ok, Warns1}, Warns2)       -> {ok, Warns2++Warns1};
+merge_res_warns({ok, M, B}, Warns)          -> {ok, M, B, Warns};
+merge_res_warns({ok, M, B, Warns1}, Warns2) -> {ok, M, B, Warns2++Warns1};
+merge_res_warns({error, R}, Warns)          -> {error, R, Warns};
+merge_res_warns({error, R, Warns1}, Warns2) -> {error, R, Warns2++Warns1}.
+
+possibly_report_warnings(Result, Opts) ->
+    Warns = case Result of
+                {error, _Reason, Ws} -> Ws;
+                {ok, Ws}             -> Ws;
+                {ok, _M, _B, Ws}     -> Ws
+            end,
     case proplists:get_bool(report_warnings, Opts) of
         true  -> lists:foreach(fun report_warning/1, Warns);
         false -> ok
@@ -248,26 +262,36 @@ possibly_report_warnings(Warns, Opts) ->
 report_warning(Warn) ->
     io:format("~s~n", [format_warning(Warn)]).
 
-possibly_return_warnings({error, _}=Error, _Warns, _Opts) ->
-    Error;
-possibly_return_warnings(OkRes, Warns, Opts) ->
-    case proplists:get_bool(return_warnings, Opts) of
-        true  -> return_warnings(OkRes, Warns);
-        false -> OkRes
+possibly_report_error(Res, Opts) ->
+    case {Res, proplists:get_bool(report_errors, Opts)} of
+        {{error, _Reason, _Warns}, true} ->
+            io:format("~s~n", [format_error(Res)]);
+        {{error, _Reason}, true} ->
+            io:format("~s~n", [format_error(Res)]);
+        _ ->
+            ok
     end.
 
-return_warnings(ok, Warns)                  -> {ok, Warns};
-return_warnings({ok, Warns1}, Warns2)       -> {ok, Warns2++Warns1};
-return_warnings({ok, M, B}, Warns)          -> {ok, M, B, Warns};
-return_warnings({ok, M, B, Warns1}, Warns2) -> {ok, M, B, Warns2++Warns1}.
+return_warnings_or_errors(Res, Opts) ->
+    case proplists:get_bool(return_warnings, Opts) of
+        true ->
+            Res;
+        false ->
+            case Res of
+                {ok, _Warns}       -> ok;
+                {ok, M, B, _Warns} -> {ok, M, B};
+                {error, R, _Warns} -> {error, R}
+            end
+    end.
 
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()
 %%
 %% @doc Produce a plain-text error message from a reason returned by
 %% for instance {@link file/2} or {@link msg_defs/2}.
-format_error({error, Reason}) -> fmt_err(Reason);
-format_error(Reason)          -> fmt_err(Reason).
+format_error({error, Reason, _Warns}) -> fmt_err(Reason);
+format_error({error, Reason})         -> fmt_err(Reason);
+format_error(Reason)                  -> fmt_err(Reason).
 
 %% Note: do NOT include trailing newline (\n or ~n)
 fmt_err({parse_error, FileName, {Line, Module, ErrInfo}}) ->
@@ -280,6 +304,8 @@ fmt_err({read_failed, File, Reason}) ->
     f("failed to read ~p: ~s (~p)", [File, file:format_error(Reason), Reason]);
 fmt_err({verification, Reasons}) ->
     gpb_parse:format_verification_error({error, Reasons});
+fmt_err({write_failed, File, Reason}) ->
+    f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
 fmt_err(X) ->
     f("Unexpected error ~p", [X]).
 
@@ -293,7 +319,10 @@ fmt_err(X) ->
 format_warning(cyclic_message_dependencies) ->
   f("Warning: omitting type specs due to cyclic message references.");
 format_warning(X) ->
-  f("Warning: Unknown warning: ~p", [X]).
+    case io_lib:deep_char_list(X) of
+        true  -> X;
+        false -> f("Warning: Unknown warning: ~p", [X])
+    end.
 
 %% @doc Command line interface for the compiler.
 %% With no proto file to compile, print a help message and exit.
