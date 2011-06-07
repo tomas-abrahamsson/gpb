@@ -34,7 +34,6 @@
 -record(m1,{a}).
 -endif. %% gpb_compile_common_tests
 
-
 parses_non_importing_file_test() ->
     Contents = iolist_to_binary(
                  ["message Msg { required uint32 field1 = 1; }\n"]),
@@ -71,7 +70,7 @@ parses_file_to_binary_test() ->
           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
            mk_defs_probe_sender_opt(self()),
            {i,"."},
-           binary]),
+           binary, return_warnings]),
     true = is_binary(Code),
     [{{msg,'Msg'},_}] = receive_filter_sort_msgs_defs().
 
@@ -80,7 +79,7 @@ parses_msgdefs_to_binary_test() ->
              [#field{name=field1, rnum=2, fnum=1, type=uint32,
                      occurrence=required, opts=[]}]}],
     M = find_unused_module(),
-    {ok, M, Code, []} = gpb_compile:msg_defs(M, Defs, [binary]),
+    {ok, M, Code} = gpb_compile:msg_defs(M, Defs, [binary]),
     true = is_binary(Code).
 
 parses_and_generates_good_code_also_for_reserved_keywords_test() ->
@@ -157,6 +156,269 @@ decodes_overly_long_varints_test() ->
     #m1{a=54} = M:decode_msg(<<8, 54>>, m1), %% canonically encoded
     #m1{a=54} = M:decode_msg(<<8, (128+54), 128, 128, 0>>, m1),
     unload_code(M).
+
+%% --- Returning/reporting warnings/errors tests ----------
+%% ... when compiling to file/binary
+%% ... when there are/aren't warnings/errors
+
+report_or_return_warnings_or_errors_test() ->
+    [rwre_go(Options, CompileTo, SrcType, SrcQuality)
+     || Options    <- [[report_warnings, report_errors],
+                       [report_warnings],
+                       [report_errors],
+                       [return_warnings, return_errors],
+                       [return_warnings],
+                       [return_errors],
+                       [report_warnings, return_errors],
+                       [return_warnings, report_errors],
+                       []
+                      ],
+        CompileTo  <- [to_binary, to_file],
+        SrcType    <- [from_file, from_defs],
+        SrcQuality <- [clean_code, warningful_code, erroneous_code],
+        not (SrcQuality == erroneous_code andalso SrcType == from_defs)].
+
+rwre_go(Options, CompileTo, SrcType, SrcQuality) ->
+    ExpectedReturn = compute_expected_return(Options, CompileTo, SrcQuality),
+    ExpectedOutput = compute_expected_output(Options, SrcQuality),
+    {{return,Returned},
+     {output,Output}} = compile_the_code(Options, CompileTo,
+                                         SrcType, SrcQuality),
+    eval_return(ExpectedReturn, Returned, Output,
+                Options, CompileTo, SrcType, SrcQuality),
+    eval_output(ExpectedOutput, Output, Returned,
+                Options, CompileTo, SrcType, SrcQuality),
+    ok.
+
+compute_expected_return(Options, to_file, SrcQuality) ->
+    WarnOpt = get_warning_opt(Options),
+    ErrOpt = get_error_opt(Options),
+    case {WarnOpt, ErrOpt, SrcQuality} of
+        {report, report, clean_code}      -> ok;
+        {report, report, warningful_code} -> ok;
+        {report, report, erroneous_code}  -> {error, '_'};
+        {return, return, clean_code}      -> {ok, []};
+        {return, return, warningful_code} -> {ok, non_empty_list};
+        {return, return, erroneous_code}  -> {error, '_', []};
+        {report, return, clean_code}      -> ok;
+        {report, return, warningful_code} -> ok;
+        {report, return, erroneous_code}  -> {error, '_'};
+        {return, report, clean_code}      -> {ok, []};
+        {return, report, warningful_code} -> {ok, non_empty_list};
+        {return, report, erroneous_code}  -> {error, '_', []}
+    end;
+compute_expected_return(Options, to_binary, SrcQuality) ->
+    WarnOpt = get_warning_opt(Options),
+    ErrOpt = get_error_opt(Options),
+    case {WarnOpt, ErrOpt, SrcQuality} of
+        {report, report, clean_code}      -> {ok, mod, binary};
+        {report, report, warningful_code} -> {ok, mod, binary};
+        {report, report, erroneous_code}  -> {error, '_'};
+        {return, return, clean_code}      -> {ok, mod, binary, []};
+        {return, return, warningful_code} -> {ok, mod, binary, non_empty_list};
+        {return, return, erroneous_code}  -> {error, '_', []};
+        {report, return, clean_code}      -> {ok, mod, binary};
+        {report, return, warningful_code} -> {ok, mod, binary};
+        {report, return, erroneous_code}  -> {error, '_'};
+        {return, report, clean_code}      -> {ok, mod, binary, []};
+        {return, report, warningful_code} -> {ok, mod, binary, non_empty_list};
+        {return, report, erroneous_code}  -> {error, '_', []}
+    end.
+
+compute_expected_output(_Options, clean_code) ->
+    "";
+compute_expected_output(Options, warningful_code) ->
+    WarnOpt = get_warning_opt(Options),
+    ErrOpt = get_error_opt(Options),
+    case {WarnOpt, ErrOpt} of
+        {report, report} -> non_empty_list;
+        {report, return} -> non_empty_list;
+        {return, report} -> "";
+        {return, return} -> ""
+    end;
+compute_expected_output(Options, erroneous_code) ->
+    WarnOpt = get_warning_opt(Options),
+    ErrOpt = get_error_opt(Options),
+    case {WarnOpt, ErrOpt} of
+        {report, report} -> non_empty_list;
+        {report, return} -> "";
+        {return, report} -> non_empty_list;
+        {return, return} -> ""
+    end.
+
+get_warning_opt(Opts) ->
+    case {member(return_warnings, Opts), member(report_warnings, Opts)} of
+        {false, false} -> report; %% default
+        {true,  false} -> return;
+        {false,  true} -> report
+    end.
+
+get_error_opt(Opts) ->
+    case {member(return_errors, Opts), member(report_errors, Opts)} of
+        {false, false} -> report; %% default
+        {true,  false} -> return;
+        {false,  true} -> report
+    end.
+
+member(Elem, List) ->
+    lists:member(Elem, List).
+
+compile_the_code(Options, CompileTo, from_defs, SrcQuality) ->
+    compile_msg_defs_get_output(get_proto_defs(SrcQuality),
+                                compute_compile_opts(Options, CompileTo));
+compile_the_code(Options, CompileTo, from_file, SrcQuality) ->
+    compile_file_get_output(get_proto_file(SrcQuality),
+                            compute_compile_opts(Options, CompileTo)).
+
+get_proto_defs(clean_code) ->
+    [{{msg,m1}, [#field{name=field11, type=uint32, occurrence=optional,
+                        fnum=1, rnum=2, opts=[]}]}];
+get_proto_defs(warningful_code) ->
+    %% circular msg definitions ==> warning about omitting type specs
+    [{{msg,m1}, [#field{name=field11, type={msg,m2}, occurrence=optional,
+                        fnum=1, rnum=2, opts=[]}]},
+     {{msg,m2}, [#field{name=field22, type={msg,m1}, occurrence=optional,
+                        fnum=2, rnum=2, opts=[]}]}].
+
+get_proto_file(clean_code) ->
+    "message m1 { optional uint32 field11 = 1; }\n";
+get_proto_file(warningful_code) ->
+    %% circular msg definitions ==> warning about omitting type specs
+    ["message m1 { optional m2 field11 = 1; }\n"
+     "message m2 { optional m1 field22 = 2; }\n"];
+get_proto_file(erroneous_code) ->
+    "g&~#".
+
+compute_compile_opts(Options, to_binary) -> [binary, type_specs | Options];
+compute_compile_opts(Options, to_file)   -> [type_specs | Options].
+
+compile_msg_defs_get_output(MsgDefs, Opts) ->
+    capture_stdout(fun() -> gpb_compile:msg_defs('x', MsgDefs, Opts) end).
+
+compile_file_get_output(Txt, Opts) ->
+    Contents = iolist_to_binary(Txt),
+    capture_stdout(
+      fun() ->
+              gpb_compile:file(
+                "X.proto",
+                [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+                 {i,"."} | Opts])
+      end).
+
+eval_return(Expected, Actual, Output,
+            Options, CompileTo, SrcType, SrcQuality) ->
+    case match_values(Expected, Actual) of
+        true ->
+            ok;
+        false ->
+            erlang:error({bad_return,Expected,Actual,
+                          [{output,Output},
+                           {setup,{Options, CompileTo,
+                                   SrcType, SrcQuality}}]})
+    end.
+
+eval_output(Expected, Actual, Returned,
+            Options, CompileTo, SrcType, SrcQuality) ->
+    case match_value(Expected, Actual) of
+        true ->
+            ok;
+        false ->
+            erlang:error({bad_output,Expected,Actual,
+                          [{returned,Returned},
+                           {setup,{Options, CompileTo,
+                                   SrcType, SrcQuality}}]})
+    end.
+
+
+match_values(X, X) ->
+    true;
+match_values([E | ERest], [A | ARest]) ->
+    case match_value(E, A) of
+        true  -> match_values(ERest, ARest);
+        false -> false
+    end;
+match_values(ET, AT) when is_tuple(ET), is_tuple(AT),
+                          tuple_size(ET) == tuple_size(AT) ->
+    match_values(tuple_to_list(ET), tuple_to_list(AT));
+match_values(_, _) ->
+    false.
+
+match_value('_', _) ->
+    true;
+match_value(non_empty_list, X) when is_list(X), X /= [] ->
+    true;
+match_value(binary, X) when is_binary(X) ->
+    true;
+match_value(mod, X) when is_atom(X) ->
+    true;
+match_value(atom, X) when is_atom(X) ->
+    true;
+match_value(X, X)  ->
+    true;
+match_value(ET, AT) when is_tuple(ET), is_tuple(AT),
+                          tuple_size(ET)==tuple_size(AT) ->
+    match_values(ET, AT);
+match_value(_, _) ->
+    false.
+
+capture_stdout_actually_works_test() ->
+    Ret = x,
+    {{return, Ret},
+     {output, "z"}} = capture_stdout(fun() -> io:format("~s", [z]), Ret end).
+
+capture_stdout(Fun) ->
+    {_Pid,MRef} = spawn_monitor(
+                   fun() ->
+                           EvalExitWithResult = fun() -> exit(Fun()) end,
+                           group_leader(self(), self()),
+                           {_Pid, MRef} = spawn_monitor(EvalExitWithResult),
+                           handle_io_requests(MRef, [])
+                   end),
+    receive
+        {'DOWN', MRef, _, _, {{return, _Ret}, {output, _Output}}=Res} ->
+            Res
+    end.
+
+handle_io_requests(MRef, Acc) ->
+    receive
+        {'DOWN', MRef, _, _, FunRes} ->
+            exit({{return, FunRes},
+                  {output, lists:flatten(lists:reverse(Acc))}});
+        {io_request, From, ReplyAs, Req} ->
+            {IoRes, Output} = handle_io_req(Req),
+            From ! {io_reply, ReplyAs, IoRes},
+            handle_io_requests(MRef, [Output | Acc])
+    end.
+
+handle_io_req({put_chars, Mod, Fun, Args}) ->
+    {ok, apply(Mod, Fun, Args)};
+handle_io_req({put_chars, _Enc, Mod, Fun, Args}) ->
+    {ok, apply(Mod, Fun, Args)};
+handle_io_req({put_chars, Txt}) ->
+    {ok, Txt};
+handle_io_req({put_chars, _Enc, Txt}) ->
+    {ok, Txt};
+handle_io_req({setopts, _}) ->
+    {ok, ""};
+handle_io_req({requests, IoRequests}) ->
+    handle_io_reqs(IoRequests, []);
+handle_io_req(_) ->
+    %% {get_geometry, _??}
+    %% {get_password, Prompt}
+    %% {get_password, Enc, Prompt}
+    %% {get_until, Prompt, Mod, Fun, Args}
+    %% {get_until, Prompt, Enc, Mod, Fun, Args}
+    %% {get_line, Prompt}
+    %% {get_line, Enc, Prompt}
+    %% {get_chars, Prompt, N}
+    %% {get_chars, Enc, Prompt, N}
+    {{error, enotsup}, ""}.
+
+handle_io_reqs([Req | Rest], Acc) ->
+    {_Res, Output} = handle_io_req(Req),
+    handle_io_reqs(Rest, [Output | Acc]);
+handle_io_reqs([], Acc) ->
+    {ok, lists:flatten(lists:reverse(Acc))}.
 
 %% --- format_error tests ----------
 
@@ -279,7 +541,7 @@ compile_defs(MsgDefs) ->
 compile_defs(MsgDefs, ExtraOpts) ->
     Mod = find_unused_module(),
     Opts = [binary | ExtraOpts],
-    {ok, Mod, Code, []} = gpb_compile:msg_defs(Mod, MsgDefs, Opts),
+    {ok, Mod, Code} = gpb_compile:msg_defs(Mod, MsgDefs, Opts),
     load_code(Mod, Code),
     Mod.
 
@@ -291,7 +553,7 @@ compile_iolist(IoList) ->
           f("~s.proto", [Mod]),
           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
            {i,"."},
-           binary]),
+           binary, return_warnings]),
     load_code(Mod, Code),
     Mod.
 

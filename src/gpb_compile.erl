@@ -20,7 +20,7 @@
 %-compile(export_all).
 -export([file/1, file/2]).
 -export([msg_defs/2, msg_defs/3]).
--export([format_error/1]).
+-export([format_error/1, format_warning/1]).
 -export([c/0, c/1]). % Command line interface, halts vm---don't use from shell!
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -42,7 +42,7 @@
 file(File) ->
     file(File, []).
 
-%% @spec file(File, Opts) -> ok | {ok, Mod, Code} | {error, Reason}
+%% @spec file(File, Opts) -> CompRet
 %%            File = string()
 %%            Opts = [Opt]
 %%            Opt  = {i,directory()} |
@@ -51,7 +51,12 @@ file(File) ->
 %%                   {o,directory()} |
 %%                   binary |
 %%                   {copy_bytes, true | false | auto | integer() | float()}
-%%            Mod  = atom()
+%%            CompRet = ModRet | BinRet | ErrRet
+%%            ModRet = ok | {ok, Warnings}
+%%            BinRet = {ok, ModuleName, Code} |
+%%                     {ok, ModuleName, Code, Warnings}
+%%            ErrRet = {error, Reason} | {error,Reason,Warnings}
+%%            ModuleName  = atom()
 %%            Code = binary()
 %%
 %% @doc
@@ -123,25 +128,79 @@ file(File) ->
 %%           bytes/(sub-)binary.</dd>
 %% </dl>
 %%
+%% <dl>
+%%   <dt>`report_errors'/`report_warnings'</dt>
+%%   <dd>Causes errors/warnings to be printed as they occur.</dd>
+%%   <dt>`report'</dt>
+%%   <dd>This is a short form for both `report_errors' and
+%%       `report_warnings'.</dd>
+%%   <dt>`return_errors'</dt>
+%%   <dd>If this flag is set, then  `{error,ErrorList,WarningList}' is
+%%       returned when there are errors.</dd>
+%%   <dt>`return_warnings'</dt>
+%%   <dd>If  this  flag  is set, then an extra field containing `WarningList'
+%%       is added to the tuples returned on success.</dd>
+%%   <dt>`return'</dt>
+%%   <dd>This is a short form for both `return_errors' and
+%%       `return_warnings'.</dd>
+%% </dl>
+%%
 %% See {@link format_error/1} for a way to turn an error <i>Reason</i> to
 %% plain text.
-file(File, Opts) ->
-    case parse_file(File, Opts) of
+file(File, Opts1) ->
+    Opts2 = normalize_return_report_opts(Opts1),
+    case parse_file(File, Opts2) of
         {ok, Defs} ->
             Ext = filename:extension(File),
             Mod = list_to_atom(filename:basename(File, Ext)),
             DefaultOutDir = filename:dirname(File),
-            msg_defs(Mod, Defs, Opts ++ [{o,DefaultOutDir}]);
-        {error, _Reason} = Error ->
-            Error
+            Opts3 = Opts2 ++ [{o,DefaultOutDir}],
+            msg_defs(Mod, Defs, Opts3);
+        {error, Reason} = Error ->
+            possibly_report_error(Error, Opts2),
+            case proplists:get_bool(return_warnings, Opts2) of
+                true  -> {error, Reason, []};
+                false -> Error
+            end
     end.
 
-%% @spec msg_defs(Mod, Defs) -> ok | {ok, Mod, Code} | {error, Reason}
+possibly_report_error(Error, Opts) ->
+    case proplists:get_bool(report_errors, Opts) of
+        true  -> io:format("~s~n", [format_error(Error)]);
+        false -> ok
+    end.
+
+normalize_return_report_opts(Opts1) ->
+    Opts2 = expand_opt(return, [return_warnings, return_errors], Opts1),
+    Opts3 = expand_opt(report, [report_warnings, report_errors], Opts2),
+    Opts4 = unless_defined_set(return_warnings, report_warnings, Opts3),
+    Opts5 = unless_defined_set(return_errors,   report_errors, Opts4),
+    Opts5.
+
+expand_opt(OptionToTestFor, OptionsToExpandTo, Opts) ->
+    case proplists:get_bool(OptionToTestFor, Opts) of
+        true  -> OptionsToExpandTo ++ delete_bool_opt(OptionToTestFor, Opts);
+        false -> Opts
+    end.
+
+delete_bool_opt(OptToDelete, Opts) ->
+    %% Boolean opts can be defined both as [opt] and as [{opt, true|false}],
+    %% delete both type of occurrences.
+    lists:keydelete(OptToDelete, 1, Opts -- [OptToDelete]).
+
+unless_defined_set(OptionToTestFor, OptionToSet, Opts) ->
+    case proplists:get_bool(OptionToTestFor, Opts) of
+        true  -> Opts;
+        false -> [OptionToSet | Opts]
+    end.
+
+
+%% @spec msg_defs(Mod, Defs) -> CompRet
 %% @equiv msg_defs(Mod, Defs, [])
 msg_defs(Mod, Defs) ->
     msg_defs(Mod, Defs, []).
 
-%% @spec msg_defs(Mod, Defs, Opts) -> ok | {ok, Mod, Code} | {error, Reason}
+%% @spec msg_defs(Mod, Defs, Opts) -> CompRet
 %%            Mod  = atom()
 %%            Defs = [Def]
 %%            Def = {{enum, EnumName}, Enums} |
@@ -151,32 +210,56 @@ msg_defs(Mod, Defs) ->
 %%            Name = atom()
 %%            MsgName = atom()
 %%            MsgFields = [#field{}]
-%%            Opts = [Opt]
-%%            Opt  = {i,directory()} |
-%%                   {type_specs, boolean()} |
-%%                   {o,directory()} |
-%%                   binary |
-%%                   {copy_bytes, true | false | auto | integer() | float()}
-%%            Code = binary()
 %%
 %% @doc
 %% Compile a list of pre-parsed definitions to file or to a binary.
-%% See the {@link file/2} function for furhter description.
+%% See {@link file/2} for information on options and return values.
 msg_defs(Mod, Defs0, Opts0) ->
     {IsAcyclic, Defs} = try_topsort_defs(Defs0),
     possibly_probe_defs(Defs, Opts0),
-    Opts1 = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
-    OutDir = proplists:get_value(o, Opts1, "."),
-    Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
-    Hrl = change_ext(Erl, ".hrl"),
+    {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
+    Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs),
-    case proplists:get_bool(binary, Opts1) of
+    possibly_report_warnings(Warns, Opts2),
+    Res1 = do_msg_defs(Defs, Mod, AnRes, Opts2),
+    possibly_return_warnings(Res1, Warns, Opts2).
+
+do_msg_defs(Defs, Mod, AnRes, Opts) ->
+    ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
+    case proplists:get_bool(binary, Opts) of
         true ->
-            compile_to_binary(Defs, format_erl(Mod, Defs, AnRes, Opts1), Opts1);
+            compile_to_binary(Defs, ErlTxt, Opts);
         false ->
-            file_write_file(Erl, format_erl(Mod, Defs, AnRes, Opts1), Opts1),
-            file_write_file(Hrl, format_hrl(Mod, Defs, Opts1), Opts1)
+            OutDir = proplists:get_value(o, Opts, "."),
+            Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
+            Hrl = change_ext(Erl, ".hrl"),
+            HrlTxt = format_hrl(Mod, Defs, Opts),
+            %% FIXME: verify that writing both files succeeds
+            file_write_file(Erl, ErlTxt, Opts),
+            file_write_file(Hrl, HrlTxt, Opts)
     end.
+
+possibly_report_warnings(Warns, Opts) ->
+    case proplists:get_bool(report_warnings, Opts) of
+        true  -> lists:foreach(fun report_warning/1, Warns);
+        false -> ok
+    end.
+
+report_warning(Warn) ->
+    io:format("~s~n", [format_warning(Warn)]).
+
+possibly_return_warnings({error, _}=Error, _Warns, _Opts) ->
+    Error;
+possibly_return_warnings(OkRes, Warns, Opts) ->
+    case proplists:get_bool(return_warnings, Opts) of
+        true  -> return_warnings(OkRes, Warns);
+        false -> OkRes
+    end.
+
+return_warnings(ok, Warns)                  -> {ok, Warns};
+return_warnings({ok, Warns1}, Warns2)       -> {ok, Warns2++Warns1};
+return_warnings({ok, M, B}, Warns)          -> {ok, M, B, Warns};
+return_warnings({ok, M, B, Warns1}, Warns2) -> {ok, M, B, Warns2++Warns1}.
 
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()
@@ -199,6 +282,18 @@ fmt_err({verification, Reasons}) ->
     gpb_parse:format_verification_error({error, Reasons});
 fmt_err(X) ->
     f("Unexpected error ~p", [X]).
+
+%% @spec format_warning(Reason) -> io_list()
+%%           Reason = term()
+%%
+%% @doc Produce a plain-text error message from a reason returned by
+%% for instance {@link file/2} or {@link msg_defs/2}.
+%% @end
+%% Note: do NOT include trailing newline (\n or ~n)
+format_warning(cyclic_message_dependencies) ->
+  f("Warning: omitting type specs due to cyclic message references.");
+format_warning(X) ->
+  f("Warning: Unknown warning: ~p", [X]).
 
 %% @doc Command line interface for the compiler.
 %% With no proto file to compile, print a help message and exit.
@@ -239,17 +334,17 @@ c([File]) when is_atom(File); is_list(File) -> %% invoked with -s or -run
                end,
     Args = init:get_arguments(),
     PlainArgs = init:get_plain_arguments(),
-    Opts = parse_opts(Args, PlainArgs),
-    case is_help_requested(Opts, FileName) of
+    Opts1 = parse_opts(Args, PlainArgs),
+    Opts2 = [report_warnings, report_errors] ++ Opts1,
+    case is_help_requested(Opts2, FileName) of
         true  ->
             show_help(),
             init:stop(0);
         false ->
-            case file(FileName, Opts) of
+            case file(FileName, Opts2) of
                 ok ->
                     init:stop(0);
-                {error, Reason} ->
-                    io:format("~s~n", [format_error(Reason)]),
+                {error, _Reason} ->
                     init:stop(1)
             end
     end,
@@ -458,15 +553,15 @@ try_topsort_defs(Defs) ->
     end.
 
 possibly_adjust_typespec_opt(true=_IsAcyclic, Opts) ->
-    Opts;
+    {[], Opts};
 possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
     case get_type_specs_by_opts(Opts) of
         true  ->
-            io:format("Warning: omitting type specs "
-                      "due to cyclic message references.~n"),
-            lists:keydelete(type_specs, 1, Opts -- [type_specs]); % disable
+            %% disable `type_specs' option
+            Opts1 = delete_bool_opt(type_specs, Opts),
+            {[cyclic_message_dependencies], Opts1};
         false ->
-            Opts
+            {[], Opts}
     end.
 
 %% -- encoders -----------------------------------------------------
@@ -1940,8 +2035,8 @@ compile_to_binary(MsgDefs, ErlCode, Opts) ->
     {AttrForms, CodeForms} = split_forms_at_first_code(Forms),
     FieldDef = field_record_to_attr_form(),
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
-    COs = [verbose, return_errors, return_warnings | Opts],
-    compile:forms(AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms, COs).
+    AllForms = AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms,
+    compile:forms(AllForms, Opts).
 
 split_toks_at_dot(AllToks) ->
     case lists:splitwith(fun is_no_dot/1, AllToks) of
