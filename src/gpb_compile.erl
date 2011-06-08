@@ -45,12 +45,14 @@ file(File) ->
 %% @spec file(File, Opts) -> CompRet
 %%            File = string()
 %%            Opts = [Opt]
-%%            Opt  = {i,directory()} |
-%%                   {type_specs, boolean()} | type_specs |
+%%            Opt  = {type_specs, boolean()} | type_specs |
 %%                   {verify, optionally | always | never} |
-%%                   {o,directory()} |
+%%                   {copy_bytes, true | false | auto | integer() | float()} |
+%%                   {i, directory()} |
+%%                   {o, directory()} |
 %%                   binary |
-%%                   {copy_bytes, true | false | auto | integer() | float()}
+%%                   return | return_warnings | return_errors |
+%%                   report | report_warnings | report_errors
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
@@ -99,15 +101,6 @@ file(File) ->
 %% `{gpb_type_error,Reason}'. Regardless of the `verify' option,
 %% a function, `verify_msg/1' is always generated.
 %%
-%% The `{o,directory()}' option specifies directory to use for storing
-%% the generated `.erl' and `.hrl' files. Default is the same
-%% directory as for the proto `File'.
-%%
-%% The `binary' option will cause the generated and compiled code be
-%% returned as a binary. No files will be written. The return value
-%% will be on the form `{ok,Mod,Code}' if the compilation is succesful.
-%% This option may be useful e.g. when generating test cases.
-%%
 %% The `copy_bytes' option specifies whether when decoding data of
 %% type `bytes', the decoded bytes should be copied or not. Copying
 %% requires the `binary' module, which first appeared in Erlang
@@ -122,11 +115,21 @@ file(File) ->
 %%   <dt>`true'</dt><dd>Always copy bytes/(sub-)binaries.</dd>
 %%   <dt>`auto'</dt><dd>Copy bytes/(sub-)binaries if the beam vm,
 %%           on which the compiler (this module) is running,
-%%           has the `binary:copy/1' function.</dd>
+%%           has the `binary:copy/1' function. (This is the default)</dd>
 %%   <dt>integer() | float()</dt><dd>Copy the bytes/(sub-)binaries if the
 %%           message this many times or more larger than the size of the
 %%           bytes/(sub-)binary.</dd>
 %% </dl>
+%%
+%% The `{o,directory()}' option specifies directory to use for storing
+%% the generated `.erl' and `.hrl' files. Default is the same
+%% directory as for the proto `File'.
+%%
+%% The `binary' option will cause the generated and compiled code be
+%% returned as a binary. No files will be written. The return value
+%% will be on the form `{ok,Mod,Code}' or `{ok,Mod,Code,Warnings}'
+%% if the compilation is succesful. This option may be useful
+%% e.g. when generating test cases.
 %%
 %% <dl>
 %%   <dt>`report_errors'/`report_warnings'</dt>
