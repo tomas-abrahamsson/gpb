@@ -50,7 +50,7 @@ file(File) ->
 %%                   {copy_bytes, true | false | auto | integer() | float()} |
 %%                   {i, directory()} |
 %%                   {o, directory()} |
-%%                   binary |
+%%                   binary | to_msg_defs |
 %%                   return | return_warnings | return_errors |
 %%                   report | report_warnings | report_errors
 %%            CompRet = ModRet | BinRet | ErrRet
@@ -130,6 +130,11 @@ file(File) ->
 %% will be on the form `{ok,Mod,Code}' or `{ok,Mod,Code,Warnings}'
 %% if the compilation is succesful. This option may be useful
 %% e.g. when generating test cases.
+%%
+%% The `to_msg_defs' option will result in `{ok,MsgDefs}' or
+%% `{ok,MsgDefs,Warns}' being returned if the compilation is succesful.
+%% The returned message definitions can be used with the
+%% {@link msg_defs/2} or {@link msg_defs/3} functions.
 %%
 %% <dl>
 %%   <dt>`report_errors'/`report_warnings'</dt>
@@ -218,14 +223,18 @@ msg_defs(Mod, Defs0, Opts0) ->
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs),
     Res1 = do_msg_defs(Defs, Mod, AnRes, Opts2),
-    return_or_report_warnings_or_errors(Res1, Warns, Opts2).
+    return_or_report_warnings_or_errors(Res1, Warns, Opts2,
+                                        get_output_format(Opts2)).
 
 do_msg_defs(Defs, Mod, AnRes, Opts) ->
-    ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
-    case proplists:get_bool(binary, Opts) of
-        true ->
+    case get_output_format(Opts) of
+        msg_defs ->
+            {ok, Defs};
+        binary ->
+            ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
             compile_to_binary(Defs, ErlTxt, Opts);
-        false ->
+        file ->
+            ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
             OutDir = proplists:get_value(o, Opts, "."),
             Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
             Hrl = change_ext(Erl, ".hrl"),
@@ -238,24 +247,26 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
             end
     end.
 
-return_or_report_warnings_or_errors(Res, ExtraWarns, Opts) ->
-    Res2 = merge_res_warns(Res, ExtraWarns),
+return_or_report_warnings_or_errors(Res, ExtraWarns, Opts, OutFormat) ->
+    Res2 = merge_warns(Res, ExtraWarns, OutFormat),
     possibly_report_warnings(Res2, Opts),
     possibly_report_error(Res2, Opts),
     return_warnings_or_errors(Res2, Opts).
 
-merge_res_warns(ok, Warns)                  -> {ok, Warns};
-merge_res_warns({ok, Warns1}, Warns2)       -> {ok, Warns2++Warns1};
-merge_res_warns({ok, M, B}, Warns)          -> {ok, M, B, Warns};
-merge_res_warns({ok, M, B, Warns1}, Warns2) -> {ok, M, B, Warns2++Warns1};
-merge_res_warns({error, R}, Warns)          -> {error, R, Warns};
-merge_res_warns({error, R, Warns1}, Warns2) -> {error, R, Warns2++Warns1}.
+merge_warns(ok, Warns, _OutFmt)                  -> {ok, Warns};
+merge_warns({ok, Warns1}, Warns2, file)          -> {ok, Warns2++Warns1};
+merge_warns({ok, MsgDefs}, Warns, msg_defs)      -> {ok, MsgDefs, Warns};
+merge_warns({ok, M, B}, Warns, binary)           -> {ok, M, B, Warns};
+merge_warns({ok, M, B, Warns1}, Warns2, binary)  -> {ok, M, B, Warns2++Warns1};
+merge_warns({error, R}, Warns, _OutFmt)          -> {error, R, Warns};
+merge_warns({error, R, Warns1}, Warns2, _OutFmt) -> {error, R, Warns2++Warns1}.
 
 possibly_report_warnings(Result, Opts) ->
     Warns = case Result of
                 {error, _Reason, Ws} -> Ws;
-                {ok, Ws}             -> Ws;
-                {ok, _M, _B, Ws}     -> Ws
+                {ok, _M, _B, Ws}     -> Ws;
+                {ok, _Defs, Ws}      -> Ws;
+                {ok, Ws}             -> Ws
             end,
     case proplists:get_bool(report_warnings, Opts) of
         true  -> lists:foreach(fun report_warning/1, Warns);
@@ -281,11 +292,19 @@ return_warnings_or_errors(Res, Opts) ->
             Res;
         false ->
             case Res of
-                {ok, _Warns}       -> ok;
-                {ok, M, B, _Warns} -> {ok, M, B};
-                {error, R, _Warns} -> {error, R}
+                {ok, Mod, Bin, _Warns} -> {ok, Mod, Bin};
+                {ok, MsgDefs, _Warns}  -> {ok, MsgDefs};
+                {ok, _Warns}           -> ok;
+                {error, R, _Warns}     -> {error, R}
             end
     end.
+
+get_output_format([binary | _])              -> binary;
+get_output_format([{binary, true} | _])      -> binary;
+get_output_format([to_msg_defs | _])         -> msg_defs;
+get_output_format([{to_msg_defs, true} | _]) -> msg_defs;
+get_output_format([_ | Rest])                -> get_output_format(Rest);
+get_output_format([])                        -> file.
 
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()

@@ -62,8 +62,7 @@ parses_importing_file_test() ->
 
 
 parses_file_to_binary_test() ->
-    Contents = iolist_to_binary(
-                 ["message Msg { required uint32 field1 = 1; }\n"]),
+    Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
     {ok, 'X', Code, []} =
         gpb_compile:file(
           "X.proto",
@@ -73,6 +72,19 @@ parses_file_to_binary_test() ->
            binary, return_warnings]),
     true = is_binary(Code),
     [{{msg,'Msg'},_}] = receive_filter_sort_msgs_defs().
+
+parses_file_to_msg_defs_test() ->
+    Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
+    {ok, [{{msg,'Msg'},[#field{}]}]=MsgDefs} =
+        gpb_compile:file(
+          "X.proto",
+          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+           {i,"."},
+           to_msg_defs, report_warnings]),
+    %% Check that the returned msgdefs are usable
+    M = compile_defs(MsgDefs),
+    ?assertMatch(<<_/binary>>, M:encode_msg({'Msg',33})),
+    unload_code(M).
 
 parses_msgdefs_to_binary_test() ->
     Defs = [{{msg,'Msg'},
@@ -173,13 +185,14 @@ report_or_return_warnings_or_errors_test() ->
                        [return_warnings, report_errors],
                        []
                       ],
-        CompileTo  <- [to_binary, to_file],
+        CompileTo  <- [to_binary, to_file, to_msg_defs],
         SrcType    <- [from_file, from_defs],
         SrcQuality <- [clean_code, warningful_code, erroneous_code,
                        write_fails],
         %% Exclude a few combos
         not (SrcQuality == erroneous_code andalso SrcType == from_defs),
-        not (SrcQuality == write_fails andalso CompileTo == to_binary)].
+        not (SrcQuality == write_fails andalso CompileTo == to_binary),
+        not (SrcQuality == write_fails andalso CompileTo == to_msg_defs)].
 
 rwre_go(Options, CompileTo, SrcType, SrcQuality) ->
     ExpectedReturn = compute_expected_return(Options, CompileTo, SrcQuality),
@@ -227,6 +240,23 @@ compute_expected_return(Options, to_binary, SrcQuality) ->
         {report, return, erroneous_code}  -> {error, '_'};
         {return, report, clean_code}      -> {ok, mod, binary, []};
         {return, report, warningful_code} -> {ok, mod, binary, non_empty_list};
+        {return, report, erroneous_code}  -> {error, '_', []}
+    end;
+compute_expected_return(Options, to_msg_defs, SrcQuality) ->
+    WarnOpt = get_warning_opt(Options),
+    ErrOpt = get_error_opt(Options),
+    case {WarnOpt, ErrOpt, SrcQuality} of
+        {report, report, clean_code}      -> {ok, non_empty_list};
+        {report, report, warningful_code} -> {ok, non_empty_list};
+        {report, report, erroneous_code}  -> {error, '_'};
+        {return, return, clean_code}      -> {ok, non_empty_list, []};
+        {return, return, warningful_code} -> {ok, non_empty_list,non_empty_list};
+        {return, return, erroneous_code}  -> {error, '_', []};
+        {report, return, clean_code}      -> {ok, non_empty_list};
+        {report, return, warningful_code} -> {ok, non_empty_list};
+        {report, return, erroneous_code}  -> {error, '_'};
+        {return, report, clean_code}      -> {ok, non_empty_list, []};
+        {return, report, warningful_code} -> {ok, non_empty_list,non_empty_list};
         {return, report, erroneous_code}  -> {error, '_', []}
     end.
 
@@ -307,8 +337,9 @@ compute_compile_opts(Options, CompileTo, write_fails) ->
 compute_compile_opts(Options, CompileTo, _SrcQuality) ->
     compute_compile_opts_2(Options, CompileTo).
 
-compute_compile_opts_2(Options, to_binary) -> [binary, type_specs | Options];
-compute_compile_opts_2(Options, to_file)   -> [type_specs | Options].
+compute_compile_opts_2(Opts, to_binary)   -> [binary, type_specs | Opts];
+compute_compile_opts_2(Opts, to_msg_defs) -> [to_msg_defs, type_specs | Opts];
+compute_compile_opts_2(Opts, to_file)     -> [type_specs | Opts].
 
 mk_failing_write_option() ->
     [fail_write].
