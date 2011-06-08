@@ -779,6 +779,10 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("-export([merge_msgs/2]).~n"),
        f("-export([verify_msg/1]).~n"),
        f("-export([get_msg_defs/0]).~n"),
+       f("-export([get_msg_names/0]).~n"),
+       f("-export([get_enum_names/0]).~n"),
+       f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
+       f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
        "\n",
        f("-include(\"~s.hrl\").~n", [Mod]),
        f("-include(\"gpb.hrl\").~n"),
@@ -822,8 +826,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        "\n",
        f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
        "\n",
-       f("get_msg_defs() ->~n"
-         "    [~s].~n", [outdent_first(format_msgs_and_enums(5, Defs))])]).
+       format_introspection(Defs)]).
 
 %% -- encoders -----------------------------------------------------
 
@@ -1908,6 +1911,28 @@ format_verifier_auxiliaries() ->
 
 %% -- message defs -----------------------------------------------------
 
+format_introspection(Defs) ->
+    MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
+    EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
+    [f("get_msg_defs() ->~n"
+       "    [~s].~n", [outdent_first(format_msgs_and_enums(5, Defs))]),
+     f("~n"),
+     f("get_msg_names() ->~n"
+       "    ~p.~n", [[MsgName || {{msg,MsgName},_Fields} <- Defs]]),
+     f("~n"),
+     f("get_enum_names() ->~n"
+       "    ~p.~n", [[EnumName || {{enum,EnumName},_Enums} <- Defs]]),
+     f("~n"),
+     format_fetch_msg_defs(MsgDefs),
+     f("~n"),
+     format_fetch_enum_defs(EnumDefs),
+     f("~n"),
+     format_find_msg_defs(MsgDefs),
+     f("~n"),
+     format_find_enum_defs(EnumDefs)
+    ].
+
+
 format_msgs_and_enums(Indent, Defs) ->
     Enums = [Item || {{enum, _}, _}=Item <- Defs],
     Msgs  = [Item || {{msg, _}, _}=Item <- Defs],
@@ -1940,6 +1965,46 @@ format_efield(I, #field{name=N, fnum=F, rnum=R, type=T,
     [indent(I, f("#field{name=~w, fnum=~w, rnum=~w, type=~w,~n", [N,F,R,T])),
      indent(I, f("       occurrence=~w,~n", [Occurrence])),
      indent(I, f("       opts=~p}", [Opts]))].
+
+format_fetch_msg_defs([]) ->
+    f("fetch_msg_def(MsgName) ->~n"
+      "    erlang:error({no_such_msg, MsgName})~n");
+format_fetch_msg_defs(_MsgDefs) ->
+    f("fetch_msg_def(MsgName) ->~n"
+      "    case find_msg_def(MsgName) of~n"
+      "        Fs when is_list(Fs) -> Fs;~n"
+      "        error               -> erlang:error({no_such_msg, MsgName})~n"
+      "    end.~n").
+
+format_fetch_enum_defs([]) ->
+    f("fetch_enum_def(EnumName) ->~n"
+      "    erlang:error({no_such_enum,EnumName})~n");
+format_fetch_enum_defs(_EnumDefs) ->
+    f("fetch_enum_def(EnumName) ->~n"
+      "    case find_enum_def(EnumName) of~n"
+      "        Es when is_list(Es) -> Es;~n"
+      "        error               -> erlang:error({no_such_enum,EnumName})~n"
+      "    end.~n").
+
+format_find_msg_defs([]) ->
+    f("find_msg_def(_) ->~n"
+      "    error.~n");
+format_find_msg_defs(Msgs) ->
+    [[[f("find_msg_def(~p) ->~n", [MsgName]),
+       f("    [~s];~n", [outdent_first(format_efields(4+1, Fields))])]
+      || {{msg, MsgName}, Fields} <- Msgs],
+     f("find_msg_def(_) ->~n"
+       "    error.~n")].
+
+format_find_enum_defs([]) ->
+    f("find_enum_def(_) ->~n"
+      "    error.~n");
+format_find_enum_defs(Enums) ->
+    [[[f("find_enum_def(~p) ->~n", [EnumName]),
+       f("    ~p;~n", [EnumValues])]
+      || {{enum, EnumName}, EnumValues} <- Enums],
+     f("find_enum_def(_) ->~n"
+       "    error.~n")].
 
 %% -- hrl -----------------------------------------------------
 
