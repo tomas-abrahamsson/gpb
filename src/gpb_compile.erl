@@ -2045,9 +2045,12 @@ format_find_enum_defs(Enums) ->
 %% -- hrl -----------------------------------------------------
 
 format_hrl(Mod, Defs, Opts) ->
+    ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
     iolist_to_binary(
       [f("-ifndef(~p).~n", [Mod]),
        f("-define(~p, true).~n", [Mod]),
+       "\n",
+       f("-define(~p, \"~s\").~n", [ModVsn, gpb:version_as_string()]),
        "\n",
        string:join([format_msg_record(Msg, Fields, Opts, Defs)
                     || {{msg,Msg},Fields} <- Defs],
