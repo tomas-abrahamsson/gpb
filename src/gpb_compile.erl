@@ -1278,11 +1278,11 @@ format_msg_decoder_read_field(MsgName, MsgDef) ->
      indent(4, f("~p(Bin, 0, 0, Msg0).~n", [mk_fn(d_read_field_def_, MsgName)])),
      "\n",
      f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n",
+       "    ~p(Rest, N+7, X bsl N + Acc, Msg);~n",
        [mk_fn(d_read_field_def_, MsgName),
         mk_fn(d_read_field_def_, MsgName)]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    Key = X bsl (N*7) + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
+       "    Key = X bsl N + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
      if ReadFieldCases == [] ->
              f("    case Key band 7 of  %% WireType~n"
                "        0 -> skip_varint_~s(Rest, Msg);~n"
@@ -1389,10 +1389,10 @@ format_packed_field_decoder(MsgName,#field{name=FName}=FieldDef, Opts)->
     #field{opts=FOpts} = FieldDef,
     FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
-     f("    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [DecodePackWrapFn]),
+     f("    ~p(Rest, N+7, X bsl N + Acc, Msg);~n", [DecodePackWrapFn]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, #~p{~p=AccSeq}=Msg) ->~n",
        [DecodePackWrapFn, MsgName, FName]),
-     f("    Len = X bsl (N*7) + Acc,~n"),
+     f("    Len = X bsl N + Acc,~n"),
      f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
      f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
        [mk_fn(d_packed_field_, MsgName, FName),
@@ -1405,11 +1405,11 @@ format_packed_field_decoder(MsgName,#field{name=FName}=FieldDef, Opts)->
      format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
 
 format_vi_based_field_decoder(MsgName, #field{type=Type, name=FName}, Opts) ->
-    BValueExpr = "X bsl (N*7) + Acc",
+    BValueExpr = "X bsl N + Acc",
     {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
                                          Opts),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n",
+       "    ~p(Rest, N+7, X bsl N + Acc, Msg);~n",
        [mk_fn(d_field_, MsgName, FName),
         mk_fn(d_field_, MsgName, FName)]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n",
@@ -1573,11 +1573,11 @@ format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitType) ->
 
 format_dpacked_vi(MsgName, #field{name=FName, type=Type}, Opts) ->
     FnName = mk_fn(d_packed_field_, MsgName, FName),
-    BValueExpr = "X bsl (N*7) + Acc",
+    BValueExpr = "X bsl N + Acc",
     {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
                                          Opts),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
-     f("    ~p(Rest, N+1, X bsl (N*7) + Acc, AccSeq);~n", [FnName]),
+     f("    ~p(Rest, N+7, X bsl N + Acc, AccSeq);~n", [FnName]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
      f("~s", [FValueCode]),
      f("    ~p(~s, 0, 0, [FValue | AccSeq]);~n", [FnName, RestVar]),
@@ -1745,9 +1745,9 @@ format_varint_skipper(MsgName) ->
 format_length_delimited_skipper(MsgName) ->
     SkipFn = mk_fn(skip_length_delimited_, MsgName),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [SkipFn]),
+     f("    ~p(Rest, N+7, X bsl N + Acc, Msg);~n", [SkipFn]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    Length = X bsl (N*7) + Acc,~n"),
+     f("    Length = X bsl N + Acc,~n"),
      f("    <<_:Length/binary, Rest2/binary>> = Rest,~n"),
      f("    ~p(Rest2, 0, 0, Msg).~n~n", [mk_fn(d_read_field_def_, MsgName)])].
 
