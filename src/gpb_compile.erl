@@ -1191,7 +1191,7 @@ format_varint_encoder() ->
     [f("e_varint(N, Bin) when N =< 127 ->~n"),
      f("    <<Bin/binary, N>>;~n"),
      f("e_varint(N, Bin) ->~n"),
-     f("    Bin2 = <<Bin/binary, 1:1, (N band 127):7>>,~n"),
+     f("    Bin2 = <<Bin/binary, (N band 127 bor 128)>>,~n"),
      f("    e_varint(N bsr 7, Bin2).~n~n")].
 
 %% -- decoders -----------------------------------------------------
