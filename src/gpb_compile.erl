@@ -832,16 +832,16 @@ d_field_pass_method(MsgDef) ->
     NumSubMsgFields = length([x || #field{type={msg,_}} <- MsgDef]),
     NF = length(MsgDef), %% num fields (awk-istic terminology)
     IsMsgDominatedBySubMsgs = NumSubMsgFields / NF > 0.5,
-    if NF > 250 ->
+    if NF >= 250 ->
             %% Functions can take at most 255 arguments
             pass_as_record;
        IsMsgDominatedBySubMsgs ->
             pass_as_record;
        true ->
-            %% Assume all fields do occur, also optional fields.
+            %% Assume all fields occur once, also optional/repeated fields.
             %%
-            %% The cost is estimated to be 1 per beam assembler line
-            %% -- I compiled with the 'S' option to check.
+            %% Estimates are based on number of resulting beam assembler
+            %% lines and also on observed performance characterstics.
             NCallFields = length([1 || #field{type=Type}=Field <- MsgDef,
                                        case Type of
                                            {msg, _} -> true;
@@ -849,11 +849,16 @@ d_field_pass_method(MsgDef) ->
                                            _        -> is_packed(Field)
                                        end]),
             NRepeated = length([1 || #field{occurrence=repeated} <- MsgDef]),
-            SCost = 2*NF, %% cost or saving params to stack and restoring
+            %% cost of saving params to stack and restoring
+            %%  assume saving/restoring is rather cheap, hence "* 0.5"
+            SCost = 2 * NF * 0.5,
             PassByParamsCost = NCallFields * SCost + if NRepeated > 0 -> SCost;
                                                         true          -> 0
                                                      end,
-            PassByMsgRecordCost = NF * 4, %% cost for verifying term is record
+            %% cost for verifying term is a record -- the expected record
+            %% plus cost updating the record (copying almost all pointers,
+            %% and changing one) which is a fast BIF
+            PassByMsgRecordCost = NF * (4 + NF*0.2),
             if PassByParamsCost < PassByMsgRecordCost -> pass_as_params;
                true                                   -> pass_as_record
             end
