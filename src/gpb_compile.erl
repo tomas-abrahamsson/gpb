@@ -829,38 +829,18 @@ d_field_pass_method(MsgDef) ->
     %%   Such function calls, are: call to unicode:characters_to_list
     %%   for strings, calls to parse sub messages or packed fields and
     %%   final top-level calls to lists:reverse for repeated fields.
-    NumSubMsgFields = length([x || #field{type={msg,_}} <- MsgDef]),
     NF = length(MsgDef), %% num fields (awk-istic terminology)
-    IsMsgDominatedBySubMsgs = NumSubMsgFields / NF > 0.5,
     if NF >= 250 ->
-            %% Functions can take at most 255 arguments
-            pass_as_record;
-       IsMsgDominatedBySubMsgs ->
-            pass_as_record;
+            pass_as_record; %% Functions can take at most 255 arguments
+       NF == 0 ->
+            pass_as_params;
        true ->
-            %% Assume all fields occur once, also optional/repeated fields.
-            %%
-            %% Estimates are based on number of resulting beam assembler
-            %% lines and also on observed performance characterstics.
-            NCallFields = length([1 || #field{type=Type}=Field <- MsgDef,
-                                       case Type of
-                                           {msg, _} -> true;
-                                           string   -> true;
-                                           _        -> is_packed(Field)
-                                       end]),
-            NRepeated = length([1 || #field{occurrence=repeated} <- MsgDef]),
-            %% cost of saving params to stack and restoring
-            %%  assume saving/restoring is rather cheap, hence "* 0.5"
-            SCost = 2 * NF * 0.5,
-            PassByParamsCost = NCallFields * SCost + if NRepeated > 0 -> SCost;
-                                                        true          -> 0
-                                                     end,
-            %% cost for verifying term is a record -- the expected record
-            %% plus cost updating the record (copying almost all pointers,
-            %% and changing one) which is a fast BIF
-            PassByMsgRecordCost = NF * (4 + NF*0.2),
-            if PassByParamsCost < PassByMsgRecordCost -> pass_as_params;
-               true                                   -> pass_as_record
+            NumSubMsgFields = length([x || #field{type={msg,_}} <- MsgDef]),
+            IsMsgDominatedBySubMsgs = NumSubMsgFields / NF > 0.5,
+            if IsMsgDominatedBySubMsgs, NF >= 100 ->
+                    pass_as_record;
+               true ->
+                    pass_as_params
             end
     end.
 
