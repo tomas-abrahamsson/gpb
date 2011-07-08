@@ -102,6 +102,12 @@ parses_and_generates_good_code_also_for_reserved_keywords_test() ->
     ?assertMatch(true, is_binary(M:encode_msg({'catch', 'begin'}))),
     unload_code(M).
 
+parses_and_generates_good_code_also_for_empty_msgs_test() ->
+    M = compile_iolist(["message m1 { }\n"]),
+    ?assertMatch(true, is_binary(M:encode_msg({m1}))),
+    ?assertMatch({m1}, M:decode_msg(M:encode_msg({m1}), m1)),
+    unload_code(M).
+
 mk_fileop_opt(NonDefaults) ->
     {file_op,
      fun(read_file_info, [FileName]) ->
