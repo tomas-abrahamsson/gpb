@@ -40,7 +40,7 @@ benchmarks: benchmarks-code
 	@echo
 	erl +V
 	@echo
-	./proto_bench \
+	./proto-bench \
 	  d dm1 --multi d-msgs/d-msg-n*.dat --end-multi \
 	  d dm1 d-msgs/d-all-concatenated.dat \
           msg Message1 google_message1.dat \
