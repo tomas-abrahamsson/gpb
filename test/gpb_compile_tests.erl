@@ -108,6 +108,39 @@ parses_and_generates_good_code_also_for_empty_msgs_test() ->
     ?assertMatch({m1}, M:decode_msg(M:encode_msg({m1}), m1)),
     unload_code(M).
 
+field_pass_as_params_test() ->
+    MsgDef = ["message m2 { required uint32 f22 = 1; }"
+              "message m1 { required uint32  f1 = 1;",
+              "             optional fixed32 f2 = 2;",
+              "             repeated fixed32 f3 = 3;",
+              "             repeated fixed32 f4 = 4 [packed];",
+              "             repeated uint32  f5 = 5;",
+              "             repeated uint32  f6 = 5 [packed];",
+              "             optional string  f7 = 7;"
+              "             optional m2      f8 = 8; }"],
+    Msg = {m1, 4711, undefined,      %% f1,f2
+           [4713,4714], [4715,4716], %% f3,f4
+           [4717,4718], [4719,4720], %% f5,f6
+           "abc", {m2,33}},
+    lists:foreach(
+      fun(Opts) ->
+              ?assertMatch({Msg,_},
+                           {encode_decode_round_trip(MsgDef, Msg, Opts), Opts})
+      end,
+      [[{field_pass_method,pass_as_params}],
+       [{field_pass_method,pass_as_record}],
+       [{{field_pass_method,m1},pass_as_record},
+        {{field_pass_method,m2},pass_as_params}],
+       [{{field_pass_method,m1},pass_as_params},
+        {{field_pass_method,m2},pass_as_record}]]).
+
+encode_decode_round_trip(MsgDefAsIoList, Msg, Opts) ->
+    M = compile_iolist(MsgDefAsIoList, Opts),
+    MsgName = element(1, Msg),
+    Result = M:decode_msg(M:encode_msg(Msg), MsgName),
+    unload_code(M),
+    Result.
+
 mk_fileop_opt(NonDefaults) ->
     {file_op,
      fun(read_file_info, [FileName]) ->
@@ -636,6 +669,9 @@ compile_defs(MsgDefs, ExtraOpts) ->
     Mod.
 
 compile_iolist(IoList) ->
+    compile_iolist(IoList, []).
+
+compile_iolist(IoList, ExtraOpts) ->
     Mod = find_unused_module(),
     Contents = iolist_to_binary(IoList),
     {ok, Mod, Code, []} =
@@ -643,7 +679,7 @@ compile_iolist(IoList) ->
           f("~s.proto", [Mod]),
           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
            {i,"."},
-           binary, return_warnings]),
+           binary, return_warnings | ExtraOpts]),
     load_code(Mod, Code),
     Mod.
 

@@ -224,7 +224,7 @@ msg_defs(Mod, Defs0, Opts0) ->
     possibly_probe_defs(Defs, Opts0),
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
-    AnRes = analyze_defs(Defs),
+    AnRes = analyze_defs(Defs, Opts2),
     Res1 = do_msg_defs(Defs, Mod, AnRes, Opts2),
     return_or_report_warnings_or_errors(Res1, Warns, Opts2,
                                         get_output_format(Opts2)).
@@ -648,14 +648,14 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 
 %% -- analysis -----------------------------------------------------
 
-analyze_defs(Defs) ->
+analyze_defs(Defs, Opts) ->
     #anres{used_types          = find_used_types(Defs),
            known_msg_size      = find_msgsizes_known_at_compile_time(Defs),
            msg_occurrences     = find_msg_occurrences(Defs),
            fixlen_types        = find_fixlen_types(Defs),
            num_packed_fields   = find_num_packed_fields(Defs),
            num_fields          = find_num_fields(Defs),
-           d_field_pass_method = compute_decode_field_pass_methods(Defs)}.
+           d_field_pass_method = compute_decode_field_pass_methods(Defs, Opts)}.
 
 find_used_types(Defs) ->
     fold_msg_fields(fun(_MsgName, #field{type=Type}, Acc) ->
@@ -806,13 +806,28 @@ all_enum_values_encode_to_same_size(EnumName, Defs) ->
         _      -> no
     end.
 
-compute_decode_field_pass_methods(Defs) ->
+compute_decode_field_pass_methods(Defs, Opts) ->
     lists:foldl(fun({MsgName, MsgDef}, D) ->
-                        dict:store(MsgName, d_field_pass_method(MsgDef), D)
+                        PassHow = d_field_pass_method(MsgName, MsgDef, Opts),
+                        dict:store(MsgName, PassHow, D)
                 end,
                 dict:new(),
                 [{MsgName, MsgDefs} || {{msg, MsgName}, MsgDefs} <- Defs]).
 
+
+d_field_pass_method(MsgName, MsgDef, Opts) ->
+    %% Allow overriding options, mainly intended for testing
+    case proplists:get_value({field_pass_method,MsgName}, Opts) of
+        undefined ->
+            case proplists:get_value(field_pass_method, Opts) of
+                undefined ->
+                    d_field_pass_method(MsgDef);
+                Method when Method==pass_as_record; Method==pass_as_params ->
+                    Method
+            end;
+        Method when Method==pass_as_record; Method==pass_as_params ->
+            Method
+    end.
 
 d_field_pass_method(MsgDef) ->
     %% Compute estimated costs:
