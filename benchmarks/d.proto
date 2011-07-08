@@ -1,0 +1,541 @@
+// many deeply nested messages
+
+enum de01 {
+  DE01_E01 = 200;
+  DE01_E02 = 201;
+  DE01_E03 = 202;
+  DE01_E04 = 203;
+  DE01_E05 = 204;
+  DE01_E06 = 205;
+  DE01_E07 = 206;
+  DE01_E08 = 207;
+  DE01_E00 = 208;
+  DE01_E01 = 209;
+  DE01_E02 = 210;
+  DE01_E03 = 211;
+  DE01_E04 = 212;
+  DE01_E05 = 213;
+  DE01_E06 = 214;
+  DE01_E07 = 215;
+  DE01_E08 = 216;
+  DE01_E09 = 217;
+  DE01_E10 = 218;
+  DE01_E11 = 219;
+}
+message dm02 {
+  required fixed32 dm02f01 = 1;
+  required uint32  dm02f02 = 2;
+  required string  dm02f03 = 3;
+}
+message dm03 {
+  required fixed32 dm03f01 = 1;
+  required uint32  dm03f02 = 2;
+  optional uint32  dm03f03 = 3 [default = 0];
+  optional uint32  dm03f04 = 4 [default = 0];
+  required string  dm03f05 = 5;
+}
+message dm04 {
+  required string  dm04f01 = 1;
+  required uint32  dm04f02 = 10;
+  required fixed32 dm04f03 = 2;
+  required uint32  dm04f04 = 3;
+  optional uint32  dm04f05 = 4 [default = 0];
+  optional uint32  dm04f06 = 5 [default = 0];
+  required string  dm04f07 = 6;
+  required string  dm04f08 = 7;
+  required string  dm04f09 = 8;
+  required string  dm04f10 = 9;
+}
+message dm05 {
+}
+message dm06 {
+}
+message dm07 {
+  optional fixed64 dm07f01 = 1;
+  repeated uint32  dm07f02 = 2;
+}
+message dm08 {
+  optional fixed64 dm08f01 = 1;
+  repeated uint32  dm08f02 = 2;
+}
+message dm09 {
+  optional string dm09f01 = 1;
+  optional bool   dm09f02 = 2;
+}
+message dm10 {
+  optional string dm10f01 = 1;
+  required uint32 dm10f02 = 2;
+  optional uint32 dm10f03 = 3;
+}
+enum de02 {
+ DE02_E01 = 1;
+ DE02_E02 = 2;
+}
+message dm11 {
+  optional string dm11f01 = 1;
+  optional de02   dm11f02 = 2;
+}
+message dm12 {
+ required string dm12f01 = 1;
+ required uint32 dm12f02 = 2;
+ optional bool   dm12f03 = 3;
+}
+message dm13 {
+ required uint32 dm13f01 = 1;
+ optional uint32 dm13f02 = 2;
+}
+message dm14 {
+ required uint32 dm14f01 = 1;
+ required de02   dm14f02 = 2;
+}
+message dm15 {
+ required uint32 dm15f01 = 1;
+}
+message dm16 {
+ required uint32 dm16f01 = 1;
+}
+enum de03 {
+ DE03_E01 = 1;
+ DE03_E02 = 2;
+}
+message dm17 {
+ required uint32 dm17f01 = 1;
+ required de03   dm17f02 = 2;
+}
+message dm18 {
+ required uint32 dm18f01 = 1;
+ required uint32 dm18f02 = 2;
+ required int32  dm18f03 = 3;
+ optional bool   dm18f04 = 4 [default = false];
+ optional uint32 dm18f05 = 5 [default = 100];
+ optional uint32 dm18f06 = 6 [default = 100];
+}
+message dm19 {
+ required uint32 dm19f01 = 1;
+}
+message dm20 {
+ required uint32 dm20f01 = 1;
+}
+message dm21 {
+ required uint32 dm21f01 = 1;
+}
+message dm22 {
+ required uint32 dm22f01 = 1;
+}
+enum de04 {
+ DE04_E01 = 100;
+ DE04_E02 = 101;
+ DE04_E03 = 102;
+ DE04_E04 = 103;
+ DE04_E05 = 104;
+}
+message dm23 {
+ optional uint32  dm23f01 = 1;
+ optional fixed32 dm23f02 = 2;
+ optional bytes   dm23f03 = 3;
+}
+message dm24 {
+ optional string dm24f01 = 1;
+ optional string dm24f02 = 2;
+ optional string dm24f03 = 3;
+ optional string dm24f04 = 4;
+ optional string dm24f05 = 6;
+}
+message dm25 {
+ optional string dm25f01 = 1;
+ optional string dm25f02 = 2;
+ optional string dm25f03 = 3;
+}
+message dm26 {
+ optional string dm26f01 = 1;
+ optional string dm26f02 = 2;
+ optional string dm26f03 = 3;
+ optional uint32 dm26f04 = 4;
+}
+message dm27 {
+ optional string dm27f01 = 1;
+ optional uint32 dm27f02 = 2;
+}
+message dm28 {
+ optional dm23 dm28f01 = 1;
+ optional dm24 dm28f02 = 2;
+ optional dm25 dm28f03 = 3;
+}
+message dm29 {
+ optional dm23 dm29f01 = 1;
+ optional dm26 dm29f02 = 2;
+}
+message dm30 {
+}
+message dm31 {
+ repeated dm26 dm31f01 = 1;
+}
+message dm32 {
+ optional string dm32f01 = 1;
+ optional uint32 dm32f02 = 2;
+ repeated dm27   dm32f03 = 3;
+}
+enum de05 {
+ DE05_E01 = 300;
+ DE05_E02 = 301;
+ DE05_E03 = 302;
+ DE05_E04 = 303;
+ DE05_E05 = 304;
+ DE05_E06 = 305;
+ DE05_E07 = 306;
+ DE05_E08 = 307;
+ DE05_E09 = 308;
+ DE05_E10 = 309;
+ DE05_E11 = 310;
+}
+enum de06 {
+ DE06_E01 = 1;
+ DE06_E02 = 2;
+ DE06_E03 = 3;
+}
+enum de07 {
+ DE07_E01 = 1;
+ DE07_E02 = 2;
+}
+message dm33 {
+}
+message dm34 {
+}
+message dm35 {
+ optional uint32 dm35f01 = 1;
+ optional uint32 dm35f02 = 2;
+ optional uint32 dm35f03 = 3;
+ optional uint32 dm35f04 = 4;
+ optional uint32 dm35f05 = 5;
+ optional uint32 dm35f06 = 6;
+}
+message dm36 {
+ required de06  dm36f01 = 1;
+ optional de07  dm36f02 = 6 [default = DE07_E02];
+ required int32 dm36f03 = 2;
+ required int32 dm36f04 = 7;
+ optional dm33  dm36f05 = 3;
+ optional dm34  dm36f06 = 4;
+ optional dm35  dm36f07 = 5;
+}
+message dm37 {
+ repeated dm36 dm37f01 = 1;
+}
+message dm38 {
+ repeated int32 dm38f01 = 1;
+}
+message dm39 {
+ repeated int32 dm39f01 = 1;
+}
+message dm40 {
+ repeated int32 dm40f01 = 1;
+}
+message dm41 {
+ optional uint32 dm41f01 = 1;
+}
+message dm42 {
+ optional uint32 dm42f01 = 1;
+}
+message dm43 {
+}
+message dm44 {
+ required uint32 dm44f01 = 1;
+}
+message dm45 {
+}
+message dm46 {
+ required uint32 dm46f01 = 1;
+ required uint32 dm46f02 = 2;
+}
+message dm47 {
+}
+enum de08 {
+ DE08_E01 = 400;
+ DE08_E02 = 401;
+ DE08_E03 = 402;
+ DE08_E04 = 403;
+ DE08_E05 = 404;
+ DE08_E06 = 405;
+ DE08_E07 = 406;
+ DE08_E08 = 407;
+ DE08_E09 = 408;
+ DE08_E10 = 409;
+ DE08_E11 = 410;
+ DE08_E12 = 411;
+ DE08_E13 = 412;
+}
+message dm48 {
+}
+message dm49 {
+ required uint32 dm49f01 = 2;
+ required uint32 dm49f02 = 3;
+}
+message dm50 {
+ required uint32 dm50f01 = 1;
+ optional uint32 dm50f02 = 2;
+ required bool   dm50f03 = 3;
+}
+message dm51 {
+ optional bool dm51f01 = 1 [default = false];
+ optional dm50 dm51f02 = 2;
+}
+message dm52 {
+ optional uint32 dm52f01 = 1;
+ optional sint32 dm52f02 = 2;
+ optional int32  dm52f03 = 3;
+ optional uint32 dm52f04 = 4;
+ optional int32  dm52f05 = 5;
+ optional int32  dm52f06 = 6;
+ optional int32  dm52f07 = 7;
+ optional int32  dm52f08 = 8;
+ optional int32  dm52f09 = 9;
+ optional int32  dm52f10 = 10;
+ optional sint32 dm52f11 = 11;
+ optional int32  dm52f12 = 12;
+ optional uint32 dm52f13 = 13;
+ optional int32  dm52f14 = 14;
+ optional uint32 dm52f15 = 15;
+ optional int32  dm52f16 = 16;
+ optional int32  dm52f17 = 17;
+ optional int32  dm52f18 = 18;
+ optional int32  dm52f19 = 19;
+ optional bytes  dm52f20 = 20;
+ optional uint32 dm52f21 = 21;
+ optional uint32 dm52f22 = 22;
+ optional dm51   dm52f23 = 23;
+}
+message dm53 {
+}
+message dm54 {
+}
+message dm55 {
+}
+enum de09 {
+ DE09_E01 = 1;
+ DE09_E02 = 2;
+ DE09_E03 = 3;
+}
+message dm56 {
+ required int32  dm56f01 = 1;
+ optional int32  dm56f02 = 2;
+ optional sint32 dm56f03 = 3;
+ optional int32  dm56f04 = 4;
+ optional int32  dm56f05 = 5;
+}
+message dm57 {
+ required de09 dm57f01 = 1;
+ optional dm56 dm57f02 = 2;
+}
+message dm58 {
+ repeated dm57 dm58f01 = 1;
+}
+message dm59 {
+ repeated int32 dm59f01 = 1;
+}
+enum de10 {
+ DE10_E01 = 1;
+ DE10_E02 = 2;
+}
+message dm60 {
+ required de10 dm60f01 = 1;
+}
+message dm61 {
+}
+message dm62 {
+}
+message dm63 {
+ required uint32 dm63f01 = 1;
+ optional uint32 dm63f02 = 2 [default = 100];
+ optional uint32 dm63f03 = 3;
+ optional uint32 dm63f04 = 4 [default = 211];
+ optional int32  dm63f05 = 5;
+ optional int32  dm63f06 = 6;
+ optional bool   dm63f07 = 7 [default = true];
+}
+message dm64 {
+}
+enum de11 {
+ DE11_E01 = 500;
+ DE11_E02 = 501;
+ DE11_E03 = 502;
+}
+enum de12 {
+ DE12_E01 = -2;
+ DE12_E02 = 0;
+ DE12_E03 = 2;
+}
+enum de13 {
+ DE13_E01 = 1;
+ DE13_E02 = 3;
+ DE13_E03 = 5;
+}
+enum de14 {
+ DE14_E01 = -2;
+ DE14_E02 = 0;
+ DE14_E03 = 1;
+ DE14_E04 = 2;
+}
+enum de15 {
+ DE15_E01 = -2;
+ DE15_E02 = 0;
+ DE15_E03 = 2;
+}
+enum de16 {
+ DE16_E01 = -2;
+ DE16_E02 = 0;
+ DE16_E03 = 2;
+}
+enum de17 {
+ DE17_E01 = 0;
+ DE17_E02 = 1;
+}
+message dm65 {
+}
+message dm66 {
+ optional uint32 dm66f01 = 1;
+ optional uint32 dm66f02 = 2;
+ optional uint32 dm66f03 = 3;
+ optional uint32 dm66f04 = 4;
+ optional int32  dm66f05 = 5;
+ optional int32  dm66f06 = 6;
+ optional int32  dm66f07 = 7;
+ optional de12   dm66f08 = 8;
+ optional de13   dm66f09 = 9;
+ optional de14   dm66f10 = 10;
+ optional de15   dm66f11 = 11;
+ optional de16   dm66f12 = 12;
+ optional int32  dm66f13 = 16;
+ optional int32  dm66f14 = 13;
+ optional int32  dm66f15 = 14;
+ optional bool   dm66f16 = 18;
+ optional de17   dm66f17 = 15;
+ optional int32  dm66f18 = 17;
+}
+message dm67 {
+}
+enum de18 {
+ DE18_E01 = 600;
+ DE18_E02 = 601;
+ DE18_E03 = 602;
+ DE18_E04 = 603;
+ DE18_E05 = 604;
+ DE18_E06 = 605;
+ DE18_E07 = 606;
+ DE18_E08 = 607;
+}
+message dm68 {
+ optional string  dm68f01 = 1;
+ optional uint32  dm68f02 = 2;
+ optional fixed32 dm68f03 = 3;
+ optional uint32  dm68f04 = 4;
+ optional uint32  dm68f05 = 5;
+ optional uint32  dm68f06 = 6;
+}
+message dm69 {
+}
+message dm70 {
+ optional fixed32 dm70f01 = 1;
+}
+message dm71 {
+}
+message dm72 {
+}
+message dm73 {
+ required fixed32 dm73f01 = 1;
+}
+message dm74 {
+ required fixed32 dm74f01 = 1;
+}
+message dm75 {
+ required fixed32 dm75f01 = 1;
+}
+enum de19 {
+ DE19_E01 = 700;
+ DE19_E02 = 701;
+}
+message dm76 {
+}
+message dm77 {
+}
+enum de20 {
+ DE20_E01 = 800;
+ DE20_E02 = 801;
+}
+message dm78 {
+}
+message dm79 {
+ required bool   dm79f01 = 1;
+ repeated uint32 dm79f02 = 2;
+ repeated uint32 dm79f03 = 3;
+ repeated uint32 dm79f04 = 4;
+ repeated int32  dm79f05 = 5;
+}
+message dm1 {
+ required uint32 dm01f01 = 1;
+ optional dm28   dm01f02 = 100;
+ optional dm29   dm01f03 = 101;
+ optional dm30   dm01f04 = 102;
+ optional dm31   dm01f05 = 103;
+ optional dm32   dm01f06 = 104;
+ optional dm02   dm01f07 = 200;
+ optional dm03   dm01f08 = 201;
+ optional dm04   dm01f09 = 202;
+ optional dm05   dm01f10 = 203;
+ optional dm06   dm01f11 = 204;
+ optional dm07   dm01f12 = 205;
+ optional dm08   dm01f13 = 206;
+ optional dm09   dm01f14 = 207;
+ optional dm10   dm01f15 = 208;
+ optional dm11   dm01f16 = 209;
+ optional dm12   dm01f17 = 210;
+ optional dm13   dm01f18 = 211;
+ optional dm14   dm01f19 = 212;
+ optional dm15   dm01f20 = 213;
+ optional dm16   dm01f21 = 214;
+ optional dm17   dm01f22 = 215;
+ optional dm18   dm01f23 = 216;
+ optional dm20   dm01f24 = 217;
+ optional dm21   dm01f25 = 218;
+ optional dm19   dm01f26 = 219;
+ optional dm37   dm01f27 = 300;
+ optional dm38   dm01f28 = 301;
+ optional dm39   dm01f29 = 302;
+ optional dm40   dm01f30 = 303;
+ optional dm41   dm01f31 = 304;
+ optional dm42   dm01f32 = 305;
+ optional dm43   dm01f33 = 306;
+ optional dm44   dm01f34 = 307;
+ optional dm45   dm01f35 = 308;
+ optional dm46   dm01f36 = 309;
+ optional dm47   dm01f37 = 310;
+ optional dm48   dm01f38 = 400;
+ optional dm49   dm01f39 = 401;
+ optional dm52   dm01f40 = 402;
+ optional dm53   dm01f41 = 403;
+ optional dm54   dm01f42 = 404;
+ optional dm55   dm01f43 = 405;
+ optional dm58   dm01f44 = 406;
+ optional dm59   dm01f45 = 407;
+ optional dm60   dm01f46 = 408;
+ optional dm61   dm01f47 = 409;
+ optional dm63   dm01f48 = 410;
+ optional dm64   dm01f49 = 411;
+ optional dm62   dm01f50 = 412;
+ optional dm65   dm01f51 = 500;
+ optional dm66   dm01f52 = 501;
+ optional dm67   dm01f53 = 502;
+ optional dm68   dm01f54 = 600;
+ optional dm69   dm01f55 = 601;
+ optional dm70   dm01f56 = 602;
+ optional dm71   dm01f57 = 603;
+ optional dm72   dm01f58 = 604;
+ optional dm73   dm01f59 = 605;
+ optional dm74   dm01f60 = 606;
+ optional dm75   dm01f61 = 607;
+ optional dm76   dm01f62 = 700;
+ optional dm77   dm01f63 = 701;
+ optional dm78   dm01f64 = 800;
+ optional dm79   dm01f65 = 801;
+}
+
+

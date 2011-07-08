@@ -7,11 +7,15 @@ protobuf's subversion repository.
 Deviations from the benchmarks in protobuf's subversion repository:
 
 * The google_size.proto and the google_speed.proto have been
-  fused into msg.proto since gpb don't know how to optimize neither
-  for speed nor for code size.
+  fused into msg.proto since gpb doesn't know how to optimize
+  neither for speed nor for code size.
 * The "repeated group" construction has been changed into a
   repeated (sub) message, since groups are not supported by gpb.
   The google_message2.dat file has been updated accordingly.
+* Addition of the d.proto and messages in d-msgs/ This contains
+  randomly generated messages according to d.proto.
+  The d-msgs/d-all-concatenated.dat will cause a lot of message
+  merging to happen upon deserialization.
 
 Running a benchmark
 -------------------
@@ -34,5 +38,5 @@ Running a benchmark
                      msg Message2 google_message2.dat
 
 4. Wait! Each test runs for around 30--35 seconds, and there are 2 tests
-   per msg/data combination. The above command will take about 2--2.5
-   minutes to run.
+   per msg/data combination. The above command will take about
+   4.5 -- 5 minutes to run.
