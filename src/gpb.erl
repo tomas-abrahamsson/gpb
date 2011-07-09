@@ -1,4 +1,4 @@
-%%% Copyright (C) 2010  Tomas Abrahamsson
+%%% Copyright (C) 2010-2011  Tomas Abrahamsson
 %%%
 %%% Author: Tomas Abrahamsson <tab@lysator.liu.se>
 %%%
@@ -24,8 +24,10 @@
 -export([verify_msg/2, check_scalar/2]).
 -export([encode_varint/1, decode_varint/1]).
 -export([encode_wiretype/1, decode_wiretype/1]).
+-export([version_as_string/0, version_as_list/0]).
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
+-include("../include/gpb_version.hrl").
 
 %% TODO
 %%
@@ -44,6 +46,12 @@
 %%   Example: (1 bsl 33) for an uint32? The bit-syntax silently truncates,
 %%   but this has been under debate on the erlang mailing list as it
 %%   was unexpected. Related: principle of least astonishment.
+
+version_as_string() ->
+    ?gpb_version.
+
+version_as_list() -> %% this one is better for comparison
+    [list_to_integer(S) || S <- string:tokens(?gpb_version, ".")].
 
 decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},

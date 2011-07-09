@@ -1,4 +1,4 @@
-%%% Copyright (C) 2010  Tomas Abrahamsson
+%%% Copyright (C) 2010-2011  Tomas Abrahamsson
 %%%
 %%% Author: Tomas Abrahamsson <tab@lysator.liu.se>
 %%%
@@ -33,7 +33,10 @@
           known_msg_size      :: dict(), %% MsgName -> Size | undefined
           msg_occurrences     :: dict(), %% MsgName -> [occurrence()]
           fixlen_types        :: set(),  %% #ft{}
-          num_packed_fields   :: integer()
+          num_packed_fields   :: integer(),
+          num_fields          :: dict(), %% MsgName -> integer()
+          d_field_pass_method :: dict()  %% MsgName -> pass_as_record |
+                                         %%            pass_as_params
         }).
 
 
@@ -221,7 +224,7 @@ msg_defs(Mod, Defs0, Opts0) ->
     possibly_probe_defs(Defs, Opts0),
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
-    AnRes = analyze_defs(Defs),
+    AnRes = analyze_defs(Defs, Opts2),
     Res1 = do_msg_defs(Defs, Mod, AnRes, Opts2),
     return_or_report_warnings_or_errors(Res1, Warns, Opts2,
                                         get_output_format(Opts2)).
@@ -350,9 +353,7 @@ format_warning(X) ->
 %% With no proto file to compile, print a help message and exit.
 -spec c() -> no_return().
 c() ->
-    show_help(),
-    init:stop(1),
-    timer:sleep(infinity).
+    c([undefined]).
 
 %% @doc This function is intended as a command line interface for the compiler.
 %% Call it from the command line as follows:
@@ -377,21 +378,32 @@ c() ->
 %%   <dt>`-c true | false | auto | integer() | float()'</dt>
 %%   <dd>Specify how or when the generated decoder should
 %%       copy fields of type `bytes'.</dd>
+%%   <dt>`--help' or `-h'</dt>
+%%   <dd>Show help.</dd>
+%%   <dt>`--version' or `-V'</dt>
+%%   <dd>Show the version number of gpb.</dd>
 %% </dl>
 -spec c([string() | atom()]) -> no_return().
 c([File]) when is_atom(File); is_list(File) -> %% invoked with -s or -run
-    FileName = if is_atom(File) -> atom_to_list(File);
-                  is_list(File) -> File
+    FileName = if File == undefined -> undefined;
+                  is_atom(File)     -> atom_to_list(File);
+                  is_list(File)     -> File
                end,
     Args = init:get_arguments(),
     PlainArgs = init:get_plain_arguments(),
     Opts1 = parse_opts(Args, PlainArgs),
     Opts2 = [report_warnings, report_errors] ++ Opts1,
-    case is_help_requested(Opts2, FileName) of
-        true  ->
+    case determine_cmdline_op(Opts2, FileName) of
+        error  ->
+            show_help(),
+            init:stop(1);
+        show_help  ->
             show_help(),
             init:stop(0);
-        false ->
+        show_version  ->
+            show_version(),
+            init:stop(0);
+        compile ->
             case file(FileName, Opts2) of
                 ok ->
                     init:stop(0);
@@ -401,13 +413,24 @@ c([File]) when is_atom(File); is_list(File) -> %% invoked with -s or -run
     end,
     timer:sleep(infinity). %% give init:stop time to do its work
 
-is_help_requested(Opts, FileName) ->
-    lists:member(help, Opts) orelse
+determine_cmdline_op(Opts, FileName) ->
+    Help = lists:member(help, Opts) orelse
         FileName == "-h" orelse
-        FileName == "--help".
+        FileName == "--help",
+    Vsn = lists:member(version, Opts) orelse
+        FileName == "-V" orelse
+        FileName == "--version",
+    case {Help, Vsn} of
+        {true, _} -> show_help;
+        {_, true} -> show_version;
+        _         -> if FileName == undefined -> error;
+                        is_list(FileName)     -> compile
+                     end
+    end.
 
 show_help() ->
     io:format(
+      "gpb version ~s~n"
       "Usage: erl <erlargs> [gpb-opts] -s ~p c <ProtoFile>.proto~n"
       "   or: erl <erlargs> -s ~p c <ProtoFile>.proto -extra [gpb-opts]~n"
       "Typical erlargs = -noshell -noinput +B -boot start_clean -pa SomeDir~n"
@@ -425,8 +448,14 @@ show_help() ->
       "          verify the message to be encoded.~n"
       "    -c true | false | auto | integer() | float()~n"
       "          Specify how or when the generated decoder should~n"
-      "          copy fields of type `bytes'.~n"
-      , [?MODULE, ?MODULE, ?MODULE]).
+      "    --help  -h~n"
+      "          Show help~n"
+      "    --version  -V~n"
+      "          Show version~n"
+      , [gpb:version_as_string(), ?MODULE, ?MODULE, ?MODULE]).
+
+show_version() ->
+    io:format("gpb version ~s~n", [gpb:version_as_string()]).
 
 parse_opts(Args, PlainArgs) ->
     arg_zf(fun parse_opt/1, Args) ++ plain_arg_zf(fun parse_opt/1, PlainArgs).
@@ -446,7 +475,9 @@ parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
                                     end;
 parse_opt({"h", _})              -> {true, help};
 parse_opt({"-help", _})          -> {true, help};
-parse_opt(_)                     -> false.
+parse_opt({"V", _})              -> {true, version};
+parse_opt({"-version", _})       -> {true, version};
+parse_opt(_X)                    -> false.
 
 string_to_number(S) ->
     try {ok, list_to_integer(S)}
@@ -615,14 +646,16 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
             {[], Opts}
     end.
 
-%% -- encoders -----------------------------------------------------
+%% -- analysis -----------------------------------------------------
 
-analyze_defs(Defs) ->
+analyze_defs(Defs, Opts) ->
     #anres{used_types          = find_used_types(Defs),
            known_msg_size      = find_msgsizes_known_at_compile_time(Defs),
            msg_occurrences     = find_msg_occurrences(Defs),
            fixlen_types        = find_fixlen_types(Defs),
-           num_packed_fields   = find_num_packed_fields(Defs)}.
+           num_packed_fields   = find_num_packed_fields(Defs),
+           num_fields          = find_num_fields(Defs),
+           d_field_pass_method = compute_decode_field_pass_methods(Defs, Opts)}.
 
 find_used_types(Defs) ->
     fold_msg_fields(fun(_MsgName, #field{type=Type}, Acc) ->
@@ -693,6 +726,13 @@ fold_msg_fields(Fun, InitAcc, Defs) ->
                 end,
                 InitAcc,
                 Defs).
+
+find_num_fields(Defs) ->
+    lists:foldl(fun({MsgName, MsgDef}, Acc) ->
+                        dict:store(MsgName, length(MsgDef), Acc)
+                end,
+                dict:new(),
+                [{MsgName, MsgDef} || {{msg, MsgName}, MsgDef} <- Defs]).
 
 find_msgsizes_known_at_compile_time(Defs) ->
     T = ets:new(gpb_msg_sizes, [set, public]),
@@ -766,12 +806,67 @@ all_enum_values_encode_to_same_size(EnumName, Defs) ->
         _      -> no
     end.
 
+compute_decode_field_pass_methods(Defs, Opts) ->
+    lists:foldl(fun({MsgName, MsgDef}, D) ->
+                        PassHow = d_field_pass_method(MsgName, MsgDef, Opts),
+                        dict:store(MsgName, PassHow, D)
+                end,
+                dict:new(),
+                [{MsgName, MsgDefs} || {{msg, MsgName}, MsgDefs} <- Defs]).
+
+
+d_field_pass_method(MsgName, MsgDef, Opts) ->
+    %% Allow overriding options, mainly intended for testing
+    case proplists:get_value({field_pass_method,MsgName}, Opts) of
+        undefined ->
+            case proplists:get_value(field_pass_method, Opts) of
+                undefined ->
+                    d_field_pass_method(MsgDef);
+                Method when Method==pass_as_record; Method==pass_as_params ->
+                    Method
+            end;
+        Method when Method==pass_as_record; Method==pass_as_params ->
+            Method
+    end.
+
+d_field_pass_method(MsgDef) ->
+    %% Compute estimated costs:
+    %% Either passing a message record, or pass the fields as parameters
+    %% to the functions, one parameter for each field, then as the last
+    %% operation, stuff all parameters into a record.
+    %%
+    %% There are different advantages and disadvantages:
+    %% - Updating fields in a record means the vm will have to verify
+    %%   that the term is a record (for each time a field is parsed/added)
+    %% - Passing the fields eliminates the cost above, but for each
+    %%   (non-tail-recursive) function call, the field-parameters will
+    %%   be saved to the stack, then restored after the call.
+    %%   Such function calls, are: call to unicode:characters_to_list
+    %%   for strings, calls to parse sub messages or packed fields and
+    %%   final top-level calls to lists:reverse for repeated fields.
+    NF = length(MsgDef), %% num fields (awk-istic terminology)
+    if NF >= 250 ->
+            pass_as_record; %% Functions can take at most 255 arguments
+       NF == 0 ->
+            pass_as_params;
+       true ->
+            NumSubMsgFields = length([x || #field{type={msg,_}} <- MsgDef]),
+            IsMsgDominatedBySubMsgs = NumSubMsgFields / NF > 0.5,
+            if IsMsgDominatedBySubMsgs, NF >= 100 ->
+                    pass_as_record;
+               true ->
+                    pass_as_params
+            end
+    end.
+
+
 %% -- generating code ----------------------------------------------
 
 format_erl(Mod, Defs, AnRes, Opts) ->
     iolist_to_binary(
       [f("%% Automatically generated, do not edit~n"
-         "%% Generated by ~p on ~p~n", [?MODULE, calendar:local_time()]),
+         "%% Generated by ~p version ~s on ~p~n",
+         [?MODULE, gpb:version_as_string(), calendar:local_time()]),
        f("-module(~w).~n", [Mod]),
        "\n",
        f("-export([encode_msg/1, encode_msg/2]).~n"),
@@ -783,6 +878,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("-export([get_enum_names/0]).~n"),
        f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
        f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
+       f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
        f("-include(\"~s.hrl\").~n", [Mod]),
        f("-include(\"gpb.hrl\").~n"),
@@ -826,7 +922,13 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        "\n",
        f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
        "\n",
-       format_introspection(Defs)]).
+       format_introspection(Defs),
+       "\n",
+       f("gpb_version_as_string() ->~n"),
+       f("    \"~s\".~n", [gpb:version_as_string()]),
+       "\n",
+       f("gpb_version_as_list() ->~n"),
+       f("    ~w.~n", [gpb:version_as_list()])]).
 
 %% -- encoders -----------------------------------------------------
 
@@ -1155,7 +1257,7 @@ format_varint_encoder() ->
     [f("e_varint(N, Bin) when N =< 127 ->~n"),
      f("    <<Bin/binary, N>>;~n"),
      f("e_varint(N, Bin) ->~n"),
-     f("    Bin2 = <<Bin/binary, 1:1, (N band 127):7>>,~n"),
+     f("    Bin2 = <<Bin/binary, (N band 127 bor 128)>>,~n"),
      f("    e_varint(N bsr 7, Bin2).~n~n")].
 
 %% -- decoders -----------------------------------------------------
@@ -1171,13 +1273,13 @@ format_decoder_topcase(Indent, Defs, BinVar, MsgNameVar) ->
 
 format_decoders(Defs, AnRes, Opts) ->
     [format_enum_decoders(Defs, AnRes),
-     format_initial_msgs(Defs),
-     format_msg_decoders(Defs, Opts)].
+     format_initial_msgs(Defs, AnRes),
+     format_msg_decoders(Defs, AnRes, Opts)].
 
 format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
     %%        insert a 2-complement in the mapping in order to move computations
-    %%        from runtime to compiletime??
+    %%        from run-time to compile-time??
     [[string:join([f("~p(~w) -> ~p",
                      [mk_fn(d_enum_, EnumName), EnumValue, EnumSym])
                    || {EnumSym, EnumValue} <- EnumDef],
@@ -1186,11 +1288,17 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
-format_initial_msgs(Defs) ->
-    [format_initial_msg(MsgName, MsgDef, Defs)
+format_initial_msgs(Defs, AnRes) ->
+    [format_initial_msg(MsgName, MsgDef, Defs, AnRes)
      || {{msg, MsgName}, MsgDef} <- Defs].
 
-format_initial_msg(MsgName, MsgDef, Defs) ->
+format_initial_msg(MsgName, MsgDef, Defs, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params -> ""; %% handled in d_read_field_def_<MsgName>/1
+        pass_as_record -> format_initial_msg_par(MsgName, MsgDef, Defs)
+    end.
+
+format_initial_msg_par(MsgName, MsgDef, Defs) ->
     [f("~p() ->~n", [mk_fn(msg0_, MsgName)]),
      indent(4, format_initial_msg_record(4, MsgName, MsgDef, Defs)),
      ".\n\n"].
@@ -1224,29 +1332,99 @@ format_initial_msg_fields(Indent, MsgDef, Defs) ->
             end],
         ",\n")).
 
-format_msg_decoders(Defs, Opts) ->
-    [format_msg_decoder(MsgName, MsgDef, Opts)
+format_initial_field_values(MsgDef) ->
+    [[", ", case Occurrence of
+                repeated -> "[]";
+                required -> "undefined"; %% Use default value? (if available)
+                optional -> "undefined"
+            end] || #field{occurrence = Occurrence} <- MsgDef].
+
+format_msg_decoders(Defs, AnRes, Opts) ->
+    [format_msg_decoder(MsgName, MsgDef, AnRes, Opts)
      || {{msg, MsgName}, MsgDef} <- Defs].
 
-format_msg_decoder(MsgName, MsgDef, Opts) ->
-    [format_msg_decoder_read_field(MsgName, MsgDef),
-     format_msg_decoder_reverse_toplevel(MsgName, MsgDef),
-     format_field_decoders(MsgName, MsgDef, Opts),
-     format_field_adders(MsgName, MsgDef),
-     format_field_skippers(MsgName)].
+format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
+    [format_msg_decoder_read_field(MsgName, MsgDef, AnRes),
+     format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes),
+     format_field_decoders(MsgName, MsgDef, AnRes, Opts),
+     format_field_adders(MsgName, MsgDef, AnRes),
+     format_field_skippers(MsgName, AnRes)].
 
-format_msg_decoder_read_field(MsgName, MsgDef) ->
-    ReadFieldCases = format_read_field_cases(MsgName, MsgDef),
+format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params -> format_msg_decoder_read_field_pap(MsgName, MsgDef);
+        pass_as_record -> format_msg_decoder_read_field_par(MsgName, MsgDef)
+    end.
+
+format_msg_decoder_read_field_pap(MsgName, MsgDef) ->
+    FieldVars = [f(", F~w", [I]) || I <- lists:seq(1,length(MsgDef))],
+    ReadFieldCases = format_read_field_cases(MsgName, MsgDef, pass_as_params,
+                                             FieldVars),
+    MsgIndent = flength("    #~p{", [MsgName]),
+    FieldSets = string:join([case Occurrence of
+                                 required -> f("~p = F~w", [FName, I]);
+                                 optional -> f("~p = F~w", [FName, I]);
+                                 repeated -> f("~p = lists:reverse(F~w)",
+                                               [FName, I])
+                             end
+                             || {I, #field{occurrence=Occurrence,
+                                           name=FName}} <- index_seq(MsgDef)],
+                            f(",~n~s",[indent(MsgIndent, "")])),
+    [f("~p(Bin) ->~n", [mk_fn(d_msg_, MsgName)]),
+     f("    ~p(Bin, 0, 0~s).~n",
+       [mk_fn(d_read_field_def_, MsgName),
+        format_initial_field_values(MsgDef)]),
+     "\n",
+     f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
+       "    ~p(Rest, N+7, X bsl N + Acc~s);~n",
+       [mk_fn(d_read_field_def_, MsgName), FieldVars,
+        mk_fn(d_read_field_def_, MsgName), FieldVars]),
+     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
+       "    Key = X bsl N + Acc,~n",
+       [mk_fn(d_read_field_def_, MsgName), FieldVars]),
+     if ReadFieldCases == [] ->
+             f("    case Key band 7 of  %% WireType~n"
+               "        0 -> skip_varint_~s(Rest, 1, 1~s);~n"
+               "        1 -> skip_64_~s(Rest, 1, 1~s);~n"
+               "        2 -> skip_length_delimited_~s(Rest, 0, 0~s);~n"
+               "        5 -> skip_32_~s(Rest, 1, 1~s)~n"
+               "    end;~n",
+               [MsgName, FieldVars,
+                MsgName, FieldVars,
+                MsgName, FieldVars,
+                MsgName, FieldVars]);
+        true ->
+             f("    case Key of~n"
+               "~s"
+               "        _ ->~n"
+               "            case Key band 7 of %% wiretype~n"
+               "                0 -> skip_varint_~s(Rest, 1, 1~s);~n"
+               "                1 -> skip_64_~s(Rest, 1, 1~s);~n"
+               "                2 -> skip_length_delimited_~s(Rest,0,0~s);~n"
+               "                5 -> skip_32_~s(Rest, 1, 1~s)~n"
+               "            end~n"
+               "    end;~n",
+               [ReadFieldCases,
+                MsgName, FieldVars,
+                MsgName, FieldVars,
+                MsgName, FieldVars,
+                MsgName, FieldVars])
+     end,
+     f("~p(<<>>, 0, 0~s) ->~n", [mk_fn(d_read_field_def_, MsgName), FieldVars]),
+     f("    #~p{~s}.~n~n", [MsgName, FieldSets])].
+
+format_msg_decoder_read_field_par(MsgName, MsgDef) ->
+    ReadFieldCases = format_read_field_cases(MsgName, MsgDef, pass_as_record, x),
     [f("~p(Bin) ->~n", [mk_fn(d_msg_, MsgName)]),
      indent(4, f("Msg0 = ~s(),~n", [mk_fn(msg0_, MsgName)])),
      indent(4, f("~p(Bin, 0, 0, Msg0).~n", [mk_fn(d_read_field_def_, MsgName)])),
      "\n",
      f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n",
+       "    ~p(Rest, N+7, X bsl N + Acc, Msg);~n",
        [mk_fn(d_read_field_def_, MsgName),
         mk_fn(d_read_field_def_, MsgName)]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    Key = X bsl (N*7) + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
+       "    Key = X bsl N + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
      if ReadFieldCases == [] ->
              f("    case Key band 7 of  %% WireType~n"
                "        0 -> skip_varint_~s(Rest, Msg);~n"
@@ -1274,24 +1452,30 @@ format_msg_decoder_read_field(MsgName, MsgDef) ->
        [mk_fn(d_read_field_def_, MsgName),
         mk_fn(d_reverse_toplevel_fields_, MsgName)])].
 
-format_read_field_cases(MsgName, MsgDef) ->
+format_read_field_cases(MsgName, MsgDef, FieldPass, FieldVars) ->
     [begin
          Wiretype = case is_packed(FieldDef) of
                         true  -> gpb:encode_wiretype(bytes);
                         false -> gpb:encode_wiretype(Type)
                     end,
          Key = (FNum bsl 3) bor Wiretype,
-         indent(8, f("~w -> ~p(Rest~sMsg);~n",
+         Fill = if FieldPass == pass_as_params -> fill;
+                   FieldPass == pass_as_record -> no_fill
+                end,
+         indent(8, f("~w -> ~p(Rest~s~s);~n",
                  [Key, mk_fn(d_field_, MsgName, FName),
-                  case mk_field_decoder_vi_params(FieldDef) of
-                      ""     -> [", "];
-                      Params -> [", ", Params, ", "]
+                  case mk_field_decoder_vi_params(FieldDef, Fill) of
+                      ""     -> [];
+                      Params -> [", ", Params]
+                  end,
+                  if FieldPass == pass_as_record -> ", Msg";
+                     FieldPass == pass_as_params -> FieldVars
                   end]))
      end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
 
-mk_field_decoder_vi_params(#field{type=Type}=FieldDef) ->
+mk_field_decoder_vi_params(#field{type=Type}=FieldDef, Fill) ->
     case is_packed(FieldDef) of
         false ->
             case Type of
@@ -1303,12 +1487,12 @@ mk_field_decoder_vi_params(#field{type=Type}=FieldDef) ->
                 uint64   -> "0, 0"; %% varint-based
                 bool     -> "0, 0"; %% varint-based
                 {enum,_} -> "0, 0"; %% varint-based
-                fixed32  -> "";
-                sfixed32 -> "";
-                float    -> "";
-                fixed64  -> "";
-                sfixed64 -> "";
-                double   -> "";
+                fixed32  -> if Fill == fill -> "0, 0"; true -> "" end;
+                sfixed32 -> if Fill == fill -> "0, 0"; true -> "" end;
+                float    -> if Fill == fill -> "0, 0"; true -> "" end;
+                fixed64  -> if Fill == fill -> "0, 0"; true -> "" end;
+                sfixed64 -> if Fill == fill -> "0, 0"; true -> "" end;
+                double   -> if Fill == fill -> "0, 0"; true -> "" end;
                 string   -> "0, 0"; %% varint-based
                 bytes    -> "0, 0"; %% varint-based
                 {msg,_}  -> "0, 0"  %% varint-based
@@ -1317,50 +1501,89 @@ mk_field_decoder_vi_params(#field{type=Type}=FieldDef) ->
             "0, 0" %% length of packed bytes is varint-based
     end.
 
-format_field_decoders(MsgName, MsgDef, Opts) ->
-    [[format_field_decoder(MsgName, FieldDef, Opts), "\n"]
-     || FieldDef <- MsgDef].
+format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
+    [[format_field_decoder(MsgName, Field, AnRes, Opts), "\n"]
+     || Field <- MsgDef].
 
-format_field_decoder(MsgName, FieldDef, Opts) ->
-    case is_packed(FieldDef) of
-        false -> format_non_packed_field_decoder(MsgName, FieldDef, Opts);
-        true  -> format_packed_field_decoder(MsgName, FieldDef, Opts)
+format_field_decoder(MsgName, Field, AnRes, Opts) ->
+    case is_packed(Field) of
+        false -> format_non_packed_field_decoder(MsgName, Field, AnRes, Opts);
+        true  -> format_packed_field_decoder(MsgName, Field, AnRes, Opts)
     end.
 
-format_non_packed_field_decoder(MsgName, #field{type=Type}=FieldDef, Opts)->
+format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
     case Type of
-        sint32   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        sint64   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        int32    -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        int64    -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        uint32   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        uint64   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        bool     -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        {enum,_} -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        fixed32  -> format_uf32_field_decoder(MsgName, FieldDef);
-        sfixed32 -> format_sf32_field_decoder(MsgName, FieldDef);
-        float    -> format_float_field_decoder(MsgName, FieldDef);
-        fixed64  -> format_uf64_field_decoder(MsgName, FieldDef);
-        sfixed64 -> format_sf64_field_decoder(MsgName, FieldDef);
-        double   -> format_double_field_decoder(MsgName, FieldDef);
-        string   -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        bytes    -> format_vi_based_field_decoder(MsgName, FieldDef, Opts);
-        {msg,_}  -> format_vi_based_field_decoder(MsgName, FieldDef, Opts)
+        sint32   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        sint64   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        int32    -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        int64    -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        uint32   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        uint64   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        bool     -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        {enum,_} -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        fixed32  -> format_uf32_field_decoder(MsgName, Field, AnRes);
+        sfixed32 -> format_sf32_field_decoder(MsgName, Field, AnRes);
+        float    -> format_float_field_decoder(MsgName, Field, AnRes);
+        fixed64  -> format_uf64_field_decoder(MsgName, Field, AnRes);
+        sfixed64 -> format_sf64_field_decoder(MsgName, Field, AnRes);
+        double   -> format_double_field_decoder(MsgName, Field, AnRes);
+        string   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        bytes    -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
+        {msg,_}  -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts)
     end.
 
-format_packed_field_decoder(MsgName,#field{name=FName}=FieldDef, Opts)->
+format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            format_packed_field_decoder_pap(MsgName, FieldDef, AnRes, Opts);
+        pass_as_record ->
+            format_packed_field_decoder_par(MsgName, FieldDef, Opts)
+    end.
+
+format_packed_field_decoder_pap(MsgName, FieldDef, AnRes, Opts) ->
+    NF = get_num_fields(MsgName, AnRes),
+    #field{name=FName, rnum=RNum, opts=FOpts}=FieldDef,
     DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
-    #field{opts=FOpts} = FieldDef,
     FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
-     f("    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [DecodePackWrapFn]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, #~p{~p=AccSeq}=Msg) ->~n",
-       [DecodePackWrapFn, MsgName, FName]),
-     f("    Len = X bsl (N*7) + Acc,~n"),
+    FieldVars = [[", ", f("F~w", [I])] || I <- lists:seq(1, NF)],
+    InFieldVars = [[", ", if I == RNum-1 -> "AccSeq";
+                             I /= RNum-1 -> f("F~w", [I])
+                          end]
+                   || I <- lists:seq(1, NF)],
+    OutFieldVars = [[", ", if I == RNum-1 -> "NewSeq";
+                              I /= RNum-1 -> f("F~w", [I])
+                           end]
+                    || I <- lists:seq(1, NF)],
+    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
+       [DecodePackWrapFn, FieldVars]),
+     f("    ~p(Rest, N+7, X bsl N + Acc~s);~n", [DecodePackWrapFn, FieldVars]),
+     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
+       [DecodePackWrapFn, InFieldVars]),
+     f("    Len = X bsl N + Acc,~n"),
      f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
      f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
        [mk_fn(d_packed_field_, MsgName, FName),
-        case mk_field_decoder_vi_params(FieldDefAsNonpacked) of
+        case mk_field_decoder_vi_params(FieldDefAsNonpacked, no_fill) of
+            ""     -> [", "];
+            Params -> [", ", Params, ", "]
+        end]),
+     f("    ~p(Rest2, 0, 0~s).~n~n",
+       [mk_fn(d_read_field_def_, MsgName), OutFieldVars]),
+     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
+
+format_packed_field_decoder_par(MsgName, FieldDef, Opts) ->
+    #field{name=FName, opts=FOpts}=FieldDef,
+    DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
+    FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
+    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
+     f("    ~p(Rest, N+7, X bsl N + Acc, Msg);~n", [DecodePackWrapFn]),
+     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, #~p{~p=AccSeq}=Msg) ->~n",
+       [DecodePackWrapFn, MsgName, FName]),
+     f("    Len = X bsl N + Acc,~n"),
+     f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
+     f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
+       [mk_fn(d_packed_field_, MsgName, FName),
+        case mk_field_decoder_vi_params(FieldDefAsNonpacked, no_fill) of
             ""     -> [", "];
             Params -> [", ", Params, ", "]
         end]),
@@ -1368,12 +1591,66 @@ format_packed_field_decoder(MsgName,#field{name=FName}=FieldDef, Opts)->
      f("    ~p(Rest2, 0, 0, NewMsg).~n~n", [mk_fn(d_read_field_def_, MsgName)]),
      format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
 
-format_vi_based_field_decoder(MsgName, #field{type=Type, name=FName}, Opts) ->
-    BValueExpr = "X bsl (N*7) + Acc",
+format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            format_vi_based_field_decoder_pap(MsgName, FieldDef, AnRes, Opts);
+        pass_as_record ->
+            format_vi_based_field_decoder_par(MsgName, FieldDef, Opts)
+    end.
+
+format_vi_based_field_decoder_pap(MsgName, FieldDef, AnRes, Opts) ->
+    NF = get_num_fields(MsgName, AnRes),
+    #field{type=Type, rnum=RNum, name=FName}=FieldDef,
+    Merge = classify_field_merge_action(FieldDef),
+    PassFieldVars = [[", ", f("F~w", [I])] || I <- lists:seq(1, NF)],
+    InFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "_";
+                             I == RNum-1, Merge == seqadd    -> f("F~w", [I]);
+                             I == RNum-1, Merge == msgmerge  -> f("F~w", [I]);
+                             I /= RNum-1                     -> f("F~w", [I])
+                          end]
+                   || I <- lists:seq(1, NF)],
+    MergeCode = case Merge of
+                    overwrite -> "";
+                    seqadd    -> f("    FValue2 = [FValue | F~w],~n", [RNum-1]);
+                    msgmerge  -> {msg,FMsgName} = Type,
+                                 f("    FValue2 = if F~w == undefined ->~n"
+                                   "                     FValue;~n"
+                                   "                 true ->~n"
+                                   "                     ~p(F~w, FValue)~n"
+                                   "              end,~n",
+                                   [RNum-1,
+                                    mk_fn(merge_msg_, FMsgName), RNum-1])
+                end,
+    OutFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "FValue";
+                              I == RNum-1, Merge == seqadd    -> "FValue2";
+                              I == RNum-1, Merge == msgmerge  -> "FValue2";
+                              I /= RNum-1                     -> f("F~w", [I])
+                           end]
+                    || I <- lists:seq(1, NF)],
+    BValueExpr = "X bsl N + Acc",
+    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
+                                         Opts),
+    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
+       "    ~p(Rest, N+7, X bsl N + Acc~s);~n",
+       [mk_fn(d_field_, MsgName, FName), PassFieldVars,
+        mk_fn(d_field_, MsgName, FName), PassFieldVars]),
+     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
+       [mk_fn(d_field_, MsgName, FName), InFieldVars]),
+     f("~s",
+       [FValueCode]),
+     f("~s",
+       [MergeCode]),
+     f("    ~p(~s, 0, 0~s).~n",
+       [mk_fn(d_read_field_def_, MsgName), RestVar, OutFieldVars])].
+
+format_vi_based_field_decoder_par(MsgName, FieldDef, Opts) ->
+    #field{type=Type, name=FName}=FieldDef,
+    BValueExpr = "X bsl N + Acc",
     {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
                                          Opts),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n",
+       "    ~p(Rest, N+7, X bsl N + Acc, Msg);~n",
        [mk_fn(d_field_, MsgName, FName),
         mk_fn(d_field_, MsgName, FName)]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n",
@@ -1491,25 +1768,60 @@ fmt_decode_zigzag(Indent, VarStr) ->
      indent(Indent,f("   true -> -((~s + 1) bsr 1)~n", [VarStr])),
      indent(Indent,f("end"))].
 
-format_uf32_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 32, 'little', FieldDef).
+format_uf32_field_decoder(MsgName, FieldDef, AnRes) ->
+    format_f_field_decoder(MsgName, 32, 'little', FieldDef, AnRes).
 
-format_sf32_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 32, 'little-signed', FieldDef).
+format_sf32_field_decoder(MsgName, FieldDef, AnRes) ->
+    format_f_field_decoder(MsgName, 32, 'little-signed', FieldDef, AnRes).
 
-format_float_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 32, 'little-float', FieldDef).
+format_float_field_decoder(MsgName, FieldDef, AnRes) ->
+    format_f_field_decoder(MsgName, 32, 'little-float', FieldDef, AnRes).
 
-format_uf64_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 64, 'little', FieldDef).
+format_uf64_field_decoder(MsgName, FieldDef, AnRes) ->
+    format_f_field_decoder(MsgName, 64, 'little', FieldDef, AnRes).
 
-format_sf64_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 64, 'little-signed', FieldDef).
+format_sf64_field_decoder(MsgName, FieldDef, AnRes) ->
+    format_f_field_decoder(MsgName, 64, 'little-signed', FieldDef, AnRes).
 
-format_double_field_decoder(MsgName, FieldDef) ->
-    format_f_field_decoder(MsgName, 64, 'little-float', FieldDef).
+format_double_field_decoder(MsgName, FieldDef, AnRes) ->
+    format_f_field_decoder(MsgName, 64, 'little-float', FieldDef, AnRes).
 
-format_f_field_decoder(MsgName, BitLen, BitType, #field{name=FName}) ->
+format_f_field_decoder(MsgName, BitLen, BitType, FieldDef, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            format_f_field_decoder_pap(MsgName, BitLen, BitType, FieldDef,
+                                       AnRes);
+        pass_as_record ->
+            format_f_field_decoder_par(MsgName, BitLen, BitType, FieldDef)
+    end.
+
+format_f_field_decoder_pap(MsgName, BitLen, BitType, FieldDef, AnRes) ->
+    NF = get_num_fields(MsgName, AnRes),
+    #field{rnum=RNum, name=FName}=FieldDef,
+    Merge = classify_field_merge_action(FieldDef),
+    InFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "_";
+                             I == RNum-1, Merge == seqadd    -> f("F~w", [I]);
+                             I /= RNum-1                     -> f("F~w", [I])
+                          end]
+                   || I <- lists:seq(1, NF)],
+    MergeCode = case Merge of
+                    overwrite -> "";
+                    seqadd    -> f("    Value2 = [Value | F~w],~n", [RNum-1])
+                end,
+    OutFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "Value";
+                              I == RNum-1, Merge == seqadd    -> "Value2";
+                              I /= RNum-1                     -> f("F~w", [I])
+                           end]
+                    || I <- lists:seq(1, NF)],
+
+    [f("~p(<<Value:~p/~s, Rest/binary>>, _, _~s) ->~n",
+       [mk_fn(d_field_, MsgName, FName), BitLen, BitType, InFieldVars]),
+     f("~s", [MergeCode]),
+     f("    ~p(Rest, 0, 0~s).~n",
+       [mk_fn(d_read_field_def_, MsgName), OutFieldVars])].
+
+format_f_field_decoder_par(MsgName, BitLen, BitType, FieldDef)  ->
+    #field{name=FName}=FieldDef,
     [f("~p(<<Value:~p/~s, Rest/binary>>, Msg) ->~n",
        [mk_fn(d_field_, MsgName, FName), BitLen, BitType]),
      f("    NewMsg = ~p(Value, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
@@ -1537,18 +1849,24 @@ format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitType) ->
 
 format_dpacked_vi(MsgName, #field{name=FName, type=Type}, Opts) ->
     FnName = mk_fn(d_packed_field_, MsgName, FName),
-    BValueExpr = "X bsl (N*7) + Acc",
+    BValueExpr = "X bsl N + Acc",
     {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
                                          Opts),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
-     f("    ~p(Rest, N+1, X bsl (N*7) + Acc, AccSeq);~n", [FnName]),
+     f("    ~p(Rest, N+7, X bsl N + Acc, AccSeq);~n", [FnName]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
      f("~s", [FValueCode]),
      f("    ~p(~s, 0, 0, [FValue | AccSeq]);~n", [FnName, RestVar]),
      f("~p(<<>>, 0, 0, AccSeq) ->~n", [FnName]),
      f("    AccSeq.~n~n")].
 
-format_msg_decoder_reverse_toplevel(MsgName, MsgDef) ->
+format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params -> ""; %% handled in d_read_field_def_<Msg>
+        pass_as_record -> format_msg_decoder_reverse_toplevel_par(MsgName,MsgDef)
+    end.
+
+format_msg_decoder_reverse_toplevel_par(MsgName, MsgDef) ->
     MsgNameQLen = flength("~p", [MsgName]),
     FieldsToReverse = [F || F <- MsgDef, F#field.occurrence == repeated],
     if FieldsToReverse /= [] ->
@@ -1571,6 +1889,12 @@ format_msg_decoder_reverse_toplevel(MsgName, MsgDef) ->
        true ->
             [f("~p(Msg) ->~n", [mk_fn(d_reverse_toplevel_fields_, MsgName)]),
              indent(4, f("Msg.~n~n"))]
+    end.
+
+format_field_adders(MsgName, MsgDef, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params -> ""; %% handled by passing other field params
+        pass_as_record -> format_field_adders(MsgName, MsgDef)
     end.
 
 format_field_adders(MsgName, MsgDef) ->
@@ -1693,33 +2017,66 @@ occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
     can_occur_as_sub_msg(MsgName, AnRes) andalso
         lists:member(optional, dict:fetch(MsgName, Occurrences)).
 
-format_field_skippers(MsgName) ->
-    [format_varint_skipper(MsgName),
-     format_length_delimited_skipper(MsgName),
-     format_32bit_skipper(MsgName),
-     format_64bit_skipper(MsgName)].
+format_field_skippers(MsgName, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            NF = get_num_fields(MsgName, AnRes),
+            [format_varint_skipper_pap(MsgName, NF),
+             format_length_delimited_skipper_pap(MsgName, NF),
+             format_bit_skipper_pap(MsgName, 32, NF),
+             format_bit_skipper_pap(MsgName, 64, NF)];
+        pass_as_record ->
+            [format_varint_skipper_par(MsgName),
+             format_length_delimited_skipper_par(MsgName),
+             format_bit_skipper_par(MsgName, 32),
+             format_bit_skipper_par(MsgName, 64)]
+    end.
 
-format_varint_skipper(MsgName) ->
+format_varint_skipper_pap(MsgName, NF) ->
+    SkipFn = mk_fn(skip_varint_, MsgName),
+    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
+    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
+    [f("~p(<<0:1, _:7, Rest/binary>>, _, _~s) ->~n", [SkipFn, PassFieldVars]),
+     f("    ~p(Rest, 0, 0~s);~n", [ReadFieldFn, PassFieldVars]),
+     f("~p(<<1:1, _:7, Rest/binary>>, X1, X2~s) ->~n", [SkipFn, PassFieldVars]),
+     f("    ~p(Rest, X1, X2~s).~n~n", [SkipFn, PassFieldVars])].
+
+format_varint_skipper_par(MsgName) ->
     SkipFn = mk_fn(skip_varint_, MsgName),
     [f("~p(<<0:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
      f("    ~p(Rest, 0, 0, Msg);~n", [mk_fn(d_read_field_def_, MsgName)]),
      f("~p(<<1:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
      f("    ~p(Rest, Msg).~n~n", [SkipFn])].
 
-format_length_delimited_skipper(MsgName) ->
+format_length_delimited_skipper_pap(MsgName, NF) ->
+    SkipFn = mk_fn(skip_length_delimited_, MsgName),
+    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
+    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
+    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n", [SkipFn, PassFieldVars]),
+     f("    ~p(Rest, N+7, X bsl N + Acc~s);~n", [SkipFn, PassFieldVars]),
+     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n", [SkipFn, PassFieldVars]),
+     f("    Length = X bsl N + Acc,~n"),
+     f("    <<_:Length/binary, Rest2/binary>> = Rest,~n"),
+     f("    ~p(Rest2, 0, 0~s).~n~n", [ReadFieldFn, PassFieldVars])].
+
+format_length_delimited_skipper_par(MsgName) ->
     SkipFn = mk_fn(skip_length_delimited_, MsgName),
     [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    ~p(Rest, N+1, X bsl (N*7) + Acc, Msg);~n", [SkipFn]),
+     f("    ~p(Rest, N+7, X bsl N + Acc, Msg);~n", [SkipFn]),
      f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    Length = X bsl (N*7) + Acc,~n"),
+     f("    Length = X bsl N + Acc,~n"),
      f("    <<_:Length/binary, Rest2/binary>> = Rest,~n"),
      f("    ~p(Rest2, 0, 0, Msg).~n~n", [mk_fn(d_read_field_def_, MsgName)])].
 
-format_32bit_skipper(MsgName) -> format_bit_skipper(MsgName, 32).
+format_bit_skipper_pap(MsgName, BitLen, NF) ->
+    SkipFn = mk_fn(skip_, BitLen, MsgName),
+    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
+    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
+    [f("~p(<<_:~w, Rest/binary>>, _, _~s) ->~n",
+       [SkipFn, BitLen, PassFieldVars]),
+     f("    ~p(Rest, 0, 0~s).~n~n",  [ReadFieldFn, PassFieldVars])].
 
-format_64bit_skipper(MsgName) -> format_bit_skipper(MsgName, 64).
-
-format_bit_skipper(MsgName, BitLen) ->
+format_bit_skipper_par(MsgName, BitLen) ->
     SkipFn = mk_fn(skip_, BitLen, MsgName),
     [f("~p(<<_:~w, Rest/binary>>, Msg) ->~n", [SkipFn, BitLen]),
      f("    ~p(Rest, 0, 0, Msg).~n~n",  [mk_fn(d_read_field_def_, MsgName)])].
@@ -1968,7 +2325,7 @@ format_efield(I, #field{name=N, fnum=F, rnum=R, type=T,
 
 format_fetch_msg_defs([]) ->
     f("fetch_msg_def(MsgName) ->~n"
-      "    erlang:error({no_such_msg, MsgName})~n");
+      "    erlang:error({no_such_msg, MsgName}).~n");
 format_fetch_msg_defs(_MsgDefs) ->
     f("fetch_msg_def(MsgName) ->~n"
       "    case find_msg_def(MsgName) of~n"
@@ -1978,7 +2335,7 @@ format_fetch_msg_defs(_MsgDefs) ->
 
 format_fetch_enum_defs([]) ->
     f("fetch_enum_def(EnumName) ->~n"
-      "    erlang:error({no_such_enum,EnumName})~n");
+      "    erlang:error({no_such_enum,EnumName}).~n");
 format_fetch_enum_defs(_EnumDefs) ->
     f("fetch_enum_def(EnumName) ->~n"
       "    case find_enum_def(EnumName) of~n"
@@ -2009,9 +2366,16 @@ format_find_enum_defs(Enums) ->
 %% -- hrl -----------------------------------------------------
 
 format_hrl(Mod, Defs, Opts) ->
+    ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
     iolist_to_binary(
-      [f("-ifndef(~p).~n", [Mod]),
+      [f("%% Automatically generated, do not edit~n"
+         "%% Generated by ~p version ~s on ~p~n",
+         [?MODULE, gpb:version_as_string(), calendar:local_time()]),
+       "\n",
+       f("-ifndef(~p).~n", [Mod]),
        f("-define(~p, true).~n", [Mod]),
+       "\n",
+       f("-define(~p, \"~s\").~n", [ModVsn, gpb:version_as_string()]),
        "\n",
        string:join([format_msg_record(Msg, Fields, Opts, Defs)
                     || {{msg,Msg},Fields} <- Defs],
@@ -2144,6 +2508,13 @@ compile_to_binary(MsgDefs, ErlCode, Opts) ->
     {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode)),
     FormToks = split_toks_at_dot(Toks),
     Forms = lists:map(fun(Ts) ->
+                              Res = erl_parse:parse_form(Ts),
+                              if is_tuple(Res), element(1, Res) == error ->
+                                      io:format(user, "~p for~n~s~n", [Res, ErlCode]);
+                                 true ->
+                                      ok
+                              end,
+
                               {ok, Form} = erl_parse:parse_form(Ts),
                               Form
                       end,
@@ -2200,6 +2571,12 @@ gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
 
 is_packed(#field{opts=Opts}) ->
     lists:member(packed, Opts).
+
+get_field_pass(MsgName, #anres{d_field_pass_method=D}) ->
+    dict:fetch(MsgName, D).
+
+get_num_fields(MsgName, #anres{num_fields=D}) ->
+    dict:fetch(MsgName, D).
 
 smember(Elem, Set) -> %% set-member
     sets:is_element(Elem, Set).
