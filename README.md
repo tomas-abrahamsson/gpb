@@ -85,12 +85,12 @@ the C++, Python and Java serializers/deserializers of protobuf-2.4.1
                   |       |(speed)|(size) | (lite) |       |(size) | (speed)|
     --------------+-------+-------+-------+--------+-------+-------+--------+
     small msgs    |       |       |       |        |       |       |        |
-      serialize   | 25.17 | 164.9 | 31.25 |  206.2 | 3.22  | 29.01 |  570.7 |
-      deserialize | 26.71 | 126.0 | 29.26 |  174.9 | 2.56  | 34.14 |  326.3 |
+      serialize   | 26.05 | 479.9 | 31.81 |  302.8 |  3.09 | 27.08 |  547.9 |
+      deserialize | 25.13 | 269.8 | 28.16 |  381.7 |  2.49 | 32.00 |  325.1 |
     --------------+-------+-------+-------+--------+-------+-------+--------+
     large msgs    |       |       |       |        |       |       |        |
-      serialize   | 17.64 | 134.9 | 26.85 |  156.8 | 2.31  | 26.71 |  330.5 |
-      deserialize | 21.76 | 113.3 | 25.34 |  123.0 | 1.81  | 19.25 |  226.0 |
+      serialize   | 18.48 | 447.7 | 26.87 |  284.8 |  2.20 | 24.82 |  314.2 |
+      deserialize | 20.43 | 269.6 | 24.69 |  337.2 |  1.74 | 17.93 |  215.0 |
     --------------+-------+-------+-------+--------+-------+-------+--------+
 
 The performances are measured as number of processed MB/s,
@@ -102,9 +102,10 @@ bytes, respectively, in serialized form)
 The Java benchmark is run with optimization both for code size and for
 speed. The Python implementation cannot optimize for speed.
 
-    SW: Python 2.6.6, Java SE 1.6.0_22, Erlang/OTP R14B02,
-        Linux kernel 2.6.39, Debian, protobuf-2.4.1
+    SW: Python 2.6.6, Java SE 1.6.0_22, Erlang/OTP R14B03, g++ 4.6.1
+        Linux kernel 3.0.0, Debian, protobuf-2.4.1,
     HW: Intel Core i5 760, 2.8GHz, 4x256 kB L2 cache, 8MB L3 cache
+        (Turbo boost turned off, CPU frequency pinned to 2.8 GHz)
 
 The benchmarks are all done with the exact same messages files and
 proto files.  The source of the benchmarks was found in the Google
@@ -118,6 +119,11 @@ binaries as far as possible. It has to for sub messages, strings and
 bytes, but for the rest of the types, it avoids creating sub binaries,
 both during encoding and decoding (for info, compile with the
 `bin_opt_info' option)
+
+The Erlang code ran in the smp emulator, though only one CPU core
+was utilized.
+
+The generated C++ core was compiled with -O3.
 
 
 Mapping of protocol buffer datatypes to erlang
