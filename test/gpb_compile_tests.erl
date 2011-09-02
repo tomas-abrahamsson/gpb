@@ -204,7 +204,7 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
 introspection_package_name_test() ->
     M = compile_iolist(["package foo.bar;",
                         "message M { required uint32 f1=1; }"]),
-    foo_bar = M:get_package_name(),
+    'foo.bar' = M:get_package_name(),
     unload_code(M),
     M = compile_iolist(["message M { required uint32 f1=1; }"]),
     undefined = M:get_package_name(),
