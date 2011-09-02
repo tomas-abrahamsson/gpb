@@ -878,6 +878,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("-export([get_enum_names/0]).~n"),
        f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
        f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
+       f("-export([get_package_name/0]).~n"),
        f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
        f("-include(\"~s.hrl\").~n", [Mod]),
@@ -2286,7 +2287,9 @@ format_introspection(Defs) ->
      f("~n"),
      format_find_msg_defs(MsgDefs),
      f("~n"),
-     format_find_enum_defs(EnumDefs)
+     format_find_enum_defs(EnumDefs),
+     f("~n"),
+     format_get_package_name(Defs)
     ].
 
 
@@ -2362,6 +2365,16 @@ format_find_enum_defs(Enums) ->
       || {{enum, EnumName}, EnumValues} <- Enums],
      f("find_enum_def(_) ->~n"
        "    error.~n")].
+
+format_get_package_name(Defs) ->
+    case lists:keyfind(package, 1, Defs) of
+        false ->
+            f("get_package_name() ->~n"
+              "    undefined.~n");
+        {package, Package} ->
+            f("get_package_name() ->~n"
+              "    ~p.~n", [Package])
+    end.
 
 %% -- hrl -----------------------------------------------------
 

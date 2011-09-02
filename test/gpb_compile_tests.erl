@@ -199,6 +199,28 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     unload_code(M1),
     unload_code(M2).
 
+%% --- introspection ---------------
+
+introspection_package_name_test() ->
+    M = compile_iolist(["package foo.bar;",
+                        "message M { required uint32 f1=1; }"]),
+    foo_bar = M:get_package_name(),
+    unload_code(M),
+    M = compile_iolist(["message M { required uint32 f1=1; }"]),
+    undefined = M:get_package_name(),
+    unload_code(M).
+
+introspection_msg_names_test() ->
+    M = compile_iolist(["message msg1 { required uint32 f1=1; }"]),
+    [msg1] = M:get_msg_names(),
+    unload_code(M).
+
+introspection_enum_names_test() ->
+    M = compile_iolist(["enum e1 { n1=1; n2=2; }",
+                        "message msg1 { required uint32 f1=1; }"]),
+    [e1] = M:get_enum_names(),
+    unload_code(M).
+
 %% --- decoder tests ---------------
 
 decodes_overly_long_varints_test() ->
