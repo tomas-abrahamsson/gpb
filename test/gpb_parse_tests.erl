@@ -152,11 +152,11 @@ reformat_names_defs_test() ->
                                "  required e1     z = 2;",
                                "  required uint32 w = 3;",
                                "}"]),
-    [{{enum,m1_e1}, _},
-     {{msg,m1},     [#field{name=y, type={ref,m1_m2}},
-                     #field{name=z, type={ref,m1_e1}},
-                     #field{name=w}]},
-     {{msg,m1_m2},  [#field{name=x}]}] =
+    [{{enum,'m1.e1'}, _},
+     {{msg,m1},       [#field{name=y, type={ref,'m1.m2'}},
+                       #field{name=z, type={ref,'m1.e1'}},
+                       #field{name=w}]},
+     {{msg,'m1.m2'},  [#field{name=x}]}] =
         lists:sort(gpb_parse:reformat_names(
                      gpb_parse:flatten_defs(
                        gpb_parse:absolutify_names(Elems)))).
@@ -176,12 +176,12 @@ resolve_refs_test() ->
                                "}"]),
     [{import, _},
      {package, p1},
-     {{enum,m1_e1}, _},
-     {{msg,m1},     [#field{name=y, type={msg,m1_m2}},
-                     #field{name=z, type={enum,m1_e1}},
-                     #field{name=w}]},
-     {{msg,m1_m2},  [#field{name=x}]},
-     {{msg,m3},     [#field{name=b, type={msg,m1_m2}}]}] =
+     {{enum,'m1.e1'}, _},
+     {{msg,m1},       [#field{name=y, type={msg,'m1.m2'}},
+                       #field{name=z, type={enum,'m1.e1'}},
+                       #field{name=w}]},
+     {{msg,'m1.m2'},  [#field{name=x}]},
+     {{msg,m3},       [#field{name=b, type={msg,'m1.m2'}}]}] =
         lists:sort(
           gpb_parse:resolve_refs(
             gpb_parse:reformat_names(
@@ -195,10 +195,10 @@ enumerates_msg_fields_test() ->
                                "  required m2     y = 11;",
                                "  required e1     z = 12;",
                                "}"]),
-    [{{enum,m1_e1}, _},
-     {{msg,m1},     [#field{name=y, fnum=11, rnum=2},
-                     #field{name=z, fnum=12, rnum=3}]},
-     {{msg,m1_m2},  [#field{name=x, fnum=1,  rnum=2}]}] =
+    [{{enum,'m1.e1'}, _},
+     {{msg,m1},       [#field{name=y, fnum=11, rnum=2},
+                       #field{name=z, fnum=12, rnum=3}]},
+     {{msg,'m1.m2'},  [#field{name=x, fnum=1,  rnum=2}]}] =
         lists:sort(
           gpb_parse:enumerate_msg_fields(
             gpb_parse:resolve_refs(
@@ -246,9 +246,9 @@ parses_msg_extensions_test() ->
                              "}"]),
     [{{extensions,m1},[{100,199},{250,250},{300,300},{400,max}]},
      {{extensions,m1},[{251,251},{252,252}]},
-     {{extensions,m1_m2},[{233,233}]},
-     {{msg,m1},    [#field{name=f1}]},
-     {{msg,m1_m2}, [#field{name=f2}]}] =
+     {{extensions,'m1.m2'},[{233,233}]},
+     {{msg,m1},      [#field{name=f1}]},
+     {{msg,'m1.m2'}, [#field{name=f2}]}] =
         do_process_sort_defs(Defs).
 
 parses_extending_msgs_test() ->

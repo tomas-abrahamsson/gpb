@@ -204,7 +204,7 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
 introspection_package_name_test() ->
     M = compile_iolist(["package foo.bar;",
                         "message M { required uint32 f1=1; }"]),
-    foo_bar = M:get_package_name(),
+    'foo.bar' = M:get_package_name(),
     unload_code(M),
     M = compile_iolist(["message M { required uint32 f1=1; }"]),
     undefined = M:get_package_name(),
@@ -228,6 +228,27 @@ decodes_overly_long_varints_test() ->
                                          occurrence=required, opts=[]}]}]),
     #m1{a=54} = M:decode_msg(<<8, 54>>, m1), %% canonically encoded
     #m1{a=54} = M:decode_msg(<<8, (128+54), 128, 128, 0>>, m1),
+    unload_code(M).
+
+%% --- scoped messages ---------------
+
+dotted_names_gives_no_compilation_error_test() ->
+    %% make sure dotted names does not give compilation errors,
+    %% for instance if some generated code would rely on names
+    %% having the same syntax as erlang atoms, or, when prepended
+    %% with an upper case character, having the same syntax as an
+    %% erlang variable
+    M = compile_iolist(["message m1 {"
+                        "  message m2 { required uint32 x = 1; }",
+                        "  enum    e1 { ea = 17; eb = 18; }",
+                        "  required m2     y = 1;",
+                        "  required .m1.m2 z = 2;",
+                        "  required e1     w = 3;",
+                        "}",
+                        "message m3 { required m1.m2 b = 1; }"]),
+    M1Msg = {m1, {'m1.m2', 1}, {'m1.m2', 2}, ea},
+    Data = M:encode_msg(M1Msg),
+    M1Msg = M:decode_msg(Data, m1),
     unload_code(M).
 
 %% --- Returning/reporting warnings/errors tests ----------

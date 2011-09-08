@@ -550,7 +550,7 @@ reformat_fields(Fields) ->
 reformat_name(Name) ->
     list_to_atom(string:join([atom_to_list(P) || P <- Name,
                                                  P /= '.'],
-                             "_")).
+                             ".")).
 
 reformat_rpcs(RPCs) ->
     lists:map(fun({RpcName, Arg, Return}) ->
