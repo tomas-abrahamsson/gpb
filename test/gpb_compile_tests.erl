@@ -255,7 +255,12 @@ dotted_names_gives_no_compilation_error_test() ->
 %% ... when compiling to file/binary
 %% ... when there are/aren't warnings/errors
 
-report_or_return_warnings_or_errors_test() ->
+report_or_return_warnings_or_errors_test_() ->
+    %% Without increased timeout, this test sometimes times
+    %% out on my slow machine (1.6 GHz Atom N270)
+    {timeout,58,fun report_or_return_warnings_or_errors_test_aux/0}.
+
+report_or_return_warnings_or_errors_test_aux() ->
     [rwre_go(Options, CompileTo, SrcType, SrcQuality)
      || Options    <- [[report_warnings, report_errors],
                        [report_warnings],
