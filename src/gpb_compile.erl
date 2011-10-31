@@ -782,7 +782,9 @@ find_msgsize_2([#field{type=Type, fnum=FNum} | Rest], AccSize, Defs, T) ->
         {msg,MsgName} ->
             case find_msgsize(MsgName, Defs, T) of
                 MsgSize when is_integer(MsgSize) ->
-                    find_msgsize_2(Rest, AccSize+FKeySize+MsgSize, Defs, T);
+                    SizeOfLength = byte_size(gpb:encode_varint(MsgSize)),
+                    SubMsgFieldSize = FKeySize + SizeOfLength + MsgSize,
+                    find_msgsize_2(Rest, AccSize + SubMsgFieldSize, Defs, T);
                 undefined ->
                     undefined
             end;

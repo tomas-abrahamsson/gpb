@@ -166,7 +166,8 @@ mk_defs_probe_sender_opt(SendTo) ->
 receive_filter_sort_msgs_defs() ->
     lists:sort([Msg || {{msg,_},_} = Msg <- receive {defs, Defs} -> Defs end]).
 
--record(m9,{aa, bb, cc}).
+-record(m9,{aa, bb, cc, dd}).
+-record(m10,{aaa}).
 
 code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     KnownSizeM9 =
@@ -175,24 +176,30 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
                      #field{name=bb, type=fixed32, occurrence=required,
                             fnum=2, rnum=#m9.bb, opts=[]},
                      #field{name=cc, type=fixed64, occurrence=required,
-                            fnum=3, rnum=#m9.cc, opts=[]}]}],
+                            fnum=3, rnum=#m9.cc, opts=[]},
+                     #field{name=dd, type={msg,m10}, occurrence=required,
+                            fnum=4, rnum=#m9.dd, opts=[]}]}],
     UnknownSizeM9 =
         [{{msg,m9}, [#field{name=aa, type={enum,e}, occurrence=optional,
                             fnum=1, rnum=#m9.aa, opts=[]},
                      #field{name=bb, type=fixed32, occurrence=optional,
                             fnum=2, rnum=#m9.bb, opts=[]},
                      #field{name=cc, type=fixed64, occurrence=optional,
-                            fnum=3, rnum=#m9.cc, opts=[]}]}],
+                            fnum=3, rnum=#m9.cc, opts=[]},
+                     #field{name=dd, type={msg,m10}, occurrence=required,
+                            fnum=4, rnum=#m9.dd, opts=[]}]}],
 
     CommonDefs =
         [{{msg,m1}, [#field{name=a, type={msg,m9}, occurrence=required,
                             fnum=1, rnum=2, opts=[]}]},
+         {{msg,m10},[#field{name=aaa, type=bool, occurrence=required,
+                            fnum=1, rnum=#m10.aaa, opts=[]}]},
          {{enum,e}, [{x1, 1}, {x2, 2}]} %% all enum values same encode size
         ],
 
     M1 = compile_defs(CommonDefs++KnownSizeM9),
     M2 = compile_defs(CommonDefs++UnknownSizeM9),
-    Msg = #m1{a=#m9{aa=x1, bb=33, cc=44}},
+    Msg = #m1{a=#m9{aa=x1, bb=33, cc=44, dd=#m10{aaa=true}}},
     Encoded1 = M1:encode_msg(Msg),
     Encoded2 = M2:encode_msg(Msg),
     Encoded1 = Encoded2,
