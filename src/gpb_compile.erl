@@ -1387,10 +1387,10 @@ format_msg_decoder_read_field_pap(MsgName, MsgDef) ->
        [mk_fn(d_read_field_def_, MsgName), FieldVars]),
      if ReadFieldCases == [] ->
              f("    case Key band 7 of  %% WireType~n"
-               "        0 -> skip_varint_~s(Rest, 1, 1~s);~n"
-               "        1 -> skip_64_~s(Rest, 1, 1~s);~n"
-               "        2 -> skip_length_delimited_~s(Rest, 0, 0~s);~n"
-               "        5 -> skip_32_~s(Rest, 1, 1~s)~n"
+               "        0 -> 'skip_varint_~s'(Rest, 1, 1~s);~n"
+               "        1 -> 'skip_64_~s'(Rest, 1, 1~s);~n"
+               "        2 -> 'skip_length_delimited_~s'(Rest, 0, 0~s);~n"
+               "        5 -> 'skip_32_~s'(Rest, 1, 1~s)~n"
                "    end;~n",
                [MsgName, FieldVars,
                 MsgName, FieldVars,
@@ -1401,10 +1401,10 @@ format_msg_decoder_read_field_pap(MsgName, MsgDef) ->
                "~s"
                "        _ ->~n"
                "            case Key band 7 of %% wiretype~n"
-               "                0 -> skip_varint_~s(Rest, 1, 1~s);~n"
-               "                1 -> skip_64_~s(Rest, 1, 1~s);~n"
-               "                2 -> skip_length_delimited_~s(Rest,0,0~s);~n"
-               "                5 -> skip_32_~s(Rest, 1, 1~s)~n"
+               "                0 -> 'skip_varint_~s'(Rest, 1, 1~s);~n"
+               "                1 -> 'skip_64_~s'(Rest, 1, 1~s);~n"
+               "                2 -> 'skip_length_delimited_~s'(Rest,0,0~s);~n"
+               "                5 -> 'skip_32_~s'(Rest, 1, 1~s)~n"
                "            end~n"
                "    end;~n",
                [ReadFieldCases,
@@ -1430,10 +1430,10 @@ format_msg_decoder_read_field_par(MsgName, MsgDef) ->
        "    Key = X bsl N + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
      if ReadFieldCases == [] ->
              f("    case Key band 7 of  %% WireType~n"
-               "        0 -> skip_varint_~s(Rest, Msg);~n"
-               "        1 -> skip_64_~s(Rest, Msg);~n"
-               "        2 -> skip_length_delimited_~s(Rest, 0, 0, Msg);~n"
-               "        5 -> skip_32_~s(Rest, Msg)~n"
+               "        0 -> 'skip_varint_~s'(Rest, Msg);~n"
+               "        1 -> 'skip_64_~s'(Rest, Msg);~n"
+               "        2 -> 'skip_length_delimited_~s'(Rest, 0, 0, Msg);~n"
+               "        5 -> 'skip_32_~s'(Rest, Msg)~n"
                "    end;~n",
                [MsgName,MsgName,MsgName,MsgName]);
         true ->
@@ -1441,10 +1441,10 @@ format_msg_decoder_read_field_par(MsgName, MsgDef) ->
                "~s"
                "        _ ->~n"
                "            case Key band 7 of %% wiretype~n"
-               "                0 -> skip_varint_~s(Rest, Msg);~n"
-               "                1 -> skip_64_~s(Rest, Msg);~n"
-               "                2 -> skip_length_delimited_~s(Rest,0,0,Msg);~n"
-               "                5 -> skip_32_~s(Rest, Msg)~n"
+               "                0 -> 'skip_varint_~s'(Rest, Msg);~n"
+               "                1 -> 'skip_64_~s'(Rest, Msg);~n"
+               "                2 -> 'skip_length_delimited_~s'(Rest,0,0,Msg);~n"
+               "                5 -> 'skip_32_~s'(Rest, Msg)~n"
                "            end~n"
                "    end;~n",
                [ReadFieldCases,
