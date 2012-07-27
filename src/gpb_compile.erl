@@ -256,7 +256,7 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
             Hrl = change_ext(Erl, ".hrl"),
             CC  = change_ext(Erl, ".nif.cc"),
             HrlTxt = format_hrl(Mod, Defs, Opts),
-            CCTxt = format_nif_cc(Mod, Defs, Opts),
+            CCTxt = format_nif_cc(Mod, Defs, Opts, AnRes),
             case {file_write_file(Erl, ErlTxt, Opts),
                   file_write_file(Hrl, HrlTxt, Opts),
                   file_write_file(CC,  CCTxt, Opts)} of
@@ -2642,10 +2642,11 @@ d_r("", _New)       -> "".
 
 %% -- nif c++ code -----------------------------------------------------
 
-format_nif_cc(Mod, Defs, Opts) ->
+format_nif_cc(Mod, Defs, Opts, AnRes) ->
     [format_nif_cc_includes(Mod, Defs, Opts),
      format_nif_cc_local_function_decls(Mod, Defs, Opts),
      format_nif_cc_mk_atoms(Mod, Defs, Opts),
+     format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
      format_nif_cc_decoders(Mod, Defs, Opts),
      format_nif_cc_unpackers(Mod, Defs, Opts),
      format_nif_cc_foot(Mod, Defs, Opts)].
@@ -2663,7 +2664,6 @@ is_lite_rt(Defs) ->
 
 format_nif_cc_includes(Mod, Defs, _Opts) ->
     IsLiteRT = is_lite_rt(Defs),
-    %% FIXME:
     ["#include <string.h>\n",
      "#include <string>\n",
      "\n",
@@ -2701,6 +2701,124 @@ format_nif_cc_mk_atoms(_Mod, Defs, _Opts) ->
        || {AtomVar, Atom} <- AtomVars],
       "}\n",
       "\n"]].
+
+format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, _Opts) ->
+    case is_any_field_of_type_string(AnRes) of
+        true  -> format_nif_cc_utf8_conversion_code();
+        false -> ""
+    end.
+
+is_any_field_of_type_string(#anres{used_types=UsedTypes}) ->
+    sets:is_element(string, UsedTypes).
+
+format_nif_cc_utf8_conversion_code() ->
+    ["/* Source for https://www.ietf.org/rfc/rfc2279.txt */\n",
+     "\n",
+     "static int\n",
+     "utf8_count_codepoints(const char *sinit, int len)\n",
+     "{\n",
+     "    int n = 0;\n",
+     "    const unsigned char *s0 = (unsigned char *)sinit;\n",
+     "    const unsigned char *s  = s0;\n",
+     "\n",
+     "    while ((s - s0) < len)\n",
+     "    {\n",
+     "        if (*s <= 0x7f) { n++; s++; } /* code point fits 1 octet */\n",
+     "        else if (*s <= 0xdf) { n++; s += 2; } /* 2 octets */\n",
+     "        else if (*s <= 0xef) { n++; s += 3; } /* 3 octets */\n",
+     "        else if (*s <= 0xf7) { n++; s += 4; }\n",
+     "        else if (*s <= 0xfb) { n++; s += 5; }\n",
+     "        else if (*s <= 0xfd) { n++; s += 6; }\n",
+     "        else return -1;\n",
+     "\n",
+     "        if ((s - s0) > len)\n",
+     "            return -1;\n",
+     "    }\n",
+     "    return n;\n",
+     "}\n",
+     "\n",
+     "static int\n",
+     "utf8_to_uint32(unsigned int *dest, const char *src, int numCodePoints)\n",
+     "{\n",
+     "    int i;\n",
+     "    const unsigned char *s = (unsigned char *)src;\n",
+     "\n",
+     "\n",
+     "    /* Should perhaps check for illegal chars in d800-dfff and\n",
+     "     * a other illegal chars\n",
+     "     */\n",
+     "\n",
+     "    for (i = 0; i < numCodePoints; i++)\n",
+     "    {\n",
+     "        if (*s <= 0x7f)\n",
+     "            *dest++ = *s++;\n",
+     "        else if (*s <= 0xdf) /* code point is 2 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x1f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else if (*s <= 0xef) /* code point is 3 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x0f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else if (*s <= 0xf7) /* code point is 4 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x07; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else if (*s <= 0xfb) /* code point is 5 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x03; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else if (*s <= 0xfd) /* code point is 6 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x01; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else\n",
+     "            return 0;\n",
+     "    }\n",
+     "    return 1;\n",
+     "}\n",
+     "\n"
+     "static ERL_NIF_TERM\n",
+     "utf8_to_erl_string(ErlNifEnv *env,\n",
+     "                   const char *utf8data,\n",
+     "                   unsigned int numOctets)\n",
+     "{\n",
+     "    int numcp = utf8_count_codepoints(utf8data, numOctets);\n",
+     "\n",
+     "    if (numcp < 0)\n",
+     "    {\n",
+     "        return enif_make_string(env,\n",
+     "                                \"<invalid UTF-8>\",\n",
+     "                                ERL_NIF_LATIN1);\n",
+     "    }\n",
+     "    else\n",
+     "    {\n",
+     "        unsigned int  cp[numcp];\n",
+     "        ERL_NIF_TERM  es[numcp];\n",
+     "        int i;\n",
+     "\n",
+     "        utf8_to_uint32(cp, utf8data, numcp);\n",
+     "        for (i = 0; i < numcp; i++)\n",
+     "            es[i] = enif_make_uint(env, cp[i]);\n",
+     "        return enif_make_list_from_array(env, es, numcp);\n",
+     "    }\n",
+     "}\n",
+     "\n"].
 
 format_nif_cc_foot(Mod, Defs, _Opts) ->
     ["static int\n",
@@ -2870,12 +2988,14 @@ format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
                    [f("    default: ~s = aa_undefined;\n", [DestVar])] ++
                    [f("}\n")];
            string ->
-               %% FIXME: utf-8 unpack!!
-               [f("~s = enif_make_string_len(\n", [DestVar]),
-                f("            env,\n"),
-                f("            ~s->~s().data(),\n",[MsgVar, LCFName]),
-                f("            ~s->~s().size(),\n",[MsgVar, LCFName]),
-                f("            ERL_NIF_LATIN1);\n")];
+               [f("{\n"),
+                f("    const char    *sData = ~s->~s().data();\n",
+                  [    MsgVar, LCFName]),
+                f("    unsigned int   sSize = ~s->~s().size();\n",
+                  [    MsgVar, LCFName]),
+                f("    ~s = utf8_to_erl_string(env, sData, sSize);\n",
+                  [    DestVar]),
+                f("}\n")];
            bytes ->
                [f("{\n"),
                 f("    unsigned char *data;\n"),
@@ -2949,12 +3069,13 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
                    [f("    default: relem[i] = aa_undefined;\n")] ++
                    [f("}\n")];
            string ->
-               %% FIXME: utf-8 unpack!!
-               [f("relem[i] = enif_make_string_len(\n"),
-                f("               env,\n"),
-                f("               ~s->~s(i).data(),\n",[MsgVar, LCFName]),
-                f("               ~s->~s(i).size(),\n",[MsgVar, LCFName]),
-                f("               ERL_NIF_LATIN1);\n")];
+               [f("{\n"),
+                f("    const char    *sData = ~s->~s(i).data();\n",
+                  [    MsgVar, LCFName]),
+                f("    unsigned int   sSize = ~s->~s(i).size();\n",
+                  [    MsgVar, LCFName]),
+                f("    relem[i] = utf8_to_erl_string(env, sData, sSize);\n"),
+                f("}\n")];
            bytes ->
                [f("{\n"),
                 f("    unsigned char *data;\n"),
