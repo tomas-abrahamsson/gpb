@@ -2645,7 +2645,7 @@ d_r("", _New)       -> "".
 format_nif_cc(Mod, Defs, Opts, AnRes) ->
     [format_nif_cc_includes(Mod, Defs, Opts),
      format_nif_cc_local_function_decls(Mod, Defs, Opts),
-     format_nif_cc_mk_atoms(Mod, Defs, Opts),
+     format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
      format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
      format_nif_cc_decoders(Mod, Defs, Opts),
      format_nif_cc_unpackers(Mod, Defs, Opts),
@@ -2685,12 +2685,16 @@ format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
       || {{msg, MsgName}, _Fields} <- Defs],
      "\n"].
 
-format_nif_cc_mk_atoms(_Mod, Defs, _Opts) ->
+format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
     EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
                                || {{enum, _}, EnumDef} <- Defs]),
     RecordAtoms = [MsgName || {{msg, MsgName}, _Fields} <- Defs],
-    MiscAtoms = [undefined, true, false],
-    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ MiscAtoms),
+    MiscAtoms0 = [undefined],
+    MiscAtoms1 = case is_any_field_of_type_bool(AnRes) of
+                     true  -> MiscAtoms0 ++ [true, false];
+                     false -> MiscAtoms0
+                 end,
+    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ MiscAtoms1),
     AtomVars = [{mk_c_var(aa_, A), A} || A <- Atoms],
 
     [[f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
@@ -2710,6 +2714,9 @@ format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, _Opts) ->
 
 is_any_field_of_type_string(#anres{used_types=UsedTypes}) ->
     sets:is_element(string, UsedTypes).
+
+is_any_field_of_type_bool(#anres{used_types=UsedTypes}) ->
+    sets:is_element(bool, UsedTypes).
 
 format_nif_cc_utf8_conversion_code() ->
     ["/* Source for https://www.ietf.org/rfc/rfc2279.txt */\n",
