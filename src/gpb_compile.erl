@@ -3121,6 +3121,10 @@ format_load_nif(Mod, Opts) ->
              "    NifBase = \"", atom_to_list(Mod) ++ ".nif", "\",\n",
              "    Nif = filename:join(NifDir, NifBase),\n",
              f("    erlang:load_nif(Nif, ~w).\n", [gpb:version_as_list()])];
+        "mf:"++ModuleFn ->
+            NifBase = atom_to_list(Mod) ++ ".nif",
+            ["load_nif() ->\n",
+             f("    ~s(\"~s\").\n", [ModuleFn, NifBase])];
         CodeBody when is_list(CodeBody); is_binary(CodeBody) ->
             ["load_nif() ->\n",
              CodeBody];
