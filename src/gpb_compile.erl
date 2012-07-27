@@ -63,8 +63,10 @@ file(File) ->
 %%                     {ok, ModuleName, Code, Warnings}
 %%            ErrRet = {error, Reason} | {error,Reason,Warnings}
 %%            ModuleName  = atom()
-%%            Code = binary()
-%%
+%%            Code = binary() | ErlAndNifCode
+%%            ErlAndNifCode = [CodeType]
+%%            CodeType = {erl, binary()} | {nif, NifCcText}
+%%            NifCcText = binary()
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
 %%
@@ -129,11 +131,63 @@ file(File) ->
 %% the generated `.erl' and `.hrl' files. Default is the same
 %% directory as for the proto `File'.
 %%
+%% The `nif' option will cause the compiler to generate nif C++ code
+%% for that can be linked with the Google protobuf C++ library. The
+%% purpose for this is speed: the Google protobuf C++ is faster than
+%% the interpreted Erlang code, but will also lock up an Erlang
+%% scheduler for as long as it takes for the Google protobuf library
+%% to complete. This is normally a small amount of time, but can be a
+%% longer time for huge messages.  The generated nif code can be
+%% compiled with Erlang R14B or later. The `gpb_compile' will only
+%% generate C++ code, it will <i>not</i> compile the generated C++
+%% code for you. Below is an example of how to generate and compile
+%% the C++ nif code under Linux. Details may differ from system to
+%% system.
+%%
+%% <pre>
+%%      # Use protoc to generate C++ code, and compile it.
+%%      # This will generate x.pb.cc and x.pb.h from x.proto.
+%%      protoc --cpp_out=$PWD x.proto
+%%      g++ -g -fPIC -O3 -I/path/to/protobuf-include -o x.pb.o -c x.pb.cc
+%%      # Generate Erlang code and C++ nif glue code, and compile it.
+%%      # This will generate x.erl, x.hrl and x.nif.cc from x.proto.
+%%      erl -boot start_clean -pa /path/to/gpb/ebin -noshell -noinput +B \
+%%            -I$PWD -nif -s gpb_compile c x.proto
+%%      erlc -Wall x.erl
+%%      g++ -g -fPIC -Wall -O3 -I/path/to/protobuf -o x.nif.o -c x.nif.cc
+%%      # Link all the C++ code together to a shared library.
+%%      g++ -g -fPIC -shared -O3 -Wall -o x.nif.so x.nif.o x.pb.o \
+%%            -L/path/to/protobuf-libs -lprotobuf \
+%%            -Wl,-rpath=/path/to/protobuf-libs
+%%      # Now, if you load x.beam into an Erlang VM, it will
+%%      # automatically load x.nif.so which contains the nif glue C++
+%%      code as well as the protobuf code.
+%% </pre>
+%%
+%% NB: Caveats: Reloading or upgrading code compiled with the `nif'
+%% option, might have unexpected behaviour.  The Google protobuf
+%% library maintains a database of .proto descriptors and will
+%% complain -- and halt the entire Erlang VM -- if you try to load nif
+%% code in two different modules that defines a message with the same
+%% name.  I have also seen cases where protobuf descriptors from old
+%% versions of the nif code appears to be used even if new code has
+%% been loaded.  The descriptor database appears to be kept as long as
+%% the Google C++ protobuf library is loaded, and it is not possible
+%% to control unloading of a sharerd library in Erlang, at least as of
+%% R15B01.  Even if the code has been purged and deleted, the shared
+%% object for the nif, and thus also for the Google protobuf library's
+%% database, may still be kept in memory.
+%%
+%%
 %% The `binary' option will cause the generated and compiled code be
 %% returned as a binary. No files will be written. The return value
 %% will be on the form `{ok,Mod,Code}' or `{ok,Mod,Code,Warnings}'
 %% if the compilation is succesful. This option may be useful
-%% e.g. when generating test cases.
+%% e.g. when generating test cases. In case the `nif' option is set,
+%% the `Code' will be a list of tuples: `{erl,binary()}' which
+%% contains the erlang object byte code, and `{nif,binary()}' which
+%% contains the C++ code. You will have to compile the C++ code with a
+%% C++ compiler, before you can use the erlang code.
 %%
 %% The `to_msg_defs' option will result in `{ok,MsgDefs}' or
 %% `{ok,MsgDefs,Warns}' being returned if the compilation is succesful.
@@ -236,34 +290,23 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
             {ok, Defs};
         binary ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
-            compile_to_binary(Defs, ErlTxt, Opts);
+            NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
+            compile_to_binary(Defs, ErlTxt, NifTxt, Opts);
         file ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
+            HrlTxt = format_hrl(Mod, Defs, Opts),
+            NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             OutDir = proplists:get_value(o, Opts, "."),
             Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
             Hrl = change_ext(Erl, ".hrl"),
-            HrlTxt = format_hrl(Mod, Defs, Opts),
-            case {file_write_file(Erl, ErlTxt, Opts),
-                  file_write_file(Hrl, HrlTxt, Opts)} of
-                {ok, ok}        -> ok;
-                {{error, R}, _} -> {error, {write_failed, Erl, R}};
-                {_, {error, R}} -> {error, {write_failed, Hrl, R}}
-            end;
-        nif ->
-            ErlTxt = format_nif_erl(Mod, Defs, AnRes, Opts),
-            OutDir = proplists:get_value(o, Opts, "."),
-            Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
-            Hrl = change_ext(Erl, ".hrl"),
-            CC  = change_ext(Erl, ".nif.cc"),
-            HrlTxt = format_hrl(Mod, Defs, Opts),
-            CCTxt = format_nif_cc(Mod, Defs, Opts, AnRes),
+            Nif = change_ext(Erl, ".nif.cc"),
             case {file_write_file(Erl, ErlTxt, Opts),
                   file_write_file(Hrl, HrlTxt, Opts),
-                  file_write_file(CC,  CCTxt, Opts)} of
+                  possibly_write_file(Nif, NifTxt, Opts)} of
                 {ok, ok, ok}       -> ok;
                 {{error, R}, _, _} -> {error, {write_failed, Erl, R}};
                 {_, {error, R}, _} -> {error, {write_failed, Erl, R}};
-                {_, _, {error, R}} -> {error, {write_failed, CC,  R}}
+                {_, _, {error, R}} -> {error, {write_failed, Nif,  R}}
             end
     end.
 
@@ -323,8 +366,6 @@ get_output_format([binary | _])              -> binary;
 get_output_format([{binary, true} | _])      -> binary;
 get_output_format([to_msg_defs | _])         -> msg_defs;
 get_output_format([{to_msg_defs, true} | _]) -> msg_defs;
-get_output_format([nif | _])                 -> nif;
-get_output_format([{nif, true} | _])         -> nif;
 get_output_format([_ | Rest])                -> get_output_format(Rest);
 get_output_format([])                        -> file.
 
@@ -889,6 +930,7 @@ d_field_pass_method(MsgDef) ->
 %% -- generating code ----------------------------------------------
 
 format_erl(Mod, Defs, AnRes, Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
     iolist_to_binary(
       [f("%% Automatically generated, do not edit~n"
          "%% Generated by ~p version ~s on ~p~n",
@@ -907,9 +949,16 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("-export([get_package_name/0]).~n"),
        f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
+       [["-on_load(load_nif/0).\n",
+         "-export([load_nif/0]). %% for debugging of nif loading\n",
+         "\n"]
+        || DoNif],
        f("-include(\"~s.hrl\").~n", [Mod]),
        f("-include(\"gpb.hrl\").~n"),
        "\n",
+       [[f("~s~n", [format_load_nif(Mod, Opts)]),
+         "\n"]
+        || DoNif],
        %% Enabling inlining seems to cause performance to drop drastically
        %% I've seen decoding performance go down from 76000 msgs/s
        %% to about 10000 msgs/s for a set of mixed message samples.
@@ -940,79 +989,12 @@ format_erl(Mod, Defs, AnRes, Opts) ->
          "    ~s.~n",
          [format_decoder_topcase(4, Defs, "Bin", "MsgName")]),
        "\n",
-       f("~s~n", [format_decoders(Defs, AnRes, Opts)]),
-       "\n",
-       f("~s~n", [format_msg_merge_code(Defs, AnRes)]),
-       "\n",
-       f("verify_msg(Msg) ->~n" %% Option to use gpb:verify_msg??
-         "    ~s.~n", [format_verifier_topcase(4, Defs, "Msg")]),
-       "\n",
-       f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
-       "\n",
-       format_introspection(Defs),
-       "\n",
-       f("gpb_version_as_string() ->~n"),
-       f("    \"~s\".~n", [gpb:version_as_string()]),
-       "\n",
-       f("gpb_version_as_list() ->~n"),
-       f("    ~w.~n", [gpb:version_as_list()])]).
-
-format_nif_erl(Mod, Defs, AnRes, Opts) ->
-    iolist_to_binary(
-      [f("%% Automatically generated, do not edit~n"
-         "%% Generated by ~p version ~s on ~p~n",
-         [?MODULE, gpb:version_as_string(), calendar:local_time()]),
-       f("-module(~w).~n", [Mod]),
-       "\n",
-       "-on_load(load_nif/0).\n",
-       "-export([load_nif/0]). %% for debugging of nif loading\n",
-       "\n",
-       f("-export([encode_msg/1, encode_msg/2]).~n"),
-       f("-export([decode_msg/2]).~n"),
-       f("-export([merge_msgs/2]).~n"),
-       f("-export([verify_msg/1]).~n"),
-       f("-export([get_msg_defs/0]).~n"),
-       f("-export([get_msg_names/0]).~n"),
-       f("-export([get_enum_names/0]).~n"),
-       f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
-       f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
-       f("-export([get_package_name/0]).~n"),
-       f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
-       "\n",
-       f("-include(\"~s.hrl\").~n", [Mod]),
-       f("-include(\"gpb.hrl\").~n"),
-       "\n",
-       f("~s~n", [format_load_nif(Mod, Opts)]),
-       "\n",
-       %% FIXME:
-       %% - format an -on_load hook
-       %%
-       f("encode_msg(Msg) ->~n"
-         "    encode_msg(Msg, []).~n~n"),
-       case proplists:get_value(verify, Opts, optionally) of
-           optionally ->
-               f("encode_msg(Msg, Opts) ->~n"
-                 "    case proplists:get_bool(verify, Opts) of~n"
-                 "        true  -> verify_msg(Msg);~n"
-                 "        false -> ok~n"
-                 "    end,~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")]);
-           always ->
-               f("encode_msg(Msg, _Opts) ->~n"
-                 "    verify_msg(Msg),~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")]);
-           never ->
-               f("encode_msg(Msg, _Opts) ->~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")])
+       if DoNif ->
+               f("~s~n", [format_nif_decoder_error_wrappers(
+                            Defs, AnRes, Opts)]);
+          not DoNif ->
+               f("~s~n", [format_decoders(Defs, AnRes, Opts)])
        end,
-       "\n",
-       f("~s~n", [format_encoders(Defs, AnRes, Opts)]),
-       "\n",
-       f("decode_msg(Bin, MsgName) ->~n"
-         "    ~s.~n",
-         [format_decoder_topcase(4, Defs, "Bin", "MsgName")]),
-       "\n",
-       f("~s~n", [format_nif_decoder_error_wrappers(Defs, AnRes, Opts)]),
        "\n",
        f("~s~n", [format_msg_merge_code(Defs, AnRes)]),
        "\n",
@@ -2642,7 +2624,13 @@ d_r("", _New)       -> "".
 
 %% -- nif c++ code -----------------------------------------------------
 
-format_nif_cc(Mod, Defs, Opts, AnRes) ->
+possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
+    case proplists:get_bool(nif, Opts) of
+        true  -> format_nif_cc(Mod, Defs, AnRes, Opts);
+        false -> '$not_generated'
+    end.
+
+format_nif_cc(Mod, Defs, AnRes, Opts) ->
     [format_nif_cc_includes(Mod, Defs, Opts),
      format_nif_cc_local_function_decls(Mod, Defs, Opts),
      format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
@@ -3142,7 +3130,7 @@ to_lower(A) when is_atom(A) ->
 
 %% -- compile to memory -----------------------------------------------------
 
-compile_to_binary(MsgDefs, ErlCode, Opts) ->
+compile_to_binary(MsgDefs, ErlCode, PossibleNifCode, Opts) ->
     {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode)),
     FormToks = split_toks_at_dot(Toks),
     Forms = lists:map(fun(Ts) ->
@@ -3154,7 +3142,8 @@ compile_to_binary(MsgDefs, ErlCode, Opts) ->
     FieldDef = field_record_to_attr_form(),
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
     AllForms = AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms,
-    compile:forms(AllForms, Opts).
+    combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
+                                 PossibleNifCode).
 
 split_toks_at_dot(AllToks) ->
     case lists:splitwith(fun is_no_dot/1, AllToks) of
@@ -3198,6 +3187,19 @@ gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
         Default   -> {FName, Default}
     end.
 
+combine_erl_and_possible_nif(ErlCompilationResult, '$not_generated'=_Nif) ->
+    ErlCompilationResult;
+combine_erl_and_possible_nif({ok, ModuleName, ErlCode}, NifTxt) ->
+    {ok, ModuleName, combine_erlcode_with_niftxt(ErlCode, NifTxt)};
+combine_erl_and_possible_nif({ok, ModuleName, ErlCode, Warnings}, NifTxt) ->
+    {ok, ModuleName, combine_erlcode_with_niftxt(ErlCode, NifTxt), Warnings};
+combine_erl_and_possible_nif(Error, _NifTxt) ->
+    Error.
+
+combine_erlcode_with_niftxt(ErlCode, NifTxt) ->
+    [{erl, ErlCode},
+     {nif, NifTxt}].
+
 %% -- internal utilities -----------------------------------------------------
 
 is_packed(#field{opts=Opts}) ->
@@ -3236,6 +3238,11 @@ file_read_file_info(FileName, Opts) ->
 
 file_write_file(FileName, Bin, Opts) ->
     file_op(write_file, [FileName, Bin], Opts).
+
+possibly_write_file(FileName, Bin, Opts) when is_binary(Bin) ->
+    file_op(write_file, [FileName, Bin], Opts);
+possibly_write_file(_FileName, '$not_generated', _Opts) ->
+    ok.
 
 file_op(Fn, Args, Opts) ->
     FileOp = proplists:get_value(file_op, Opts, fun use_the_file_module/2),
