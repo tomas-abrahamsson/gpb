@@ -2631,13 +2631,14 @@ possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
     end.
 
 format_nif_cc(Mod, Defs, AnRes, Opts) ->
-    [format_nif_cc_includes(Mod, Defs, Opts),
-     format_nif_cc_local_function_decls(Mod, Defs, Opts),
-     format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
-     format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
-     format_nif_cc_decoders(Mod, Defs, Opts),
-     format_nif_cc_unpackers(Mod, Defs, Opts),
-     format_nif_cc_foot(Mod, Defs, Opts)].
+    iolist_to_binary(
+      [format_nif_cc_includes(Mod, Defs, Opts),
+       format_nif_cc_local_function_decls(Mod, Defs, Opts),
+       format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
+       format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
+       format_nif_cc_decoders(Mod, Defs, Opts),
+       format_nif_cc_unpackers(Mod, Defs, Opts),
+       format_nif_cc_foot(Mod, Defs, Opts)]).
 
 get_cc_pkg(Defs) ->
     case lists:keyfind(package, 1, Defs) of
