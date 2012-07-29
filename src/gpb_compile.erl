@@ -2535,9 +2535,9 @@ compile_to_binary(MsgDefs, ErlCode, Opts) ->
 
 split_toks_at_dot(AllToks) ->
     case lists:splitwith(fun is_no_dot/1, AllToks) of
-        {Toks, [{dot,_}=Dot]}        -> [Toks ++ [Dot]];
-        {Toks, [{dot,_}=Dot | Rest]} -> [Toks ++ [Dot] | split_toks_at_dot(Rest)]
-        end.
+        {Toks, [{dot,_}=Dot]}      -> [Toks ++ [Dot]];
+        {Toks, [{dot,_}=Dot | Tl]} -> [Toks ++ [Dot] | split_toks_at_dot(Tl)]
+    end.
 
 is_no_dot({dot,_}) -> false;
 is_no_dot(_)       -> true.
