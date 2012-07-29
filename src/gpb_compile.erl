@@ -2523,13 +2523,6 @@ compile_to_binary(MsgDefs, ErlCode, Opts) ->
     {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode)),
     FormToks = split_toks_at_dot(Toks),
     Forms = lists:map(fun(Ts) ->
-                              Res = erl_parse:parse_form(Ts),
-                              if is_tuple(Res), element(1, Res) == error ->
-                                      io:format(user, "~p for~n~s~n", [Res, ErlCode]);
-                                 true ->
-                                      ok
-                              end,
-
                               {ok, Form} = erl_parse:parse_form(Ts),
                               Form
                       end,
