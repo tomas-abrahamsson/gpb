@@ -679,6 +679,297 @@ mk_read_file_info(_MainProtoFileName, ExtraFileOpReturnValues) ->
     end.
 
 
+%% --- nif generation tests -----------------
+
+generates_nif_as_binary_and_file_test() ->
+    Defs = mk_one_msg_field_of_each_type(),
+    M = gpb_nif_test,
+    LoadNif = f("erlang:load_nif(\"~s.nif\", gpb:version_as_list()).\n", [M]),
+    LoadNifOpt = {nif_load_code, LoadNif},
+    {ok, M, Codes} = gpb_compile:msg_defs(M, Defs, [binary, nif, LoadNifOpt]),
+    Nif1 = proplists:get_value(nif, Codes),
+    Master = self(),
+    ReportWriteCc = fun(FName, Contents) ->
+                            case filename:extension(FName) of
+                                ".cc" -> Master ! {cc, Contents}, ok;
+                                _     -> ok
+                            end
+                    end,
+    FileOpOpt = mk_fileop_opt([{write_file, ReportWriteCc}]),
+    ok = gpb_compile:msg_defs(M, Defs, [nif, FileOpOpt, LoadNifOpt]),
+    Nif2 = receive {cc, Cc} -> Cc end,
+    ?assertMatch(Nif1, Nif2).
+
+nif_code_test_() ->
+    {Descr, Tests} =
+        case {find_protoc(), find_cplusplus_compiler()} of
+            {false,_} -> {"Protoc not found, not trying to compile", []};
+            {_,false} -> {"C++ compiler not found, not trying to compile", []};
+            {_,_}     -> {"nif tests",
+                          [{"Nif compiles", fun nif_compiles/0},
+                           {"Nif encode decode", fun nif_encode_decode/0}]}
+        end,
+    {Descr,
+     {timeout, 300,  %% timeout for all tests
+      [{timeout, 100, %% timeout for each test
+        Tests}]}}.
+
+nif_compiles() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              NCM = gpb_nif_test_c1,
+              Defs = mk_one_msg_field_of_each_type(),
+              {ok, _Code} = compile_msg_defs(NCM, Defs, TmpDir)
+      end).
+
+nif_encode_decode() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              NEDM = gpb_nif_test_ed1,
+              Defs = mk_one_msg_field_of_each_type(),
+              {ok, Code} = compile_msg_defs(NEDM, Defs, TmpDir),
+              with_tmpcode(
+                NEDM, Code,
+                fun() -> nif_encode_decode_test_it(NEDM, Defs) end)
+      end).
+
+nif_encode_decode_test_it(NEDM, Defs) ->
+    MsgNames = [MsgName || {{msg, MsgName}, _Fields} <- Defs],
+    Variants = [small, big, short, long],
+    lists:foreach(fun({MsgName, Variant}) ->
+                          OrigMsg = mk_msg(MsgName, Defs, Variant),
+                          Encoded = NEDM:encode_msg(OrigMsg),
+                          Decoded = NEDM:decode_msg(Encoded, MsgName),
+                          ?assertEqual(Decoded, OrigMsg)
+                  end,
+                  [{MsgName,Variant} || MsgName <- MsgNames,
+                                        Variant <- Variants]).
+
+compile_msg_defs(M, MsgDefs, TmpDir) ->
+    [NifCcPath, PbCcPath, NifOPath, PbOPath, NifSoPath, ProtoPath] =
+        [filename:join(TmpDir, lists:concat([M, Ext]))
+         || Ext <- [".nif.cc", ".pb.cc", ".nif.o", ".pb.o", ".nif.so",
+                    ".proto"]],
+    LoadNif = f("erlang:load_nif(\"~s\", gpb:version_as_list()).\n",
+                [filename:join(TmpDir, lists:concat([M,".nif"]))]),
+    LoadNifOpt = {nif_load_code, LoadNif},
+    Opts = [binary, nif, LoadNifOpt],
+    {ok, M, Codes} = gpb_compile:msg_defs(M, MsgDefs, Opts),
+    Code = proplists:get_value(erl, Codes),
+    NifTxt = proplists:get_value(nif, Codes),
+    ProtoTxt = msg_defs_to_proto(MsgDefs),
+    %%
+    ok = file:write_file(NifCcPath, NifTxt),
+    ok = file:write_file(ProtoPath, ProtoTxt),
+    %%
+    CC = find_cplusplus_compiler(),
+    Protoc = find_protoc(),
+    CFlags = get_cflags(),
+    LdFlags = get_ldflags(),
+    ok = ccompile("'~s' --proto_path '~s' --cpp_out='~s' '~s'",
+                  [Protoc, TmpDir, TmpDir, ProtoPath]),
+    ok = ccompile("'~s' -g -fPIC -Wall -O3 '-I~s' ~s -c -o '~s' '~s'",
+                  [CC, TmpDir, CFlags, NifOPath, NifCcPath]),
+    ok = ccompile("'~s' -g -fPIC -Wall -O3 '-I~s' ~s -c -o '~s' '~s'",
+                  [CC, TmpDir, CFlags, PbOPath, PbCcPath]),
+    ok = ccompile("'~s' -g -fPIC -shared -Wall -O3 ~s"
+                  "    -o '~s' '~s' '~s' -lprotobuf",
+                  [CC, LdFlags, NifSoPath, NifOPath, PbOPath]),
+    {ok, Code}.
+
+with_tmpdir(Fun) ->
+    {ok, TmpDir} = get_tmpdir(),
+    try Fun(TmpDir)
+    after clean_tmpdir(TmpDir)
+    end.
+
+get_tmpdir() ->
+    {A, B, C} = now(),
+    random:seed(erlang:phash2(A+B+C), erlang:phash2(B+C), erlang:phash2(A+C)),
+    mktempdir(
+      filename:join(case os:getenv("TMPDIR") of
+                        false -> "/tmp";
+                        TDir  -> TDir
+                    end,
+                    lists:concat([?MODULE,"-",os:getenv("LOGNAME"),"-",
+                                  os:getpid(),"-"]))).
+
+mktempdir(Base) ->
+    D = Base ++ f("~8..0w", [random:uniform(90000000)]),
+    case file:make_dir(D) of
+        ok             -> {ok, D};
+        {error, exist} -> mktempdir(Base);
+        Error          -> Error
+    end.
+
+clean_tmpdir(TmpDir) ->
+    os:cmd(f("/bin/rm -rf '~s'", [TmpDir])).
+
+with_tmpcode(Module, Code, Fun) ->
+    try
+        load_code(Module, Code),
+        Fun()
+    after
+        unload_code(Module)
+    end.
+
+find_cplusplus_compiler() ->
+    case os:getenv("CXX") of
+        false ->
+            case os:find_executable("g++") of
+                false -> os:find_executable("c++");
+                Gxx   -> Gxx
+            end;
+        CxxCompiler ->
+            CxxCompiler
+    end.
+
+find_protoc() ->
+    case os:getenv("PROTOC") of
+        false  -> os:find_executable("protoc");
+        Protoc -> Protoc
+    end.
+
+get_cflags() ->
+    case os:getenv("CFLAGS") of
+        false  -> "";
+        CFlags -> CFlags
+    end ++ case os:getenv("CXXFLAGS") of
+               false    -> "";
+               CxxFlags -> CxxFlags
+           end.
+
+get_ldflags() ->
+    case os:getenv("LDFLAGS") of
+        false   -> "";
+        LdFlags -> LdFlags
+    end.
+
+msg_defs_to_proto(MsgDefs) ->
+    iolist_to_binary(lists:map(fun msg_def_to_proto/1, MsgDefs)).
+
+msg_def_to_proto({{enum, Name}, EnumValues}) ->
+    f("enum ~s {~n~s}~n~n",
+      [Name, lists:map(fun format_enumerator/1, EnumValues)]);
+msg_def_to_proto({{msg, Name}, Fields}) ->
+    f("message ~s {~n~s}~n~n",
+      [Name, lists:map(fun format_field/1, Fields)]).
+
+format_enumerator({N,V}) ->
+    f("  ~s = ~w;~n", [N, V]).
+
+format_field(#field{name=FName, fnum=FNum, type=Type, occurrence=Occurrence}) ->
+    TypeStr = case Type of
+                  {msg,Name2}  -> Name2;
+                  {enum,Name2} -> Name2;
+                  Type         -> Type
+              end,
+    f("  ~s ~s ~s = ~w;~n", [Occurrence, TypeStr, FName, FNum]).
+
+
+ccompile(F, A) ->
+    Cmd = f(F, A),
+    Output = os:cmd(Cmd ++ "; echo $?\n"),
+    [LastLine | _Rest] = lists:reverse(string:tokens(Output, "\r\n")),
+    try list_to_integer(string:strip(LastLine)) of
+        0 -> ok;
+        _ -> ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~s~n~n",
+                       [Cmd, Output]),
+             {error, Output}
+    catch error:badarg ->
+            ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~s~n~n",
+                      [Cmd, Output]),
+            {error, Output}
+    end.
+
+mk_one_msg_field_of_each_type() ->
+    EnumDef    = {{enum, ee}, [{en1, 1}, {en2, 2}]},
+    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], required)},
+    TopMsgDef1 = {{msg, topmsg1}, mk_fields_of_type(
+                                    [sint32, sint64, int32, int64, uint32,
+                                     uint64, bool, fixed64, sfixed64,
+                                     double, string, bytes, fixed32, sfixed32,
+                                     float, {enum, ee}, {msg, submsg1}],
+                                    required)},
+    TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(
+                                    [sint32, sint64, int32, int64, uint32,
+                                     uint64, bool, fixed64, sfixed64,
+                                     double, string, bytes, fixed32, sfixed32,
+                                     float, {enum, ee}, {msg, submsg1}],
+                                    repeated)},
+    TopMsgDef3 = {{msg, topmsg3}, mk_fields_of_type(
+                                    [sint32, sint64, int32, int64, uint32,
+                                     uint64, bool, fixed64, sfixed64,
+                                     double, string, bytes, fixed32, sfixed32,
+                                     float, {enum, ee}, {msg, submsg1}],
+                                    optional)},
+    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3].
+
+mk_fields_of_type(Types, Occurrence) ->
+    [#field{name=list_to_atom(lists:concat([f,integer_to_list(I)])),
+            rnum=I + 1,
+            fnum=I,
+            type=Type,
+            occurrence=Occurrence,
+            opts=[]}
+     || {I, Type} <- lists:zip(lists:seq(1,length(Types)), Types)].
+
+mk_msg(MsgName, Defs, Variant) ->
+    {{msg, MsgName}, Fields} = lists:keyfind({msg, MsgName}, 1, Defs),
+    R0 = erlang:make_tuple(length(Fields) + 1, undefined, [{1, MsgName}]),
+    lists:foldl(fun(#field{rnum=RNum}=Field, R) ->
+                        Value = mk_field_value(Field, Defs, Variant),
+                        setelement(RNum, R, Value)
+                end,
+                R0,
+                Fields).
+
+mk_field_value(#field{occurrence=repeated}, _Defs, short) ->
+    [];
+mk_field_value(#field{occurrence=repeated}=F, Defs, Variant) ->
+    [mk_field_value(F#field{occurrence=required}, Defs, Variant)];
+mk_field_value(#field{type=sint32}, _Defs, Vnt)   -> mk_sint(32, Vnt);
+mk_field_value(#field{type=sint64}, _Defs, Vnt)   -> mk_sint(64, Vnt);
+mk_field_value(#field{type=int32}, _Defs, Vnt)    -> mk_sint(32, Vnt);
+mk_field_value(#field{type=int64}, _Defs, Vnt)    -> mk_sint(64, Vnt);
+mk_field_value(#field{type=uint32}, _Defs, Vnt)   -> mk_uint(32, Vnt);
+mk_field_value(#field{type=uint64}, _Defs, Vnt)   -> mk_uint(64, Vnt);
+mk_field_value(#field{type=bool}, _Defs, Vnt)     -> mk_bool(Vnt);
+mk_field_value(#field{type=fixed64}, _Defs, Vnt)  -> mk_uint(64, Vnt);
+mk_field_value(#field{type=sfixed64}, _Defs, Vnt) -> mk_sint(64, Vnt);
+mk_field_value(#field{type=double}, _Defs, Vnt)   -> mk_float(64, Vnt);
+mk_field_value(#field{type=string}, _Defs, Vnt)   -> mk_string(Vnt);
+mk_field_value(#field{type=bytes}, _Defs, Vnt)    -> mk_bytes(Vnt);
+mk_field_value(#field{type=fixed32}, _Defs, Vnt)  -> mk_uint(32, Vnt);
+mk_field_value(#field{type=sfixed32}, _Defs, Vnt) -> mk_sint(32, Vnt);
+mk_field_value(#field{type=float}, _Defs, Vnt)    -> mk_float(32, Vnt);
+mk_field_value(#field{type={enum, E}}, Defs, _Vnt) ->
+    {{enum, E}, [{E1 , _V1} | _Rest]} = lists:keyfind({enum, E}, 1, Defs),
+    E1;
+mk_field_value(#field{type={msg, SubMsgName}}, Defs, Vnt) ->
+    mk_msg(SubMsgName, Defs, Vnt).
+
+mk_sint(32, small) -> - (1 bsl 31);
+mk_sint(32, big)   -> (1 bsl 31) - 1;
+mk_sint(64, small) -> - (1 bsl 63);
+mk_sint(64, big)   -> (1 bsl 63) - 1;
+mk_sint(_,  _)     -> 0.
+
+mk_uint(32, big)   -> (1 bsl 32) - 1;
+mk_uint(64, big)   -> (1 bsl 64) - 1;
+mk_uint(_,  _)     -> 0.
+
+mk_bool(small) -> false;
+mk_bool(_)     -> true.
+
+mk_string(short) -> "";
+mk_string(big)   -> [16#10ffff];
+mk_string(_)     -> "a".
+
+mk_bytes(short) -> <<>>;
+mk_bytes(_)     -> <<"b">>.
+
+mk_float(_, _) -> 1.0.
 
 %% --- auxiliaries -----------------
 
