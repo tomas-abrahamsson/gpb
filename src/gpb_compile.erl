@@ -291,7 +291,7 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
         binary ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
-            compile_to_binary(Defs, ErlTxt, NifTxt, Opts);
+            compile_to_binary(Mod, Defs, ErlTxt, NifTxt, Opts);
         file ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
             HrlTxt = format_hrl(Mod, Defs, Opts),
@@ -3131,8 +3131,10 @@ to_lower(A) when is_atom(A) ->
 
 %% -- compile to memory -----------------------------------------------------
 
-compile_to_binary(MsgDefs, ErlCode, PossibleNifCode, Opts) ->
-    {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode)),
+compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
+    ModAsBin = list_to_binary(atom_to_list(Mod)),
+    ErlCode2 = replace_module_macro(ErlCode, ModAsBin),
+    {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode2)),
     FormToks = split_toks_at_dot(Toks),
     Forms = lists:map(fun(Ts) ->
                               {ok, Form} = erl_parse:parse_form(Ts),
@@ -3145,6 +3147,13 @@ compile_to_binary(MsgDefs, ErlCode, PossibleNifCode, Opts) ->
     AllForms = AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms,
     combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
                                  PossibleNifCode).
+
+replace_module_macro(<<$?, "MODULE", Rest/binary>>, ModBin) ->
+    <<ModBin/binary, (replace_module_macro(Rest, ModBin))/binary>>;
+replace_module_macro(<<C, Rest/binary>>, ModBin) ->
+    <<C, (replace_module_macro(Rest, ModBin))/binary>>;
+replace_module_macro(<<>>, _ModBin) ->
+    <<>>.
 
 split_toks_at_dot(AllToks) ->
     case lists:splitwith(fun is_no_dot/1, AllToks) of
