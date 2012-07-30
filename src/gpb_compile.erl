@@ -52,6 +52,7 @@ file(File) ->
 %%                   {verify, optionally | always | never} |
 %%                   {copy_bytes, true | false | auto | integer() | float()} |
 %%                   {nif,boolean()} | nif |
+%%                   {load_nif, LoadNif} |
 %%                   {i, directory()} |
 %%                   {o, directory()} |
 %%                   binary | to_msg_defs |
@@ -67,6 +68,8 @@ file(File) ->
 %%            ErlAndNifCode = [CodeType]
 %%            CodeType = {erl, binary()} | {nif, NifCcText}
 %%            NifCcText = binary()
+%%            LoadNif = string()
+%%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
 %%
@@ -178,6 +181,28 @@ file(File) ->
 %% object for the nif, and thus also for the Google protobuf library's
 %% database, may still be kept in memory.
 %%
+%% The `load_nif' option lets you specify the code to use to load the nif.
+%% It the value to the `load_nif' option can be in either of two forms:
+%% <dl>
+%%   <dt>`"mf:Module:Function"'</dt>
+%%   <dd>Call Module:Function/2 to load the NIF. The first arguments
+%%     will be the basename of the shared object file, ie: sans directory.
+%%     The second argument will be the value of the call
+%%     `gpb:module_version_as_list()'. The Module:Function/2 is expected
+%%     to call erlang:load_nif/2, possibly after having modified the
+%%     path to something useful.</dd>
+%%   <dt>The body of the `on_load' function as an `iolist'</dt>
+%%   <dd>This lets you specify the entire body of the `on_load' function.
+%%     It is included verbatim. The code is expected to call
+%%     erlang:load_nif/2, with the value of `gpb:module_version_as_list()'
+%%     (NB: the value at generation time!) as the second argument.</dd>
+%% </dl>
+%% The default for the `load_nif' is as follows: If the module's
+%% directory, as returned by`code:which/1', is on the form
+%% `/path/to/ebin/Mod.beam', then the nif object code is loaded from
+%% `/path/to/priv/Mod.nif'. Otherwise: if `code:which/1' returns
+%% `/some/path/Mod.beam', then the nif is loaded from
+%% `/some/path/Mod.nif'.
 %%
 %% The `binary' option will cause the generated and compiled code be
 %% returned as a binary. No files will be written. The return value
@@ -437,6 +462,8 @@ c() ->
 %%       verify the message to be encoded.</dd>
 %%   <dt>`-nif'</dt>
 %%   <dd>Generate nifs for linking with the protobuf C(++) library.</dd>
+%%   <dt>`-load_nif mf:Module:Funcion'</dt>
+%%   <dd>Generate code that calls `Module:Function/2' to load the NIF.</dd>
 %%   <dt>`-c true | false | auto | integer() | float()'</dt>
 %%   <dd>Specify how or when the generated decoder should
 %%       copy fields of type `bytes'.</dd>
@@ -507,6 +534,8 @@ show_help() ->
       "          the <Protofile>.erl and <Protofile>.hrl~n"
       "    -nif~n"
       "          Generate nifs for linking with the protobuf C(++) library.~n"
+      "    -load_nif mf:Module:Funcion~n"
+      "          Generate code that calls Module:Function/2 to load the NIF.~n"
       "    -v optionally | always | never~n"
       "          Specify how the generated encoder should~n"
       "          verify the message to be encoded.~n"
@@ -528,6 +557,7 @@ parse_opt({"I", [Dir]})          -> {true, {i,Dir}};
 parse_opt({"I"++Dir, []})        -> {true, {i,Dir}};
 parse_opt({"o", [Dir]})          -> {true, {o,Dir}};
 parse_opt({"nif",[]})            -> {true, nif};
+parse_opt({"load_nif",[S]})      -> {true, {load_nif,S}};
 parse_opt({"v", ["optionally"]}) -> {true, {verify,optionally}};
 parse_opt({"v", ["always"]})     -> {true, {verify,always}};
 parse_opt({"v", ["never"]})      -> {true, {verify,never}};
@@ -3096,9 +3126,13 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
      "\n"].
 
 format_load_nif(Mod, Opts) ->
-    case proplists:get_value(nif_load_code, Opts, '$undefined') of
+    VsnAsList = gpb:version_as_list(),
+    case proplists:get_value(load_nif, Opts, '$undefined') of
         '$undefined' ->
             ["load_nif() ->\n",
+             %% Note: using ?MODULE here has impacts on compiling to
+             %% binary, because we don't pass it through the preprocessor
+             %% maybe we should?
              "    SelfDir = filename:dirname(code:which(?MODULE)),\n",
              "    NifDir = case lists:reverse(filename:split(SelfDir)) of\n"
              "                 [\"ebin\" | PDR] ->\n"
@@ -3109,21 +3143,14 @@ format_load_nif(Mod, Opts) ->
              "             end,\n",
              "    NifBase = \"", atom_to_list(Mod) ++ ".nif", "\",\n",
              "    Nif = filename:join(NifDir, NifBase),\n",
-             f("    erlang:load_nif(Nif, ~w).\n", [gpb:version_as_list()])];
+             f("    erlang:load_nif(Nif, ~w).\n", [VsnAsList])];
         "mf:"++ModuleFn ->
             NifBase = atom_to_list(Mod) ++ ".nif",
             ["load_nif() ->\n",
-             f("    ~s(\"~s\").\n", [ModuleFn, NifBase])];
+             f("    ~s(\"~s\", ~w).\n", [ModuleFn, NifBase, VsnAsList])];
         CodeBody when is_list(CodeBody); is_binary(CodeBody) ->
             ["load_nif() ->\n",
-             CodeBody];
-        CodeFn when is_function(CodeFn, 0) ->
-            ["load_nif() ->\n",
-             CodeFn()];
-        CodeFn when is_function(CodeFn, 1) ->
-            NifBase = atom_to_list(Mod) ++ ".nif",
-            ["load_nif() ->\n",
-             CodeFn(NifBase)]
+             CodeBody]
     end.
 
 to_lower(A) when is_atom(A) ->
