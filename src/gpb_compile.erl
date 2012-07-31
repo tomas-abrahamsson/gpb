@@ -182,20 +182,18 @@ file(File) ->
 %% database, may still be kept in memory.
 %%
 %% The `load_nif' option lets you specify the code to use to load the nif.
-%% It the value to the `load_nif' option can be in either of two forms:
+%% The value to the `load_nif' must be a text that defines the function
+%% `load_nif/0', that in the end calls `erlang:load_nif/2'.
+%% Two special substrings are recognized and substituted in the text:
 %% <dl>
-%%   <dt>`"mf:Module:Function"'</dt>
-%%   <dd>Call Module:Function/2 to load the NIF. The first arguments
-%%     will be the basename of the shared object file, ie: sans directory.
-%%     The second argument will be the value of the call
-%%     `gpb:module_version_as_list()'. The Module:Function/2 is expected
-%%     to call erlang:load_nif/2, possibly after having modified the
-%%     path to something useful.</dd>
-%%   <dt>The body of the `on_load' function as an `iolist'</dt>
-%%   <dd>This lets you specify the entire body of the `on_load' function.
-%%     It is included verbatim. The code is expected to call
-%%     erlang:load_nif/2, with the value of `gpb:module_version_as_list()'
-%%     (NB: the value at generation time!) as the second argument.</dd>
+%%   <dt>`{{nifbase}}'</dt>
+%%   <dd>The basename of the nif file to be loaded (a string).
+%%       Example: `"MyModule.nif"' if we are compiling `MyModule.proto'.
+%%       This is intended to be (part of) the first argument in
+%%       the call to `erlang:load_nif/2'.</dd>
+%%   <dt>`{{loadinfo}}'</dt>
+%%   <dd>This is a term that is intended to be the second argument in
+%%       the call to `erlang:load_nif/2'.</dd>
 %% </dl>
 %% The default for the `load_nif' is as follows: If the module's
 %% directory, as returned by`code:which/1', is on the form
@@ -3144,14 +3142,20 @@ format_load_nif(Mod, Opts) ->
              "    NifBase = \"", atom_to_list(Mod) ++ ".nif", "\",\n",
              "    Nif = filename:join(NifDir, NifBase),\n",
              f("    erlang:load_nif(Nif, ~w).\n", [VsnAsList])];
-        "mf:"++ModuleFn ->
-            NifBase = atom_to_list(Mod) ++ ".nif",
-            ["load_nif() ->\n",
-             f("    ~s(\"~s\", ~w).\n", [ModuleFn, NifBase, VsnAsList])];
-        CodeBody when is_list(CodeBody); is_binary(CodeBody) ->
-            ["load_nif() ->\n",
-             CodeBody]
+        LoadNifFnText when is_list(LoadNifFnText); is_binary(LoadNifFnText) ->
+            [replace_tilde_s(iolist_to_binary(LoadNifFnText),
+                             iolist_to_binary(f("\"~s.nif\"", [Mod])),
+                             iolist_to_binary(f("~w", [VsnAsList])))]
     end.
+
+replace_tilde_s(<<"{{nifbase}}", Rest/binary>>, ModBin, VsnBin) ->
+    <<ModBin/binary, (replace_tilde_s(Rest, ModBin, VsnBin))/binary>>;
+replace_tilde_s(<<"{{loadinfo}}", Rest/binary>>, ModBin, VsnBin) ->
+    <<VsnBin/binary, (replace_tilde_s(Rest, ModBin, VsnBin))/binary>>;
+replace_tilde_s(<<C, Rest/binary>>, ModBin, VsnBin) ->
+    <<C, (replace_tilde_s(Rest, ModBin, VsnBin))/binary>>;
+replace_tilde_s(<<>>, _ModBin, _VsnBin) ->
+    <<>>.
 
 to_lower(A) when is_atom(A) ->
     list_to_atom(string:to_lower(atom_to_list(A))).
