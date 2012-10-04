@@ -106,8 +106,9 @@ syntax          : {token, {syntax,TokenLine}}.
 
 
 
-//.*\n          : skip_token. %% comment
-//.*            : skip_token. %% comment
+//.*\n          : skip_token.                    %% C++-style comment
+//.*            : skip_token.                    %% C++-style comment
+(/\*([^*]|(\*+[^*/]))*\*+/)|(//.*) : skip_token. %% C-style comment
 {WS}            : skip_token.
 
 

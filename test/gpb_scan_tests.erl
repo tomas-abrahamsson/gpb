@@ -58,6 +58,17 @@ skips_comments_test() ->
     {ok, [{dec_lit,_,_}], _} = gpb_scan:string("12//def"), %% no \n on last line
     ok.
 
+skips_c_style_comments_test() ->
+    {error, _, _}            = gpb_scan:string("/*/12"), % not a comment
+    {ok, [{dec_lit,_,_}], _} = gpb_scan:string("/**/12"), % smallest comment
+    {ok, [{dec_lit,_,_}], _} = gpb_scan:string("/* - */12"),
+    {ok, [{dec_lit,_,_}], _} = gpb_scan:string("/*****/12"),
+    {ok, [{dec_lit,_,_}], _} = gpb_scan:string("/*****/12/****/"), % greedy test
+    {ok, [{dec_lit,_,_}], _} = gpb_scan:string("/**\n *\n*/12"), % \n in comment
+    S = "x/* xyz */y",
+    {ok, [{str_lit,_,S}], _} = gpb_scan:string("\""++S++"\""),% comment in str
+    ok.
+
 parses_strings_test() ->
     {ok, [{str_lit,_,""}], _}     = gpb_scan:string("\"\""),
     {ok, [{str_lit,_,""}], _}     = gpb_scan:string("''"),
