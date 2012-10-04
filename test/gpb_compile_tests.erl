@@ -684,7 +684,7 @@ mk_read_file_info(_MainProtoFileName, ExtraFileOpReturnValues) ->
 generates_nif_as_binary_and_file_test() ->
     Defs = mk_one_msg_field_of_each_type(),
     M = gpb_nif_test,
-    LoadNif = f("erlang:load_nif(\"~s.nif\", gpb:version_as_list()).\n", [M]),
+    LoadNif = "load_nif() -> erlang:load_nif({{nifbase}}, {{loadinfo}}).\n",
     LoadNifOpt = {load_nif, LoadNif},
     {ok, M, Codes} = gpb_compile:msg_defs(M, Defs, [binary, nif, LoadNifOpt]),
     Nif1 = proplists:get_value(nif, Codes),
@@ -750,7 +750,7 @@ compile_msg_defs(M, MsgDefs, TmpDir) ->
         [filename:join(TmpDir, lists:concat([M, Ext]))
          || Ext <- [".nif.cc", ".pb.cc", ".nif.o", ".pb.o", ".nif.so",
                     ".proto"]],
-    LoadNif = f("erlang:load_nif(\"~s\", gpb:version_as_list()).\n",
+    LoadNif = f("load_nif() -> erlang:load_nif(\"~s\", {{loadinfo}}).\n",
                 [filename:join(TmpDir, lists:concat([M,".nif"]))]),
     LoadNifOpt = {load_nif, LoadNif},
     Opts = [binary, nif, LoadNifOpt],
