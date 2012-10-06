@@ -51,6 +51,7 @@ file(File) ->
 %%            Opt  = {type_specs, boolean()} | type_specs |
 %%                   {verify, optionally | always | never} |
 %%                   {copy_bytes, true | false | auto | integer() | float()} |
+%%                   {strings_as_binaries, boolean()} | strings_as_binaries |
 %%                   {nif,boolean()} | nif |
 %%                   {load_nif, LoadNif} |
 %%                   {i, directory()} |
@@ -111,11 +112,12 @@ file(File) ->
 %% a function, `verify_msg/1' is always generated.
 %%
 %% The `copy_bytes' option specifies whether when decoding data of
-%% type `bytes', the decoded bytes should be copied or not. Copying
-%% requires the `binary' module, which first appeared in Erlang
-%% R14A. When not copying decoded bytes, they will become sub binaries
-%% of the larger input message binary. This may tie up the memory in
-%% the input message binary longer than necessary after it has been
+%% type `bytes' (or strings if the `strings_as_binaries' is set), the
+%% decoded bytes should be copied or not.  Copying requires the
+%% `binary' module, which first appeared in Erlang R14A. When not
+%% copying decoded bytes, they will become sub binaries of the larger
+%% input message binary. This may tie up the memory in the input
+%% message binary longer than necessary after it has been
 %% decoded. Copying the decoded bytes will avoid creating sub
 %% binaries, which will in make it possible to free the input message
 %% binary earlier. The `copy_bytes' option can have the following values:
@@ -129,6 +131,12 @@ file(File) ->
 %%           message this many times or more larger than the size of the
 %%           bytes/(sub-)binary.</dd>
 %% </dl>
+%%
+%% The `strings_as_binaries' option specifies whether strings should
+%% be returned from decoding as strings (list of unicode code points),
+%% or as binaries (UTF-8 encoded). The `copy_bytes' option applies
+%% to strings as well, when the `strings_as_binaries' option is set.
+%% Upon encoding, both binaries and lists are accepted.
 %%
 %% The `{o,directory()}' option specifies directory to use for storing
 %% the generated `.erl' and `.hrl' files. Default is the same
@@ -467,7 +475,11 @@ c() ->
 %%       option in the {@link file/2} function.</dd>
 %%   <dt>`-c true | false | auto | integer() | float()'</dt>
 %%   <dd>Specify how or when the generated decoder should
-%%       copy fields of type `bytes'.</dd>
+%%       copy fields of type `bytes'. See the `copy_bytes' option
+%%       for the function {@link file/2} for more info.</dd>
+%%   <dt>`-strbin'</dt>
+%%   <dd>Specify that decoded strings should be returend as binaries,
+%%       instead of as strings (lists).</dd>
 %%   <dt>`--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
 %%   <dt>`--version' or `-V'</dt>
@@ -544,6 +556,10 @@ show_help() ->
       "          verify the message to be encoded.~n"
       "    -c true | false | auto | integer() | float()~n"
       "          Specify how or when the generated decoder should~n"
+      "          copy fields of type bytes.~n"
+      "    -strbin~n"
+      "          Specify that decoded strings should be returend as binaries,~n"
+      "          instead of as strings (lists).~n"
       "    --help  -h~n"
       "          Show help~n"
       "    --version  -V~n"
@@ -571,6 +587,7 @@ parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
                                         {ok, Num} -> {true, {copy_bytes,Num}};
                                         error     -> false
                                     end;
+parse_opt({"strbin", []})        -> {true, strings_as_binaries};
 parse_opt({"h", _})              -> {true, help};
 parse_opt({"-help", _})          -> {true, help};
 parse_opt({"V", _})              -> {true, version};
@@ -1824,11 +1841,17 @@ mk_unpack_vi(Indent, FValueVar, BValueExpr, Type, RestVar, Opts) ->
              RestVar};
         string ->
             {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
-              indent(Indent, f("<<Utf8:Len/binary, ~s/binary>> = ~s,~n",
-                               [Rest2Var, RestVar])),
-              indent(Indent, f("~s = unicode:characters_to_list("
-                               "Utf8,unicode),~n",
-                               [FValueVar]))],
+              case proplists:get_bool(strings_as_binaries, Opts) of
+                  false ->
+                      [indent(Indent, f("<<Utf8:Len/binary, ~s/binary>> = ~s,~n",
+                                        [Rest2Var, RestVar])),
+                       indent(Indent, f("~s = unicode:characters_to_list("
+                                        "Utf8,unicode),~n",
+                                        [FValueVar]))];
+                  true ->
+                      mk_unpack_bytes(Indent, FValueVar, RestVar, Rest2Var,
+                                      Opts)
+              end],
              Rest2Var};
         bytes ->
             {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),

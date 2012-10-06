@@ -258,6 +258,55 @@ dotted_names_gives_no_compilation_error_test() ->
     M1Msg = M:decode_msg(Data, m1),
     unload_code(M).
 
+%% --- strings ----------
+
+strings_as_binaries_option_produces_bins_test() ->
+    M = compile_iolist(["message m1 {"
+                        "  required string f1 = 1;",
+                        "}"],
+                       [strings_as_binaries]),
+    Data = M:encode_msg({m1, "some string"}),
+    {m1, <<"some string">>} = M:decode_msg(Data, m1),
+    unload_code(M).
+
+strings_as_lists_is_the_default_test() ->
+    M = compile_iolist(["message m1 {"
+                        "  required string f1 = 1;",
+                        "}"],
+                       []),
+    Data = M:encode_msg({m1, "some string"}),
+    {m1, "some string"} = M:decode_msg(Data, m1),
+    unload_code(M).
+
+strings_as_binaries_opt_together_with_copy_bytes_opt_test() ->
+    M = compile_iolist(["message m1 {"
+                        "  required string f1 = 1;",
+                        "}"],
+                       [strings_as_binaries, {copy_bytes, auto}]),
+    Data = M:encode_msg({m1, "some string"}),
+    {m1, <<"some string">>=StrBin} = M:decode_msg(Data, m1),
+    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
+    if HasBinary ->
+            %% If the StrBin has not been copied, then it is a sub-binary
+            %% of a larger binary: of the message, ie of Data.
+            %% So verify copying by verifying size of referenced data.
+            ?assertEqual(byte_size(StrBin),
+                         binary:referenced_byte_size(StrBin));
+       true ->
+            ok
+    end,
+    unload_code(M).
+
+accepts_both_strings_and_binaries_as_input_test() ->
+    M = compile_iolist(["message m1 {"
+                        "  required string f1 = 1;",
+                        "  required string f2 = 2;",
+                        "}"]),
+    Data = M:encode_msg({m1, "some string", <<"some other string">>}),
+    {m1, "some string", "some other string"} = M:decode_msg(Data, m1),
+    unload_code(M).
+
+
 %% --- Returning/reporting warnings/errors tests ----------
 %% ... when compiling to file/binary
 %% ... when there are/aren't warnings/errors
