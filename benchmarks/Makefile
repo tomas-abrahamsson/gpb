@@ -9,6 +9,19 @@ ifdef HIPE
 else
   HIPE_ERLC_OPTS =
 endif
+
+ifndef NO_NIF
+  nif_opt = -nif
+  tmp/msg.beam: tmp/msg.nif.so
+  tmp/d.beam: tmp/d.nif.so
+  protohome = /usr/local/src/protobuf
+  protoc = $(protohome)/src/protoc
+else
+  nif_opt =
+endif
+
+get_protolib = $(if $(shell grep 'option.*optimize_for.*LITE_RUNTIME' $(1)),protobuf-lite,protobuf)
+
 all:	benchmarks-code
 
 benchmarks-code: tmp/msg.beam tmp/d.beam
@@ -22,12 +35,21 @@ tmp/d.beam:   tmp/d.erl
 tmp/%.erl: %.proto
 	[ -d tmp ] || mkdir tmp
 	erl -boot start_clean -pa ../ebin -noshell -noinput +B \
-		-v never -c false -I`pwd` -o tmp -s gpb_compile c $<
+		-v never -c false -I`pwd` -o tmp $(nif_opt) -s gpb_compile c $<
 
 tmp/%.beam: tmp/%.erl
 	cd tmp; erlc -Wall $(HIPE_ERLC_OPTS) -I../../include +debug_info \
-		$(patsubst tmp/%,%,$^)
+		$(patsubst tmp/%,%,$<)
 
+tmp/%.nif.so: %.proto
+	$(protoc) --cpp_out=tmp/ $*.proto
+	g++ -g -fPIC -O3 -I$(protohome)/src -o tmp/$*.pb.o -c tmp/$*.pb.cc
+	g++ -g -fPIC -Wall -O3 -I$(protohome)/src \
+	  -o tmp/$*.nif.o -c tmp/$*.nif.cc
+	g++ -g -fPIC -shared -O3 -Wall -I$(protohome)/src -o $@ \
+	  tmp/$*.nif.o tmp/$*.pb.o \
+	  -L$(protohome)/src/.libs -l$(call get_protolib,$*.proto) \
+	  -Wl,-rpath=$(protohome)/src/.libs
 clean:
 	$(RM) -r tmp
 

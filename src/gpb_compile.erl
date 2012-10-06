@@ -51,6 +51,8 @@ file(File) ->
 %%            Opt  = {type_specs, boolean()} | type_specs |
 %%                   {verify, optionally | always | never} |
 %%                   {copy_bytes, true | false | auto | integer() | float()} |
+%%                   {nif,boolean()} | nif |
+%%                   {load_nif, LoadNif} |
 %%                   {i, directory()} |
 %%                   {o, directory()} |
 %%                   binary | to_msg_defs |
@@ -62,7 +64,11 @@ file(File) ->
 %%                     {ok, ModuleName, Code, Warnings}
 %%            ErrRet = {error, Reason} | {error,Reason,Warnings}
 %%            ModuleName  = atom()
-%%            Code = binary()
+%%            Code = binary() | ErlAndNifCode
+%%            ErlAndNifCode = [CodeType]
+%%            CodeType = {erl, binary()} | {nif, NifCcText}
+%%            NifCcText = binary()
+%%            LoadNif = string()
 %%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
@@ -128,11 +134,83 @@ file(File) ->
 %% the generated `.erl' and `.hrl' files. Default is the same
 %% directory as for the proto `File'.
 %%
+%% The `nif' option will cause the compiler to generate nif C++ code
+%% for that can be linked with the Google protobuf C++ library. The
+%% purpose for this is speed: the Google protobuf C++ is faster than
+%% the interpreted Erlang code, but will also lock up an Erlang
+%% scheduler for as long as it takes for the Google protobuf library
+%% to complete. This is normally a small amount of time, but can be a
+%% longer time for huge messages.  The generated nif code can be
+%% compiled with Erlang R14B or later. The `gpb_compile' will only
+%% generate C++ code, it will <i>not</i> compile the generated C++
+%% code for you. Below is an example of how to generate and compile
+%% the C++ nif code under Linux. Details may differ from system to
+%% system.
+%%
+%% <pre>
+%%      # Use protoc to generate C++ code, and compile it.
+%%      # This will generate x.pb.cc and x.pb.h from x.proto.
+%%      protoc --cpp_out=$PWD x.proto
+%%      g++ -g -fPIC -O3 -I/path/to/protobuf-include -o x.pb.o -c x.pb.cc
+%%      # Generate Erlang code and C++ nif glue code, and compile it.
+%%      # This will generate x.erl, x.hrl and x.nif.cc from x.proto.
+%%      erl -boot start_clean -pa /path/to/gpb/ebin -noshell -noinput +B \
+%%            -I$PWD -nif -s gpb_compile c x.proto
+%%      erlc -Wall x.erl
+%%      g++ -g -fPIC -Wall -O3 -I/path/to/protobuf -o x.nif.o -c x.nif.cc
+%%      # Link all the C++ code together to a shared library.
+%%      g++ -g -fPIC -shared -O3 -Wall -o x.nif.so x.nif.o x.pb.o \
+%%            -L/path/to/protobuf-libs -lprotobuf \
+%%            -Wl,-rpath=/path/to/protobuf-libs
+%%      # Now, if you load x.beam into an Erlang VM, it will
+%%      # automatically load x.nif.so which contains the nif glue C++
+%%      code as well as the protobuf code.
+%% </pre>
+%%
+%% NB: Caveats: Reloading or upgrading code compiled with the `nif'
+%% option, might have unexpected behaviour.  The Google protobuf
+%% library maintains a database of .proto descriptors and will
+%% complain -- and halt the entire Erlang VM -- if you try to load nif
+%% code in two different modules that defines a message with the same
+%% name.  I have also seen cases where protobuf descriptors from old
+%% versions of the nif code appears to be used even if new code has
+%% been loaded.  The descriptor database appears to be kept as long as
+%% the Google C++ protobuf library is loaded, and it is not possible
+%% to control unloading of a sharerd library in Erlang, at least as of
+%% R15B01.  Even if the code has been purged and deleted, the shared
+%% object for the nif, and thus also for the Google protobuf library's
+%% database, may still be kept in memory.
+%%
+%% The `load_nif' option lets you specify the code to use to load the nif.
+%% The value to the `load_nif' must be a text that defines the function
+%% `load_nif/0', that in the end calls `erlang:load_nif/2'.
+%% Two special substrings are recognized and substituted in the text:
+%% <dl>
+%%   <dt>`{{nifbase}}'</dt>
+%%   <dd>The basename of the nif file to be loaded (a string).
+%%       Example: `"MyModule.nif"' if we are compiling `MyModule.proto'.
+%%       This is intended to be (part of) the first argument in
+%%       the call to `erlang:load_nif/2'.</dd>
+%%   <dt>`{{loadinfo}}'</dt>
+%%   <dd>This is a term that is intended to be the second argument in
+%%       the call to `erlang:load_nif/2'.</dd>
+%% </dl>
+%% The default for the `load_nif' is as follows: If the module's
+%% directory, as returned by`code:which/1', is on the form
+%% `/path/to/ebin/Mod.beam', then the nif object code is loaded from
+%% `/path/to/priv/Mod.nif'. Otherwise: if `code:which/1' returns
+%% `/some/path/Mod.beam', then the nif is loaded from
+%% `/some/path/Mod.nif'.
+%%
 %% The `binary' option will cause the generated and compiled code be
 %% returned as a binary. No files will be written. The return value
 %% will be on the form `{ok,Mod,Code}' or `{ok,Mod,Code,Warnings}'
 %% if the compilation is succesful. This option may be useful
-%% e.g. when generating test cases.
+%% e.g. when generating test cases. In case the `nif' option is set,
+%% the `Code' will be a list of tuples: `{erl,binary()}' which
+%% contains the erlang object byte code, and `{nif,binary()}' which
+%% contains the C++ code. You will have to compile the C++ code with a
+%% C++ compiler, before you can use the erlang code.
 %%
 %% The `to_msg_defs' option will result in `{ok,MsgDefs}' or
 %% `{ok,MsgDefs,Warns}' being returned if the compilation is succesful.
@@ -235,18 +313,23 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
             {ok, Defs};
         binary ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
-            compile_to_binary(Defs, ErlTxt, Opts);
+            NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
+            compile_to_binary(Mod, Defs, ErlTxt, NifTxt, Opts);
         file ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
+            HrlTxt = format_hrl(Mod, Defs, Opts),
+            NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             OutDir = proplists:get_value(o, Opts, "."),
             Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
             Hrl = change_ext(Erl, ".hrl"),
-            HrlTxt = format_hrl(Mod, Defs, Opts),
+            Nif = change_ext(Erl, ".nif.cc"),
             case {file_write_file(Erl, ErlTxt, Opts),
-                  file_write_file(Hrl, HrlTxt, Opts)} of
-                {ok, ok}        -> ok;
-                {{error, R}, _} -> {error, {write_failed, Erl, R}};
-                {_, {error, R}} -> {error, {write_failed, Hrl, R}}
+                  file_write_file(Hrl, HrlTxt, Opts),
+                  possibly_write_file(Nif, NifTxt, Opts)} of
+                {ok, ok, ok}       -> ok;
+                {{error, R}, _, _} -> {error, {write_failed, Erl, R}};
+                {_, {error, R}, _} -> {error, {write_failed, Erl, R}};
+                {_, _, {error, R}} -> {error, {write_failed, Nif,  R}}
             end
     end.
 
@@ -375,6 +458,13 @@ c() ->
 %%   <dt>`-v optionally | always | never'</dt>
 %%   <dd>Specify how the generated encoder should
 %%       verify the message to be encoded.</dd>
+%%   <dt>`-nif'</dt>
+%%   <dd>Generate nifs for linking with the protobuf C(++) library.</dd>
+%%   <dt>`-load_nif FunctionDefinition'</dt>
+%%   <dd>Specify `FunctionDefinition' as the text that defines the
+%%       function `load_nif/0'.  This is called as the `on_load'
+%%       hook for loading the NIF.  See also the doc for the `load_nif'
+%%       option in the {@link file/2} function.</dd>
 %%   <dt>`-c true | false | auto | integer() | float()'</dt>
 %%   <dd>Specify how or when the generated decoder should
 %%       copy fields of type `bytes'.</dd>
@@ -443,6 +533,12 @@ show_help() ->
       "    -o Dir~n"
       "          Specify output directory for where to generate~n"
       "          the <Protofile>.erl and <Protofile>.hrl~n"
+      "    -nif~n"
+      "          Generate nifs for linking with the protobuf C(++) library.~n"
+      "    -load_nif FunctionDefinition~n"
+      "          Specify FunctionDefinition as the text that defines the~n"
+      "          function load_nif/0.  This is called as the -on_load.~n"
+      "          hook for loading the NIF.~n"
       "    -v optionally | always | never~n"
       "          Specify how the generated encoder should~n"
       "          verify the message to be encoded.~n"
@@ -463,6 +559,8 @@ parse_opts(Args, PlainArgs) ->
 parse_opt({"I", [Dir]})          -> {true, {i,Dir}};
 parse_opt({"I"++Dir, []})        -> {true, {i,Dir}};
 parse_opt({"o", [Dir]})          -> {true, {o,Dir}};
+parse_opt({"nif",[]})            -> {true, nif};
+parse_opt({"load_nif",[S]})      -> {true, {load_nif,S}};
 parse_opt({"v", ["optionally"]}) -> {true, {verify,optionally}};
 parse_opt({"v", ["always"]})     -> {true, {verify,always}};
 parse_opt({"v", ["never"]})      -> {true, {verify,never}};
@@ -865,6 +963,7 @@ d_field_pass_method(MsgDef) ->
 %% -- generating code ----------------------------------------------
 
 format_erl(Mod, Defs, AnRes, Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
     iolist_to_binary(
       [f("%% Automatically generated, do not edit~n"
          "%% Generated by ~p version ~s on ~p~n",
@@ -883,9 +982,16 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("-export([get_package_name/0]).~n"),
        f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
+       [["-on_load(load_nif/0).\n",
+         "-export([load_nif/0]). %% for debugging of nif loading\n",
+         "\n"]
+        || DoNif],
        f("-include(\"~s.hrl\").~n", [Mod]),
        f("-include(\"gpb.hrl\").~n"),
        "\n",
+       [[f("~s~n", [format_load_nif(Mod, Opts)]),
+         "\n"]
+        || DoNif],
        %% Enabling inlining seems to cause performance to drop drastically
        %% I've seen decoding performance go down from 76000 msgs/s
        %% to about 10000 msgs/s for a set of mixed message samples.
@@ -916,7 +1022,12 @@ format_erl(Mod, Defs, AnRes, Opts) ->
          "    ~s.~n",
          [format_decoder_topcase(4, Defs, "Bin", "MsgName")]),
        "\n",
-       f("~s~n", [format_decoders(Defs, AnRes, Opts)]),
+       if DoNif ->
+               f("~s~n", [format_nif_decoder_error_wrappers(
+                            Defs, AnRes, Opts)]);
+          not DoNif ->
+               f("~s~n", [format_decoders(Defs, AnRes, Opts)])
+       end,
        "\n",
        f("~s~n", [format_msg_merge_code(Defs, AnRes)]),
        "\n",
@@ -2084,6 +2195,17 @@ format_bit_skipper_par(MsgName, BitLen) ->
     [f("~p(<<_:~w, Rest/binary>>, Msg) ->~n", [SkipFn, BitLen]),
      f("    ~p(Rest, 0, 0, Msg).~n~n",  [mk_fn(d_read_field_def_, MsgName)])].
 
+
+format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
+    [format_msg_nif_error_wrapper(MsgName)
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+format_msg_nif_error_wrapper(MsgName) ->
+    FnName = mk_fn(d_msg_, MsgName),
+    f("~p(Bin) ->~n"
+      "    erlang:nif_error({error,{nif_not_loaded,~p}}, [Bin]).~n~n",
+     [FnName, MsgName]).
+
 %% -- verifiers -----------------------------------------------------
 
 format_verifier_topcase(Indent, Defs, MsgVar) ->
@@ -2517,10 +2639,538 @@ mk_fn(Prefix, Middlefix, Suffix) when is_integer(Middlefix) ->
 mk_fn(Prefix, Middlefix, Suffix) ->
     list_to_atom(lists:concat([Prefix, Middlefix, "_", Suffix])).
 
+mk_c_fn(Prefix, Suffix) ->
+    dot_to_underscore(lists:concat([Prefix, Suffix])).
+
+mk_c_var(Prefix, Suffix) ->
+    dot_to_underscore(lists:concat([Prefix, Suffix])).
+
+dot_to_underscore(X) when is_atom(X) -> dot_to_underscore(atom_to_list(X));
+dot_to_underscore(X) when is_list(X) -> dot_replace_s(X, "_").
+
+dot_replace_s(S, New) when is_list(S) -> d_r(S, New);
+dot_replace_s(S, New) when is_atom(S) -> d_r(atom_to_list(S), New).
+
+d_r("."++Rest, New) -> New ++ d_r(Rest, New);
+d_r([C|Rest], New)  -> [C | d_r(Rest, New)];
+d_r("", _New)       -> "".
+
+%% -- nif c++ code -----------------------------------------------------
+
+possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
+    case proplists:get_bool(nif, Opts) of
+        true  -> format_nif_cc(Mod, Defs, AnRes, Opts);
+        false -> '$not_generated'
+    end.
+
+format_nif_cc(Mod, Defs, AnRes, Opts) ->
+    iolist_to_binary(
+      [format_nif_cc_includes(Mod, Defs, Opts),
+       format_nif_cc_local_function_decls(Mod, Defs, Opts),
+       format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
+       format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
+       format_nif_cc_decoders(Mod, Defs, Opts),
+       format_nif_cc_unpackers(Mod, Defs, Opts),
+       format_nif_cc_foot(Mod, Defs, Opts)]).
+
+get_cc_pkg(Defs) ->
+    case lists:keyfind(package, 1, Defs) of
+        false              -> "";
+        {package, Package} -> "::"++dot_replace_s(Package, "::")
+    end.
+
+is_lite_rt(Defs) ->
+    OptimizeOpts = [Opt || {option,{optimize_for,Opt}} <- Defs],
+    lists:any(fun(OptOpt) -> OptOpt == 'LITE_RUNTIME' end,
+              OptimizeOpts).
+
+format_nif_cc_includes(Mod, Defs, _Opts) ->
+    IsLiteRT = is_lite_rt(Defs),
+    ["#include <string.h>\n",
+     "#include <string>\n",
+     "\n",
+     "#include <erl_driver.h>\n",
+     "#include <erl_nif.h>\n",
+     "\n",
+     f("#include \"~s.pb.h\"\n", [Mod]),
+     ["#include <google/protobuf/message_lite.h>\n" || IsLiteRT],
+     "\n"].
+
+format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [[begin
+          UnpackFnName = mk_c_fn(u_msg_, MsgName),
+          CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+          ["static ERL_NIF_TERM ",UnpackFnName,["(ErlNifEnv *env, ",
+                                                "const ",CMsgType," *m);\n"]]
+      end
+      || {{msg, MsgName}, _Fields} <- Defs],
+     "\n"].
+
+format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
+    EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
+                               || {{enum, _}, EnumDef} <- Defs]),
+    RecordAtoms = [MsgName || {{msg, MsgName}, _Fields} <- Defs],
+    MiscAtoms0 = [undefined],
+    MiscAtoms1 = case is_any_field_of_type_bool(AnRes) of
+                     true  -> MiscAtoms0 ++ [true, false];
+                     false -> MiscAtoms0
+                 end,
+    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ MiscAtoms1),
+    AtomVars = [{mk_c_var(aa_, A), A} || A <- Atoms],
+
+    [[f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
+     "\n",
+     ["static void install_atoms(ErlNifEnv *env)\n"
+      "{\n",
+      [f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
+       || {AtomVar, Atom} <- AtomVars],
+      "}\n",
+      "\n"]].
+
+format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, _Opts) ->
+    case is_any_field_of_type_string(AnRes) of
+        true  -> format_nif_cc_utf8_conversion_code();
+        false -> ""
+    end.
+
+is_any_field_of_type_string(#anres{used_types=UsedTypes}) ->
+    sets:is_element(string, UsedTypes).
+
+is_any_field_of_type_bool(#anres{used_types=UsedTypes}) ->
+    sets:is_element(bool, UsedTypes).
+
+format_nif_cc_utf8_conversion_code() ->
+    ["/* Source for https://www.ietf.org/rfc/rfc2279.txt */\n",
+     "\n",
+     "static int\n",
+     "utf8_count_codepoints(const char *sinit, int len)\n",
+     "{\n",
+     "    int n = 0;\n",
+     "    const unsigned char *s0 = (unsigned char *)sinit;\n",
+     "    const unsigned char *s  = s0;\n",
+     "\n",
+     "    while ((s - s0) < len)\n",
+     "    {\n",
+     "        if (*s <= 0x7f) { n++; s++; } /* code point fits 1 octet */\n",
+     "        else if (*s <= 0xdf) { n++; s += 2; } /* 2 octets */\n",
+     "        else if (*s <= 0xef) { n++; s += 3; } /* 3 octets */\n",
+     "        else if (*s <= 0xf7) { n++; s += 4; }\n",
+     "        else if (*s <= 0xfb) { n++; s += 5; }\n",
+     "        else if (*s <= 0xfd) { n++; s += 6; }\n",
+     "        else return -1;\n",
+     "\n",
+     "        if ((s - s0) > len)\n",
+     "            return -1;\n",
+     "    }\n",
+     "    return n;\n",
+     "}\n",
+     "\n",
+     "static int\n",
+     "utf8_to_uint32(unsigned int *dest, const char *src, int numCodePoints)\n",
+     "{\n",
+     "    int i;\n",
+     "    const unsigned char *s = (unsigned char *)src;\n",
+     "\n",
+     "\n",
+     "    /* Should perhaps check for illegal chars in d800-dfff and\n",
+     "     * a other illegal chars\n",
+     "     */\n",
+     "\n",
+     "    for (i = 0; i < numCodePoints; i++)\n",
+     "    {\n",
+     "        if (*s <= 0x7f)\n",
+     "            *dest++ = *s++;\n",
+     "        else if (*s <= 0xdf) /* code point is 2 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x1f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else if (*s <= 0xef) /* code point is 3 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x0f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else if (*s <= 0xf7) /* code point is 4 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x07; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else if (*s <= 0xfb) /* code point is 5 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x03; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else if (*s <= 0xfd) /* code point is 6 octets long */\n",
+     "        {\n",
+     "            *dest   =  *s++ & 0x01; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+     "            *dest++ |= *s++ & 0x3f;\n",
+     "        }\n",
+     "        else\n",
+     "            return 0;\n",
+     "    }\n",
+     "    return 1;\n",
+     "}\n",
+     "\n"
+     "static ERL_NIF_TERM\n",
+     "utf8_to_erl_string(ErlNifEnv *env,\n",
+     "                   const char *utf8data,\n",
+     "                   unsigned int numOctets)\n",
+     "{\n",
+     "    int numcp = utf8_count_codepoints(utf8data, numOctets);\n",
+     "\n",
+     "    if (numcp < 0)\n",
+     "    {\n",
+     "        return enif_make_string(env,\n",
+     "                                \"<invalid UTF-8>\",\n",
+     "                                ERL_NIF_LATIN1);\n",
+     "    }\n",
+     "    else\n",
+     "    {\n",
+     "        unsigned int  cp[numcp];\n",
+     "        ERL_NIF_TERM  es[numcp];\n",
+     "        int i;\n",
+     "\n",
+     "        utf8_to_uint32(cp, utf8data, numcp);\n",
+     "        for (i = 0; i < numcp; i++)\n",
+     "            es[i] = enif_make_uint(env, cp[i]);\n",
+     "        return enif_make_list_from_array(env, es, numcp);\n",
+     "    }\n",
+     "}\n",
+     "\n"].
+
+format_nif_cc_foot(Mod, Defs, _Opts) ->
+    ["static int\n",
+     "load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)\n",
+     "{\n",
+     "    install_atoms(env);\n"
+     "    return 0;\n",
+     "}\n",
+     "\n",
+     "static int\n",
+     "reload(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)\n",
+     "{\n",
+     "    return 0;\n",
+     "}\n",
+     "\n",
+     "void\n",
+     "unload(ErlNifEnv *env, void *priv_data)\n",
+     "{\n",
+     "}\n",
+     "\n",
+     "static int\n",
+     "upgrade(ErlNifEnv *env, void **priv_data, void **old_priv_data,\n",
+     "        ERL_NIF_TERM load_info)\n",
+     "{\n",
+     "    return 0;\n",
+     "}\n",
+     "\n",
+     "static ErlNifFunc nif_funcs[] =\n",
+     "{\n",
+     [begin
+          FnName = mk_fn(d_msg_, MsgName),
+          CFnName = mk_c_fn(d_msg_, MsgName),
+          IsLast = I == length(Defs),
+          Comma = ["," || not IsLast],
+          f("    {\"~s\", 1, ~s}~s\n", [FnName, CFnName, Comma])
+      end
+      || {I, {{msg, MsgName}, _MsgFields}} <- index_seq(Defs)],
+     "\n",
+     "};\n",
+     "\n",
+     f("ERL_NIF_INIT(~s, nif_funcs, load, reload, upgrade, unload)\n",
+       [Mod])].
+
+format_nif_cc_decoders(Mod, Defs, Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [format_nif_cc_decoder(Mod, CPkg, MsgName, Fields, Opts)
+     || {{msg, MsgName}, Fields} <- Defs].
+
+format_nif_cc_decoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
+    FnName = mk_c_fn(d_msg_, MsgName),
+    UnpackFnName = mk_c_fn(u_msg_, MsgName),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    ["static ERL_NIF_TERM\n",
+     FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
+     "{\n",
+     "    ErlNifBinary data;\n",
+     "    ERL_NIF_TERM res;\n",
+     "    ",CMsgType," *m = new ",CMsgType,"();\n",
+     "\n"
+     "    if (argc != 1)\n",
+     "        return enif_make_badarg(env);\n",
+     "\n",
+     "    if (m == NULL)\n",
+     "        return enif_make_badarg(env);\n", %% FIXME: enomem?
+     "\n",
+     "    if (!enif_inspect_binary(env, argv[0], &data))\n"
+     "        return enif_make_badarg(env);\n",
+     "\n",
+     "    if (!m->ParseFromArray(data.data, data.size))\n",
+     "    {\n",
+     "        delete m;\n",
+     "        return enif_make_badarg(env);\n",
+     "    }\n",
+     "\n",
+     "    res = ",UnpackFnName,"(env, m);\n",
+     "    delete m;\n",
+     "    return res;\n",
+     "}\n"
+     "\n"].
+
+format_nif_cc_unpackers(_Mod, Defs, _Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs)
+     || {{msg, MsgName}, Fields} <- Defs].
+
+format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
+    UnpackFnName = mk_c_fn(u_msg_, MsgName),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    Is = [I || {I,_} <- index_seq(Fields)],
+    ["static ERL_NIF_TERM\n",
+     UnpackFnName,"(ErlNifEnv *env, const ",CMsgType," *m)\n",
+     "{\n",
+     "    ERL_NIF_TERM res;\n",
+     f("    ERL_NIF_TERM rname = ~s;\n", [mk_c_var(aa_, MsgName)]),
+     [f("    ERL_NIF_TERM elem~w;\n", [I]) || I <- Is],
+     "\n",
+     [begin
+          DestVar = f("elem~w",[I]),
+          format_nif_cc_field_unpacker(DestVar, "m", Field, Defs)
+      end
+      || {I, Field} <- index_seq(Fields)],
+     "\n",
+     f("    res = enif_make_tuple(env, ~w, rname~s);\n",
+       [length(Fields) + 1, [f(", elem~w",[I]) || I <- Is]]),
+     "    return res;\n"
+     "}\n",
+    "\n"].
+
+format_nif_cc_field_unpacker(DestVar, MsgVar, Field, Defs) ->
+    #field{occurrence=Occurrence}=Field,
+    case Occurrence of
+        required ->
+            format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs);
+        optional ->
+            format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs);
+        repeated ->
+            format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs)
+    end.
+
+
+format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
+    #field{name=FName, type=FType} = Field,
+    LCFName = to_lower(FName),
+    [f("    if (!~s->has_~s())\n", [MsgVar, LCFName]),
+     f("        ~s = aa_undefined;\n", [DestVar]),
+     f("    else\n"),
+     indent_lines(
+       8,
+       case FType of
+           float ->
+               [f("~s = enif_make_double(env, (double)~s->~s());\n",
+                  [DestVar, MsgVar, LCFName])];
+           double ->
+               [f("~s = enif_make_double(env, ~s->~s());\n",
+                  [DestVar, MsgVar, LCFName])];
+           _S32 when FType == sint32;
+                     FType == int32;
+                     FType == sfixed32 ->
+               [f("~s = enif_make_int(env, ~s->~s());\n",
+                  [DestVar, MsgVar, LCFName])];
+           _S64 when FType == sint64;
+                     FType == int64;
+                     FType == sfixed64 ->
+               [f("~s = enif_make_int64(env, (ErlNifSInt64)~s->~s());\n",
+                  [DestVar, MsgVar, LCFName])];
+           _U32 when FType == uint32;
+                     FType == fixed32 ->
+               [f("~s = enif_make_uint(env, ~s->~s());\n",
+                  [DestVar, MsgVar, LCFName])];
+           _U64 when FType == uint64;
+                     FType == fixed64 ->
+               [f("~s = enif_make_uint64(env, (ErlNifUInt64)~s->~s());\n",
+                  [DestVar, MsgVar, LCFName])];
+           bool ->
+               [f("if (~s->~s())\n", [MsgVar, LCFName]),
+                f("    ~s = aa_true;\n", [DestVar]),
+                f("else\n"),
+                f("    ~s = aa_false;\n", [DestVar])];
+           {enum, EnumName} ->
+               {value, {{enum,EnumName}, Enumerations}} =
+                   lists:keysearch({enum,EnumName}, 1, Defs),
+               [] ++
+                   [f("switch (~s->~s()) {\n", [MsgVar, LCFName])] ++
+                   [f("    case ~w: ~s = ~s; break;\n",
+                      [Value, DestVar, mk_c_var(aa_, Sym)])
+                    || {Sym, Value} <- Enumerations] ++
+                   [f("    default: ~s = aa_undefined;\n", [DestVar])] ++
+                   [f("}\n")];
+           string ->
+               [f("{\n"),
+                f("    const char    *sData = ~s->~s().data();\n",
+                  [    MsgVar, LCFName]),
+                f("    unsigned int   sSize = ~s->~s().size();\n",
+                  [    MsgVar, LCFName]),
+                f("    ~s = utf8_to_erl_string(env, sData, sSize);\n",
+                  [    DestVar]),
+                f("}\n")];
+           bytes ->
+               [f("{\n"),
+                f("    unsigned char *data;\n"),
+                f("    unsigned int   bSize = ~s->~s().size();\n",
+                  [    MsgVar, LCFName]),
+                f("    const char    *bData = ~s->~s().data();\n",
+                  [    MsgVar, LCFName]),
+                f("    data = enif_make_new_binary(\n"), %% can data be NULL??
+                f("               env,\n"),
+                f("               bSize,\n"),
+                f("               &~s);\n", [DestVar]),
+                f("    memmove(data, bData, bSize);\n"),
+                f("}\n")];
+           {msg, Msg2Name} ->
+               UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
+               [f("~s = ~s(env, &~s->~s());\n",
+                  [DestVar, UnpackFnName, MsgVar, LCFName])]
+       end),
+     "\n"].
+
+format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
+    #field{name=FName, type=FType} = Field,
+    LCFName = to_lower(FName),
+    [f("    {\n"),
+     f("        unsigned int numElems = ~s->~s_size();\n", [MsgVar, LCFName]),
+     f("        ERL_NIF_TERM relem[numElems];\n"),
+     f("        unsigned int i;\n"),
+     "\n",
+     f("        for (i = 0; i < numElems; i++)\n"),
+     indent_lines(
+       12,
+       case FType of
+           float ->
+               [f("relem[i] = enif_make_double(env, (double)~s->~s(i));\n",
+                  [MsgVar, LCFName])];
+           double ->
+               [f("relem[i] = enif_make_double(env, ~s->~s(i));\n",
+                  [MsgVar, LCFName])];
+           _S32 when FType == sint32;
+                     FType == int32;
+                     FType == sfixed32 ->
+               [f("relem[i] = enif_make_int(env, ~s->~s(i));\n",
+                  [MsgVar, LCFName])];
+           _S64 when FType == sint64;
+                     FType == int64;
+                     FType == sfixed64 ->
+               [f("relem[i] = enif_make_int64(env, (ErlNifSInt64)~s->~s(i));\n",
+                  [MsgVar, LCFName])];
+           _U32 when FType == uint32;
+                     FType == fixed32 ->
+               [f("relem[i] = enif_make_uint(env, ~s->~s(i));\n",
+                  [MsgVar, LCFName])];
+           _U64 when FType == uint64;
+                     FType == fixed64 ->
+               [f("relem[i] = enif_make_uint64(env,\n"
+                  "                            (ErlNifUInt64)~s->~s(i));\n",
+                  [MsgVar, LCFName])];
+           bool ->
+               [f("if (~s->~s(i))\n", [MsgVar, LCFName]),
+                f("    relem[i] = aa_true;\n"),
+                f("else\n"),
+                f("    relem[i] = aa_false;\n")];
+           {enum, EnumName} ->
+               {value, {{enum,EnumName}, Enumerations}} =
+                   lists:keysearch({enum,EnumName}, 1, Defs),
+               [] ++
+                   [f("switch (~s->~s(i)) {\n", [MsgVar, LCFName])] ++
+                   [f("    case ~w: relem[i] = ~s; break;\n",
+                      [Value, mk_c_var(aa_, Sym)])
+                    || {Sym, Value} <- Enumerations] ++
+                   [f("    default: relem[i] = aa_undefined;\n")] ++
+                   [f("}\n")];
+           string ->
+               [f("{\n"),
+                f("    const char    *sData = ~s->~s(i).data();\n",
+                  [    MsgVar, LCFName]),
+                f("    unsigned int   sSize = ~s->~s(i).size();\n",
+                  [    MsgVar, LCFName]),
+                f("    relem[i] = utf8_to_erl_string(env, sData, sSize);\n"),
+                f("}\n")];
+           bytes ->
+               [f("{\n"),
+                f("    unsigned char *data;\n"),
+                f("    unsigned int   bSize = ~s->~s(i).size();\n",
+                  [    MsgVar, LCFName]),
+                f("    const char    *bData = ~s->~s(i).data();\n",
+                  [    MsgVar, LCFName]),
+                f("    data = enif_make_new_binary(\n"), %% can data be NULL??
+                f("               env,\n"),
+                f("               bSize,\n"),
+                f("               &relem[i]);\n"),
+                f("    memmove(data, bData, bSize);\n"),
+                f("}\n")];
+           {msg, Msg2Name} ->
+               UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
+               [f("relem[i] = ~s(env, &~s->~s(i));\n",
+                  [UnpackFnName, MsgVar, LCFName])]
+       end),
+     f("        ~s = enif_make_list_from_array(env, relem, numElems);\n",
+       [DestVar]),
+     "    }\n",
+     "\n"].
+
+format_load_nif(Mod, Opts) ->
+    VsnAsList = gpb:version_as_list(),
+    case proplists:get_value(load_nif, Opts, '$undefined') of
+        '$undefined' ->
+            ["load_nif() ->\n",
+             %% Note: using ?MODULE here has impacts on compiling to
+             %% binary, because we don't pass it through the preprocessor
+             %% maybe we should?
+             "    SelfDir = filename:dirname(code:which(?MODULE)),\n",
+             "    NifDir = case lists:reverse(filename:split(SelfDir)) of\n"
+             "                 [\"ebin\" | PDR] ->\n"
+             "                      PD = filename:join(lists:reverse(PDR)),\n",
+             "                      filename:join(PD, \"priv\");\n",
+             "                 _ ->\n",
+             "                      SelfDir\n",
+             "             end,\n",
+             "    NifBase = \"", atom_to_list(Mod) ++ ".nif", "\",\n",
+             "    Nif = filename:join(NifDir, NifBase),\n",
+             f("    erlang:load_nif(Nif, ~w).\n", [VsnAsList])];
+        LoadNifFnText when is_list(LoadNifFnText); is_binary(LoadNifFnText) ->
+            [replace_tilde_s(iolist_to_binary(LoadNifFnText),
+                             iolist_to_binary(f("\"~s.nif\"", [Mod])),
+                             iolist_to_binary(f("~w", [VsnAsList])))]
+    end.
+
+replace_tilde_s(<<"{{nifbase}}", Rest/binary>>, ModBin, VsnBin) ->
+    <<ModBin/binary, (replace_tilde_s(Rest, ModBin, VsnBin))/binary>>;
+replace_tilde_s(<<"{{loadinfo}}", Rest/binary>>, ModBin, VsnBin) ->
+    <<VsnBin/binary, (replace_tilde_s(Rest, ModBin, VsnBin))/binary>>;
+replace_tilde_s(<<C, Rest/binary>>, ModBin, VsnBin) ->
+    <<C, (replace_tilde_s(Rest, ModBin, VsnBin))/binary>>;
+replace_tilde_s(<<>>, _ModBin, _VsnBin) ->
+    <<>>.
+
+to_lower(A) when is_atom(A) ->
+    list_to_atom(string:to_lower(atom_to_list(A))).
+
 %% -- compile to memory -----------------------------------------------------
 
-compile_to_binary(MsgDefs, ErlCode, Opts) ->
-    {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode)),
+compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
+    ModAsBin = list_to_binary(atom_to_list(Mod)),
+    ErlCode2 = replace_module_macro(ErlCode, ModAsBin),
+    {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode2)),
     FormToks = split_toks_at_dot(Toks),
     Forms = lists:map(fun(Ts) ->
                               {ok, Form} = erl_parse:parse_form(Ts),
@@ -2531,7 +3181,15 @@ compile_to_binary(MsgDefs, ErlCode, Opts) ->
     FieldDef = field_record_to_attr_form(),
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
     AllForms = AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms,
-    compile:forms(AllForms, Opts).
+    combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
+                                 PossibleNifCode).
+
+replace_module_macro(<<$?, "MODULE", Rest/binary>>, ModBin) ->
+    <<ModBin/binary, (replace_module_macro(Rest, ModBin))/binary>>;
+replace_module_macro(<<C, Rest/binary>>, ModBin) ->
+    <<C, (replace_module_macro(Rest, ModBin))/binary>>;
+replace_module_macro(<<>>, _ModBin) ->
+    <<>>.
 
 split_toks_at_dot(AllToks) ->
     case lists:splitwith(fun is_no_dot/1, AllToks) of
@@ -2575,6 +3233,19 @@ gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
         Default   -> {FName, Default}
     end.
 
+combine_erl_and_possible_nif(ErlCompilationResult, '$not_generated'=_Nif) ->
+    ErlCompilationResult;
+combine_erl_and_possible_nif({ok, ModuleName, ErlCode}, NifTxt) ->
+    {ok, ModuleName, combine_erlcode_with_niftxt(ErlCode, NifTxt)};
+combine_erl_and_possible_nif({ok, ModuleName, ErlCode, Warnings}, NifTxt) ->
+    {ok, ModuleName, combine_erlcode_with_niftxt(ErlCode, NifTxt), Warnings};
+combine_erl_and_possible_nif(Error, _NifTxt) ->
+    Error.
+
+combine_erlcode_with_niftxt(ErlCode, NifTxt) ->
+    [{erl, ErlCode},
+     {nif, NifTxt}].
+
 %% -- internal utilities -----------------------------------------------------
 
 is_packed(#field{opts=Opts}) ->
@@ -2613,6 +3284,11 @@ file_read_file_info(FileName, Opts) ->
 
 file_write_file(FileName, Bin, Opts) ->
     file_op(write_file, [FileName, Bin], Opts).
+
+possibly_write_file(FileName, Bin, Opts) when is_binary(Bin) ->
+    file_op(write_file, [FileName, Bin], Opts);
+possibly_write_file(_FileName, '$not_generated', _Opts) ->
+    ok.
 
 file_op(Fn, Args, Opts) ->
     FileOp = proplists:get_value(file_op, Opts, fun use_the_file_module/2),
