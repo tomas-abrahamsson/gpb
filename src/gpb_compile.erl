@@ -608,9 +608,9 @@ arg_zf(ZFFun, Args) ->
 plain_arg_zf(ZFFun, PlainArgs) ->
     lists:zf(ZFFun, plainargs_to_args(PlainArgs)).
 
-plainargs_to_args(["-"++_=Opt1, "-"++_=Opt2 | Rest]) ->
+plainargs_to_args(["-"++Opt1, "-"++_=Opt2 | Rest]) ->
     [{Opt1, []} | plainargs_to_args([Opt2 | Rest])];
-plainargs_to_args(["-"++_ =Opt | OptArgsAndRest]) ->
+plainargs_to_args(["-"++Opt | OptArgsAndRest]) ->
     {OptArgs, Rest} = plainoptargs_to_args(OptArgsAndRest, []),
     [{Opt, OptArgs} | plainargs_to_args(Rest)];
 plainargs_to_args([]) ->
