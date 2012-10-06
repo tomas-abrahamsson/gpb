@@ -258,6 +258,87 @@ dotted_names_gives_no_compilation_error_test() ->
     M1Msg = M:decode_msg(Data, m1),
     unload_code(M).
 
+%% --- bytes ----------
+
+copy_bytes_unconditionally_test() ->
+    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
+    if HasBinary ->
+            M = compile_iolist(["message m1 { required bytes f1 = 1; }"],
+                               [{copy_bytes, true}]),
+            Data = M:encode_msg({m1, <<"d">>}),
+            {m1, <<"d">>=Bs} = M:decode_msg(Data, m1),
+            %% If the Bs has not been copied, then it is a sub-binary
+            %% of a larger binary: of the message, ie of Data.
+            %% So verify copying by verifying size of referenced data.
+            ?assertEqual(byte_size(Bs), binary:referenced_byte_size(Bs)),
+            unload_code(M);
+       true ->
+            %% nothing to test
+            ok
+    end.
+
+copy_bytes_false_test() ->
+    M = compile_iolist(["message m1 { required bytes f1 = 1; }"],
+                       [{copy_bytes, false}]),
+    Data = M:encode_msg({m1, <<"d">>}),
+    {m1, <<"d">>=Bs} = M:decode_msg(Data, m1),
+    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
+    if HasBinary ->
+            %% If the StrBin has not been copied, then it is a sub-binary
+            %% of a larger binary: of the message, ie of Data.
+            %% So verify copying by verifying size of referenced data.
+            ?assertEqual(byte_size(Data), binary:referenced_byte_size(Bs));
+       true ->
+            ok
+    end,
+    unload_code(M).
+
+copy_bytes_auto_test() ->
+    M = compile_iolist(["message m1 { required bytes f1 = 1; }"],
+                       [{copy_bytes, auto}]),
+    Data = M:encode_msg({m1, <<"d">>}),
+    {m1, <<"d">>=Bs} = M:decode_msg(Data, m1),
+    HasBinary = (catch binary:copy(<<1>>)) == <<1>>,
+    if HasBinary ->
+            ?assertEqual(byte_size(Bs), binary:referenced_byte_size(Bs));
+       true ->
+            ok %% cannot test more if we don't have the binary module
+    end,
+    unload_code(M).
+
+copy_bytes_fraction_test() ->
+    HasBinary = (catch binary:copy(<<1>>)) == <<1>>,
+    if HasBinary ->
+            Proto = ["message m1 {",
+                     "  required bytes f1 = 1;",
+                     "  required bytes f2 = 2;",
+                     "}"],
+            M1 = compile_iolist(Proto, [{copy_bytes, 2}]),   % fraction as int
+            M2 = compile_iolist(Proto, [{copy_bytes, 2.0}]), % fraction as float
+            D1 = <<"d">>, %% small
+            D2 = <<"dddddddddddddddddddddddddddd">>, %% large
+            Data = M1:encode_msg({m1, D1, D2}),
+            ?assert(byte_size(Data) > (2 * byte_size(D1))),
+            ?assert(byte_size(Data) < (2 * byte_size(D2))),
+            {m1, D1Bs, D2Bs} = M1:decode_msg(Data, m1),
+            ?assertEqual(D1, D1Bs),
+            ?assertEqual(D2, D2Bs),
+            %% The small data should have been copied, but not the larger
+            ?assertEqual(byte_size(D1Bs), binary:referenced_byte_size(D1Bs)),
+            ?assertEqual(byte_size(Data), binary:referenced_byte_size(D2Bs)),
+
+            {m1, D3Bs, D4Bs} = M2:decode_msg(Data, m1),
+            ?assertEqual(D1, D3Bs),
+            ?assertEqual(D2, D4Bs),
+            ?assertEqual(byte_size(D3Bs), binary:referenced_byte_size(D3Bs)),
+            ?assertEqual(byte_size(Data), binary:referenced_byte_size(D4Bs)),
+
+            unload_code(M1),
+            unload_code(M2);
+       true ->
+            ok
+    end.
+
 %% --- strings ----------
 
 strings_as_binaries_option_produces_bins_test() ->
@@ -287,9 +368,6 @@ strings_as_binaries_opt_together_with_copy_bytes_opt_test() ->
     {m1, <<"some string">>=StrBin} = M:decode_msg(Data, m1),
     HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
     if HasBinary ->
-            %% If the StrBin has not been copied, then it is a sub-binary
-            %% of a larger binary: of the message, ie of Data.
-            %% So verify copying by verifying size of referenced data.
             ?assertEqual(byte_size(StrBin),
                          binary:referenced_byte_size(StrBin));
        true ->
