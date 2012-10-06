@@ -996,6 +996,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("-export([get_enum_names/0]).~n"),
        f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
        f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
+       format_enum_value_symbol_converter_exports(Defs),
        f("-export([get_package_name/0]).~n"),
        f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
@@ -2436,6 +2437,8 @@ format_introspection(Defs) ->
      f("~n"),
      format_find_enum_defs(EnumDefs),
      f("~n"),
+     format_enum_value_symbol_converters(EnumDefs),
+     f("~n"),
      format_get_package_name(Defs)
     ].
 
@@ -2512,6 +2515,55 @@ format_find_enum_defs(Enums) ->
       || {{enum, EnumName}, EnumValues} <- Enums],
      f("find_enum_def(_) ->~n"
        "    error.~n")].
+
+format_enum_value_symbol_converter_exports(Defs) ->
+    [f("-export([enum_symbol_by_value/2, enum_value_by_symbol/2]).~n"),
+     [begin
+         ToSymFnName = mk_fn(enum_symbol_by_value_, EnumName),
+         ToValFnName = mk_fn(enum_value_by_symbol_, EnumName),
+         f("-export([~p/1, ~p/1]).~n", [ToSymFnName, ToValFnName])
+     end
+     || {{enum, EnumName}, _EnumDef} <- Defs]].
+
+format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
+    %% A difference between this function and `d_enum_X' as generated
+    %% by `format_enum_decoders' is that this function generates
+    %% value/symbol converters for all enums, not only for the ones
+    %% that are used in messags.
+    [string:join([begin
+                      ToSymFnName = mk_fn(enum_symbol_by_value_, EnumName),
+                      f("enum_symbol_by_value(~p, V) -> ~p(V)",
+                        [EnumName, ToSymFnName])
+                  end
+                  || {{enum, EnumName}, _EnumDef} <- EnumDefs],
+                 ";\n"),
+     ".\n\n",
+     string:join([begin
+                      ToValFnName = mk_fn(enum_value_by_symbol_, EnumName),
+                      f("enum_value_by_symbol(~p, S) -> ~p(S)",
+                        [EnumName, ToValFnName])
+                  end
+                  || {{enum, EnumName}, _EnumDef} <- EnumDefs],
+                 ";\n"),
+     ".\n\n",
+     [[string:join([begin
+                        FnName = mk_fn(enum_symbol_by_value_, EnumName),
+                        f("~p(~w) -> ~p", [FnName, EnumValue, EnumSym])
+                    end
+                    || {EnumSym, EnumValue} <- EnumDef],
+                   ";\n"),
+       ".\n\n",
+       string:join([begin
+                        FnName = mk_fn(enum_value_by_symbol_, EnumName),
+                        f("~p(~w) -> ~p", [FnName, EnumSym, EnumValue])
+                    end
+                    || {EnumSym, EnumValue} <- EnumDef],
+                   ";\n"),
+       ".\n\n"]
+      || {{enum, EnumName}, EnumDef} <- EnumDefs]];
+format_enum_value_symbol_converters([]=_EnumDefs) ->
+    [f("enum_symbol_by_value(E, V) -> erlang:error({no_enum_defs,E,V}).~n"),
+     f("enum_value_by_symbol(E, V) -> erlang:error({no_enum_defs,E,V}).~n")].
 
 format_get_package_name(Defs) ->
     case lists:keyfind(package, 1, Defs) of
