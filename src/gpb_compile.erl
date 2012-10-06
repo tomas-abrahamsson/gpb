@@ -460,8 +460,11 @@ c() ->
 %%       verify the message to be encoded.</dd>
 %%   <dt>`-nif'</dt>
 %%   <dd>Generate nifs for linking with the protobuf C(++) library.</dd>
-%%   <dt>`-load_nif mf:Module:Funcion'</dt>
-%%   <dd>Generate code that calls `Module:Function/2' to load the NIF.</dd>
+%%   <dt>`-load_nif FunctionDefinition'</dt>
+%%   <dd>Specify `FunctionDefinition' as the text that defines the
+%%       function `load_nif/0'.  This is called as the `on_load'
+%%       hook for loading the NIF.  See also the doc for the `load_nif'
+%%       option in the {@link file/2} function.</dd>
 %%   <dt>`-c true | false | auto | integer() | float()'</dt>
 %%   <dd>Specify how or when the generated decoder should
 %%       copy fields of type `bytes'.</dd>
@@ -532,8 +535,10 @@ show_help() ->
       "          the <Protofile>.erl and <Protofile>.hrl~n"
       "    -nif~n"
       "          Generate nifs for linking with the protobuf C(++) library.~n"
-      "    -load_nif mf:Module:Funcion~n"
-      "          Generate code that calls Module:Function/2 to load the NIF.~n"
+      "    -load_nif FunctionDefinition~n"
+      "          Specify FunctionDefinition as the text that defines the~n"
+      "          function load_nif/0.  This is called as the -on_load.~n"
+      "          hook for loading the NIF.~n"
       "    -v optionally | always | never~n"
       "          Specify how the generated encoder should~n"
       "          verify the message to be encoded.~n"
