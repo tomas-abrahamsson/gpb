@@ -56,6 +56,8 @@ file(File) ->
 %%                   {load_nif, LoadNif} |
 %%                   {i, directory()} |
 %%                   {o, directory()} |
+%%                   {o_erl, directory()} | {o_hrl, directory()} |
+%%                   {o_nif_cc, directory()} |
 %%                   binary | to_msg_defs |
 %%                   return | return_warnings | return_errors |
 %%                   report | report_warnings | report_errors
@@ -141,6 +143,13 @@ file(File) ->
 %% The `{o,directory()}' option specifies directory to use for storing
 %% the generated `.erl' and `.hrl' files. Default is the same
 %% directory as for the proto `File'.
+%%
+%% The `{o_erl,directory()}', `{o_hrl,directory()}', `{o_nif_cc,directory()}',
+%% options specify output directory for where to generate the `.erl'
+%% and `.hrl' files respectively, and for the NIF C++ file,
+%% if the `nif' option is specified. The `{o_erl,directory()}' option
+%% overrides any `{o,directory()}' option, and similarly for the
+%% other file-type specific output options.
 %%
 %% The `nif' option will cause the compiler to generate nif C++ code
 %% for that can be linked with the Google protobuf C++ library. The
@@ -327,17 +336,19 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
             HrlTxt = format_hrl(Mod, Defs, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
-            OutDir = proplists:get_value(o, Opts, "."),
-            Erl = filename:join(OutDir, atom_to_list(Mod) ++ ".erl"),
-            Hrl = change_ext(Erl, ".hrl"),
-            Nif = change_ext(Erl, ".nif.cc"),
+            ErlOutDir = get_erl_outdir(Opts),
+            HrlOutDir = get_hrl_outdir(Opts),
+            NifCcOutDir = get_nif_cc_outdir(Opts),
+            Erl   = filename:join(ErlOutDir, atom_to_list(Mod) ++ ".erl"),
+            Hrl   = filename:join(HrlOutDir, atom_to_list(Mod) ++ ".hrl"),
+            NifCc = filename:join(NifCcOutDir, atom_to_list(Mod) ++ ".nif.cc"),
             case {file_write_file(Erl, ErlTxt, Opts),
                   file_write_file(Hrl, HrlTxt, Opts),
-                  possibly_write_file(Nif, NifTxt, Opts)} of
+                  possibly_write_file(NifCc, NifTxt, Opts)} of
                 {ok, ok, ok}       -> ok;
                 {{error, R}, _, _} -> {error, {write_failed, Erl, R}};
                 {_, {error, R}, _} -> {error, {write_failed, Erl, R}};
-                {_, _, {error, R}} -> {error, {write_failed, Nif,  R}}
+                {_, _, {error, R}} -> {error, {write_failed, NifCc,  R}}
             end
     end.
 
@@ -399,6 +410,19 @@ get_output_format([to_msg_defs | _])         -> msg_defs;
 get_output_format([{to_msg_defs, true} | _]) -> msg_defs;
 get_output_format([_ | Rest])                -> get_output_format(Rest);
 get_output_format([])                        -> file.
+
+get_erl_outdir(Opts) ->
+    proplists:get_value(o_erl, Opts, get_outdir(Opts)).
+
+get_hrl_outdir(Opts) ->
+    proplists:get_value(o_hrl, Opts, get_outdir(Opts)).
+
+get_nif_cc_outdir(Opts) ->
+    proplists:get_value(o_nif_cc, Opts, get_outdir(Opts)).
+
+get_outdir(Opts) ->
+    proplists:get_value(o, Opts, ".").
+
 
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()
@@ -462,7 +486,13 @@ c() ->
 %%       several include directories.</dd>
 %%   <dt>`-o Dir'</dt>
 %%   <dd>Specify output directory for where to generate
-%%       the <i>Protofile</i>.erl and <i>Protofile</i>.hrl</dd>
+%%       the <i>ProtoFile</i>.erl and <i>ProtoFile</i>.hrl</dd>
+%%   <dt>`-o-erl Dir' | `-o-hrl Dir' | `-o-nif-cc Dir'</dt>
+%%   <dd>Specify output directory for where to generate
+%%       the <i>ProtoFile</i>.erl and <i>ProtoFile</i>.hrl</dd> respectively,
+%%       and for the NIF C++ file, if the `-nif' option is specified.
+%%       The `-o-erl Dir' option overrides any `-o Dir' option, and
+%%       similarly for the other file-type specific output options.
 %%   <dt>`-v optionally | always | never'</dt>
 %%   <dd>Specify how the generated encoder should
 %%       verify the message to be encoded.</dd>
@@ -544,7 +574,13 @@ show_help() ->
       "          several include directories.~n"
       "    -o Dir~n"
       "          Specify output directory for where to generate~n"
-      "          the <Protofile>.erl and <Protofile>.hrl~n"
+      "          the <ProtoFile>.erl and <ProtoFile>.hrl~n"
+      "    -o-erl Dir | -o-hrl Dir | -o-nif-cc Dir~n"
+      "          Specify output directory for where to generate~n"
+      "          the <ProtoFile>.erl and <ProtoFile>.hrl respectively,~n"
+      "          and for the NIF C++ file, if the -nif option is specified~n"
+      "          The -o-erl Dir option overrides any -o Dir option, and~n"
+      "          similarly for the other file-type specific output options.~n"
       "    -nif~n"
       "          Generate nifs for linking with the protobuf C(++) library.~n"
       "    -load_nif FunctionDefinition~n"
@@ -575,6 +611,9 @@ parse_opts(Args, PlainArgs) ->
 parse_opt({"I", [Dir]})          -> {true, {i,Dir}};
 parse_opt({"I"++Dir, []})        -> {true, {i,Dir}};
 parse_opt({"o", [Dir]})          -> {true, {o,Dir}};
+parse_opt({"o-erl", [Dir]})      -> {true, {o_erl,Dir}};
+parse_opt({"o-hrl", [Dir]})      -> {true, {o_hrl,Dir}};
+parse_opt({"o-nif-cc", [Dir]})   -> {true, {o_nif_cc,Dir}};
 parse_opt({"nif",[]})            -> {true, nif};
 parse_opt({"load_nif",[S]})      -> {true, {load_nif,S}};
 parse_opt({"v", ["optionally"]}) -> {true, {verify,optionally}};
@@ -622,11 +661,6 @@ plainoptargs_to_args([OptArg | Rest], Acc) ->
     plainoptargs_to_args(Rest, [OptArg | Acc]);
 plainoptargs_to_args([], Acc) ->
     {lists:reverse(Acc), []}.
-
-
-change_ext(File, NewExt) ->
-    filename:join(filename:dirname(File),
-                  filename:basename(File, filename:extension(File)) ++ NewExt).
 
 parse_file(FName, Opts) ->
     case parse_file_and_imports(FName, Opts) of
