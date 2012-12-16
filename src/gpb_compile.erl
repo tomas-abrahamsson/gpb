@@ -1039,7 +1039,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
          "\n"]
         || DoNif],
        f("-include(\"~s.hrl\").~n", [Mod]),
-       f("-include(\"gpb.hrl\").~n"),
+       f("-include_lib(\"gpb/include/gpb.hrl\").~n"),
        "\n",
        [[f("~s~n", [format_load_nif(Mod, Opts)]),
          "\n"]
