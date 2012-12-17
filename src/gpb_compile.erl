@@ -495,10 +495,10 @@ c() ->
 %%       the <i>ProtoFile</i>.erl and <i>ProtoFile</i>.hrl</dd>
 %%   <dt>`-o-erl Dir' | `-o-hrl Dir' | `-o-nif-cc Dir'</dt>
 %%   <dd>Specify output directory for where to generate
-%%       the <i>ProtoFile</i>.erl and <i>ProtoFile</i>.hrl</dd> respectively,
+%%       the <i>ProtoFile</i>.erl and <i>ProtoFile</i>.hrl respectively,
 %%       and for the NIF C++ file, if the `-nif' option is specified.
 %%       The `-o-erl Dir' option overrides any `-o Dir' option, and
-%%       similarly for the other file-type specific output options.
+%%       similarly for the other file-type specific output options.</dd>
 %%   <dt>`-v optionally | always | never'</dt>
 %%   <dd>Specify how the generated encoder should
 %%       verify the message to be encoded.</dd>
