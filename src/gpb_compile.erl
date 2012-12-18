@@ -516,6 +516,9 @@ c() ->
 %%   <dt>`-strbin'</dt>
 %%   <dd>Specify that decoded strings should be returend as binaries,
 %%       instead of as strings (lists).</dd>
+%%   <dt>`-il'</dt>
+%%   <dd>Generate code that include gpb.hrl using `-include_lib'
+%%       instad of `-include', which is the default.</dd>
 %%   <dt>`--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
 %%   <dt>`--version' or `-V'</dt>
@@ -602,6 +605,9 @@ show_help() ->
       "    -strbin~n"
       "          Specify that decoded strings should be returend as binaries,~n"
       "          instead of as strings (lists).~n"
+      "    -il~n"
+      "          Generate code that includes gpb.hrl using -include_lib~n"
+      "          instad of -include, which is the default.~n"
       "    --help  -h~n"
       "          Show help~n"
       "    --version  -V~n"
@@ -633,6 +639,7 @@ parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
                                         error     -> false
                                     end;
 parse_opt({"strbin", []})        -> {true, strings_as_binaries};
+parse_opt({"il", []})            -> {true, include_as_lib};
 parse_opt({"h", _})              -> {true, help};
 parse_opt({"-help", _})          -> {true, help};
 parse_opt({"V", _})              -> {true, version};
