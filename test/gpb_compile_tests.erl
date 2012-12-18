@@ -836,10 +836,13 @@ nif_code_test_() ->
                           [{"Nif compiles", fun nif_compiles/0},
                            {"Nif encode decode", fun nif_encode_decode/0}]}
         end,
+    %% Without increased timeout, this test frequently times
+    %% out on my slow laptop (1.6 GHz Atom N270)
     {Descr,
      {timeout, 300,  %% timeout for all tests
       [{timeout, 100, %% timeout for each test
-        Tests}]}}.
+        [{TestDescr, TestFun}]}
+       || {TestDescr, TestFun} <- Tests]}}.
 
 nif_compiles() ->
     with_tmpdir(
