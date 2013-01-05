@@ -257,7 +257,7 @@ Erlang code.
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
--export([absolutify_names/1]).
+-export([absolutify_names/1, absolutify_names/2]).
 -export([flatten_defs/1]).
 -export([verify_defs/1]).
 -export([format_verification_error/1]).
@@ -276,41 +276,56 @@ kw_to_identifier({Kw, Line}) ->
 literal_value({_TokenType, _Line, Value}) -> Value.
 
 absolutify_names(Defs) ->
-    %% FIXME: Search for {package, ...} in Defs,
-    %%        use that as initial Path instead of ['.'] ?
-    %%        Control this behaviour by an option?
-    abs_names_2(['.'], Defs).
+  absolutify_names(Defs, []).
+absolutify_names(Defs, Opts) ->
+    abs_names(['.'], Defs, [['.'] | [prepend_path(['.'], Pkg)
+        || Pkg <- proplists:get_all_values(package, Defs)
+    ]], Opts).
 
-abs_names_2(Path, Elems) ->
-    lists:map(fun({{msg,Msg}, FieldsOrDefs}) ->
-                      MsgPath = prepend_path(Path, Msg),
-                      {{msg, MsgPath}, abs_names_2(MsgPath, FieldsOrDefs)};
-                 ({{enum,E}, ENs}) ->
-                      {{enum, prepend_path(Path, E)}, ENs};
-                 (#field{type={ref,To}}=F) ->
-                      case is_absolute_ref(To) of
-                          true  ->
-                              F;
-                          false ->
-                              FullPath = case refers_to_peer_elem(To, Elems) of
-                                             true  -> prepend_path(Path, To);
-                                             false -> prepend_path(['.'], To)
-                                         end,
-                              F#field{type={ref, FullPath}}
-                      end;
-                 ({extensions,Exts}) ->
-                      {{extensions,Path},Exts};
-                 ({{extend,Msg}, FieldsOrDefs}) ->
-                      MsgPath = prepend_path(Path, Msg),
-                      {{extend, MsgPath}, abs_names_2(MsgPath, FieldsOrDefs)};
-                 ({package, Name}) ->
-                      {package, prepend_path(['.'], Name)};
-                 ({{service, Name}, RPCs}) ->
-                      {{service,Name}, abs_rpcs(Path, RPCs)};
-                 (OtherElem) ->
-                      OtherElem
-              end,
-              Elems).
+abs_names(Path, Elems, Packages, Opts) ->
+    Map = fun({{msg,Msg}, FieldsOrDefs}, Pkgs=[Pkg|_]) ->
+                  MsgPath = prepend_package(Pkg, prepend_path(Path, Msg)),
+                  {{{msg, MsgPath}, abs_names(MsgPath, FieldsOrDefs, Pkgs, Opts)}, Pkgs};
+             ({{enum,E}, ENs}, Pkgs=[Pkg|_]) ->
+                  {{{enum, prepend_package(Pkg, prepend_path(Path, E))}, ENs}, Pkgs};
+             (#field{type={ref,To}}=F, Pkgs=[Pkg|_]) ->
+                  case is_absolute_ref(To) of
+                      true  ->
+                          {F, Pkgs};
+                      false ->
+                          FullPath = case refers_to_peer_elem(To, Elems) of
+                                         true  ->
+                                             prepend_path(Path, To);
+                                         false ->
+                                             Ref = prepend_path(['.'], To),
+                                             case [Sub || Sub <- Pkgs,
+                                                 Sub /= ['.'], lists:prefix(Sub, Ref)]
+                                             of
+                                                 [] -> prepend_package(Pkg, Ref);
+                                                 _  -> Ref
+                                             end
+                                     end,
+                          {F#field{type={ref, FullPath}}, Pkgs}
+                  end;
+             ({extensions,Exts}, Pkgs) ->
+                  {{{extensions,Path},Exts}, Pkgs};
+             ({{extend,Msg}, FieldsOrDefs}, Pkgs=[Pkg|_]) ->
+                  MsgPath = prepend_package(Pkg, prepend_path(Path, Msg)),
+                  {{{extend, MsgPath}, abs_names(MsgPath, FieldsOrDefs, Pkgs, Opts)}, Pkgs};
+             ({package, Name}, Pkgs) ->
+                  {{package, Name}, case proplists:get_bool(use_packages, Opts) of
+                                        true  ->
+                                            Pkg = prepend_path(['.'], Name),
+                                            [Pkg | lists:delete(Pkg, Pkgs)];
+                                        false ->
+                                            Pkgs
+                                    end};
+             ({{service, Name}, RPCs}, Pkgs) ->
+                  {{{service,Name}, abs_rpcs(Path, RPCs)}, Pkgs};
+             (OtherElem, Pkgs) ->
+                  {OtherElem, Pkgs}
+          end,
+    element(1, lists:mapfoldl(Map, Packages, Elems)).
 
 is_absolute_ref(['.' | _]) -> true;
 is_absolute_ref(_Other)    -> false.
@@ -334,6 +349,14 @@ prepend_path(['.'], Id) when is_atom(Id)           -> ['.', Id];
 prepend_path(['.'], SubPath) when is_list(SubPath) -> ['.' | SubPath];
 prepend_path(Path,  Id) when is_atom(Id)           -> Path ++ ['.', Id];
 prepend_path(Path,  SubPath) when is_list(SubPath) -> Path ++ ['.' | SubPath].
+
+prepend_package(['.'], Path) -> Path;
+prepend_package(Pkg, ['.'])  -> Pkg;
+prepend_package(Pkg, Path)   ->
+    case lists:prefix(Pkg, Path) of
+        false -> Pkg ++ Path;
+        true ->  Path
+    end.
 
 abs_rpcs(Path, RPCs) ->
     lists:map(

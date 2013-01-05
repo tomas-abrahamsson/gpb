@@ -61,7 +61,7 @@ file(File) ->
 %%                   binary | to_msg_defs |
 %%                   return | return_warnings | return_errors |
 %%                   report | report_warnings | report_errors |
-%%                   include_as_lib
+%%                   include_as_lib | use_packages
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
@@ -259,6 +259,12 @@ file(File) ->
 %% gpb.hrl as a library, which is necessary if dependencies are managed with
 %% Rebar. Otherwise, the header file is included directly and must be located
 %% in the path, which is default behaviour.
+%%
+%% The `use_packages` option instructs gpb to prepend the name of a package
+%% to every message it contains. If no package is defined, nothing will be
+%% prepended. This enables the reference of messages in other packages which
+%% would otherwise not be possible. However, for reasons of backward
+%% compatibility, this option is disabled by default.
 file(File, Opts1) ->
     Opts2 = normalize_return_report_opts(Opts1),
     case parse_file(File, Opts2) of
@@ -681,7 +687,7 @@ parse_file(FName, Opts) ->
             %% io:format("processed these imports:~n  ~p~n", [_AllImported]),
             %% io:format("Defs1=~n  ~p~n", [Defs1]),
             Defs2 = gpb_parse:flatten_defs(
-                      gpb_parse:absolutify_names(Defs1)),
+                      gpb_parse:absolutify_names(Defs1, Opts)),
             case gpb_parse:verify_defs(Defs2) of
                 ok ->
                     {ok, gpb_parse:normalize_msg_field_options( %% Sort it?
