@@ -306,7 +306,6 @@ unless_defined_set(OptionToTestFor, OptionToSet, Opts) ->
         false -> [OptionToSet | Opts]
     end.
 
-
 %% @spec msg_defs(Mod, Defs) -> CompRet
 %% @equiv msg_defs(Mod, Defs, [])
 msg_defs(Mod, Defs) ->
@@ -332,7 +331,7 @@ msg_defs(Mod, Defs0, Opts0) ->
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs, Opts2),
-    Res1 = do_msg_defs(Defs, Mod, AnRes, Opts2),
+    Res1 = do_msg_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
     return_or_report_warnings_or_errors(Res1, Warns, Opts2,
                                         get_output_format(Opts2)).
 
@@ -435,6 +434,9 @@ get_nif_cc_outdir(Opts) ->
 get_outdir(Opts) ->
     proplists:get_value(o, Opts, ".").
 
+clean_module_name(Mod) ->
+    Clean = re:replace(atom_to_list(Mod), "[.]", "_", [global, {return,list}]),
+    list_to_atom(Clean).
 
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()
