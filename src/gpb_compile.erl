@@ -61,7 +61,7 @@ file(File) ->
 %%                   binary | to_msg_defs |
 %%                   return | return_warnings | return_errors |
 %%                   report | report_warnings | report_errors |
-%%                   include_as_lib
+%%                   include_as_lib | use_packages
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
@@ -259,6 +259,12 @@ file(File) ->
 %% gpb.hrl as a library, which is necessary if dependencies are managed with
 %% Rebar. Otherwise, the header file is included directly and must be located
 %% in the path, which is default behaviour.
+%%
+%% The `use_packages` option instructs gpb to prepend the name of a package
+%% to every message it contains. If no package is defined, nothing will be
+%% prepended. This enables the reference of messages in other packages which
+%% would otherwise not be possible. However, for reasons of backward
+%% compatibility, this option is disabled by default.
 file(File, Opts1) ->
     Opts2 = normalize_return_report_opts(Opts1),
     case parse_file(File, Opts2) of
@@ -300,7 +306,6 @@ unless_defined_set(OptionToTestFor, OptionToSet, Opts) ->
         false -> [OptionToSet | Opts]
     end.
 
-
 %% @spec msg_defs(Mod, Defs) -> CompRet
 %% @equiv msg_defs(Mod, Defs, [])
 msg_defs(Mod, Defs) ->
@@ -326,7 +331,7 @@ msg_defs(Mod, Defs0, Opts0) ->
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs, Opts2),
-    Res1 = do_msg_defs(Defs, Mod, AnRes, Opts2),
+    Res1 = do_msg_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
     return_or_report_warnings_or_errors(Res1, Warns, Opts2,
                                         get_output_format(Opts2)).
 
@@ -429,6 +434,9 @@ get_nif_cc_outdir(Opts) ->
 get_outdir(Opts) ->
     proplists:get_value(o, Opts, ".").
 
+clean_module_name(Mod) ->
+    Clean = re:replace(atom_to_list(Mod), "[.]", "_", [global, {return,list}]),
+    list_to_atom(Clean).
 
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()
@@ -681,7 +689,7 @@ parse_file(FName, Opts) ->
             %% io:format("processed these imports:~n  ~p~n", [_AllImported]),
             %% io:format("Defs1=~n  ~p~n", [Defs1]),
             Defs2 = gpb_parse:flatten_defs(
-                      gpb_parse:absolutify_names(Defs1)),
+                      gpb_parse:absolutify_names(Defs1, Opts)),
             case gpb_parse:verify_defs(Defs2) of
                 ok ->
                     {ok, gpb_parse:normalize_msg_field_options( %% Sort it?
