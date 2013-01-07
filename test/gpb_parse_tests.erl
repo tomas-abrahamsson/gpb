@@ -188,6 +188,33 @@ resolve_refs_test() ->
               gpb_parse:flatten_defs(
                 gpb_parse:absolutify_names(Elems))))).
 
+resolve_refs_with_packages_test() ->
+    {ok, Elems} = parse_lines(["package p1;"
+                               "import \"a/b/c.proto\";",
+                               "message m1 {"
+                               "  message m2 { required uint32 x = 1; }",
+                               "  enum    e1 { a = 17; }",
+                               "  required m2     y = 1;",
+                               "  required e1     z = 2;",
+                               "  required uint32 w = 3;",
+                               "}",
+                               "message m3 {",
+                               "  required m1.m2 b = 1;",
+                               "}"]),
+    [{import, _},
+     {package, p1},
+     {{enum,'p1.m1.e1'}, _},
+     {{msg,'p1.m1'},    [#field{name=y, type={msg,'p1.m1.m2'}},
+                         #field{name=z, type={enum,'p1.m1.e1'}},
+                         #field{name=w}]},
+     {{msg,'p1.m1.m2'}, [#field{name=x}]},
+     {{msg,'p1.m3'},    [#field{name=b, type={msg,'p1.m1.m2'}}]}] =
+        lists:sort(
+          gpb_parse:resolve_refs(
+            gpb_parse:reformat_names(
+              gpb_parse:flatten_defs(
+                gpb_parse:absolutify_names(Elems, [use_packages]))))).
+
 enumerates_msg_fields_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
                                "  message m2 { required uint32 x = 1; }",
