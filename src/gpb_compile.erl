@@ -2666,9 +2666,12 @@ format_hfields(Indent, Fields, CompileOpts, Defs) ->
     TypeSpecs = get_type_specs_by_opts(CompileOpts),
     string:join(
       lists:map(
-        fun({I, #field{name=Name, fnum=FNum, opts=FOpts}=Field}) ->
+        fun({I, #field{name=Name, fnum=FNum, opts=FOpts, occurrence=Occur}=Field}) ->
                 DefaultStr = case proplists:get_value(default, FOpts, '$no') of
-                                 '$no'   -> "";
+                                 '$no'   -> case Occur of
+                                                repeated -> f(" = []");
+                                                _        -> ""
+                                            end;
                                  Default -> f(" = ~p", [Default])
                              end,
                 TypeStr = f("~s", [type_to_typestr(Field, Defs)]),
