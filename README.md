@@ -11,7 +11,7 @@ Features of gpb
    - record defintions, one record for each message
    - erlang code for encoding/decoding the messages to/from binaries
 
-*  Features of the protocol buffer defintion files:
+*  Features of the protocol buffer definition files:
    gpb supports:
    - message definitions (also messages in messages)
    - scalar types
@@ -20,12 +20,12 @@ Features of gpb
    - message extensions
    - the 'packed' and 'default' options
    - generating metadata information
+   - package namespacing (optional)
 
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'
    - custom options
    - services
-   - package information
 
    gpb does not support:
    - groups
@@ -42,6 +42,9 @@ Features of gpb
    - Gpb can optionally or conditionally copying the contents of 'bytes'
      fields, in order to let the runtime system free the larger message
      binary.
+   - Gpb can optionally make use of the package attribute by prepending
+     the name of the package to every contained message type (if defined),
+     which is useful to avoid name clashes of message types across packages.
    - The generated encode/decoder has no run-time dependency to gpb,
      but there is a compile-time dependency for the generated code:
      to the #field{} record in gpb.hrl the for the get_msg_defs function.
