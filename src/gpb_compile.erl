@@ -260,7 +260,7 @@ file(File) ->
 %% Rebar. Otherwise, the header file is included directly and must be located
 %% in the path, which is default behaviour.
 %%
-%% The `use_packages` option instructs gpb to prepend the name of a package
+%% The `use_packages' option instructs gpb to prepend the name of a package
 %% to every message it contains. If no package is defined, nothing will be
 %% prepended. This enables the reference of messages in other packages which
 %% would otherwise not be possible. However, for reasons of backward
