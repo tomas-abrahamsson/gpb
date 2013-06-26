@@ -278,48 +278,53 @@ literal_value({_TokenType, _Line, Value}) -> Value.
 absolutify_names(Defs) ->
   absolutify_names(Defs, []).
 absolutify_names(Defs, Opts) ->
-    abs_names(['.'], Defs, [['.'] | [prepend_path(['.'], Pkg)
-        || Pkg <- proplists:get_all_values(package, Defs)
-    ]], Opts).
+    Pkgs = proplists:get_all_values(package, Defs),
+    abs_names(['.'],
+              Defs,
+              [['.'] | [prepend_path(['.'], Pkg) || Pkg <- Pkgs]],
+              Opts).
 
 abs_names(Path, Elems, Packages, Opts) ->
     Map = fun({{msg,Msg}, FieldsOrDefs}, Pkgs=[Pkg|_]) ->
                   MsgPath = prepend_package(Pkg, prepend_path(Path, Msg)),
-                  {{{msg, MsgPath}, abs_names(MsgPath, FieldsOrDefs, Pkgs, Opts)}, Pkgs};
+                  AbsFieldsDefs = abs_names(MsgPath, FieldsOrDefs, Pkgs, Opts),
+                  {{{msg, MsgPath}, AbsFieldsDefs}, Pkgs};
              ({{enum,E}, ENs}, Pkgs=[Pkg|_]) ->
-                  {{{enum, prepend_package(Pkg, prepend_path(Path, E))}, ENs}, Pkgs};
+                  AbsENs = prepend_package(Pkg, prepend_path(Path, E)),
+                  {{{enum, AbsENs}, ENs}, Pkgs};
              (#field{type={ref,To}}=F, Pkgs=[Pkg|_]) ->
                   case is_absolute_ref(To) of
                       true  ->
                           {F, Pkgs};
                       false ->
-                          FullPath = case refers_to_peer_elem(To, Elems) of
-                                         true  ->
-                                             prepend_path(Path, To);
-                                         false ->
-                                             Ref = prepend_path(['.'], To),
-                                             case [Sub || Sub <- Pkgs,
-                                                 Sub /= ['.'], lists:prefix(Sub, Ref)]
-                                             of
-                                                 [] -> prepend_package(Pkg, Ref);
-                                                 _  -> Ref
-                                             end
-                                     end,
+                          FullPath =
+                              case refers_to_peer_elem(To, Elems) of
+                                  true  ->
+                                      prepend_path(Path, To);
+                                  false ->
+                                      Ref = prepend_path(['.'], To),
+                                      case already_contains_pkg(Ref, Pkgs) of
+                                          true  -> Ref;
+                                          false -> prepend_package(Pkg, Ref)
+                                      end
+                              end,
                           {F#field{type={ref, FullPath}}, Pkgs}
                   end;
              ({extensions,Exts}, Pkgs) ->
                   {{{extensions,Path},Exts}, Pkgs};
              ({{extend,Msg}, FieldsOrDefs}, Pkgs=[Pkg|_]) ->
                   MsgPath = prepend_package(Pkg, prepend_path(Path, Msg)),
-                  {{{extend, MsgPath}, abs_names(MsgPath, FieldsOrDefs, Pkgs, Opts)}, Pkgs};
+                  AbsExtends = abs_names(MsgPath, FieldsOrDefs, Pkgs, Opts),
+                  {{{extend, MsgPath}, AbsExtends}, Pkgs};
              ({package, Name}, Pkgs) ->
-                  {{package, Name}, case proplists:get_bool(use_packages, Opts) of
-                                        true  ->
-                                            Pkg = prepend_path(['.'], Name),
-                                            [Pkg | lists:delete(Pkg, Pkgs)];
-                                        false ->
-                                            Pkgs
-                                    end};
+                  PkgPath = case proplists:get_bool(use_packages, Opts) of
+                                true  ->
+                                    Pkg = prepend_path(['.'], Name),
+                                    [Pkg | lists:delete(Pkg, Pkgs)];
+                                false ->
+                                    Pkgs
+                            end,
+                  {{package, Name}, PkgPath};
              ({{service, Name}, RPCs}, Pkgs) ->
                   {{{service,Name}, abs_rpcs(Path, RPCs)}, Pkgs};
              (OtherElem, Pkgs) ->
@@ -344,6 +349,12 @@ find_name(Name, [{{enum,Name}, _Values} | _]) -> {found, []};
 find_name(Name, [{{msg,Name}, SubElems} | _]) -> {found, SubElems};
 find_name(Name, [_ | Rest])                   -> find_name(Name, Rest);
 find_name(_Name,[])                           -> not_found.
+
+already_contains_pkg(Ref, Pkgs) ->
+    lists:any(fun(['.']) -> false;
+                 (Pkg)   -> lists:prefix(Pkg, Ref)
+              end,
+              Pkgs).
 
 prepend_path(['.'], Id) when is_atom(Id)           -> ['.', Id];
 prepend_path(['.'], SubPath) when is_list(SubPath) -> ['.' | SubPath];
