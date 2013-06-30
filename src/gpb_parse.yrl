@@ -275,6 +275,22 @@ kw_to_identifier({Kw, Line}) ->
 
 literal_value({_TokenType, _Line, Value}) -> Value.
 
+%% Make relative names absolute.  The parser produces names as atoms,
+%% such as m1, or as a list of path components separated by the
+%% dot-atom, '.', such as [m1,'.',m2].  Such names are relative.
+%% An absolute name is a name that begins with a dot-atom, for example
+%% ['.',m1] or ['.',m1,'.',m2], much like the slash or backslash character
+%% in a file system path.
+%%
+%% The resulting names will begin with package names if the
+%% `use_package' option is specified, and also if the proto
+%% file define a package.
+%%
+%% Currently, a sort-of name-resolution step is built-in: relative
+%% names that refer to nested definitions, at the same level or more
+%% deeply nested, are turned into absolute names, too.
+%%
+%% Prerequisites: No prerequisite, a data structure from the parser is ok.
 absolutify_names(Defs) ->
   absolutify_names(Defs, []).
 absolutify_names(Defs, Opts) ->
@@ -376,6 +392,29 @@ abs_rpcs(Path, RPCs) ->
       end,
       RPCs).
 
+%% For nested message definitions such as
+%% ```
+%%    message m1 {
+%%      required uint32 f1 = 1;
+%%      message m2 { ... }
+%%      enum e2 { ... }
+%%    };",
+%% '''
+%% the parser will produce a nested structure, such as:
+%% ```
+%%   [{{msg,M1},[#field{},
+%%               {{msg,M2}, [...]},
+%%               {{enum,E2}, [...]}]}]
+%% '''
+%% Flattenning means to lift the nested m2 and e2 definition to the top-level,
+%% so the above turns into:
+%% ```
+%%   [{{msg,M1},[#field{}]},
+%%    {{msg,M2}, [...]},
+%%    {{enum,E2}, [...]}]
+%% '''
+%%
+%% Prerequisites:
 %% `Defs' is expected to be absolutified
 flatten_defs(Defs) ->
     lists:reverse(
@@ -400,9 +439,10 @@ flatten_fields(FieldsOrDefs) ->
                     FieldsOrDefs),
     {lists:reverse(RFields2), Defs2}.
 
-
-
-%% `Defs' is expected to be flattened and may or may not be reformatted
+%% Find inconsistencies
+%%
+%% Prerequisites:
+%% `Defs' is expected to be flattened and may or may not be reformatted.
 verify_defs(Defs) ->
     collect_errors(Defs,
                    [{msg,     [fun verify_msg/2, fun verify_field_defaults/2]},
@@ -555,6 +595,11 @@ fmt_verr({{bad_binary_value, Default}, {Msg, Field}}) ->
 f(F, A) ->
     io_lib:format(F, A).
 
+%% Rewrites for instance ['.','m1','.',m2] into 'm1.m2'
+%% Example: {{msg,['.','m1','.',m2]}, [#field{type=['.','m1','.',m3]}]}
+%% becomes: {{msg,'m1.m2'},           [#field{type='m1.m3'}]}
+%%
+%% Prerequisites:
 %% `Defs' is expected to be absolutified and flattened
 reformat_names(Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
@@ -592,6 +637,11 @@ reformat_rpcs(RPCs) ->
               end,
               RPCs).
 
+%% For a field, such as f1 of type x, in "message m1 { required x f1 = 1 }",
+%% resolve_refs resolves the type of x to either {enum,x} or {msg,x}.
+%% It replaces #field{type={ref,X}} with e.g. #field{type={msg,x}} accordingly.
+%%
+%% Prerequisites:
 %% `Defs' is expected to be flattened and may or may not be reformatted
 %% `Defs' is expected to be verified, to have no dangling references
 resolve_refs(Defs) ->
