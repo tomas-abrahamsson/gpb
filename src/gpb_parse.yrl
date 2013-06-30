@@ -257,15 +257,8 @@ Erlang code.
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
--export([absolutify_names/1, absolutify_names/2]).
--export([flatten_defs/1]).
--export([verify_defs/1]).
--export([format_verification_error/1]).
--export([reformat_names/1]).
--export([resolve_refs/1]).
--export([extend_msgs/1]).
--export([enumerate_msg_fields/1]).
--export([normalize_msg_field_options/1]).
+-export([post_process/2]).
+-export([format_post_process_error/1]).
 -export([fetch_imports/1]).
 
 identifier_name({identifier, _Line, Name}) -> list_to_atom(Name).
@@ -275,122 +268,56 @@ kw_to_identifier({Kw, Line}) ->
 
 literal_value({_TokenType, _Line, Value}) -> Value.
 
-%% Make relative names absolute.  The parser produces names as atoms,
-%% such as m1, or as a list of path components separated by the
-%% dot-atom, '.', such as [m1,'.',m2].  Such names are relative.
-%% An absolute name is a name that begins with a dot-atom, for example
-%% ['.',m1] or ['.',m1,'.',m2], much like the slash or backslash character
-%% in a file system path.
-%%
-%% The resulting names will begin with package names if the
-%% `use_package' option is specified, and also if the proto
-%% file define a package.
-%%
-%% Currently, a sort-of name-resolution step is built-in: relative
-%% names that refer to nested definitions, at the same level or more
-%% deeply nested, are turned into absolute names, too.
-%%
-%% Prerequisites: No prerequisite, a data structure from the parser is ok.
-absolutify_names(Defs) ->
-  absolutify_names(Defs, []).
-absolutify_names(Defs, Opts) ->
-    Pkgs = proplists:get_all_values(package, Defs),
-    abs_names(['.'],
-              Defs,
-              [['.'] | [prepend_path(['.'], Pkg) || Pkg <- Pkgs]],
-              Opts).
-
-abs_names(Path, Elems, Packages, Opts) ->
-    Map = fun({{msg,Msg}, FieldsOrDefs}, Pkgs=[Pkg|_]) ->
-                  MsgPath = prepend_package(Pkg, prepend_path(Path, Msg)),
-                  AbsFieldsDefs = abs_names(MsgPath, FieldsOrDefs, Pkgs, Opts),
-                  {{{msg, MsgPath}, AbsFieldsDefs}, Pkgs};
-             ({{enum,E}, ENs}, Pkgs=[Pkg|_]) ->
-                  AbsENs = prepend_package(Pkg, prepend_path(Path, E)),
-                  {{{enum, AbsENs}, ENs}, Pkgs};
-             (#field{type={ref,To}}=F, Pkgs=[Pkg|_]) ->
-                  case is_absolute_ref(To) of
-                      true  ->
-                          {F, Pkgs};
-                      false ->
-                          FullPath =
-                              case refers_to_peer_elem(To, Elems) of
-                                  true  ->
-                                      prepend_path(Path, To);
-                                  false ->
-                                      Ref = prepend_path(['.'], To),
-                                      case already_contains_pkg(Ref, Pkgs) of
-                                          true  -> Ref;
-                                          false -> prepend_package(Pkg, Ref)
-                                      end
-                              end,
-                          {F#field{type={ref, FullPath}}, Pkgs}
-                  end;
-             ({extensions,Exts}, Pkgs) ->
-                  {{{extensions,Path},Exts}, Pkgs};
-             ({{extend,Msg}, FieldsOrDefs}, Pkgs=[Pkg|_]) ->
-                  MsgPath = prepend_package(Pkg, prepend_path(Path, Msg)),
-                  AbsExtends = abs_names(MsgPath, FieldsOrDefs, Pkgs, Opts),
-                  {{{extend, MsgPath}, AbsExtends}, Pkgs};
-             ({package, Name}, Pkgs) ->
-                  PkgPath = case proplists:get_bool(use_packages, Opts) of
-                                true  ->
-                                    Pkg = prepend_path(['.'], Name),
-                                    [Pkg | lists:delete(Pkg, Pkgs)];
-                                false ->
-                                    Pkgs
-                            end,
-                  {{package, Name}, PkgPath};
-             ({{service, Name}, RPCs}, Pkgs) ->
-                  {{{service,Name}, abs_rpcs(Path, RPCs)}, Pkgs};
-             (OtherElem, Pkgs) ->
-                  {OtherElem, Pkgs}
-          end,
-    element(1, lists:mapfoldl(Map, Packages, Elems)).
-
-is_absolute_ref(['.' | _]) -> true;
-is_absolute_ref(_Other)    -> false.
-
-refers_to_peer_elem(['.' | Rest], Elems) ->
-    refers_to_peer_elem(Rest, Elems);
-refers_to_peer_elem([To], Elems) ->
-    find_name(To, Elems) /= not_found;
-refers_to_peer_elem([To | Rest], Elems) ->
-    case find_name(To, Elems) of
-        not_found        -> false;
-        {found,SubElems} -> refers_to_peer_elem(Rest, SubElems)
+post_process(Defs, Opts) ->
+    case resolve_names(Defs, Opts) of
+        {ok, Defs2} ->
+            {ok, normalize_msg_field_options( %% Sort it?
+                   enumerate_msg_fields(
+                     reformat_names(
+                       extend_msgs(Defs2))))};
+        {error, Reasons} ->
+            {error, Reasons}
     end.
 
-find_name(Name, [{{enum,Name}, _Values} | _]) -> {found, []};
-find_name(Name, [{{msg,Name}, SubElems} | _]) -> {found, SubElems};
-find_name(Name, [_ | Rest])                   -> find_name(Name, Rest);
-find_name(_Name,[])                           -> not_found.
-
-already_contains_pkg(Ref, Pkgs) ->
-    lists:any(fun(['.']) -> false;
-                 (Pkg)   -> lists:prefix(Pkg, Ref)
-              end,
-              Pkgs).
-
-prepend_path(['.'], Id) when is_atom(Id)           -> ['.', Id];
-prepend_path(['.'], SubPath) when is_list(SubPath) -> ['.' | SubPath];
-prepend_path(Path,  Id) when is_atom(Id)           -> Path ++ ['.', Id];
-prepend_path(Path,  SubPath) when is_list(SubPath) -> Path ++ ['.' | SubPath].
-
-prepend_package(['.'], Path) -> Path;
-prepend_package(Pkg, ['.'])  -> Pkg;
-prepend_package(Pkg, Path)   ->
-    case lists:prefix(Pkg, Path) of
-        false -> Pkg ++ Path;
-        true ->  Path
+%% -> {ok, Defs} | {error, [Reason]}
+resolve_names(Defs, Opts) ->
+    case find_package_def(Defs, Opts) of
+        {ok, Package} ->
+            FlatDefs = flatten_qualify_defnames(Defs, Package),
+            case resolve_refs(FlatDefs, Package) of
+                {ok, RDefs} ->
+                    case verify_defs(RDefs) of
+                        ok ->
+                            {ok, RDefs};
+                        {error, Reasons} ->
+                            {error, Reasons}
+                    end;
+                {error, Reasons} ->
+                    {error, Reasons}
+            end;
+        {error, Reasons} ->
+            {error, Reasons}
     end.
 
-abs_rpcs(Path, RPCs) ->
-    lists:map(
-      fun({RpcName, Arg, Return}) ->
-              {RpcName, prepend_path(Path, Arg), prepend_path(Path,Return)}
-      end,
-      RPCs).
+%% Find any package specifier. At most one such package specifier
+%% may exist, and it can exist anywhere (top-level) in the proto file,
+%% yet it still applies to the whole file.
+find_package_def(Defs, Opts) ->
+    DefaultPkg = ['.'],
+    case proplists:get_bool(use_packages, Opts) of
+        true ->
+            case [Pkg || {package, Pkg} <- Defs] of
+                [] ->
+                    {ok, DefaultPkg};
+                [Pkg] ->
+                    {ok, ['.' | Pkg]};
+                Pkgs when length(Pkgs) >= 2 ->
+                    PrettyPkgs = [reformat_name(Pkg) || Pkg <- Pkgs],
+                    {error, [{multiple_pkg_specifiers, PrettyPkgs}]}
+            end;
+        false ->
+            {ok, DefaultPkg}
+    end.
 
 %% For nested message definitions such as
 %% ```
@@ -414,30 +341,175 @@ abs_rpcs(Path, RPCs) ->
 %%    {{enum,E2}, [...]}]
 %% '''
 %%
-%% Prerequisites:
-%% `Defs' is expected to be absolutified
-flatten_defs(Defs) ->
+%% During this process, the message and enum names and similar get
+%% fully qualified into absolute rooted name-paths. In the example
+%% above, this applies to m1, m2 and e2. Note that at this stage,
+%% nothing is done to resolve reference to names, such as message
+%% types for fields. A name-path is a list of path components,
+%% separated by the dot-atom, '.', and an absolute rooted name-path is
+%% a path that begins with the dot-atom, '.', much like a slash or a
+%% backslash in a file name path.
+flatten_qualify_defnames(Defs, Root) ->
     lists:reverse(
-      lists:foldl(fun({{msg,Name}, FieldsOrDefs}, Acc) ->
-                          {Fields2, Defs2} = flatten_fields(FieldsOrDefs),
-                          [{{msg,Name},Fields2} | Defs2] ++ Acc;
-                     ({{extend,Name}, FieldsOrDefs}, Acc) ->
-                          {Fields2, Defs2} = flatten_fields(FieldsOrDefs),
-                          [{{extend,Name},Fields2} | Defs2] ++ Acc;
-                     (OtherElem, Acc) ->
-                          [OtherElem | Acc]
-                  end,
-                  [],
-                  Defs)).
+      lists:foldl(
+        fun({{msg,Name}, FieldsOrDefs}, Acc) ->
+                FullName = prepend_path(Root, Name),
+                {Fields2, Defs2} = flatten_fields(FieldsOrDefs, FullName),
+                [{{msg,FullName},Fields2} | Defs2] ++ Acc;
+           ({{enum,Name}, ENs}, Acc) ->
+                FullName = prepend_path(Root, Name),
+                [{{enum,FullName}, ENs} | Acc];
+           ({extensions,Exts}, Acc) ->
+                [{{extensions,Root},Exts} | Acc];
+           ({{extend,Name}, FieldsOrDefs}, Acc) ->
+                FullName = prepend_path(Root, Name),
+                {Fields2, Defs2} = flatten_fields(FieldsOrDefs, FullName),
+                [{{extend,FullName},Fields2} | Defs2] ++ Acc;
+           ({{service, Name}, RPCs}, Acc) ->
+                FullName = prepend_path(Root, Name),
+                [{{service,FullName}, RPCs} | Acc];
+           (OtherElem, Acc) ->
+                [OtherElem | Acc]
+        end,
+        [],
+        Defs)).
 
-flatten_fields(FieldsOrDefs) ->
+flatten_fields(FieldsOrDefs, FullName) ->
     {RFields2, Defs2} =
-        lists:foldl(fun(#field{}=F, {Fs,Ds}) -> {[F | Fs], Ds};
-                       (Def,        {Fs,Ds}) -> {Fs, flatten_defs([Def])++Ds}
+        lists:foldl(fun(#field{}=F, {Fs,Ds}) ->
+                            {[F | Fs], Ds};
+                       (Def, {Fs,Ds}) ->
+                            QDefs = flatten_qualify_defnames([Def], FullName),
+                            {Fs, QDefs++Ds}
                     end,
                     {[],[]},
                     FieldsOrDefs),
     {lists:reverse(RFields2), Defs2}.
+
+%% Resolve any refs in
+resolve_refs(Defs, Root) ->
+    {ResolvedRefs, Reasons} =
+        lists:mapfoldl(
+          fun({{msg,FullName}, Fields}, Acc) ->
+                  {NewFields, Acc2} =
+                      resolve_field_refs(Fields, Defs, Root, FullName, Acc),
+                  {{{msg,FullName}, NewFields}, Acc2};
+             ({{service,FullName}, Rpcs}, Acc) ->
+                  {NewRPCs, Acc2} =
+                      resolve_rpc_refs(Rpcs, Defs, Root, FullName, Acc),
+                  {{{service,FullName}, NewRPCs}, Acc2};
+             (OtherElem, Acc) ->
+                  {OtherElem, Acc}
+          end,
+          [],
+          Defs),
+    if Reasons == [] -> {ok, ResolvedRefs};
+       Reasons /= [] -> {error, lists:reverse(Reasons)}
+    end.
+
+
+
+resolve_field_refs(Fields, Defs, Root, FullName, Reasons) ->
+    lists:mapfoldl(
+      fun(#field{name=FName, type={ref,Ref}}=Field, Acc) ->
+              case resolve_ref(Defs, Ref, Root, FullName) of
+                  {found, TypeName} ->
+                      {Field#field{type=TypeName}, Acc};
+                  not_found ->
+                      Reason = {ref_to_undefined_msg_or_enum,
+                                {{FullName, FName}, Ref}},
+                      {Field, [Reason | Acc]}
+              end;
+         (#field{}=Field, Acc) ->
+              {Field, Acc}
+      end,
+      Reasons,
+      Fields).
+
+resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
+    lists:mapfoldl(
+      fun({RpcName, Arg, Return}=Rpc, Acc) ->
+              case resolve_ref(Defs, Arg, Root, FullName) of
+                  {found, {msg, MArg}} ->
+                      case resolve_ref(Defs, Return, Root, FullName) of
+                          {found, {msg, MReturn}} ->
+                              {{RpcName, MArg, MReturn}, Acc};
+                          {found, {BadType, MReturn}} ->
+                              Reason = {rpc_return_ref_to_non_msg,
+                                        {{FullName, RpcName, Return},
+                                         BadType, MReturn}},
+                              {Rpc, [Reason | Acc]};
+                          not_found ->
+                              Reason = {rpc_return_ref_to_undefined_msg,
+                                        {{FullName, RpcName}, Return}},
+                              {Rpc, [Reason | Acc]}
+                      end;
+                  {found, {BadType, MArg}} ->
+                      Reason = {rpc_arg_ref_to_non_msg,
+                                {{FullName, RpcName, Arg}, BadType, MArg}},
+                      {Rpc, [Reason | Acc]};
+                  not_found ->
+                      Reason = {rpc_arg_ref_to_undefined_msg,
+                                {{FullName, RpcName}, Arg}},
+                      {Rpc, [Reason | Acc]}
+              end
+      end,
+      Reasons,
+      Rpcs).
+
+%% -> {found, {msg,FullName}|{enum,FullName}} | not_found
+resolve_ref(Defs, Ref, Root, FullName) ->
+    case is_absolute_ref(Ref) of
+        true  ->
+            FullRef = ensure_path_prepended(Root, Ref),
+            find_typename(FullRef, Defs);
+        false ->
+            PossibleRoots = compute_roots(FullName),
+            find_ref_rootwards(PossibleRoots, Ref, Defs)
+    end.
+
+find_ref_rootwards([PossibleRoot | Rest], Ref, Defs) ->
+    FullRef = ensure_path_prepended(PossibleRoot, Ref),
+    case find_typename(FullRef, Defs) of
+        {found, TypeName} -> {found, TypeName};
+        not_found -> find_ref_rootwards(Rest, Ref, Defs)
+    end;
+find_ref_rootwards([], _Ref, _Defs) ->
+    not_found.
+
+is_absolute_ref(['.' | _]) -> true;
+is_absolute_ref(_Other)    -> false.
+
+find_typename(Name, [{{enum,Name}, _Values} | _])  -> {found, {enum,Name}};
+find_typename(Name, [{{msg,Name}, _SubElems} | _]) -> {found, {msg,Name}};
+find_typename(Name, [_ | Rest])                    -> find_typename(Name, Rest);
+find_typename(_Name,[])                            -> not_found.
+
+%% Turn ['.',m1,'.',m2,'.',m3]
+%% into [['.',m1,'.',m2,'.',m3],
+%%       ['.',m1,'.',m2],
+%%       ['.',m1],
+%%       ['.']]
+compute_roots(['.']) -> [['.']];
+compute_roots(DeeperPath) ->
+    [DeeperPath | compute_roots(drop_last_level(DeeperPath))].
+
+drop_last_level(['.']) -> ['.'];
+drop_last_level(['.', X]) when is_atom(X) -> ['.'];
+drop_last_level(DeeperPath) when length(DeeperPath) >= 3 ->
+    [_X, '.' | RestReversed] = lists:reverse(DeeperPath),
+    lists:reverse(RestReversed).
+
+prepend_path(['.'], Id) when is_atom(Id)           -> ['.', Id];
+prepend_path(['.'], SubPath) when is_list(SubPath) -> ['.' | SubPath];
+prepend_path(Path,  Id) when is_atom(Id)           -> Path ++ ['.', Id];
+prepend_path(Path,  SubPath) when is_list(SubPath) -> Path ++ ['.' | SubPath].
+
+ensure_path_prepended(Pkg, Path)   ->
+    case lists:prefix(Pkg, Path) of
+        false -> prepend_path(Pkg, Path);
+        true ->  Path
+    end.
 
 %% Find inconsistencies
 %%
@@ -445,7 +517,7 @@ flatten_fields(FieldsOrDefs) ->
 %% `Defs' is expected to be flattened and may or may not be reformatted.
 verify_defs(Defs) ->
     collect_errors(Defs,
-                   [{msg,     [fun verify_msg/2, fun verify_field_defaults/2]},
+                   [{msg,     [fun verify_field_defaults/2]},
                     {extend,  [fun verify_extend/2]},
                     {service, [fun verify_service/2]},
                     {'_',     [fun(_Def, _AllDefs) -> ok end]}]).
@@ -481,29 +553,6 @@ find_verifiers(Type,  [{Type, Verifiers} | _]) -> Verifiers;
 find_verifiers(_Type, [{'_', Verifiers} | _])  -> Verifiers;
 find_verifiers(Type,  [_Other | Rest])         -> find_verifiers(Type, Rest).
 
-verify_msg({{msg,M}, Fields}, AllDefs) ->
-    OnError = fun(FieldName, Target) ->
-                      {reference_to_undefined_msg_or_enum,
-                       {{name_to_dstr(M), atom_to_list(FieldName)},
-                        name_to_dstr(Target)}}
-              end,
-    verify_refs_aux(OnError, AllDefs, [enum, msg],
-                    [{FieldName, Target}
-                     || #field{name=FieldName, type={ref,Target}} <- Fields]).
-
-verify_refs_aux(ErrorFormatter, Defs, AllowedTargetTypes, Refs) ->
-    lists:foldl(fun({Name, Target}, Acc) ->
-                        case is_ref_defined(Defs, Target, AllowedTargetTypes) of
-                            true ->
-                                Acc;
-                            false ->
-                                Reason = ErrorFormatter(Name, Target),
-                                add_acc(Acc, {error, [Reason]})
-                        end
-                end,
-                ok,
-                Refs).
-
 verify_field_defaults({{msg,M}, Fields}, AllDefs) ->
     lists:foldl(fun(#field{name=Name, type=Type, opts=FOpts}, Acc) ->
                         Res = case lists:keysearch(default, 1, FOpts) of
@@ -520,7 +569,7 @@ verify_field_defaults({{msg,M}, Fields}, AllDefs) ->
 
 verify_scalar_default_if_present(MsgName, FieldName, Type, Default, AllDefs) ->
     case Type of
-        {ref,Ref} ->
+        {enum,Ref} ->
             case lists:keysearch({enum, Ref}, 1, AllDefs) of
                 {value, {{enum,Ref}, Enumerators}} ->
                     case lists:keysearch(Default, 1, Enumerators) of
@@ -552,55 +601,72 @@ verify_service(_, _AllDefs) ->
     %% FIXME
     ok.
 
-is_ref_defined(AllDefs, Target, AllowedTypes) ->
-    lists:any(fun(Def) ->
-                      case element(1, Def) of
-                          {Type, Target} -> lists:member(Type, AllowedTypes);
-                          _              -> false
-                      end
-              end,
-              AllDefs).
+name_to_absdstr(['.' | Name]) -> "." ++ name_to_dstr(Name);
+name_to_absdstr(Name) -> name_to_dstr(Name).
 
 name_to_dstr(Name) when is_list(Name) ->
     string:join([atom_to_list(P) || P <- Name, P /= '.'],
-                ".").
+                ".");
+name_to_dstr(Name) when is_atom(Name) ->
+    atom_to_list(Name).
 
-format_verification_error({error, Reasons}) ->
-    lists:flatten([[fmt_verr(Reason),"\n"] || Reason <- Reasons]).
+format_post_process_error({error, Reasons}) ->
+    lists:flatten([[fmt_err(Reason),"\n"] || Reason <- Reasons]).
 
-fmt_verr({reference_to_undefined_msg_or_enum, {{Msg, Field}, To}}) ->
-    f("in msg ~s, field ~s: undefined reference  ~s", [Msg, Field, To]);
-fmt_verr({{invalid_default_enum_value, Default}, {Msg, Field}}) ->
-    f("in msg ~s, field ~s: undefined enumerator in default value ~s",
-      [Msg, Field, Default]);
-fmt_verr({{{value_out_of_range, Signedness, Bits}, Default}, {Msg, Field}}) ->
-    f("in msg ~s, field ~s: default value ~p ouf of range for ~p ~p bit int",
-      [Msg, Field, Default, Signedness, Bits]);
-fmt_verr({{{bad_integer_value, Signedness, Bits}, Default}, {Msg, Field}}) ->
-    f("in msg ~s, field ~s: bad default value ~p for ~p ~p bit int",
-      [Msg, Field, Default, Signedness, Bits]);
-fmt_verr({{bad_floating_point_value, Default}, {Msg, Field}}) ->
-    f("in msg ~s, field ~s: bad floating point default value ~p",
-      [Msg, Field, Default]);
-fmt_verr({{bad_boolean_value, Default}, {Msg, Field}}) ->
-    f("in msg ~s, field ~s: bad default value ~p for boolean",
-      [Msg, Field, Default]);
-fmt_verr({{bad_unicode_string, Default}, {Msg, Field}}) ->
-    f("in msg ~s, field ~s: bad default value ~p for string",
-      [Msg, Field, Default]);
-fmt_verr({{bad_binary_value, Default}, {Msg, Field}}) ->
-    f("in msg ~s, field ~s: bad default value ~p for bytes",
-      [Msg, Field, Default]).
+-define(f(F, A), io_lib:format(F, A)).
 
-f(F, A) ->
-    io_lib:format(F, A).
+fmt_err({multiple_pkg_specifiers, Pkgs}) ->
+    ?f("package specified more than once: ~s~n",
+       [string:join([atom_to_list(Pkg) || Pkg <- Pkgs], ", ")]);
+fmt_err({ref_to_undefined_msg_or_enum, {{Msg, Field}, To}}) ->
+    ?f("in msg ~s, field ~s: undefined reference  ~s",
+       [name_to_dstr(Msg), name_to_dstr(Field), name_to_absdstr(To)]);
+fmt_err({rpc_return_ref_to_non_msg,
+         {{FullName, RpcName, Return}, BadType, MReturn}}) ->
+    ?f("in service ~s, rpc ~s, the return type, ~s, refers to "
+       " a ~p, ~s, instead of to a message",
+       [name_to_dstr(FullName), name_to_dstr(RpcName), name_to_absdstr(Return),
+        BadType, name_to_dstr(MReturn)]);
+fmt_err({rpc_return_ref_to_undefined_msg, {{FullName, RpcName}, Ret}}) ->
+    ?f("in service ~s, rpc ~s, return: undefined reference ~s",
+       [name_to_dstr(FullName), name_to_dstr(RpcName), name_to_absdstr(Ret)]);
+fmt_err({rpc_arg_ref_to_non_msg, {{FullName, RpcName, Arg}, BadType, MArg}}) ->
+    ?f("in service ~s, rpc ~s, the arg type, ~s, refers to "
+       " a ~p, ~s, instead of to a message",
+       [name_to_dstr(FullName), name_to_dstr(RpcName), name_to_absdstr(Arg),
+        BadType, name_to_dstr(MArg)]);
+fmt_err({rpc_arg_ref_to_undefined_msg, {{FullName, RpcName}, Arg}}) ->
+    ?f("in service ~s, rpc ~s, arg: undefined reference ~s",
+       [name_to_dstr(FullName), name_to_dstr(RpcName), name_to_absdstr(Arg)]);
+fmt_err({{invalid_default_enum_value, Default}, {Msg, Field}}) ->
+    ?f("in msg ~s, field ~s: undefined enumerator in default value ~s",
+       [Msg, Field, Default]);
+fmt_err({{{value_out_of_range, Signedness, Bits}, Default}, {Msg, Field}}) ->
+    ?f("in msg ~s, field ~s: default value ~p ouf of range for ~p ~p bit int",
+       [Msg, Field, Default, Signedness, Bits]);
+fmt_err({{{bad_integer_value, Signedness, Bits}, Default}, {Msg, Field}}) ->
+    ?f("in msg ~s, field ~s: bad default value ~p for ~p ~p bit int",
+       [Msg, Field, Default, Signedness, Bits]);
+fmt_err({{bad_floating_point_value, Default}, {Msg, Field}}) ->
+    ?f("in msg ~s, field ~s: bad floating point default value ~p",
+       [Msg, Field, Default]);
+fmt_err({{bad_boolean_value, Default}, {Msg, Field}}) ->
+    ?f("in msg ~s, field ~s: bad default value ~p for boolean",
+       [Msg, Field, Default]);
+fmt_err({{bad_unicode_string, Default}, {Msg, Field}}) ->
+    ?f("in msg ~s, field ~s: bad default value ~p for string",
+       [Msg, Field, Default]);
+fmt_err({{bad_binary_value, Default}, {Msg, Field}}) ->
+    ?f("in msg ~s, field ~s: bad default value ~p for bytes",
+       [Msg, Field, Default]).
 
 %% Rewrites for instance ['.','m1','.',m2] into 'm1.m2'
-%% Example: {{msg,['.','m1','.',m2]}, [#field{type=['.','m1','.',m3]}]}
-%% becomes: {{msg,'m1.m2'},           [#field{type='m1.m3'}]}
+%% Example: {{msg,['.','m1','.',m2]}, [#field{type={msg,['.','m1','.',m3]}}]}
+%% becomes: {{msg,'m1.m2'},           [#field{type={msg,'m1.m3'}}]}
 %%
 %% Prerequisites:
-%% `Defs' is expected to be absolutified and flattened
+%% `Defs' is expected to be flattened and names and references
+%% are expected to have been resolved
 reformat_names(Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
                       {{msg,reformat_name(Name)}, reformat_fields(Fields)};
@@ -611,7 +677,7 @@ reformat_names(Defs) ->
                  ({{extend,Name}, Fields}) ->
                       {{extend,reformat_name(Name)}, reformat_fields(Fields)};
                  ({{service,Name}, RPCs}) ->
-                      {{service,Name}, reformat_rpcs(RPCs)};
+                      {{service,reformat_name(Name)}, reformat_rpcs(RPCs)};
                  ({package, Name}) ->
                       {package, reformat_name(Name)};
                  (OtherElem) ->
@@ -621,8 +687,8 @@ reformat_names(Defs) ->
 
 reformat_fields(Fields) ->
     lists:map(
-      fun(#field{type={ref,Nm}}=F) -> F#field{type={ref,reformat_name(Nm)}};
-         (#field{}=F)              -> F
+      fun(#field{type={T,Nm}}=F) -> F#field{type={T,reformat_name(Nm)}};
+         (#field{}=F)            -> F
       end,
       Fields).
 
@@ -636,33 +702,6 @@ reformat_rpcs(RPCs) ->
                       {RpcName, reformat_name(Arg), reformat_name(Return)}
               end,
               RPCs).
-
-%% For a field, such as f1 of type x, in "message m1 { required x f1 = 1 }",
-%% resolve_refs resolves the type of x to either {enum,x} or {msg,x}.
-%% It replaces #field{type={ref,X}} with e.g. #field{type={msg,x}} accordingly.
-%%
-%% Prerequisites:
-%% `Defs' is expected to be flattened and may or may not be reformatted
-%% `Defs' is expected to be verified, to have no dangling references
-resolve_refs(Defs) ->
-    lists:map(fun({{msg,Name}, Fields}) ->
-                      {{msg,Name},
-                       lists:map(fun(#field{type={ref,Name2}}=F) ->
-                                         Type = fetch_ref(Name2, Defs),
-                                         F#field{type=Type};
-                                    (#field{}=F) ->
-                                         F
-                                 end,
-                                 Fields)};
-                 (OtherElem) ->
-                      OtherElem
-              end,
-              Defs).
-
-fetch_ref(Name, [{{enum,Name}=Key,_} | _]) -> Key;
-fetch_ref(Name, [{{msg,Name}=Key,_} | _])  -> Key;
-fetch_ref(Name, [_ | T])                   -> fetch_ref(Name, T).
-
 
 %% `Defs' is expected to be flattened and may or may not be reformatted
 %% `Defs' is expected to be verified, to not extend missing messages
@@ -724,6 +763,6 @@ opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
         true  -> [Opt | lists:keydelete(Opt, 1, Opts)]
     end.
 
-%% `Defs' is expected to be parsed.
+%% `Defs' is expected to be parsed, but not necessarily post_processed.
 fetch_imports(Defs) ->
     [Path || {import,Path} <- Defs].

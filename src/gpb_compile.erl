@@ -456,8 +456,8 @@ fmt_err({import_not_found, Import}) ->
     f("Could not find import file ~p", [Import]);
 fmt_err({read_failed, File, Reason}) ->
     f("failed to read ~p: ~s (~p)", [File, file:format_error(Reason), Reason]);
-fmt_err({verification, Reasons}) ->
-    gpb_parse:format_verification_error({error, Reasons});
+fmt_err({post_process, Reasons}) ->
+    gpb_parse:format_post_process_error({error, Reasons});
 fmt_err({write_failed, File, Reason}) ->
     f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
 fmt_err(X) ->
@@ -686,19 +686,11 @@ plainoptargs_to_args([], Acc) ->
 parse_file(FName, Opts) ->
     case parse_file_and_imports(FName, Opts) of
         {ok, {Defs1, _AllImported}} ->
-            %% io:format("processed these imports:~n  ~p~n", [_AllImported]),
-            %% io:format("Defs1=~n  ~p~n", [Defs1]),
-            Defs2 = gpb_parse:flatten_defs(
-                      gpb_parse:absolutify_names(Defs1, Opts)),
-            case gpb_parse:verify_defs(Defs2) of
-                ok ->
-                    {ok, gpb_parse:normalize_msg_field_options( %% Sort it?
-                           gpb_parse:enumerate_msg_fields(
-                             gpb_parse:extend_msgs(
-                               gpb_parse:resolve_refs(
-                                 gpb_parse:reformat_names(Defs2)))))};
+            case gpb_parse:post_process(Defs1, Opts) of
+                {ok, Defs2} ->
+                    {ok, Defs2};
                 {error, Reasons} ->
-                    {error, {verification, Reasons}}
+                    {error, {post_process, Reasons}}
             end;
         {error, Reason} ->
             {error, Reason}

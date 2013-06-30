@@ -55,6 +55,44 @@ parses_nested_messages_test() ->
            "  repeated string y=1;",
            "}"]).
 
+parses_relative_nested_messages_test() ->
+    {ok, Elems} = parse_lines(["message m1 {",
+                               "",
+                               "  required m2 f2 = 1;",
+                               "",
+                               "  message m2 {",
+                               "    message m3 {",
+                               %%     The 'm5' refers to m1.m2.m5 (not m1.m5),
+                               %%     and it is ok but not not necessary
+                               %%     to write it with full path like this:
+                               %%     required m1.m2.m5 f5 = 5;
+                               "      required m5       f5 = 5;",
+                               "      required m1.m2.m5 f6 = 6;",
+                               "    }",
+                               "    message m5 {",
+                               "      required string fy = 1;",
+                               "    }",
+                               "  }",
+                               "",
+                               "  message m5 {",
+                               "    required uint32 fx = 1;",
+                               "  }",
+                               "}"]),
+    [{{msg,m1},         [#field{name=f2, type={msg,'m1.m2'}}]},
+     {{msg,'m1.m2'},    []},
+     {{msg,'m1.m2.m3'}, [#field{name=f5, type={msg,'m1.m2.m5'}},
+                         #field{name=f6, type={msg,'m1.m2.m5'}}]},
+     {{msg,'m1.m2.m5'}, [#field{name=fy}]},
+     {{msg,'m1.m5'},    [#field{name=fx}]}] =
+        do_process_sort_defs(Elems).
+
+parses_circular_messages_test() ->
+    {ok, Elems} = parse_lines(["message m1 {",
+                               "  optional m1 f = 1;",
+                               "}"]),
+    [{{msg,m1}, [#field{name=f, type={msg,m1}}]}] =
+        do_process_sort_defs(Elems).
+
 parses_enum_def_test() ->
     {ok, [{{enum,e1}, [{ee1,1},{ee2,2}]}]} =
         parse_lines(
@@ -104,13 +142,13 @@ generates_correct_absolute_names_test() ->
                                "message m3 {",
                                "  required m1.m2 b = 1;",
                                "}"]),
-    [{{msg,['.',m1]}, [{{msg,['.',m1,'.',m2]}, [#field{name=x}]},
-                       {{enum,['.',m1,'.',e1]}, [_]},
-                       #field{name=y, type={ref,['.',m1,'.',m2]}},
-                       #field{name=z, type={ref,['.',m1,'.',m2]}},
-                       #field{name=w, type={ref,['.',m1,'.',e1]}}]},
-     {{msg,['.',m3]}, [#field{name=b, type={ref,['.',m1,'.',m2]}}]}] =
-        lists:sort(gpb_parse:absolutify_names(Elems)).
+    [{{enum,'m1.e1'}, [_]},
+     {{msg,m1},       [#field{name=y, type={msg,'m1.m2'}},
+                       #field{name=z, type={msg,'m1.m2'}},
+                       #field{name=w, type={enum,'m1.e1'}}]},
+     {{msg,'m1.m2'},  [#field{name=x}]},
+     {{msg,m3},       [#field{name=b, type={msg,'m1.m2'}}]}] =
+        do_process_sort_defs(Elems).
 
 generates_correct_absolute_names_2_test() ->
     {ok, Elems} = parse_lines(["message m2 {",
@@ -118,48 +156,20 @@ generates_correct_absolute_names_2_test() ->
                                "}",
                                "message m1 {",
                                "  message m2 {",
-                               "    message m3 { required uint32 x = 1; }",
+                               "    message m3 { required uint32 y = 1; }",
                                "  }",
                                "  required m1.m2 f1 = 1;", %% -> .m1.m2
                                "  required m2.m3 f2 = 2;", %% -> .m1.m2.m3
-                               "  required m2.m4 f3 = 3;", %% -> .m2.m4 ???
+                               "  required m2.m4 f3 = 3;", %% -> .m2.m4
                                "}"]),
-    [{{msg,['.',m1]}, [{{msg,['.',m1,'.',m2]},
-                        [{{msg,['.',m1,'.',m2,'.',m3]},_}]},
-                       #field{name=f1,type={ref,['.',m1,'.',m2]}},
-                       #field{name=f2,type={ref,['.',m1,'.',m2,'.',m3]}},
-                       #field{name=f3,type={ref,['.',m2,'.',m4]}}]},
-     {{msg,['.',m2]}, _}] =
-        lists:sort(gpb_parse:absolutify_names(Elems)).
-
-flattens_absolutified_defs_test() ->
-    {ok, Elems} = parse_lines(["message m1 {"
-                               "  message m2 { required uint32 x = 1;",
-                               "               required uint32 y = 2; }",
-                               "  required m2 z = 1;",
-                               "  required m2 w = 2;",
-                               "}"]),
-    AElems = gpb_parse:absolutify_names(Elems),
-    [{{msg,['.',m1]},        [#field{name=z}, #field{name=w}]},
-     {{msg,['.',m1,'.',m2]}, [#field{name=x}, #field{name=y}]}] =
-        lists:sort(gpb_parse:flatten_defs(AElems)).
-
-reformat_names_defs_test() ->
-    {ok, Elems} = parse_lines(["message m1 {"
-                               "  message m2 { required uint32 x = 1; }",
-                               "  enum    e1 { a = 17; }",
-                               "  required m2     y = 1;",
-                               "  required e1     z = 2;",
-                               "  required uint32 w = 3;",
-                               "}"]),
-    [{{enum,'m1.e1'}, _},
-     {{msg,m1},       [#field{name=y, type={ref,'m1.m2'}},
-                       #field{name=z, type={ref,'m1.e1'}},
-                       #field{name=w}]},
-     {{msg,'m1.m2'},  [#field{name=x}]}] =
-        lists:sort(gpb_parse:reformat_names(
-                     gpb_parse:flatten_defs(
-                       gpb_parse:absolutify_names(Elems)))).
+    [{{msg,m1},         [#field{name=f1,type={msg,'m1.m2'}},
+                         #field{name=f2,type={msg,'m1.m2.m3'}},
+                         #field{name=f3,type={msg,'m2.m4'}}]},
+     {{msg,'m1.m2'},    []},
+     {{msg,'m1.m2.m3'}, [#field{name=y}]},
+     {{msg,m2},         []},
+     {{msg,'m2.m4'},    [#field{name=x}]}] =
+        do_process_sort_defs(Elems).
 
 resolve_refs_test() ->
     {ok, Elems} = parse_lines(["package p1;"
@@ -182,11 +192,7 @@ resolve_refs_test() ->
                        #field{name=w}]},
      {{msg,'m1.m2'},  [#field{name=x}]},
      {{msg,m3},       [#field{name=b, type={msg,'m1.m2'}}]}] =
-        lists:sort(
-          gpb_parse:resolve_refs(
-            gpb_parse:reformat_names(
-              gpb_parse:flatten_defs(
-                gpb_parse:absolutify_names(Elems))))).
+        do_process_sort_defs(Elems).
 
 resolve_refs_with_packages_test() ->
     {ok, Elems} = parse_lines(["package p1;"
@@ -209,11 +215,28 @@ resolve_refs_with_packages_test() ->
                          #field{name=w}]},
      {{msg,'p1.m1.m2'}, [#field{name=x}]},
      {{msg,'p1.m3'},    [#field{name=b, type={msg,'p1.m1.m2'}}]}] =
-        lists:sort(
-          gpb_parse:resolve_refs(
-            gpb_parse:reformat_names(
-              gpb_parse:flatten_defs(
-                gpb_parse:absolutify_names(Elems, [use_packages]))))).
+        do_process_sort_defs(Elems, [use_packages]).
+
+package_can_appear_anywhere_toplevelwise_test() ->
+    %% The google protoc seems accepts one package specifiers anywhere
+    %% at the top-level. It must not be at the beginning,
+    %% yet it applies to all (non-imported) definitions in the proto file.
+    {ok, Elems1} = parse_lines(["package p1;"
+                                "message m1 { required uint32 x = 1; }",
+                                "message m2 { required uint32 y = 2; }"]),
+    {ok, Elems2} = parse_lines(["message m1 { required uint32 x = 1; }",
+                                "package p1;"
+                                "message m2 { required uint32 y = 2; }"]),
+    {ok, Elems3} = parse_lines(["message m1 { required uint32 x = 1; }",
+                                "message m2 { required uint32 y = 2; }",
+                                "package p1;"]),
+    [{package, p1},
+     {{msg,'p1.m1'}, [#field{}]},
+     {{msg,'p1.m2'}, [#field{}]}] = Defs =
+        do_process_sort_defs(Elems1, [use_packages]),
+    ?assertEqual(Defs, do_process_sort_defs(Elems2, [use_packages])),
+    ?assertEqual(Defs, do_process_sort_defs(Elems3, [use_packages])).
+
 
 enumerates_msg_fields_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
@@ -226,11 +249,7 @@ enumerates_msg_fields_test() ->
      {{msg,m1},       [#field{name=y, fnum=11, rnum=2},
                        #field{name=z, fnum=12, rnum=3}]},
      {{msg,'m1.m2'},  [#field{name=x, fnum=1,  rnum=2}]}] =
-        lists:sort(
-          gpb_parse:enumerate_msg_fields(
-            gpb_parse:resolve_refs(
-              gpb_parse:reformat_names(
-                gpb_parse:flatten_defs(gpb_parse:absolutify_names(Elems)))))).
+        do_process_sort_defs(Elems).
 
 field_opt_normalization_test() ->
     {ok,Defs} = parse_lines(["message m1 {"
@@ -356,9 +375,9 @@ verify_succeeds_for_defined_ref_in_message_test() ->
                                "message m2 { required uint32 x = 1; }"]).
 
 verify_catches_missing_ref_in_message_test() ->
-    {error, [{reference_to_undefined_msg_or_enum, _}]} = Error =
+    {error, [{ref_to_undefined_msg_or_enum, _}]} = Error =
         do_parse_verify_defs(["message m1 { required m2 f1 = 1; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "m2"]).
 
 verify_succeeds_for_good_enum_default_value_test() ->
@@ -370,7 +389,7 @@ verify_catches_undefined_enum_value_in_default_test() ->
     {error, [_]} = Error = do_parse_verify_defs(
                              ["enum e { e1 = 1; e2 = 2; }"
                               "message m1 { required e f1 = 1 [default=e3];}"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "e3"]).
 
 verify_succeeds_for_valid_integer_in_default_test() ->
@@ -381,21 +400,21 @@ verify_catches_invalid_integer_in_default_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required uint32 f1 = 1 [default=-1]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "-1"]).
 
 verify_catches_invalid_integer_in_default_2_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required uint32 f1 = 1 [default=e3]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "e3"]).
 
 verify_catches_invalid_integer_in_default_3_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required uint32 f1 = 1 [default=\"abc\"]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1"]).
 
 verify_succeeds_for_valid_string_in_default_test() ->
@@ -408,7 +427,7 @@ verify_catches_invalid_string_in_default_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required string f1 = 1 [default=344]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "344"]).
 
 verify_succeeds_for_valid_float_in_default_test() ->
@@ -423,9 +442,8 @@ verify_catches_invalid_float_in_default_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required float f1 = 1 [default=\"abc\"]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "abc"]).
-
 
 verify_succeeds_for_bool_in_default_test() ->
     ok = do_parse_verify_defs(
@@ -437,28 +455,65 @@ verify_catches_invalid_bool_in_default_1_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required bool f1 = 1 [default=\"abc\"]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "abc"]).
 
 verify_catches_invalid_bool_in_default_2_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required bool f1 = 1 [default=TRUE]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "TRUE"]).
 
 verify_catches_invalid_bool_in_default_3_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required bool f1 = 1 [default=1]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_verification_error(Error)),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1"]).
 
+verify_catches_invalid_rpc_return_type_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["enum e1 { a=1; }",
+           "message m1 { required uint32 x = 1; }",
+           "service s1 { rpc req(m1) returns (e1); }"]),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["s1", "req", "e1", "return"]).
+
+verify_catches_invalid_rpc_return_ref_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required uint32 x = 1; }",
+           "service s1 { rpc req(m1) returns (m2); }"]),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["s1", "req", "m2", "return"]).
+
+verify_catches_invalid_rpc_arg_type_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["enum e1 { a=1; }",
+           "message m1 { required uint32 x = 1; }",
+           "service s1 { rpc req(e1) returns (m1); }"]),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["s1", "req", "e1", "arg"]).
+
+verify_catches_invalid_rpc_arg_ref_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required uint32 x = 1; }",
+           "service s1 { rpc req(m2) returns (m1); }"]),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["s1", "req", "m2", "arg"]).
 
 do_parse_verify_defs(Lines) ->
     {ok, Elems} = parse_lines(Lines),
-    gpb_parse:verify_defs(
-      gpb_parse:flatten_defs(gpb_parse:absolutify_names(Elems))).
+    case gpb_parse:post_process(Elems, []) of
+        {ok, _} ->
+            ok;
+        {error, Reasons} ->
+            {error, Reasons}
+    end.
 
 verify_flat_string(S) when is_list(S) ->
     case lists:all(fun is_integer/1, S) of
@@ -493,12 +548,8 @@ parse_lines(Lines) ->
     end.
 
 do_process_sort_defs(Defs) ->
-    lists:sort(
-      gpb_parse:normalize_msg_field_options(
-        gpb_parse:enumerate_msg_fields(
-          gpb_parse:extend_msgs(
-            gpb_parse:resolve_refs(
-              gpb_parse:reformat_names(
-                gpb_parse:flatten_defs(
-                  gpb_parse:absolutify_names(Defs)))))))).
+    do_process_sort_defs(Defs, []).
 
+do_process_sort_defs(Defs, Opts) ->
+    {ok, Defs2} = gpb_parse:post_process(Defs, Opts),
+    lists:sort(Defs2).
