@@ -3306,9 +3306,9 @@ to_lower(A) when is_atom(A) ->
 %% -- compile to memory -----------------------------------------------------
 
 compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
-    ModAsBin = list_to_binary(atom_to_list(Mod)),
-    ErlCode2 = replace_module_macro(ErlCode, ModAsBin),
-    {ok, Toks, _EndLine} = erl_scan:string(flatten_iolist(ErlCode2)),
+    ModAsStr = flatten_iolist(f("~p", [Mod])),
+    ErlCode2 = replace_module_macro(ErlCode, ModAsStr),
+    {ok, Toks, _EndLine} = erl_scan:string(ErlCode2),
     FormToks = split_toks_at_dot(Toks),
     Forms = lists:map(fun(Ts) ->
                               {ok, Form} = erl_parse:parse_form(Ts),
@@ -3322,12 +3322,15 @@ compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
     combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
                                  PossibleNifCode).
 
-replace_module_macro(<<$?, "MODULE", Rest/binary>>, ModBin) ->
-    <<ModBin/binary, (replace_module_macro(Rest, ModBin))/binary>>;
-replace_module_macro(<<C, Rest/binary>>, ModBin) ->
-    <<C, (replace_module_macro(Rest, ModBin))/binary>>;
-replace_module_macro(<<>>, _ModBin) ->
-    <<>>.
+replace_module_macro(Code, ModAsStr) ->
+    rmm_aux(Code, ModAsStr, []).
+
+rmm_aux(<<"?MODULE", Rest/binary>>, ModAsStr, Acc) ->
+    rmm_aux(Rest, ModAsStr, lists:reverse(ModAsStr, Acc));
+rmm_aux(<<C, Rest/binary>>, ModAsStr, Acc) ->
+    rmm_aux(Rest, ModAsStr, [C | Acc]);
+rmm_aux(<<>>, _ModAsStr, Acc) ->
+    lists:reverse(Acc).
 
 split_toks_at_dot(AllToks) ->
     case lists:splitwith(fun is_no_dot/1, AllToks) of
