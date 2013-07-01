@@ -487,8 +487,8 @@ c() ->
 %% @doc This function is intended as a command line interface for the compiler.
 %% Call it from the command line as follows:
 %% ```
-%%    erl <erlargs> [gpb-opts] -s gpb_compile c ProtoFile.proto
-%%    erl <erlargs> -s gpb_compile c ProtoFile.proto -extra [gpb-opts]
+%%    erl <erlargs> [gpb-opts] -s gpb_compile c File.proto ...
+%%    erl <erlargs> -s gpb_compile c File.proto ... -extra [gpb-opts]
 %% '''
 %% The `<erlargs>' can be `-noshell -noinput +B -boot start_clean -pa SomeDir'
 %%
@@ -532,34 +532,39 @@ c() ->
 %%   <dt>`--version' or `-V'</dt>
 %%   <dd>Show the version number of gpb.</dd>
 %% </dl>
+%% If several files are specified, each is compiled individually, no
+%% checking is done for instance for multiply defined messages or
+%% fields across files, such as the `protoc' does.
 -spec c([string() | atom()]) -> no_return().
-c([File]) when is_atom(File); is_list(File) -> %% invoked with -s or -run
-    FileName = if File == undefined -> undefined;
-                  is_atom(File)     -> atom_to_list(File);
-                  is_list(File)     -> File
-               end,
+c([F | _]=Files) when is_atom(F); is_list(F) -> %% invoked with -s or -run
+    FileNames = [if File == undefined -> undefined;
+                    is_atom(File)     -> atom_to_list(File);
+                    is_list(File)     -> File
+                 end
+                 || File <- Files],
     Args = init:get_arguments(),
     PlainArgs = init:get_plain_arguments(),
     Opts1 = parse_opts(Args, PlainArgs),
     Opts2 = [report_warnings, report_errors] ++ Opts1,
-    case determine_cmdline_op(Opts2, FileName) of
-        error  ->
-            show_help(),
-            init:stop(1);
-        show_help  ->
-            show_help(),
-            init:stop(0);
-        show_version  ->
-            show_version(),
-            init:stop(0);
-        compile ->
-            case file(FileName, Opts2) of
-                ok ->
-                    init:stop(0);
-                {error, _Reason} ->
-                    init:stop(1)
-            end
-    end,
+    [case determine_cmdline_op(Opts2, FileName) of
+         error  ->
+             show_help(),
+             halt(1);
+         show_help  ->
+             show_help(),
+             halt(0);
+         show_version  ->
+             show_version(),
+             halt(0);
+         compile ->
+             case file(FileName, Opts2) of
+                 ok ->
+                     halt(0);
+                 {error, _Reason} ->
+                     halt(1)
+             end
+     end
+     || FileName <- FileNames],
     timer:sleep(infinity). %% give init:stop time to do its work
 
 determine_cmdline_op(Opts, FileName) ->
@@ -619,11 +624,11 @@ show_help() ->
       "    --help  -h~n"
       "          Show help~n"
       "    --version  -V~n"
-      "          Show version~n"
+      "          Show interface version~n"
       , [gpb:version_as_string(), ?MODULE, ?MODULE, ?MODULE]).
 
 show_version() ->
-    io:format("gpb version ~s~n", [gpb:version_as_string()]).
+    io:format("gpb interface version ~s~n", [gpb:version_as_string()]).
 
 parse_opts(Args, PlainArgs) ->
     arg_zf(fun parse_opt/1, Args) ++ plain_arg_zf(fun parse_opt/1, PlainArgs).
