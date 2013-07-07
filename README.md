@@ -53,16 +53,20 @@ Features of gpb
 *  Introspection
 
    gpb generates some functions for examining the messages and enums:
-   - get_msg_defs(), get_msg_names(), get_enum_names()
-   - find_msg_def(MsgName) and fetch_msg_def(MsgName)
-   - find_eunm_def(MsgName) and fetch_enum_def(MsgName)
+   - `get_msg_defs()`, `get_msg_names()`, `get_enum_names()`
+   - `find_msg_def(MsgName)` and `fetch_msg_def(MsgName)`
+   - `find_enum_def(MsgName)` and `fetch_enum_def(MsgName)`
+   - `enum_symbol_by_value(EnumName, Value)`,
+   - `enum_symbol_by_value_<EnumName>(Value)`,
+     `enum_value_by_symbol(EnumName, Enum)` and
+     `enum_value_by_symbol_<EnumName>(Enum)`
 
-   There are also some version information:
+   There are also some version information functions:
 
-   - gpb:version_as_string() and gpb:version_as_list()
-   - GeneratedCode:version_as_string() and GeneratedCode:version_as_list()
-   - ?gpb_version  (in gpb_version.hrl)
-   - ?'GeneratedCode_gpb_version'  (in GeneratedCode.hrl)
+   - `gpb:version_as_string()` and `gpb:version_as_list()`
+   - `GeneratedCode:version_as_string()` and `GeneratedCode:version_as_list()`
+   - `?gpb_version`  (in gpb_version.hrl)
+   - `?'GeneratedCode_gpb_version'  (in GeneratedCode.hrl)
 
 *  Reporting of errors in .proto files
 
