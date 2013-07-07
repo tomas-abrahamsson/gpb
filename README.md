@@ -156,3 +156,32 @@ Mapping of protocol buffer datatypes to erlang
     string                unicode string, thus list of integers
     ----------------------------------------------------------------
     bytes                 binary
+
+
+Interaction with rebar
+----------------------
+
+Place the .proto files for instance in a `proto/` subdirectory.
+Any subdirectory, other than src/, is fine, since rebar will try to
+use another protobuf compiler for any .proto it finds in the src/
+subdirectory.  Here are some some lines for the `rebar.config` file:
+
+    %% -*- erlang -*-
+    {pre_hooks,
+     [{compile, "mkdir -p include"}, %% ensure the include dir exists
+      {compile,
+       "erl +B -noinput -pa /path/to/gpb/ebin "
+       "    -I`pwd`/proto -o-erl src -o-hrl include "
+       "    -s gpb_compile c `pwd`/proto/*.proto"
+      }]}.
+
+    {post_hooks,
+     [{clean,
+       "bash -c 'for f in proto/*.proto; "
+       "do "
+       "  rm -f src/$(basename $f .proto).erl; "
+       "  rm -f include/$(basename $f .proto).hrl; "
+       "done'"}
+     ]}.
+
+    {erl_opts, [{i, "/path/to/gpb/include"}]}.
