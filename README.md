@@ -68,7 +68,7 @@ Features of gpb
 
    Gpb is not very good at error reporting, especially referencing
    errors, such as references to messages that are not defined.
-   You might want to first verify with `protoc' that the .proto files
+   You might want to first verify with `protoc` that the .proto files
    are valid before feeding them to gpb.
 
 *  Caveats
@@ -121,7 +121,7 @@ For performance, the generated Erlang code avoids creating sub
 binaries as far as possible. It has to for sub messages, strings and
 bytes, but for the rest of the types, it avoids creating sub binaries,
 both during encoding and decoding (for info, compile with the
-`bin_opt_info' option)
+`bin_opt_info` option)
 
 The Erlang code ran in the smp emulator, though only one CPU core
 was utilized.
