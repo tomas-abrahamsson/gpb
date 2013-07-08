@@ -47,11 +47,84 @@
 %%   but this has been under debate on the erlang mailing list as it
 %%   was unexpected. Related: principle of least astonishment.
 
+
+%% Valid version format is:
+%%      <n>.<m>            % e.g. 2.1, 2.1.1, etc (any number of dots and ints)
+%%      <n>.<m>-<o>-<text> % e.g. 2.1-53-gb996fbe means: a commit after 2.1
+%% or:  <text>             % e.g. jenkins-gpb-226
+%%
+%% The format is what `git describe --always --tags' produces,
+%% given that all tags are always on the format <n>.<m>.
+%% However, allow a text format as well. For example Jenkins adds
+%% its own tags on their own format.
 version_as_string() ->
     ?gpb_version.
 
-version_as_list() -> %% this one is better for comparison
-    [list_to_integer(S) || S <- string:tokens(?gpb_version, ".")].
+%% The version_as_list is better if you want to be able to compare
+%% versions, for instance to see if one version is larger/later than
+%% another.
+%%
+%% For the case of non-tagged versions, this scheme often works, but
+%% is a bit of a kluge, since in erlang, numbers are the smallest of
+%% types, and a string such as "gb996fbe" cannot (and generally should
+%% not) be converted to a number. So for non-tagged versions, one
+%% should only check whether they are or are not equal, not whether
+%% one is larger/later or smaller/earlier than another.
+%%
+%% This will return for example:
+%%    "2.1"             -> [2,1]
+%%    "2.1-53-gb996fbe" -> [2,1,0,0,53,"gb996fbe"]
+%%    "2.1.1"           -> [2,1,1]
+%%    "2.2"             -> [2,2]
+%%    "<text>"          -> ["<text>"]
+%%
+%% (Lists are better than tuples when doing comparisons.  For tuples
+%% this holds: {2,2} < {2,1,1}, since tuples are first compared by
+%% size then element by element for tuples of the same size. For
+%% lists, it holds instead that: [2,1,1] < [2,2].)
+version_as_list() ->
+    version_as_list(version_as_string()).
+
+version_as_list(S) ->
+    case analyse_vsn_format(S) of
+        git  -> v2l(S, "");
+        text -> [S]
+    end.
+
+-define(is_digit(C), $0 =< C, C =< $9).
+
+analyse_vsn_format(S) ->
+    case catch analyse_vsn_1(S) of
+        git -> git;
+        _X  -> text
+    end.
+
+
+analyse_vsn_1([C|T]) when ?is_digit(C) -> analyse_vsn_2(T). % must begin with 0-9
+
+analyse_vsn_2([C|T]) when ?is_digit(C) -> analyse_vsn_2(T);
+analyse_vsn_2("."++T)                  -> analyse_vsn_3(T);
+analyse_vsn_2("-"++T)                  -> analyse_vsn_4(T);
+analyse_vsn_2("")                      -> git.
+
+analyse_vsn_3([C|T]) when ?is_digit(C) -> analyse_vsn_2(T). % 0-9 must follow .
+
+analyse_vsn_4([C|T]) when ?is_digit(C) -> analyse_vsn_5(T). % 0-9 must follow -
+
+analyse_vsn_5([C|T]) when ?is_digit(C) -> analyse_vsn_5(T);
+analyse_vsn_5("-"++[_|_])              -> git. % at least one char after -
+
+
+v2l([C|T], Acc) when ?is_digit(C) -> v2l(T, [C|Acc]);
+v2l("."++T, Acc)                  -> [v_acc_to_int(Acc) | v2l(T, "")];
+v2l("", Acc)                      -> [v_acc_to_int(Acc)];
+v2l("-"++T, Acc)                  -> [v_acc_to_int(Acc), 0, 0 | v2l2(T, "")].
+
+v2l2([C|Tl], Acc) when ?is_digit(C) -> v2l2(Tl, [C|Acc]);
+v2l2("-"++T, Acc)                   -> [v_acc_to_int(Acc), T].
+
+v_acc_to_int(Acc) ->
+    list_to_integer(lists:reverse(Acc)).
 
 decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
@@ -577,6 +650,42 @@ keyfetch(Key, KVPairs) ->
             erlang:error({error, {no_such_key, Key, KVPairs}})
     end.
 
+version_format_test() ->
+    git = analyse_vsn_format("2"),
+    git = analyse_vsn_format("2.1"),
+    git = analyse_vsn_format("2.1.1"),
+    git = analyse_vsn_format("2.1.1.1"),
+    %% a development version after 2.1, but before any 2.2
+    git = analyse_vsn_format("2.1-53-gb996fbe"),
+    %% non-digit version components
+    text = analyse_vsn_format("2.2x"),
+    text = analyse_vsn_format("2.x"),
+    text = analyse_vsn_format("3y"),
+    text = analyse_vsn_format("y"),
+    text = analyse_vsn_format("2.1-4z-gb996fbe"),
+    text = analyse_vsn_format("2.1-z-gb996fbe"),
+    %% malplaced dots
+    text = analyse_vsn_format("."),
+    text = analyse_vsn_format(".2"),
+    text = analyse_vsn_format("..2"),
+    text = analyse_vsn_format("2."),
+    text = analyse_vsn_format("2.1.."),
+    text = analyse_vsn_format("2..1"),
+    %% missing bits and pieces
+    text = analyse_vsn_format("2.1-53-"),
+    text = analyse_vsn_format("2.1-53-"),
+    text = analyse_vsn_format("2.1-"),
+    text = analyse_vsn_format("2-"),
+    text = analyse_vsn_format("-"),
+    %% misc other
+    text = analyse_vsn_format("2.1--53-gb996fbe").
+
+version_as_list_test() ->
+    [2,1] = version_as_list("2.1"),
+    [2,1,1] = version_as_list("2.1.1"),
+    [2,1,0,0,53,"gb996fbe"] = version_as_list("2.1-53-gb996fbe"),
+    [2,2] = version_as_list("2.2"),
+    ["jenkins-gpb-226"] = version_as_list("jenkins-gpb-226").
 
 encode_zigzag_test() ->
     0 = encode_zigzag(0),

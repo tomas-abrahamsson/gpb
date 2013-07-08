@@ -624,11 +624,11 @@ show_help() ->
       "    --help  -h~n"
       "          Show help~n"
       "    --version  -V~n"
-      "          Show interface version~n"
+      "          Show version~n"
       , [gpb:version_as_string(), ?MODULE, ?MODULE, ?MODULE]).
 
 show_version() ->
-    io:format("gpb interface version ~s~n", [gpb:version_as_string()]).
+    io:format("gpb version ~s~n", [gpb:version_as_string()]).
 
 parse_opts(Args, PlainArgs) ->
     arg_zf(fun parse_opt/1, Args) ++ plain_arg_zf(fun parse_opt/1, PlainArgs).

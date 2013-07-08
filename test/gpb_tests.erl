@@ -619,3 +619,22 @@ verify_path_when_failure_test() ->
                  verify_msg(#m1{a = bad_msg}, MsgDefs)),
     ?assertError({gpb_type_error, {_, [_, {path, 'm1.a.b'}]}},
                  verify_msg(#m1{a = #m2{b=x}}, MsgDefs)).
+
+version_test() ->
+    %% Check that none of version retrieval functions crash.
+    S = gpb:version_as_string(),
+    _ = gpb:version_as_list(),
+
+    %% Make sure the app file's version equals the version in gpb_version.hrl
+    App = gpb,
+    AppDir0 = filename:dirname(code:which(App)),
+    AppDir1 = case filename:basename(AppDir0) of
+                  ".eunit" -> filename:dirname(AppDir0); % run from rebar eunit
+                  "ebin"   -> filename:dirname(AppDir0); % run from emacs
+                  "gpb"++_ -> AppDir0                    % already ok
+              end,
+    AppEbin = filename:join(AppDir1, "ebin"),
+    AppFile = filename:join(AppEbin, lists:concat([App, ".app"])),
+    {ok, [{application, App, PL}]} = file:consult(AppFile),
+    ?assertEqual(S, proplists:get_value(vsn, PL)),
+    ok.
