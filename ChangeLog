@@ -1,0 +1,47 @@
+-*- coding: utf-8 -*-
+Version 2.2-to-be
+2013-07-xy
+
+	* Wrap generated skip-functions with quotes. Thanks to jesse-ad.
+	* Experimental support for calling protoc code via a NIF
+	* Empty lists are now default values for repeated fields. Thanks
+	to Martin Donath.
+	* New option, use_packages for prepending the package name found
+	in the proto file, to the message names. Thanks to Martin Donath.
+	* New option: strings_as_binaries (-strbin), for returning strings
+	as binaries. Thanks to Lars Thorsen for suggesting this option.
+	* New option: {o_erl,Dir} (-o-erl Dir), {o_hrl,Dir} (-o-hrl Dir)
+	and {o_nif_cc,Dir} (-o-nif-cc Dir) to specify destination
+	directory by file type. Thanks to Patrik Sandahl for suggesting
+	those options.
+	* New option: include_as_lib (-il) to include gpb.hrl as a
+	library. This makes it easier to integrate with rebar. Thanks to
+	Martin Donath.
+	* Generate introspection functions for enum conversions:
+	M:enum_symbol_by_value/2, M:enum_value_by_symbol/2,
+	M:enum_symbol_by_value_<Enum>/1, M:enum_value_by_symbol_<Enum>/1;
+	thanks to Patrik Sandahl for suggesting those functions.
+	* Bugfix name resolution. Thanks to Heiner Bunjes for reporting
+	the bug. This prompted a major rewrite of the name resolution code
+	that was originally a quick patch-work, and not in very good shape.
+	* Handle C-style comments. Thanks to Patrik Sandahl for reporting
+	this bug.
+	* Add a section to the README.md showing rebar integration, thanks
+	to Bin Wang for asking the question that prompted me to write it
+	up.
+	* Bugfix command line option parsing using the -extra alternative.
+	* Benchmark code improvements.
+	* Build: version number: defined format and enforced/verified
+	consistency between gpb_version.hrl and src/gpb.app.src: using the
+	git tag as the source of information.
+
+Version 2.1
+2011-10-31  Tomas Abrahamsson  <tomas.abrahamsson@gmail.com>
+
+	* Package names are dotted rather than with underscores
+	* New generated introspection function: M:get_package_name/0.
+
+Version 2.0
+2011-07-10  Tomas Abrahamsson  <tab@lysator.liu.se>
+
+	* First public version
