@@ -1,6 +1,6 @@
 -*- coding: utf-8 -*-
-Version 2.2-to-be
-2013-07-xy
+Version 2.2
+2013-07-13
 
 	* Wrap generated skip-functions with quotes. Thanks to jesse-ad.
 	* Experimental support for calling protoc code via a NIF
