@@ -51,14 +51,13 @@
 %% Valid version format is:
 %%      <n>.<m>            % e.g. 2.1, 2.1.1, etc (any number of dots and ints)
 %%      <n>.<m>-<o>-<text> % e.g. 2.1-53-gb996fbe means: a commit after 2.1
-%% or:  <text>             % e.g. jenkins-gpb-226
 %%
 %% The format is what `git describe --always --tags' produces,
 %% given that all tags are always on the format <n>.<m>.
-%% However, allow a text format as well. For example Jenkins adds
-%% its own tags on their own format.
 version_as_string() ->
-    ?gpb_version.
+    S = ?gpb_version,
+    assert_version_format(S),
+    S.
 
 %% The version_as_list is better if you want to be able to compare
 %% versions, for instance to see if one version is larger/later than
@@ -76,7 +75,6 @@ version_as_string() ->
 %%    "2.1-53-gb996fbe" -> [2,1,0,0,53,"gb996fbe"]
 %%    "2.1.1"           -> [2,1,1]
 %%    "2.2"             -> [2,2]
-%%    "<text>"          -> ["<text>"]
 %%
 %% (Lists are better than tuples when doing comparisons.  For tuples
 %% this holds: {2,2} < {2,1,1}, since tuples are first compared by
@@ -86,9 +84,12 @@ version_as_list() ->
     version_as_list(version_as_string()).
 
 version_as_list(S) ->
+    v2l(S, "").
+
+assert_version_format(S) ->
     case analyse_vsn_format(S) of
-        git  -> v2l(S, "");
-        text -> [S]
+        git  -> ok;
+        text -> erlang:error({invalid_version_format,S})
     end.
 
 -define(is_digit(C), $0 =< C, C =< $9).
@@ -98,7 +99,6 @@ analyse_vsn_format(S) ->
         git -> git;
         _X  -> text
     end.
-
 
 analyse_vsn_1([C|T]) when ?is_digit(C) -> analyse_vsn_2(T). % must begin with 0-9
 
@@ -113,7 +113,6 @@ analyse_vsn_4([C|T]) when ?is_digit(C) -> analyse_vsn_5(T). % 0-9 must follow -
 
 analyse_vsn_5([C|T]) when ?is_digit(C) -> analyse_vsn_5(T);
 analyse_vsn_5("-"++[_|_])              -> git. % at least one char after -
-
 
 v2l([C|T], Acc) when ?is_digit(C) -> v2l(T, [C|Acc]);
 v2l("."++T, Acc)                  -> [v_acc_to_int(Acc) | v2l(T, "")];
@@ -651,41 +650,40 @@ keyfetch(Key, KVPairs) ->
     end.
 
 version_format_test() ->
-    git = analyse_vsn_format("2"),
-    git = analyse_vsn_format("2.1"),
-    git = analyse_vsn_format("2.1.1"),
-    git = analyse_vsn_format("2.1.1.1"),
+    ok = assert_version_format("2"),
+    ok = assert_version_format("2.1"),
+    ok = assert_version_format("2.1.1"),
+    ok = assert_version_format("2.1.1.1"),
     %% a development version after 2.1, but before any 2.2
-    git = analyse_vsn_format("2.1-53-gb996fbe"),
+    ok = assert_version_format("2.1-53-gb996fbe"),
     %% non-digit version components
-    text = analyse_vsn_format("2.2x"),
-    text = analyse_vsn_format("2.x"),
-    text = analyse_vsn_format("3y"),
-    text = analyse_vsn_format("y"),
-    text = analyse_vsn_format("2.1-4z-gb996fbe"),
-    text = analyse_vsn_format("2.1-z-gb996fbe"),
+    ?assertError(_, assert_version_format("2.2x")),
+    ?assertError(_, assert_version_format("2.x")),
+    ?assertError(_, assert_version_format("3y")),
+    ?assertError(_, assert_version_format("y")),
+    ?assertError(_, assert_version_format("2.1-4z-gb996fbe")),
+    ?assertError(_, assert_version_format("2.1-z-gb996fbe")),
     %% malplaced dots
-    text = analyse_vsn_format("."),
-    text = analyse_vsn_format(".2"),
-    text = analyse_vsn_format("..2"),
-    text = analyse_vsn_format("2."),
-    text = analyse_vsn_format("2.1.."),
-    text = analyse_vsn_format("2..1"),
+    ?assertError(_, assert_version_format(".")),
+    ?assertError(_, assert_version_format(".2")),
+    ?assertError(_, assert_version_format("..2")),
+    ?assertError(_, assert_version_format("2.")),
+    ?assertError(_, assert_version_format("2.1..")),
+    ?assertError(_, assert_version_format("2..1")),
     %% missing bits and pieces
-    text = analyse_vsn_format("2.1-53-"),
-    text = analyse_vsn_format("2.1-53-"),
-    text = analyse_vsn_format("2.1-"),
-    text = analyse_vsn_format("2-"),
-    text = analyse_vsn_format("-"),
+    ?assertError(_, assert_version_format("2.1-53-")),
+    ?assertError(_, assert_version_format("2.1-53-")),
+    ?assertError(_, assert_version_format("2.1-")),
+    ?assertError(_, assert_version_format("2-")),
+    ?assertError(_, assert_version_format("-")),
     %% misc other
-    text = analyse_vsn_format("2.1--53-gb996fbe").
+    ?assertError(_, assert_version_format("2.1--53-gb996fbe")).
 
 version_as_list_test() ->
     [2,1] = version_as_list("2.1"),
     [2,1,1] = version_as_list("2.1.1"),
     [2,1,0,0,53,"gb996fbe"] = version_as_list("2.1-53-gb996fbe"),
-    [2,2] = version_as_list("2.2"),
-    ["jenkins-gpb-226"] = version_as_list("jenkins-gpb-226").
+    [2,2] = version_as_list("2.2").
 
 encode_zigzag_test() ->
     0 = encode_zigzag(0),
