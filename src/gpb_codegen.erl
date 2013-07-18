@@ -25,11 +25,20 @@
 %%
 %% <dl>
 %%   <dt>`gpb_codegen:mk_fn(FnName, fun(Args) -> Body end)'</dt>
-%%   <dd>will be replaced by a parse-tree for a function `FnName',
-%%       with arguments and body as in the specified fun.
+%%   <dd><p>will be replaced by a parse-tree for a function `FnName',
+%%         with `Args' and `Body' as in the specified.</p>
+%%       <p>The `Body' may contain meta variables---variables that end in
+%%         at-character, for example `Var@'.
+%%         These are not variables in the parse-tree, but the values
+%%         they have in the surrounding code is used. Since the value
+%%         will end up in a parse tree, it cannot be a pid, a
+%%         reference or a fun. It must be a value you could write in
+%%         source code.</p>
+%%       <p>The `Body' may also cotain parse-tree-meta-variables---variables
+%%         that end in two at-characters, for example `Var@@'.
+%%         These de note parse-tree values that are replaced in verbatim.
 %%   </dd>
 %% </dl>
-
 
 parse_transform(Forms, Opts) ->
     transform_forms(Forms, Opts).
@@ -117,25 +126,13 @@ mk_partly_abstract_function(FnNameExpr, FnClauses) ->
     %% while still being agnostic about the erl_parse tree format.
     %% I think I only rely on same representation of atoms
     %% (which do have a line number though...)
-    substitute(
-      erl_parse:abstract(
-        erl_syntax:revert(
-          erl_syntax:function(FnNameExprPlaceholder, FnClauses))),
-      erl_syntax:revert(FnNameExprPlaceholder),
-      FnNameExpr).
-
-substitute(Term, ToChange, NewTerm) ->
-    %% io:format("ToChange=~p~nTerm=~p~n", [ToChange, Term]),
-    subst_term(Term, ToChange, NewTerm).
-
-subst_term(ToChange, ToChange, NewTerm) ->
-    NewTerm;
-subst_term([L | Rest], ToChange, NewTerm) ->
-    [subst_term(L, ToChange, NewTerm) | subst_term(Rest, ToChange, NewTerm)];
-subst_term(Tuple, ToChange, NewTerm) when is_tuple(Tuple) ->
-    list_to_tuple(subst_term(tuple_to_list(Tuple), ToChange, NewTerm));
-subst_term(Elem, _ToChange, _NewTerm) ->
-    Elem.
+    subst_meta_var_values(
+      substitute(
+        erl_parse:abstract(
+          erl_syntax:revert(
+            erl_syntax:function(FnNameExprPlaceholder, FnClauses))),
+        erl_syntax:revert(FnNameExprPlaceholder),
+        FnNameExpr)).
 
 find_function_clauses([Form | Rest], FnName, Arity) ->
     case erl_syntax:type(Form) of
@@ -151,6 +148,58 @@ find_function_clauses([Form | Rest], FnName, Arity) ->
     end;
 find_function_clauses([], FnName, Arity) ->
     erlang:error({reference_to_undefined_function,FnName,Arity}).
+
+substitute(Term, TermToBeChanged, NewTerm) ->
+    map_term(fun(Node) ->
+                     if Node =:= TermToBeChanged -> NewTerm;
+                        true                     -> Node
+                     end
+             end,
+             Term).
+
+subst_meta_var_values(Term) ->
+    map_term(fun try_subst_meta_var_value/1, Term).
+
+map_term(F, [Term | Rest]) ->
+    case F(Term) of
+        Term -> [map_term(F, Term) | map_term(F, Rest)];
+        New  -> [New | map_term(F, Rest)]
+    end;
+map_term(F, Tuple) when is_tuple(Tuple) ->
+    case F(Tuple) of
+        Tuple -> list_to_tuple(map_term(F, tuple_to_list(Tuple)));
+        New   -> New
+    end;
+map_term(F, Other) ->
+    F(Other).
+
+try_subst_meta_var_value(Term) ->
+    try begin C = erl_syntax:concrete(Term), {erl_syntax:type(C), C} end of
+        {variable, ConcreteTerm} ->
+            case var_metaness(erl_syntax:variable_name(ConcreteTerm)) of
+                meta       -> mk_apply(erl_parse, abstract, [ConcreteTerm]);
+                parse_meta -> ConcreteTerm;
+                ordinary   -> Term
+            end;
+        _ ->
+            Term
+    catch _:_ ->
+            Term
+    end.
+
+var_metaness(VarName) ->
+    VarNameAsStr = atom_to_list(VarName),
+    case lists:suffix("@@", VarNameAsStr) of
+        true  -> parse_meta;
+        false -> case lists:suffix("@", VarNameAsStr) of
+                     true  -> meta;
+                     false -> ordinary
+                 end
+    end.
+
+mk_apply(M, F, Args) when is_atom(M), is_atom(F) ->
+    erl_syntax:revert(
+      erl_syntax:application(erl_syntax:atom(M), erl_syntax:atom(F), Args)).
 
 %% -> {Name,Arity} | {Module,{Name,Arity}}
 analyze_implicit_fun_name(Tree) ->
