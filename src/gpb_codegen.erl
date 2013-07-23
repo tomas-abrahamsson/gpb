@@ -27,7 +27,21 @@
 %% <dl>
 %%   <dt>`gpb_codegen:mk_fn(FnName, fun(Args) -> Body end)'</dt>
 %%   <dd>will be replaced by a parse-tree for a function `FnName',
-%%       with `Args' and `Body' as in the specified.
+%%       with `Args' and `Body' as in the specified fun.
+%%       The `FnName' is evaluated at run-time, not at compile-time.
+%%   </dd>
+%%   <dt>`gpb_codegen:mk_fn(FnName, fun(Args) -> Body end, RtTransforms)'</dt>
+%%   <dd><p>Like gpb_codegen:mk_fn/2, but apply `RtTransforms' at run-time
+%%         before returning the parse-tree.</p>
+%%       <p>The following `RtTransforms' are available:</p>
+%%       <dl>
+%%         <dt>`{replace,Marker::atom(),Replacement::term()}'</dt>
+%%         <dd>Replace any occurrences of `Marker' with the syntax tree
+%%           representing `Replacement', which must be something that could
+%%           have been occurred as a literal term in some program text,
+%%           thus it must not contain any references, pids, ports, fun or such.
+%%         </dd>
+%%       </dl>
 %%   </dd>
 %% </dl>
 
@@ -151,19 +165,16 @@ find_function_clauses([], FnName, Arity) ->
     erlang:error({reference_to_undefined_function,FnName,Arity}).
 
 subst_atom(Term, AtomToBeChanged, NewExpr) ->
-    AtomLiteralToBeChanged = erl_syntax:atom_literal(AtomToBeChanged),
+    AtomLiteralToBeChanged = erl_syntax:atom_name(AtomToBeChanged),
     map_term(fun(Node) -> try_subst_atom(Node, AtomLiteralToBeChanged, NewExpr)
              end,
              Term).
 
 try_subst_atom(Node, AtomLiteralToBeChanged, NewExpr) ->
-    try {erl_syntax:type(Node), erl_syntax:atom_literal(Node)} of
-        {atom, AtomLiteralToBeChanged} ->
-            NewExpr;
-        {atom, _Other} ->
-            Node
-    catch error:_ ->
-            Node
+    case safe_analyze_atom_as_name(Node) of
+        {atom, AtomLiteralToBeChanged} -> NewExpr;
+        {atom, _Other}                 -> Node;
+        non_atom                       -> Node
     end.
 
 map_term(F, [Term | Rest]) ->
@@ -188,11 +199,23 @@ runtime_transform(ParseTree) ->
     runtime_transform(ParseTree, []).
 
 runtime_transform(ParseTree, Transforms) ->
-    lists:foldl(fun apply_transform/2, ParseTree, Transforms).
+    erl_syntax:revert(lists:foldl(fun apply_transform/2, ParseTree, Transforms)).
 
-apply_transform(_Transform, ParseTree) ->
-    %% Currently no transforms defined
-    ParseTree.
+apply_transform(Transform, ParseTree) ->
+    map_term(transform_to_mapper(Transform), ParseTree).
+
+transform_to_mapper({replace, Marker, Replacement}) ->
+    replacing_mapper(Marker, Replacement).
+
+replacing_mapper(Marker, Replacement) ->
+    ReplacementTree = erl_parse:abstract(Replacement),
+    fun(Node) ->
+            case safe_analyze_atom_as_value(Node) of
+                {atom, Marker} -> ReplacementTree;
+                {atom, _Other} -> Node;
+                non_atom       -> Node
+            end
+    end.
 
 %% -> {Name,Arity} | {Module,{Name,Arity}}
 analyze_implicit_fun_name(Tree) ->
@@ -203,3 +226,21 @@ analyze_function_name(Tree) ->
     Arity = erl_syntax:function_arity(Tree),
     %% Return a format like that of analyze_implicit_fun_name (no module)
     {Name, Arity}.
+
+%% -> {atom, atom()} | non_atom
+safe_analyze_atom_as_value(Node) ->
+    try erl_syntax:type(Node) of
+        atom -> {atom, erl_syntax:atom_value(Node)};
+        _    -> non_atom
+    catch error:_ ->
+            non_atom
+    end.
+
+%% -> {atom, string()} | non_atom %% the string is not single-quoted
+safe_analyze_atom_as_name(Node) ->
+    try erl_syntax:type(Node) of
+        atom -> {atom, erl_syntax:atom_name(Node)};
+        _    -> non_atom
+    catch error:_ ->
+            non_atom
+    end.
