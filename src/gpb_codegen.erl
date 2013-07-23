@@ -22,11 +22,12 @@
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
+%% @doc
 %% This parse transform provides the following re-writes:
 %%
 %% <dl>
 %%   <dt>`gpb_codegen:mk_fn(FnName, fun(Args) -> Body end)'</dt>
-%%   <dd>will be replaced by a parse-tree for a function `FnName',
+%%   <dd>Will be replaced by a parse-tree for a function `FnName',
 %%       with `Args' and `Body' as in the specified fun.
 %%       The `FnName' is evaluated at run-time, not at compile-time.
 %%   </dd>
@@ -38,8 +39,8 @@
 %%         <dt>`{replace,Marker::atom(),Replacement::term()}'</dt>
 %%         <dd>Replace any occurrences of `Marker' with the syntax tree
 %%           representing `Replacement', which must be something that could
-%%           have been occurred as a literal term in some program text,
-%%           thus it must not contain any references, pids, ports, fun or such.
+%%           have occurred as a literal term in some program text,
+%%           thus it must not contain any funs, pids, ports, references or such.
 %%         </dd>
 %%       </dl>
 %%   </dd>
@@ -47,7 +48,7 @@
 
 parse_transform(Forms, Opts) ->
     transform_forms(Forms, Opts).
-
+%% @end
 transform_forms(Forms, Opts) ->
     Mapper = mk_transform_fn(Forms),
     [debug_form(erl_syntax:revert(transform_form(Mapper, Form)), Opts)
