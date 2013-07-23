@@ -249,18 +249,18 @@ analyze_function_name(Tree) ->
 
 %% -> {atom, atom()} | non_atom
 safe_analyze_atom_as_value(Node) ->
-    try erl_syntax:type(Node) of
-        atom -> {atom, erl_syntax:atom_value(Node)};
-        _    -> non_atom
+    try {erl_syntax:type(Node), erl_syntax:atom_value(Node)} of
+        {atom, Value} -> {atom, Value};
+        _             -> non_atom
     catch error:_ ->
             non_atom
     end.
 
 %% -> {atom, string()} | non_atom %% the string is not single-quoted
 safe_analyze_atom_as_name(Node) ->
-    try erl_syntax:type(Node) of
-        atom -> {atom, erl_syntax:atom_name(Node)};
-        _    -> non_atom
+    try {erl_syntax:type(Node), erl_syntax:atom_name(Node)} of
+        {atom, Name} -> {atom, Name};
+        _            -> non_atom
     catch error:_ ->
             non_atom
     end.
