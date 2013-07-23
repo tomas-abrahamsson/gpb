@@ -41,14 +41,26 @@ plain_parse_transform_test() ->
     {ok, 1} = M:FnName(a),
     ?assertError(_, M:FnName(b)).
 
-replacements_during_codegen_test() ->
+term_replacements_test() ->
     M = ?dummy_mod,
     FnName = mk_test_fn_name(),
     {module,M} = l(M, gpb_codegen:mk_fn(FnName,
                                         fun(a) -> {ok, b} end,
-                                        [{replace,a,1},
-                                         {replace,b,2}])),
+                                        [{replace_term,a,1},
+                                         {replace_term,b,2}])),
+    ?assertError(_, M:FnName(a)),
     {ok, 2} = M:FnName(1).
+
+tree_replacements_test() ->
+    M = ?dummy_mod,
+    FnName = mk_test_fn_name(),
+    Var = gpb_codegen:expr(V),
+    {module,M} = l(M, gpb_codegen:mk_fn(FnName,
+                                        fun(a) -> {ok, b} end,
+                                        [{replace_tree,a,Var},
+                                         {replace_tree,b,Var}])),
+    {ok, x} = M:FnName(x),
+    {ok, z} = M:FnName(z).
 
 mk_test_fn_name() ->
     %% Make different names (for testability),

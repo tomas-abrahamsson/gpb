@@ -36,19 +36,27 @@
 %%         before returning the parse-tree.</p>
 %%       <p>The following `RtTransforms' are available:</p>
 %%       <dl>
-%%         <dt>`{replace,Marker::atom(),Replacement::term()}'</dt>
+%%         <dt>`{replace_term,Marker::atom(),Replacement::term()}'</dt>
 %%         <dd>Replace any occurrences of `Marker' with the syntax tree
 %%           representing `Replacement', which must be something that could
 %%           have occurred as a literal term in some program text,
 %%           thus it must not contain any funs, pids, ports, references or such.
 %%         </dd>
+%%         <dt>`{replace_tree,Marker::atom(),Replacement::syntaxtree()}'</dt>
+%%         <dd>Replace any occurrences of `Marker' with the syntax tree
+%%           `Replacement'.
+%%         </dd>
 %%       </dl>
 %%   </dd>
+%%   <dt>`gpb_codegen:expr(Expr)'</dt>
+%%   <dd>Will be replaced by the parse-tree for a `Expr'.</dd>
+%%   <dt>`gpb_codegen:exprs(Expr, ...)'</dt>
+%%   <dd>Will be replaced by a list of parse-trees, one for each `Expr'.</dd>
 %% </dl>
-
+%% @end
 parse_transform(Forms, Opts) ->
     transform_forms(Forms, Opts).
-%% @end
+
 transform_forms(Forms, Opts) ->
     Mapper = mk_transform_fn(Forms),
     [debug_form(erl_syntax:revert(transform_form(Mapper, Form)), Opts)
@@ -98,6 +106,12 @@ transform_node(application, Node, Forms) ->
             [FnNameExpr, FnDef, RuntimeTransforms] =
                 erl_syntax:application_arguments(Node),
             transform_mk_fn(FnNameExpr, FnDef, [RuntimeTransforms], Forms);
+        {?MODULE, {expr, 1}} ->
+            [Expr] = erl_syntax:application_arguments(Node),
+            erl_syntax:abstract(Expr);
+        {?MODULE, {exprs, _Arity}} ->
+            Exprs = erl_syntax:application_arguments(Node),
+            erl_syntax:abstract(Exprs);
         _X ->
             Node
     end;
@@ -205,14 +219,19 @@ runtime_transform(ParseTree, Transforms) ->
 apply_transform(Transform, ParseTree) ->
     map_term(transform_to_mapper(Transform), ParseTree).
 
-transform_to_mapper({replace, Marker, Replacement}) ->
-    replacing_mapper(Marker, Replacement).
+transform_to_mapper({replace_term, Marker, Replacement}) ->
+    term_replacing_mapper(Marker, Replacement);
+transform_to_mapper({replace_tree, Marker, Replacement}) ->
+    tree_replacing_mapper(Marker, Replacement).
 
-replacing_mapper(Marker, Replacement) ->
+term_replacing_mapper(Marker, Replacement) ->
     ReplacementTree = erl_parse:abstract(Replacement),
+    tree_replacing_mapper(Marker, ReplacementTree).
+
+tree_replacing_mapper(Marker, Replacement) ->
     fun(Node) ->
             case safe_analyze_atom_as_value(Node) of
-                {atom, Marker} -> ReplacementTree;
+                {atom, Marker} -> Replacement;
                 {atom, _Other} -> Node;
                 non_atom       -> Node
             end
