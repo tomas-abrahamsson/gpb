@@ -22,17 +22,16 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %-compile(export_all).
--export([debug_form/1, pp/1]).
 
 -define(dummy_mod, list_to_atom(lists:concat([?MODULE, "-test"]))).
+-define(debug,true).
 
--ifdef(debug).
-debug_form(Form) -> pp(Form).
--else.   %% debug
-debug_form(_Form) -> ok.
--endif.  %% debug
-
-
+-define(current_function,
+        begin
+            {current_function,{_M___,_F___,_Arity___}} =
+                erlang:process_info(self(), current_function),
+            _F___
+        end).
 
 plain_parse_transform_test() ->
     M = ?dummy_mod,
@@ -62,23 +61,64 @@ tree_replacements_test() ->
     {ok, x} = M:FnName(x),
     {ok, z} = M:FnName(z).
 
+tree_splicing_1_test() ->
+    M = ?dummy_mod,
+    FnName = mk_test_fn_name(?current_function),
+    Vars = gpb_codegen:exprs(V, V),
+    Ret  = gpb_codegen:exprs(V, V),
+    {module,M} = l(M, gpb_codegen:mk_fn(FnName,
+                                        fun(p) -> {ret} end,
+                                        [{splice_trees,p,Vars},
+                                         {splice_trees,ret,Ret}])),
+    {x,x} = M:FnName(x, x),
+    {z,z} = M:FnName(z, z),
+    ?assertError(_, M:FnName(x, z)).
+
+tree_splicing_2_test() ->
+    M = ?dummy_mod,
+    FnName = mk_test_fn_name(?current_function),
+    Vars = gpb_codegen:exprs(V, V),
+    {module,M} = l(M, gpb_codegen:mk_fn(FnName,
+                                        fun(p) -> V + V end,
+                                        [{splice_trees,p,Vars}])),
+    4 = M:FnName(2, 2).
+
+
 mk_test_fn_name() ->
     %% Make different names (for testability),
     %% but don't exhaust the atom table.
-    list_to_atom(
-      lists:concat(
-        [test_, integer_to_list(erlang:phash2(make_ref()) rem 17)])).
+    list_to_atom(lists:concat([test_, small_random_number()])).
+
+mk_test_fn_name(FnName) ->
+    %% Make different names (for testability),
+    %% but don't exhaust the atom table.
+    list_to_atom(lists:concat([test_, FnName, "_", small_random_number()])).
+
+small_random_number() ->
+    integer_to_list(erlang:phash2(make_ref()) rem 17).
 
 l(Mod, Form) ->
-    debug_form(Form),
     File = atom_to_list(Mod)++".erl",
     Program = [mk_attr(file,{File,1}),
                mk_attr(module,Mod),
                mk_attr(compile,export_all),
                Form],
-    {ok, Mod, Bin} = compile:forms(Program),
-    unload_code(Mod),
-    code:load_binary(Mod, File, Bin).
+    try compile:forms(Program) of
+        {ok, Mod, Bin} ->
+            unload_code(Mod),
+            code:load_binary(Mod, File, Bin);
+        Error ->
+            ?debugFmt("~nCompilation Error:~n~s~n  ~p~n",
+                      [format_form_debug(Form), Error]),
+            Error
+    catch error:Error ->
+            ST = erlang:get_stacktrace(),
+            ?debugFmt("~nCompilation crashed (malformed parse-tree?):~n"
+                      ++ "~s~n"
+                      ++ "  ~p~n",
+                      [format_form_debug(Form), {Error,ST}]),
+            {error, {compiler_crash,Error}}
+    end.
 
 mk_attr(AttrName, AttrValue) ->
     erl_syntax:revert(
@@ -92,6 +132,12 @@ unload_code(Mod) ->
     code:delete(Mod),
     ok.
 
-%% for debugging
-pp(Form) ->
-    ?debugFmt("~n~s~n", [erl_prettypr:format(Form)]).
+format_form_debug(Form) ->
+    PrettyForm = try erl_prettypr:format(Form)
+                 catch error:_ -> "(Failed to pretty-print form)"
+                 end,
+    io_lib:format("~nForm=~p~n"
+                  ++ "-->~n"
+                  ++ "~s~n"
+                  ++ "^^^^",
+                  [Form, PrettyForm]).

@@ -46,6 +46,13 @@
 %%         <dd>Replace any occurrences of `Marker' with the syntax tree
 %%           `Replacement'.
 %%         </dd>
+%%         <dt>`{splice_trees,Marker::atom(),Replacements::[syntaxtree()]}'</dt>
+%%         <dd>For any list that contains `Marker', insert the `Replacements'
+%%           syntax trees instead. Use with care since usage assumes
+%%           the `erl_syntax'-internal representation the `Marker'-containing
+%%           structure is a list.
+%%           <!-- It is difficult to be entirely parse-tree-format agnostic -->
+%%         </dd>
 %%       </dl>
 %%   </dd>
 %%   <dt>`gpb_codegen:expr(Expr)'</dt>
@@ -192,10 +199,10 @@ try_subst_atom(Node, AtomLiteralToBeChanged, NewExpr) ->
         non_atom                       -> Node
     end.
 
-map_term(F, [Term | Rest]) ->
-    case F(Term) of
-        Term -> [map_term(F, Term) | map_term(F, Rest)];
-        New  -> [New | map_term(F, Rest)]
+map_term(F, List) when is_list(List) ->
+    case F(List) of
+        List -> [map_term(F, Elem) || Elem <- List];
+        New  -> New
     end;
 map_term(F, Tuple) when is_tuple(Tuple) ->
     case F(Tuple) of
@@ -222,7 +229,9 @@ apply_transform(Transform, ParseTree) ->
 transform_to_mapper({replace_term, Marker, Replacement}) ->
     term_replacing_mapper(Marker, Replacement);
 transform_to_mapper({replace_tree, Marker, Replacement}) ->
-    tree_replacing_mapper(Marker, Replacement).
+    tree_replacing_mapper(Marker, Replacement);
+transform_to_mapper({splice_trees, Marker, Replacements}) ->
+    param_splicing_mapper(Marker, Replacements).
 
 term_replacing_mapper(Marker, Replacement) ->
     ReplacementTree = erl_parse:abstract(Replacement),
@@ -236,6 +245,52 @@ tree_replacing_mapper(Marker, Replacement) ->
                 non_atom       -> Node
             end
     end.
+
+tree_splicing_mapper(Marker, Replacements) ->
+    fun(Term) when is_list(Term) ->
+            case safe_split_list_on_marker(Term, Marker) of
+                marker_not_found ->
+                    Term;
+                {BeforeMarker, _MarkerTree, AfterMarker} ->
+                    Mapper = tree_splicing_mapper(Marker, Replacements),
+                    TermsBefore = map_term(Mapper, BeforeMarker),
+                    TermsAfter  = map_term(Mapper, AfterMarker),
+                    TermsBefore ++ Replacements ++ TermsAfter
+            end;
+       (OtherTerm) ->
+            OtherTerm
+    end.
+
+param_splicing_mapper(Marker, Replacements) ->
+    fun(Term) ->
+            case safe_analyze_function(Term) of
+                {function, Name, Clauses} ->
+                    Mapper = tree_splicing_mapper(Marker, Replacements),
+                    NewClauses = [map_clause(Mapper, C) || C <- Clauses],
+                    erl_syntax:function(Name, NewClauses);
+                non_function ->
+                    Term
+            end
+    end.
+
+map_clause(Mapper, Clause) ->
+    Patterns = erl_syntax:clause_patterns(Clause),
+    Guard    = erl_syntax:clause_guard(Clause),
+    Body     = erl_syntax:clause_body(Clause),
+    erl_syntax:clause(map_term(Mapper, Patterns),
+                      map_term(Mapper, Guard),
+                      map_term(Mapper, Body)).
+
+safe_split_list_on_marker(Elems, Marker) -> safe_split_aux(Elems, Marker, []).
+
+safe_split_aux([X | Rest], Marker, Acc) ->
+    case safe_analyze_atom_as_value(X) of
+        {atom, Marker} -> {lists:reverse(Acc), X, Rest};
+        {atom, _Other} -> safe_split_aux(Rest, Marker, [X | Acc]);
+        non_atom       -> safe_split_aux(Rest, Marker, [X | Acc])
+    end;
+safe_split_aux([], _Marker, _Acc) ->
+    marker_not_found.
 
 %% -> {Name,Arity} | {Module,{Name,Arity}}
 analyze_implicit_fun_name(Tree) ->
@@ -263,4 +318,17 @@ safe_analyze_atom_as_name(Node) ->
         _            -> non_atom
     catch error:_ ->
             non_atom
+    end.
+
+safe_analyze_function(Term) ->
+    try {erl_syntax:type(Term),
+         erl_syntax:function_arity(Term),
+         erl_syntax:function_name(Term),
+         erl_syntax:function_clauses(Term)} of
+        {function, Arity, Name, Clauses} when is_integer(Arity) ->
+            {function, Name, Clauses};
+        _ ->
+            non_function
+    catch error:_ ->
+            non_function
     end.
