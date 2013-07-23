@@ -18,6 +18,7 @@
 
 -module(gpb_codegen).
 -export([parse_transform/2]).
+-export([runtime_transform/1, runtime_transform/2]).
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
@@ -25,18 +26,8 @@
 %%
 %% <dl>
 %%   <dt>`gpb_codegen:mk_fn(FnName, fun(Args) -> Body end)'</dt>
-%%   <dd><p>will be replaced by a parse-tree for a function `FnName',
-%%         with `Args' and `Body' as in the specified.</p>
-%%       <p>The `Body' may contain meta variables---variables that end in
-%%         at-character, for example `Var@'.
-%%         These are not variables in the parse-tree, but the values
-%%         they have in the surrounding code is used. Since the value
-%%         will end up in a parse tree, it cannot be a pid, a
-%%         reference or a fun. It must be a value you could write in
-%%         source code.</p>
-%%       <p>The `Body' may also cotain parse-tree-meta-variables---variables
-%%         that end in two at-characters, for example `Var@@'.
-%%         These de note parse-tree values that are replaced in verbatim.
+%%   <dd>will be replaced by a parse-tree for a function `FnName',
+%%       with `Args' and `Body' as in the specified.
 %%   </dd>
 %% </dl>
 
@@ -87,26 +78,37 @@ transform_node(application, Node, Forms) ->
     case erl_syntax_lib:analyze_application(Node) of
         {?MODULE, {mk_fn, 2}} ->
             [FnNameExpr, FnDef] = erl_syntax:application_arguments(Node),
-            transform_mk_fn(FnNameExpr, FnDef, Forms);
+            transform_mk_fn(FnNameExpr, FnDef, [], Forms);
+        {?MODULE, {mk_fn, 3}} ->
+            [FnNameExpr, FnDef, RuntimeTransforms] =
+                erl_syntax:application_arguments(Node),
+            transform_mk_fn(FnNameExpr, FnDef, [RuntimeTransforms], Forms);
         _X ->
             Node
     end;
 transform_node(_Type, Node, _Forms) ->
     Node.
 
+
 %% transform a "call" to gpb_codegen:mk_fn(Name, Def)
 %% return a parse-tree for an expression that produces a
 %% a parse-tree for a function definition
-transform_mk_fn(FnNameExpr, DefAsFun, AllForms) ->
+transform_mk_fn(FnNameExpr, DefAsFun, RuntimeTransforms, AllForms) ->
     case erl_syntax:type(DefAsFun) of
         fun_expr ->
             FnClauses = erl_syntax:fun_expr_clauses(DefAsFun),
-            mk_partly_abstract_function(FnNameExpr, FnClauses);
+            mk_apply(
+              ?MODULE, runtime_transform,
+              [mk_partly_abstract_function(FnNameExpr, FnClauses)
+               | RuntimeTransforms]);
         implicit_fun ->
             case analyze_implicit_fun_name(DefAsFun) of
                 {DFnName, Arity} when is_integer(Arity) ->
                     FnClauses = find_function_clauses(AllForms, DFnName, Arity),
-                    mk_partly_abstract_function(FnNameExpr, FnClauses);
+                    mk_apply(
+                      ?MODULE, runtime_transform,
+                      [mk_partly_abstract_function(FnNameExpr, FnClauses)
+                       | RuntimeTransforms]);
                 {Module, {FnName, Arity}} ->
                     erlang:error({?MODULE,not_supported,mk_fn,remote_fn,
                                   ?ff("~p:~p/~w", [Module, FnName, Arity])})
@@ -126,13 +128,12 @@ mk_partly_abstract_function(FnNameExpr, FnClauses) ->
     %% while still being agnostic about the erl_parse tree format.
     %% I think I only rely on same representation of atoms
     %% (which do have a line number though...)
-    subst_meta_var_values(
-      substitute(
-        erl_parse:abstract(
-          erl_syntax:revert(
-            erl_syntax:function(FnNameExprPlaceholder, FnClauses))),
-        erl_syntax:revert(FnNameExprPlaceholder),
-        FnNameExpr)).
+    subst_atom(
+      erl_parse:abstract(
+        erl_syntax:revert(
+          erl_syntax:function(FnNameExprPlaceholder, FnClauses))),
+      erl_syntax:revert(FnNameExprPlaceholder),
+      FnNameExpr).
 
 find_function_clauses([Form | Rest], FnName, Arity) ->
     case erl_syntax:type(Form) of
@@ -149,16 +150,21 @@ find_function_clauses([Form | Rest], FnName, Arity) ->
 find_function_clauses([], FnName, Arity) ->
     erlang:error({reference_to_undefined_function,FnName,Arity}).
 
-substitute(Term, TermToBeChanged, NewTerm) ->
-    map_term(fun(Node) ->
-                     if Node =:= TermToBeChanged -> NewTerm;
-                        true                     -> Node
-                     end
+subst_atom(Term, AtomToBeChanged, NewExpr) ->
+    AtomLiteralToBeChanged = erl_syntax:atom_literal(AtomToBeChanged),
+    map_term(fun(Node) -> try_subst_atom(Node, AtomLiteralToBeChanged, NewExpr)
              end,
              Term).
 
-subst_meta_var_values(Term) ->
-    map_term(fun try_subst_meta_var_value/1, Term).
+try_subst_atom(Node, AtomLiteralToBeChanged, NewExpr) ->
+    try {erl_syntax:type(Node), erl_syntax:atom_literal(Node)} of
+        {atom, AtomLiteralToBeChanged} ->
+            NewExpr;
+        {atom, _Other} ->
+            Node
+    catch error:_ ->
+            Node
+    end.
 
 map_term(F, [Term | Rest]) ->
     case F(Term) of
@@ -173,33 +179,20 @@ map_term(F, Tuple) when is_tuple(Tuple) ->
 map_term(F, Other) ->
     F(Other).
 
-try_subst_meta_var_value(Term) ->
-    try begin C = erl_syntax:concrete(Term), {erl_syntax:type(C), C} end of
-        {variable, ConcreteTerm} ->
-            case var_metaness(erl_syntax:variable_name(ConcreteTerm)) of
-                meta       -> mk_apply(erl_parse, abstract, [ConcreteTerm]);
-                parse_meta -> ConcreteTerm;
-                ordinary   -> Term
-            end;
-        _ ->
-            Term
-    catch _:_ ->
-            Term
-    end.
-
-var_metaness(VarName) ->
-    VarNameAsStr = atom_to_list(VarName),
-    case lists:suffix("@@", VarNameAsStr) of
-        true  -> parse_meta;
-        false -> case lists:suffix("@", VarNameAsStr) of
-                     true  -> meta;
-                     false -> ordinary
-                 end
-    end.
-
 mk_apply(M, F, Args) when is_atom(M), is_atom(F) ->
     erl_syntax:revert(
       erl_syntax:application(erl_syntax:atom(M), erl_syntax:atom(F), Args)).
+
+%% Main entry point at runtime
+runtime_transform(ParseTree) ->
+    runtime_transform(ParseTree, []).
+
+runtime_transform(ParseTree, Transforms) ->
+    lists:foldl(fun apply_transform/2, ParseTree, Transforms).
+
+apply_transform(_Transform, ParseTree) ->
+    %% Currently no transforms defined
+    ParseTree.
 
 %% -> {Name,Arity} | {Module,{Name,Arity}}
 analyze_implicit_fun_name(Tree) ->
