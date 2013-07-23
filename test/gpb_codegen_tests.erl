@@ -34,11 +34,12 @@ debug_form(_Form) -> ok.
 
 
 
-generates_code_with_no_replacements_test() ->
+plain_parse_transform_test() ->
     M = ?dummy_mod,
     FnName = mk_test_fn_name(),
     {module,M} = l(M, gpb_codegen:mk_fn(FnName, fun(a) -> {ok, 1} end)),
-    {ok, 1} = M:FnName(a).
+    {ok, 1} = M:FnName(a),
+    ?assertError(_, M:FnName(b)).
 
 replacements_during_codegen_test() ->
     M = ?dummy_mod,
