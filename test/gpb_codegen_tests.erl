@@ -92,6 +92,16 @@ tree_splicing_2_test() ->
                                         [{splice_trees,p,Vars}])),
     4 = M:FnName(2, 2).
 
+replaces_function_name_after_splicings_test() ->
+    M = ?dummy_mod,
+    FnName = p,
+    Vars = gpb_codegen:exprs(V, V),
+    {module,M} = l(M, gpb_codegen:mk_fn(FnName,
+                                        fun(p) -> V + V end,
+                                        [{splice_trees,p,Vars}])),
+    4 = M:FnName(2, 2).
+
+
 %% -- helpers ---------------------------
 
 mk_test_fn_name() ->
