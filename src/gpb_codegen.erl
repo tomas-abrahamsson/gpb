@@ -174,9 +174,11 @@ mk_apply(M, F, Args) when is_atom(M), is_atom(F) ->
       erl_syntax:application(erl_syntax:atom(M), erl_syntax:atom(F), Args)).
 
 %% Main entry point at runtime.
+%%@hidden
 runtime_fn_transform(FnName, FnParseTree) ->
     runtime_fn_transform(FnName, FnParseTree, []).
 
+%%@hidden
 runtime_fn_transform(FnName, FnParseTree, Transforms) ->
     Clauses = erl_syntax:function_clauses(FnParseTree),
     erl_syntax:revert(
