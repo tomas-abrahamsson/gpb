@@ -115,10 +115,10 @@ transform_node(application, Node, Forms) ->
             transform_mk_fn(FnNameExpr, FnDef, [RuntimeTransforms], Forms);
         {?MODULE, {expr, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
-            erl_syntax:abstract(Expr);
+            erl_parse:abstract(erl_syntax:revert(Expr));
         {?MODULE, {exprs, _Arity}} ->
             Exprs = erl_syntax:application_arguments(Node),
-            erl_syntax:abstract(Exprs);
+            erl_parse:abstract([erl_syntax:revert(Expr) || Expr <- Exprs]);
         _X ->
             Node
     end;

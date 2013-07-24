@@ -50,7 +50,7 @@ term_replacements_test() ->
     ?assertError(_, M:FnName(a)),
     {ok, 2} = M:FnName(1).
 
-tree_replacements_test() ->
+tree_replacements_1_test() ->
     M = ?dummy_mod,
     FnName = mk_test_fn_name(),
     Var = gpb_codegen:expr(V),
@@ -60,6 +60,15 @@ tree_replacements_test() ->
                                          {replace_tree,b,Var}])),
     {ok, x} = M:FnName(x),
     {ok, z} = M:FnName(z).
+
+tree_replacements_2_test() ->
+    M = ?dummy_mod,
+    FnName = mk_test_fn_name(?current_function),
+    Add = gpb_codegen:expr(V + V),
+    {module,M} = l(M, gpb_codegen:mk_fn(FnName,
+                                        fun(V, V) -> ret end,
+                                        [{replace_tree,ret,Add}])),
+    8 = M:FnName(4, 4).
 
 tree_splicing_1_test() ->
     M = ?dummy_mod,
@@ -83,6 +92,7 @@ tree_splicing_2_test() ->
                                         [{splice_trees,p,Vars}])),
     4 = M:FnName(2, 2).
 
+%% -- helpers ---------------------------
 
 mk_test_fn_name() ->
     %% Make different names (for testability),
