@@ -246,6 +246,23 @@ tree_replacing_mapper(Marker, Replacement) ->
             end
     end.
 
+param_splicing_mapper(Marker, Replacements) ->
+    %% Handle splicing specially, because if adding params to a
+    %% parameter list, then there's also an arity that needs to be
+    %% updated. It is set properly when reconstructing a function
+    %% definition using erl_syntax:function/2, but not when
+    %% adding parameters to a parameter list.
+    fun(Term) ->
+            case safe_analyze_function(Term) of
+                {function, Name, Clauses} ->
+                    Mapper = tree_splicing_mapper(Marker, Replacements),
+                    NewClauses = [map_clause(Mapper, C) || C <- Clauses],
+                    erl_syntax:revert(erl_syntax:function(Name, NewClauses));
+                non_function ->
+                    Term
+            end
+    end.
+
 tree_splicing_mapper(Marker, Replacements) ->
     fun(Term) when is_list(Term) ->
             case safe_split_list_on_marker(Term, Marker) of
@@ -259,18 +276,6 @@ tree_splicing_mapper(Marker, Replacements) ->
             end;
        (OtherTerm) ->
             OtherTerm
-    end.
-
-param_splicing_mapper(Marker, Replacements) ->
-    fun(Term) ->
-            case safe_analyze_function(Term) of
-                {function, Name, Clauses} ->
-                    Mapper = tree_splicing_mapper(Marker, Replacements),
-                    NewClauses = [map_clause(Mapper, C) || C <- Clauses],
-                    erl_syntax:function(Name, NewClauses);
-                non_function ->
-                    Term
-            end
     end.
 
 map_clause(Mapper, Clause) ->
