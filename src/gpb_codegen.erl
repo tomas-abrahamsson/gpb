@@ -50,6 +50,12 @@
 %%         <dd>For any list that contains `Marker', insert the `Replacements'
 %%           syntax trees instead.
 %%         </dd>
+%%         <dt>`{splice_clauses,Marker::atom(),Replacements::[syntaxtree()]}'</dt>
+%%         <dd>For case clauses (and function clauses), where the pattern is a
+%%           single atom, `Marker', insert the case clauses (or function
+%%           clauses) in `Replacements' instead.
+%%           See also the `?case_clause/1' macro.
+%%         </dd>
 %%       </dl>
 %%   </dd>
 %%   <dt>`gpb_codegen:expr(Expr)'</dt>
@@ -116,6 +122,9 @@ transform_node(application, Node, Forms) ->
         {?MODULE, {exprs, _Arity}} ->
             Exprs = erl_syntax:application_arguments(Node),
             erl_parse:abstract([erl_syntax:revert(Expr) || Expr <- Exprs]);
+        {?MODULE, {case_clause, 1}} ->
+            [Expr] = erl_syntax:application_arguments(Node),
+            transform_case_expr_to_parse_tree_for_clause(Expr);
         _X ->
             Node
     end;
@@ -173,6 +182,15 @@ mk_apply(M, F, Args) when is_atom(M), is_atom(F) ->
     erl_syntax:revert(
       erl_syntax:application(erl_syntax:atom(M), erl_syntax:atom(F), Args)).
 
+transform_case_expr_to_parse_tree_for_clause(Expr) ->
+    case erl_syntax:type(Expr) of
+        case_expr ->
+            [Clause | _] = erl_syntax:case_expr_clauses(Expr),
+            erl_parse:abstract(erl_syntax:revert(Clause));
+        _X ->
+            Expr
+    end.
+
 %% Main entry point at runtime.
 %%@hidden
 runtime_fn_transform(FnName, FnParseTree) ->
@@ -193,7 +211,9 @@ apply_transform({replace_tree, Marker, Replacement}, ParseTree) ->
     erl_syntax_lib:map(tree_replacing_mapper(Marker, Replacement),
                        ParseTree);
 apply_transform({splice_trees, Marker, Replacements}, ParseTree) ->
-    splice_trees(Marker, Replacements, ParseTree).
+    splice_trees(Marker, Replacements, ParseTree);
+apply_transform({splice_clauses, CaseMarker, Replacements}, ParseTree) ->
+    splice_clauses(CaseMarker, Replacements, ParseTree).
 
 
 term_replacing_mapper(Marker, Replacement) ->
@@ -238,6 +258,60 @@ split_aux([X | Rest], Marker, Acc) ->
     end;
 split_aux([], _Marker, _Acc) ->
     marker_not_found.
+
+splice_clauses(CMarker, Replacements, Tree) ->
+    erl_syntax_lib:map(
+      fun(Node) ->
+              case erl_syntax:type(Node) of
+                  case_expr ->
+                      Arg = erl_syntax:case_expr_argument(Node),
+                      Cs  = erl_syntax:case_expr_clauses(Node),
+                      Cs1 = splice_clauses_aux(CMarker, Replacements, Cs),
+                      erl_syntax:case_expr(Arg, Cs1);
+                  _Other ->
+                      Node
+              end
+      end,
+      Tree).
+
+splice_clauses_aux(CMarker, Replacements, Cs) ->
+    case split_clauses_on_marker(Cs, CMarker) of
+        marker_not_found ->
+            splice_cbodies(CMarker, Replacements, Cs);
+        {BeforeMarker, _MarkerClause, AfterMarker} ->
+            Before = splice_cbodies(CMarker, Replacements, BeforeMarker),
+            After  = splice_cbodies(CMarker, Replacements, AfterMarker),
+            Before ++ Replacements ++ After
+    end.
+
+split_clauses_on_marker(Clauses, CMarker) ->
+    csplit_aux(Clauses, CMarker, []).
+
+csplit_aux([CC | Rest], CMarker, Acc) ->
+    case erl_syntax:clause_patterns(CC) of
+        [CPattern] ->
+            case analyze_atom_as_value(CPattern) of
+                {atom, CMarker} -> {lists:reverse(Acc), CC, Rest};
+                {atom, _Other}  -> csplit_aux(Rest, CMarker, [CC | Acc]);
+                non_atom        -> csplit_aux(Rest, CMarker, [CC | Acc])
+            end;
+        _CPatterns ->
+            csplit_aux(Rest, CMarker, [CC | Acc])
+    end;
+csplit_aux([], _CMarker, _Acc) ->
+    marker_not_found.
+
+splice_cbodies(CMarker, Replacements, Clauses) ->
+    [begin
+         Patterns = erl_syntax:clause_patterns(Clause),
+         Guard    = erl_syntax:clause_guard(Clause),
+         Body     = erl_syntax:clause_body(Clause),
+         Body1    = [splice_clauses(CMarker, Replacements, Expr)
+                     || Expr <- Body],
+         erl_syntax:clause(Patterns, Guard, Body1)
+     end
+     || Clause <- Clauses].
+
 
 %% -> {Name,Arity} | {Module,{Name,Arity}}
 analyze_implicit_fun_name(Tree) ->

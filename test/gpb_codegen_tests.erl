@@ -101,6 +101,25 @@ replaces_function_name_after_splicings_test() ->
                                         [{splice_trees,p,Vars}])),
     4 = M:FnName(2, 2).
 
+can_add_case_clause_test() ->
+    M = ?dummy_mod,
+    FnName = p,
+    CaseClauses = [?case_clause(1 -> one),
+                   ?case_clause(2 -> two)],
+    {module,M} = l(M, gpb_codegen:mk_fn(
+                        FnName,
+                        fun(X) ->
+                                case X of
+                                    cx -> dummy;
+                                    3  -> three
+                                end
+                        end,
+                        [{splice_clauses, cx, CaseClauses}])),
+    one   = M:FnName(1),
+    two   = M:FnName(2),
+    three = M:FnName(3),
+    ?assertError({case_clause,_}, M:FnName(4)).
+
 
 %% -- helpers ---------------------------
 
