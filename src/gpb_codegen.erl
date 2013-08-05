@@ -266,23 +266,18 @@ splice_clauses(CMarker, Replacements, Tree) ->
                   case_expr ->
                       Arg = erl_syntax:case_expr_argument(Node),
                       Cs  = erl_syntax:case_expr_clauses(Node),
-                      Cs1 = splice_clauses_aux(CMarker, Replacements, Cs),
-                      erl_syntax:case_expr(Arg, Cs1);
+                      case split_clauses_on_marker(Cs, CMarker) of
+                          marker_not_found ->
+                              Node;
+                          {Before, _MarkerClause, After} ->
+                              Cs1 = Before ++ Replacements ++ After,
+                              erl_syntax:case_expr(Arg, Cs1)
+                      end;
                   _Other ->
                       Node
               end
       end,
       Tree).
-
-splice_clauses_aux(CMarker, Replacements, Cs) ->
-    case split_clauses_on_marker(Cs, CMarker) of
-        marker_not_found ->
-            splice_cbodies(CMarker, Replacements, Cs);
-        {BeforeMarker, _MarkerClause, AfterMarker} ->
-            Before = splice_cbodies(CMarker, Replacements, BeforeMarker),
-            After  = splice_cbodies(CMarker, Replacements, AfterMarker),
-            Before ++ Replacements ++ After
-    end.
 
 split_clauses_on_marker(Clauses, CMarker) ->
     csplit_aux(Clauses, CMarker, []).
@@ -300,17 +295,6 @@ csplit_aux([CC | Rest], CMarker, Acc) ->
     end;
 csplit_aux([], _CMarker, _Acc) ->
     marker_not_found.
-
-splice_cbodies(CMarker, Replacements, Clauses) ->
-    [begin
-         Patterns = erl_syntax:clause_patterns(Clause),
-         Guard    = erl_syntax:clause_guard(Clause),
-         Body     = erl_syntax:clause_body(Clause),
-         Body1    = [splice_clauses(CMarker, Replacements, Expr)
-                     || Expr <- Body],
-         erl_syntax:clause(Patterns, Guard, Body1)
-     end
-     || Clause <- Clauses].
 
 
 %% -> {Name,Arity} | {Module,{Name,Arity}}

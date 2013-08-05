@@ -106,19 +106,30 @@ can_add_case_clause_test() ->
     FnName = p,
     CaseClauses = [?case_clause(1 -> one),
                    ?case_clause(2 -> two)],
+    MoreClauses = [?case_clause(b -> 2),
+                   ?case_clause(_ -> other)],
     {module,M} = l(M, gpb_codegen:mk_fn(
                         FnName,
-                        fun(X) ->
+                        fun(X, Y) ->
                                 case X of
                                     cx -> dummy;
-                                    3  -> three
+                                    3  -> three;
+                                    99 -> case Y of
+                                              a  -> 1;
+                                              cy -> dummy
+                                          end
                                 end
                         end,
-                        [{splice_clauses, cx, CaseClauses}])),
-    one   = M:FnName(1),
-    two   = M:FnName(2),
-    three = M:FnName(3),
-    ?assertError({case_clause,_}, M:FnName(4)).
+                        [{splice_clauses, cx, CaseClauses},
+                         {splice_clauses, cy, MoreClauses}])),
+    one   = M:FnName(1, 55),
+    two   = M:FnName(2, 55),
+    three = M:FnName(3, 55),
+    ?assertError({case_clause,_}, M:FnName(cx, 55)),
+    1     = M:FnName(99, a),
+    2     = M:FnName(99, b),
+    other = M:FnName(99, c),
+    other = M:FnName(99, cy).
 
 
 %% -- helpers ---------------------------
