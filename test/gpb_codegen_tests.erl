@@ -53,7 +53,7 @@ term_replacements_test() ->
 tree_replacements_1_test() ->
     M = ?dummy_mod,
     FnName = mk_test_fn_name(),
-    Var = gpb_codegen:expr(V),
+    Var = ?expr(V),
     {module,M} = l(M, gpb_codegen:mk_fn(FnName,
                                         fun(a) -> {ok, b} end,
                                         [{replace_tree,a,Var},
@@ -64,7 +64,7 @@ tree_replacements_1_test() ->
 tree_replacements_2_test() ->
     M = ?dummy_mod,
     FnName = mk_test_fn_name(?current_function),
-    Add = gpb_codegen:expr(V + V),
+    Add = ?expr(V + V),
     {module,M} = l(M, gpb_codegen:mk_fn(FnName,
                                         fun(V, V) -> ret end,
                                         [{replace_tree,ret,Add}])),
@@ -73,8 +73,8 @@ tree_replacements_2_test() ->
 tree_splicing_1_test() ->
     M = ?dummy_mod,
     FnName = mk_test_fn_name(?current_function),
-    Vars = gpb_codegen:exprs(V, V),
-    Ret  = gpb_codegen:exprs(V, V),
+    Vars = [?expr(V), ?expr(V)],
+    Ret  = [?expr(V), ?expr(V)],
     {module,M} = l(M, gpb_codegen:mk_fn(FnName,
                                         fun(p) -> {ret} end,
                                         [{splice_trees,p,Vars},
@@ -86,7 +86,7 @@ tree_splicing_1_test() ->
 tree_splicing_2_test() ->
     M = ?dummy_mod,
     FnName = mk_test_fn_name(?current_function),
-    Vars = gpb_codegen:exprs(V, V),
+    Vars = [?expr(V), ?expr(V)],
     {module,M} = l(M, gpb_codegen:mk_fn(FnName,
                                         fun(p) -> V + V end,
                                         [{splice_trees,p,Vars}])),
@@ -95,7 +95,7 @@ tree_splicing_2_test() ->
 replaces_function_name_after_splicings_test() ->
     M = ?dummy_mod,
     FnName = p,
-    Vars = gpb_codegen:exprs(V, V),
+    Vars = [?expr(V), ?expr(V)],
     {module,M} = l(M, gpb_codegen:mk_fn(FnName,
                                         fun(p) -> V + V end,
                                         [{splice_trees,p,Vars}])),

@@ -60,8 +60,6 @@
 %%   </dd>
 %%   <dt>`gpb_codegen:expr(Expr)'</dt>
 %%   <dd>Will be replaced by the parse-tree for a `Expr'.</dd>
-%%   <dt>`gpb_codegen:exprs(Expr, ...)'</dt>
-%%   <dd>Will be replaced by a list of parse-trees, one for each `Expr'.</dd>
 %% </dl>
 %% @end
 parse_transform(Forms, Opts) ->
@@ -119,9 +117,6 @@ transform_node(application, Node, Forms) ->
         {?MODULE, {expr, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
             erl_parse:abstract(erl_syntax:revert(Expr));
-        {?MODULE, {exprs, _Arity}} ->
-            Exprs = erl_syntax:application_arguments(Node),
-            erl_parse:abstract([erl_syntax:revert(Expr) || Expr <- Exprs]);
         {?MODULE, {case_clause, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
             transform_case_expr_to_parse_tree_for_clause(Expr);

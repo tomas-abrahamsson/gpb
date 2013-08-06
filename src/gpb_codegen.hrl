@@ -6,4 +6,7 @@
 -define(case_clause(Clause),
         gpb_codegen:case_clause(case dummy of Clause end)).
 
+-define(expr(X),
+        gpb_codegen:expr(X)).
+
 -endif. %% gpb_codegen_hrl.
