@@ -71,6 +71,9 @@
 %%         </dd>
 %%       </dl>
 %%   </dd>
+%%   <dt>`gpb_codegen:format_fn(FnName, Fun [, RtTransforms]) -> string()'</dt>
+%%   <dd>like `gpb_codegen:mk_fn/2,3', but format the result into
+%%       a string by calling `erl_prettypr:format' </dd>
 %%   <dt>`?expr(Expr)' or
 %%       `gpb_codegen:expr(Expr)'</dt>
 %%   <dd>Will be replaced by the syntax tree for a `Expr'.</dd>
@@ -159,17 +162,27 @@ transform_node(application, Node, Forms) ->
             [FnNameExpr, FnDef] = erl_syntax:application_arguments(Node),
             transform_mk_fn(FnNameExpr, FnDef, [], Forms);
         {?MODULE, {mk_fn, 3}} ->
-            [FnNameExpr, FnDef, RuntimeTransforms] =
+            [FnNameExpr, FnDef, RtTransforms] =
                 erl_syntax:application_arguments(Node),
-            transform_mk_fn(FnNameExpr, FnDef, [RuntimeTransforms], Forms);
+            transform_mk_fn(FnNameExpr, FnDef, [RtTransforms], Forms);
+        {?MODULE, {format_fn, 2}} ->
+            [FnNameExpr, FnDef] = erl_syntax:application_arguments(Node),
+            mk_apply(erl_prettypr, format,
+                     [transform_mk_fn(FnNameExpr, FnDef, [], Forms)]);
+        {?MODULE, {format_fn, 3}} ->
+            [FnNameExpr, FnDef, RtTransforms] =
+                erl_syntax:application_arguments(Node),
+            mk_apply(erl_prettypr, format,
+                     [transform_mk_fn(FnNameExpr, FnDef, [RtTransforms],
+                                      Forms)]);
         {?MODULE, {expr, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
             erl_parse:abstract(erl_syntax:revert(Expr));
         {?MODULE, {expr, 2}} ->
-            [Expr, RuntimeTransforms] = erl_syntax:application_arguments(Node),
+            [Expr, RtTransforms] = erl_syntax:application_arguments(Node),
             mk_apply(?MODULE, runtime_expr_transform,
                      [erl_parse:abstract(erl_syntax:revert(Expr)),
-                      RuntimeTransforms]);
+                      RtTransforms]);
         {?MODULE, {case_clause, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
             transform_case_expr_to_parse_tree_for_clause(Expr, []);

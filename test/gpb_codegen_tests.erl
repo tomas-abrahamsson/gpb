@@ -177,6 +177,23 @@ runtime_tranforms_for_expr_test() ->
     other     = M:FnName({e4, 3}),
     ok.
 
+format_fn_no_rt_transforms_test() ->
+    FnName = p,
+    S = gpb_codegen:format_fn(FnName, fun(33) -> yes end),
+    true = io_lib:printable_list(S),
+    M = ?dummy_mod,
+    {module, M} = ls(M, S),
+    yes = M:FnName(33).
+
+format_fn_with_transforms_test() ->
+    FnName = p,
+    S = gpb_codegen:format_fn(FnName, fun(zz) -> yes end,
+                              [{replace_term, zz, 88}]),
+    true = io_lib:printable_list(S),
+    M = ?dummy_mod,
+    {module, M} = ls(M, S),
+    yes = M:FnName(88).
+
 %% -- helpers ---------------------------
 
 mk_test_fn_name() ->
@@ -219,6 +236,11 @@ mk_attr(AttrName, AttrValue) ->
     erl_syntax:revert(
       erl_syntax:attribute(erl_syntax:atom(AttrName),
                            [erl_syntax:abstract(AttrValue)])).
+
+ls(Mod, FormAsString) ->
+    {ok, Tokens, _} = erl_scan:string(FormAsString),
+    {ok, Form} = erl_parse:parse_form(Tokens),
+    l(Mod, Form).
 
 unload_code(Mod) ->
     code:purge(Mod),
