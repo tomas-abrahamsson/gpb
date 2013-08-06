@@ -6,6 +6,10 @@
 -define(case_clause(Clause),
         gpb_codegen:case_clause(case dummy of Clause end)).
 
+-define(case_clause(Clause, Transforms),
+        gpb_codegen:case_clause(case dummy of Clause end,
+                                Transforms)).
+
 -define(expr(X),
         gpb_codegen:expr(X)).
 

@@ -131,6 +131,20 @@ can_add_case_clause_test() ->
     other = M:FnName(99, c),
     other = M:FnName(99, cy).
 
+can_runtime_transform_case_clause_test() ->
+    M = ?dummy_mod,
+    FnName = p,
+    CaseClause = ?case_clause(mm -> one, [{replace_term, mm, 1}]),
+    {module,M} = l(M, gpb_codegen:mk_fn(
+                        FnName,
+                        fun(X) ->
+                                case X of
+                                    rr -> dummy
+                                end
+                        end,
+                        [{splice_clauses, rr, [CaseClause]}])),
+    one   = M:FnName(1),
+    ok.
 
 runtime_tranforms_for_expr_test() ->
     E1 = ?expr(a, [{replace_term, a, 1}]),

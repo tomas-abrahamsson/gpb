@@ -19,7 +19,7 @@
 -module(gpb_codegen).
 -export([parse_transform/2]).
 -export([runtime_fn_transform/2, runtime_fn_transform/3]).
--export([runtime_expr_transform/2]).
+-export([runtime_expr_transform/1, runtime_expr_transform/2]).
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
@@ -103,6 +103,11 @@
 %%              `gpb_codegen:case_clause/1' approach.</li>
 %%       </ul>
 %%   </dd>
+%%   <dt>`?case_clause(Pattern [when Guard] -> Body, RtTransforms)' or
+%%       `gpb_codegen:case_clause(CaseExpression, RtTransforms)'</dt>
+%%   <dd>Like `?case_clause/1' or `gpb_codegen:case_clause/1'
+%%       but apply the RtTransforms to the syntax tree.
+%%   </dd>
 %% </dl>
 %% @end
 parse_transform(Forms, Opts) ->
@@ -167,7 +172,10 @@ transform_node(application, Node, Forms) ->
                       RuntimeTransforms]);
         {?MODULE, {case_clause, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
-            transform_case_expr_to_parse_tree_for_clause(Expr);
+            transform_case_expr_to_parse_tree_for_clause(Expr, []);
+        {?MODULE, {case_clause, 2}} ->
+            [Expr, RtTransforms] = erl_syntax:application_arguments(Node),
+            transform_case_expr_to_parse_tree_for_clause(Expr, [RtTransforms]);
         _X ->
             Node
     end;
@@ -225,12 +233,14 @@ mk_apply(M, F, Args) when is_atom(M), is_atom(F) ->
     erl_syntax:revert(
       erl_syntax:application(erl_syntax:atom(M), erl_syntax:atom(F), Args)).
 
-transform_case_expr_to_parse_tree_for_clause(Expr) ->
+transform_case_expr_to_parse_tree_for_clause(Expr, RtTransforms) ->
     case erl_syntax:type(Expr) of
         case_expr ->
             [Clause | _] = erl_syntax:case_expr_clauses(Expr),
-            erl_parse:abstract(erl_syntax:revert(Clause));
-        _X ->
+            mk_apply(?MODULE, runtime_expr_transform,
+                     [erl_parse:abstract(erl_syntax:revert(Clause))
+                      | RtTransforms]);
+        _OtherType ->
             Expr
     end.
 
@@ -246,6 +256,10 @@ runtime_fn_transform(FnName, FnParseTree, Transforms) ->
       erl_syntax:function(
         erl_syntax:atom(FnName),
         [lists:foldl(fun apply_transform/2, C, Transforms) || C <- Clauses])).
+
+%%@hidden
+runtime_expr_transform(ExprParseTree) ->
+    runtime_expr_transform(ExprParseTree, []).
 
 %%@hidden
 runtime_expr_transform(ExprParseTree, Transforms) ->
