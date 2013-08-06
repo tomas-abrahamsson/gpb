@@ -142,19 +142,7 @@ mk_transform_fn(Forms) ->
     end.
 
 transform_form(Mapper, Form) ->
-    try
-        erl_syntax_lib:map(Mapper, Form)
-    catch error:Reason ->
-            ST = erlang:get_stacktrace(),
-            io:format("~p: parse transform failed:~n"
-                      ++ "  for form:~n"
-                      ++ "    ~p~n"
-                      ++ "  error:~n"
-                      ++ "    ~p~n"
-                      ++ "    ~p~n",
-                      [?MODULE, Form, Reason, ST]),
-            erlang:error({parse_transform_error, Reason, ST})
-    end.
+    erl_syntax_lib:map(Mapper, Form).
 
 transform_node(application, Node, Forms) ->
     case erl_syntax_lib:analyze_application(Node) of
