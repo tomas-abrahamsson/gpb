@@ -114,7 +114,14 @@
 %% </dl>
 %% @end
 parse_transform(Forms, Opts) ->
-    transform_forms(Forms, Opts).
+    %% Sometimes the backtrace depth is too small, causing
+    %% truncated stack traces, making it hard to see where things got awry
+    %% Up it temporarily.  Hope it has no ill effects, expect it to be
+    %% called mainly at compile-time.
+    Old = erlang:system_flag(backtrace_depth, 32),
+    Res = transform_forms(Forms, Opts),
+    erlang:system_flag(backtrace_depth, Old),
+    Res.
 
 transform_forms(Forms, Opts) ->
     Mapper = mk_transform_fn(Forms),
