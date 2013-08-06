@@ -34,12 +34,12 @@
 %% create syntax trees.
 %%
 %% <dl>
-%%   <dt>`gpb_codegen:mk_fn(FnName, fun(Arg ...) -> Body end)'</dt>
+%%   <dt>`gpb_codegen:mk_fn(FnName, fun(Arg ...) -> Body end) -> stree()'</dt>
 %%   <dd>Will be replaced by a parse-tree for a function `FnName',
 %%       with `Arg's and `Body' as in the specified fun.
 %%       The `FnName' is evaluated at run-time, not at compile-time.
 %%   </dd>
-%%   <dt>`gpb_codegen:mk_fn(FnName, fun(Args) -> Body end, RtTransforms)'</dt>
+%%   <dt>`gpb_codegen:mk_fn(FnName, Fun, RtTransforms) -> stree()'</dt>
 %%   <dd><p>Like `gpb_codegen:mk_fn/2', but apply `RtTransforms' at run-time
 %%         before returning the syntax tree.</p>
 %%       <p>The following `RtTransforms' are available:</p>
@@ -252,7 +252,7 @@ transform_case_expr_to_parse_tree_for_clause(Expr, RtTransforms) ->
             Expr
     end.
 
-%% Main entry point at runtime.
+%% Main entry points at runtime.
 %%@hidden
 runtime_fn_transform(FnName, FnParseTree) ->
     runtime_fn_transform(FnName, FnParseTree, []).
