@@ -23,46 +23,86 @@
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
-%% @doc
-%% This parse transform provides the following re-writes:
+%% @doc The parse tranform function, called by the parser/compiler.
+%%
+%% Include the file `gpb_codegen.hrl' or specify
+%% `-compile({parse_transform,gpb_codegen}).'
+%% to activate this parse transform.
+%%
+%% The syntax tree operations below are provided. An `stree()' is a
+%% syntax tree. Use for example `?expr(...)' or `?case_clause(...)' to
+%% create syntax trees.
 %%
 %% <dl>
-%%   <dt>`gpb_codegen:mk_fn(FnName, fun(Args) -> Body end)'</dt>
+%%   <dt>`gpb_codegen:mk_fn(FnName, fun(Arg ...) -> Body end)'</dt>
 %%   <dd>Will be replaced by a parse-tree for a function `FnName',
-%%       with `Args' and `Body' as in the specified fun.
+%%       with `Arg's and `Body' as in the specified fun.
 %%       The `FnName' is evaluated at run-time, not at compile-time.
 %%   </dd>
 %%   <dt>`gpb_codegen:mk_fn(FnName, fun(Args) -> Body end, RtTransforms)'</dt>
-%%   <dd><p>Like gpb_codegen:mk_fn/2, but apply `RtTransforms' at run-time
-%%         before returning the parse-tree.</p>
+%%   <dd><p>Like `gpb_codegen:mk_fn/2', but apply `RtTransforms' at run-time
+%%         before returning the syntax tree.</p>
 %%       <p>The following `RtTransforms' are available:</p>
 %%       <dl>
-%%         <dt>`{replace_term,Marker::atom(),Replacement::term()}'</dt>
+%%         <dt>`{replace_term, Marker::atom(), Replacement::term()}'</dt>
 %%         <dd>Replace any occurrences of `Marker' with the syntax tree
 %%           representing `Replacement', which must be something that could
 %%           have occurred as a literal term in some program text,
 %%           thus it must not contain any funs, pids, ports, references or such.
 %%         </dd>
-%%         <dt>`{replace_tree,Marker::atom(),Replacement::syntaxtree()}'</dt>
+%%         <dt>`{replace_tree, Marker::atom(), Replacement::stree()}'</dt>
 %%         <dd>Replace any occurrences of `Marker' with the syntax tree
 %%           `Replacement'.
 %%         </dd>
-%%         <dt>`{splice_trees,Marker::atom(),Replacements::[syntaxtree()]}'</dt>
+%%         <dt>`{splice_trees, Marker::atom(), Replacements::[stree()]}'</dt>
 %%         <dd>For any list that contains `Marker', insert the `Replacements'
-%%           syntax trees instead.
+%%           syntax trees instead of the `Marker'. Such lists are for example
+%%           lists of arguments for a function, lists of elements in a tuple
+%%           and lists of expressions in a function body, but not necessarily
+%%           elements in literal list term, since these may be represented
+%%           as cons elements in the syntax tree.
 %%         </dd>
-%%         <dt>`{splice_clauses,Marker::atom(),Replacements::[syntaxtree()]}'</dt>
+%%         <dt>`{splice_clauses, Marker::atom(), Replacements::[stree()]}'</dt>
 %%         <dd>For case clauses (and function clauses), where the pattern is a
-%%           single atom, `Marker', insert the case clauses (or function
-%%           clauses) in `Replacements' instead.
-%%           See also the `?case_clause/1' macro.
+%%           single atom, `Marker', insert the case clauses in `Replacements'
+%%           instead.
+%%           Use the `?case_clause/1' macro to create a syntax tree
+%%           for a case clause.
 %%         </dd>
 %%       </dl>
 %%   </dd>
-%%   <dt>`gpb_codegen:expr(Expr)'</dt>
-%%   <dd>Will be replaced by the parse-tree for a `Expr'.</dd>
-%%   <dt>`gpb_codegen:expr(Expr, RtTransforms)'</dt>
+%%   <dt>`?expr(Expr)' or
+%%       `gpb_codegen:expr(Expr)'</dt>
+%%   <dd>Will be replaced by the syntax tree for a `Expr'.</dd>
+%%   <dt>`?expr(Expr, RtTransforms)' or
+%%       `gpb_codegen:expr(Expr, RtTransforms)'</dt>
 %%   <dd>Like gpb_codegen:expr/1, but apply `RtTransforms' at run-time.</dd>
+%%   <dt>`?case_clause(Pattern [when Guard] -> Body)' or
+%%       `gpb_codegen:case_clause(CaseExpression)'</dt>
+%%   <dd><p>Will be replaced with the syntax tree for the case clause.
+%%          Only one case clause, the first, is considered.
+%%          When invoked using the `gpb_codegen:case_clause/1' function,
+%%          a complete `case Expr of Clause end'  must be provided;
+%%          the `Expr' is ignored.</p>
+%%       <p>Examples: `?case_clause(1 -> 2)' or `?case_clause(_ -> other)' or
+%%          `gpb_codegen:case_clause(case dummy of 1 -> 2 end)'.</p>
+%%       <p>In the macro form, some limitations apply:</p>
+%%       <ul>
+%%          <li>It is only possible to specify one `Guard';
+%%              it is _not_ possible to write for example:
+%%                `?case_clause(L when is_list(L), length(L) > 2 -> x)'
+%%              This is because the preprocessor will interpret
+%%              it as two macro arguments, delimited by the comma
+%%              in the middle between the two guards.
+%%              This limitation does not apply when using the
+%%              `gpb_codegen:case_clause/1' approach.</li>
+%%          <li>It is only possible to specify one `Body' expression,
+%%              because of the same preprocessor intermingling, but it
+%%              is possible to work around this using `begin' ... `end'.
+%%              This limitation does not apply when using the
+%%              `gpb_codegen:case_clause/1' approach.</li>
+%%       </ul>
+%%   </dd>
 %% </dl>
 %% @end
 parse_transform(Forms, Opts) ->
