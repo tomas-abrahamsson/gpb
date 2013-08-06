@@ -132,6 +132,37 @@ can_add_case_clause_test() ->
     other = M:FnName(99, cy).
 
 
+runtime_tranforms_for_expr_test() ->
+    E1 = ?expr(a, [{replace_term, a, 1}]),
+    E2 = ?expr(b, [{replace_tree, b, ?expr(bee)}]),
+    E3 = ?expr({c}, [{splice_trees, c, [?expr(see), ?expr(X)]}]),
+    E4 = ?expr(case Y of
+                   1      -> one;
+                   marker -> dummy;
+                   _      -> other
+               end,
+               [{splice_clauses, marker, [?case_clause(2 -> two)]}]),
+    M = ?dummy_mod,
+    FnName = p,
+    {module, M} = l(M, gpb_codegen:mk_fn(
+                         FnName,
+                         fun(e1) -> '<e1>';
+                            (e2) -> '<e2>';
+                            ({e3, X}) -> '<e3>';
+                            ({e4, Y}) -> '<e4>'
+                         end,
+                         [{replace_tree, '<e1>', E1},
+                          {replace_tree, '<e2>', E2},
+                          {replace_tree, '<e3>', E3},
+                          {replace_tree, '<e4>', E4}])),
+    1         = M:FnName(e1),
+    bee       = M:FnName(e2),
+    {see,sea} = M:FnName({e3, sea}),
+    one       = M:FnName({e4, 1}),
+    two       = M:FnName({e4, 2}),
+    other     = M:FnName({e4, 3}),
+    ok.
+
 %% -- helpers ---------------------------
 
 mk_test_fn_name() ->

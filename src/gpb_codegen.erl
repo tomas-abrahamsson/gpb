@@ -19,6 +19,7 @@
 -module(gpb_codegen).
 -export([parse_transform/2]).
 -export([runtime_fn_transform/2, runtime_fn_transform/3]).
+-export([runtime_expr_transform/2]).
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
@@ -60,6 +61,8 @@
 %%   </dd>
 %%   <dt>`gpb_codegen:expr(Expr)'</dt>
 %%   <dd>Will be replaced by the parse-tree for a `Expr'.</dd>
+%%   <dt>`gpb_codegen:expr(Expr, RtTransforms)'</dt>
+%%   <dd>Like gpb_codegen:expr/1, but apply `RtTransforms' at run-time.</dd>
 %% </dl>
 %% @end
 parse_transform(Forms, Opts) ->
@@ -117,6 +120,11 @@ transform_node(application, Node, Forms) ->
         {?MODULE, {expr, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
             erl_parse:abstract(erl_syntax:revert(Expr));
+        {?MODULE, {expr, 2}} ->
+            [Expr, RuntimeTransforms] = erl_syntax:application_arguments(Node),
+            mk_apply(?MODULE, runtime_expr_transform,
+                     [erl_parse:abstract(erl_syntax:revert(Expr)),
+                      RuntimeTransforms]);
         {?MODULE, {case_clause, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
             transform_case_expr_to_parse_tree_for_clause(Expr);
@@ -198,6 +206,13 @@ runtime_fn_transform(FnName, FnParseTree, Transforms) ->
       erl_syntax:function(
         erl_syntax:atom(FnName),
         [lists:foldl(fun apply_transform/2, C, Transforms) || C <- Clauses])).
+
+%%@hidden
+runtime_expr_transform(ExprParseTree, Transforms) ->
+    erl_syntax:revert(
+      erl_syntax:copy_pos(
+        ExprParseTree,
+        lists:foldl(fun apply_transform/2, ExprParseTree, Transforms))).
 
 apply_transform({replace_term, Marker, Replacement}, ParseTree) ->
     erl_syntax_lib:map(term_replacing_mapper(Marker, Replacement),
