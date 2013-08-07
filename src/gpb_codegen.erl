@@ -16,14 +16,9 @@
 %%% License along with this library; if not, write to the Free
 %%% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
--module(gpb_codegen).
--export([parse_transform/2]).
--export([runtime_fn_transform/2, runtime_fn_transform/3]).
--export([runtime_expr_transform/1, runtime_expr_transform/2]).
-
--define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
-
-%% @doc The parse tranform function, called by the parser/compiler.
+%% @doc This is a parse tranform, called by the parser/compiler,
+%% together with runtime support for successive transformation of
+%% syntax trees.
 %%
 %% Include the file `gpb_codegen.hrl' or specify
 %% `-compile({parse_transform,gpb_codegen}).'
@@ -112,7 +107,23 @@
 %%       but apply the RtTransforms to the syntax tree.
 %%   </dd>
 %% </dl>
+%%
+%% Note that there is also a runtime dependency to this module
+%% for code produced with this module.
 %% @end
+
+-module(gpb_codegen).
+-export([parse_transform/2]).
+-export([runtime_fn_transform/2, runtime_fn_transform/3]).
+-export([runtime_expr_transform/1, runtime_expr_transform/2]).
+
+%% Exported just to be able to give a (more informative) error than undef
+-export([mk_fn/2, mk_fn/3, format_fn/2, format_fn/3]).
+-export([expr/1, expr/2, case_clause/1, case_clause/2]).
+
+-define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
+
+%%@hidden
 parse_transform(Forms, Opts) ->
     %% Sometimes the backtrace depth is too small, causing
     %% truncated stack traces, making it hard to see where things got awry
@@ -122,6 +133,28 @@ parse_transform(Forms, Opts) ->
     Res = transform_forms(Forms, Opts),
     erlang:system_flag(backtrace_depth, Old),
     Res.
+
+%%@hidden
+mk_fn(Name, Fun) -> error_invalid_call(mk_fn, [Name, Fun]).
+%%@hidden
+mk_fn(Name, Fun, Ts) -> error_invalid_call(mk_fn, [Name, Fun, Ts]).
+%%@hidden
+format_fn(Name, Fun) -> error_invalid_call(format_fn, [Name, Fun]).
+%%@hidden
+format_fn(Name, Fun, Ts) -> error_invalid_call(format_fn, [Name, Fun, Ts]).
+%%@hidden
+expr(E) -> error_invalid_call(expr, [E]).
+%%@hidden
+expr(E, Ts) -> error_invalid_call(expr, [E, Ts]).
+%%@hidden
+case_clause(CC) -> error_invalid_call(case_clause, [CC]).
+%%@hidden
+case_clause(CC, Ts) -> error_invalid_call(case_clause, [CC, Ts]).
+
+error_invalid_call(Fn, Args) ->
+    erlang:error({badcall, {{?MODULE, Fn, Args},
+                            ["should be transformed with parse transform, "
+                             "not called directly"]}}).
 
 transform_forms(Forms, Opts) ->
     Mapper = mk_transform_fn(Forms),
