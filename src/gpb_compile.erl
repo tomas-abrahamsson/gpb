@@ -25,6 +25,7 @@
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
+-include("gpb_codegen.hrl").
 
 -record(ft, {type, occurrence, is_packed}).
 -record(anres, %% result of analysis
@@ -39,6 +40,7 @@
                                          %%            pass_as_params
         }).
 
+-define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
 %% @spec file(File) -> ok | {error, Reason}
 %% @equiv file(File, [])
@@ -537,6 +539,7 @@ c() ->
 %% fields across files, such as the `protoc' does.
 -spec c([string() | atom()]) -> no_return().
 c([F | _]=Files) when is_atom(F); is_list(F) -> %% invoked with -s or -run
+    erlang:system_flag(backtrace_depth, 32),
     FileNames = [if File == undefined -> undefined;
                     is_atom(File)     -> atom_to_list(File);
                     is_list(File)     -> File
@@ -1521,13 +1524,6 @@ format_initial_msg_fields(Indent, MsgDef, Defs) ->
             end],
         ",\n")).
 
-format_initial_field_values(MsgDef) ->
-    [[", ", case Occurrence of
-                repeated -> "[]";
-                required -> "undefined"; %% Use default value? (if available)
-                optional -> "undefined"
-            end] || #field{occurrence = Occurrence} <- MsgDef].
-
 format_msg_decoders(Defs, AnRes, Opts) ->
     [format_msg_decoder(MsgName, MsgDef, AnRes, Opts)
      || {{msg, MsgName}, MsgDef} <- Defs].
@@ -1540,129 +1536,207 @@ format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
      format_field_skippers(MsgName, AnRes)].
 
 format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
+    DecodeMsgFnName = mk_fn(d_msg_, MsgName),
+    DecodeFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
+    Key = ?expr(Key),
+    Rest = ?expr(Rest),
+    Params = decoder_params(MsgName, MsgDef, AnRes),
+    Bindings = new_bindings([{'<Params>', Params},
+                             {'<Key>', Key},
+                             {'<Rest>', Rest}]),
+    [gpb_codegen:format_fn(
+       DecodeMsgFnName,
+       fun(Bin) ->
+               '<decode-field-def>'(Bin, 0, 0, '<initial-params>')
+       end,
+       [{replace_term, '<decode-field-def>', DecodeFieldDefFnName},
+        {splice_trees, '<initial-params>',
+         msg_decoder_initial_params(MsgName, MsgDef, AnRes)}]),
+     "\n\n",
+     gpb_codegen:format_fn(
+      DecodeFieldDefFnName,
+      fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+              '<call-recursively>'(Rest, N+7, X bsl N + Acc, '<Params>');
+         (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+              '<Key>' = X bsl N + Acc,
+              '<calls-to-field-decoding-or-skip>';
+         (<<>>, 0, 0, '<Params>') ->
+              '<finalize-result>'
+      end,
+      [{splice_trees, '<Params>', Params},
+       {replace_term, '<call-recursively>', DecodeFieldDefFnName},
+       {replace_tree, '<Key>', Key},
+       {replace_tree, '<calls-to-field-decoding-or-skip>',
+        decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)},
+       {replace_tree, '<finalize-result>',
+        decoder_finalize_result(Params, MsgName, MsgDef, AnRes)}]),
+     "\n\n"].
+
+msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
     case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> format_msg_decoder_read_field_pap(MsgName, MsgDef);
-        pass_as_record -> format_msg_decoder_read_field_par(MsgName, MsgDef)
+        pass_as_params ->
+            [erl_parse:abstract(case Occurrence of
+                                    repeated -> [];
+                                    required -> undefined;
+                                    optional -> undefined
+                                end)
+             || #field{occurrence=Occurrence} <- MsgDef];
+        pass_as_record ->
+            [?expr('<msg0-call>'(),
+                   [{replace_term, '<msg0-call>', mk_fn(msg0_, MsgName)}])]
     end.
 
-format_msg_decoder_read_field_pap(MsgName, MsgDef) ->
-    FieldVars = [f(", F~w", [I]) || I <- lists:seq(1,length(MsgDef))],
-    ReadFieldCases = format_read_field_cases(MsgName, MsgDef, pass_as_params,
-                                             FieldVars),
-    MsgIndent = flength("    #~p{", [MsgName]),
-    FieldSets = string:join([case Occurrence of
-                                 required -> f("~p = F~w", [FName, I]);
-                                 optional -> f("~p = F~w", [FName, I]);
-                                 repeated -> f("~p = lists:reverse(F~w)",
-                                               [FName, I])
-                             end
-                             || {I, #field{occurrence=Occurrence,
-                                           name=FName}} <- index_seq(MsgDef)],
-                            f(",~n~s",[indent(MsgIndent, "")])),
-    [f("~p(Bin) ->~n", [mk_fn(d_msg_, MsgName)]),
-     f("    ~p(Bin, 0, 0~s).~n",
-       [mk_fn(d_read_field_def_, MsgName),
-        format_initial_field_values(MsgDef)]),
-     "\n",
-     f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
-       "    ~p(Rest, N+7, X bsl N + Acc~s);~n",
-       [mk_fn(d_read_field_def_, MsgName), FieldVars,
-        mk_fn(d_read_field_def_, MsgName), FieldVars]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
-       "    Key = X bsl N + Acc,~n",
-       [mk_fn(d_read_field_def_, MsgName), FieldVars]),
-     if ReadFieldCases == [] ->
-             f("    case Key band 7 of  %% WireType~n"
-               "        0 -> 'skip_varint_~s'(Rest, 1, 1~s);~n"
-               "        1 -> 'skip_64_~s'(Rest, 1, 1~s);~n"
-               "        2 -> 'skip_length_delimited_~s'(Rest, 0, 0~s);~n"
-               "        5 -> 'skip_32_~s'(Rest, 1, 1~s)~n"
-               "    end;~n",
-               [MsgName, FieldVars,
-                MsgName, FieldVars,
-                MsgName, FieldVars,
-                MsgName, FieldVars]);
-        true ->
-             f("    case Key of~n"
-               "~s"
-               "        _ ->~n"
-               "            case Key band 7 of %% wiretype~n"
-               "                0 -> 'skip_varint_~s'(Rest, 1, 1~s);~n"
-               "                1 -> 'skip_64_~s'(Rest, 1, 1~s);~n"
-               "                2 -> 'skip_length_delimited_~s'(Rest,0,0~s);~n"
-               "                5 -> 'skip_32_~s'(Rest, 1, 1~s)~n"
-               "            end~n"
-               "    end;~n",
-               [ReadFieldCases,
-                MsgName, FieldVars,
-                MsgName, FieldVars,
-                MsgName, FieldVars,
-                MsgName, FieldVars])
-     end,
-     f("~p(<<>>, 0, 0~s) ->~n", [mk_fn(d_read_field_def_, MsgName), FieldVars]),
-     f("    #~p{~s}.~n~n", [MsgName, FieldSets])].
+decoder_params(MsgName, MsgDef, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params -> [var_f_n(I) || I <- lists:seq(1, length(MsgDef))];
+        pass_as_record -> [?expr(Msg)]
+    end.
 
-format_msg_decoder_read_field_par(MsgName, MsgDef) ->
-    ReadFieldCases = format_read_field_cases(MsgName, MsgDef, pass_as_record, x),
-    [f("~p(Bin) ->~n", [mk_fn(d_msg_, MsgName)]),
-     indent(4, f("Msg0 = ~s(),~n", [mk_fn(msg0_, MsgName)])),
-     indent(4, f("~p(Bin, 0, 0, Msg0).~n", [mk_fn(d_read_field_def_, MsgName)])),
-     "\n",
-     f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~p(Rest, N+7, X bsl N + Acc, Msg);~n",
-       [mk_fn(d_read_field_def_, MsgName),
-        mk_fn(d_read_field_def_, MsgName)]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    Key = X bsl N + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
-     if ReadFieldCases == [] ->
-             f("    case Key band 7 of  %% WireType~n"
-               "        0 -> 'skip_varint_~s'(Rest, Msg);~n"
-               "        1 -> 'skip_64_~s'(Rest, Msg);~n"
-               "        2 -> 'skip_length_delimited_~s'(Rest, 0, 0, Msg);~n"
-               "        5 -> 'skip_32_~s'(Rest, Msg)~n"
-               "    end;~n",
-               [MsgName,MsgName,MsgName,MsgName]);
-        true ->
-             f("    case Key of~n"
-               "~s"
-               "        _ ->~n"
-               "            case Key band 7 of %% wiretype~n"
-               "                0 -> 'skip_varint_~s'(Rest, Msg);~n"
-               "                1 -> 'skip_64_~s'(Rest, Msg);~n"
-               "                2 -> 'skip_length_delimited_~s'(Rest,0,0,Msg);~n"
-               "                5 -> 'skip_32_~s'(Rest, Msg)~n"
-               "            end~n"
-               "    end;~n",
-               [ReadFieldCases,
-                MsgName,MsgName,MsgName,MsgName])
-     end,
-     f("~p(<<>>, 0, 0, Msg) ->~n"
-       "    ~p(Msg).~n~n",
-       [mk_fn(d_read_field_def_, MsgName),
-        mk_fn(d_reverse_toplevel_fields_, MsgName)])].
+decoder_field_calls(Bindings, MsgName, []=_MsgDef, AnRes) ->
+    Key = fetch_binding('<Key>', Bindings),
+    WiretypeExpr = ?expr('<Key>' band 7, [{replace_tree, '<Key>', Key}]),
+    Bindings1 = add_binding({'<wiretype-expr>', WiretypeExpr}, Bindings),
+    decoder_skip_calls(Bindings1, MsgName, AnRes);
+decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
+    SkipCalls = decoder_field_calls(Bindings, MsgName, [], AnRes),
+    FieldClauses = decoder_field_clauses(Bindings, MsgName, MsgDef, AnRes),
+    ?expr(
+       case '<Key>' of
+           '<field-clauses>' ->
+               '<dummy>';
+           _ ->
+               '<skip-calls>'
+       end,
+       [{replace_tree,   '<Key>', fetch_binding('<Key>', Bindings)},
+        {splice_clauses, '<field-clauses>', FieldClauses},
+        {replace_tree,   '<skip-calls>', SkipCalls}]).
 
-format_read_field_cases(MsgName, MsgDef, FieldPass, FieldVars) ->
+decoder_skip_calls(Bindings, MsgName, AnRes) ->
+    WiretypeExpr = fetch_binding('<wiretype-expr>', Bindings),
+    RestExpr = fetch_binding('<Rest>', Bindings),
+    Params = fetch_binding('<Params>', Bindings),
+    Fill = case get_field_pass(MsgName, AnRes) of
+               pass_as_params -> [?expr(0), ?expr(0)];
+               pass_as_record -> []
+           end,
+    ?expr(
+       case '<wiretype-expr>' of
+           0 -> skip_vi('<Rest>', '<Fill>', '<Params>');
+           1 -> skip_64('<Rest>', '<Fill>', '<Params>');
+           2 -> skip_ld('<Rest>', 0, 0,     '<Params>');
+           5 -> skip_32('<Rest>', '<Fill>', '<Params>')
+       end,
+       [{replace_tree, '<wiretype-expr>', WiretypeExpr},
+        {replace_tree, '<Rest>', RestExpr},
+        {splice_trees, '<Fill>', Fill},
+        {splice_trees, '<Params>', Params},
+        {replace_term, skip_vi, mk_fn(skip_varint_, MsgName)},
+        {replace_term, skip_64, mk_fn(skip_64_, MsgName)},
+        {replace_term, skip_ld, mk_fn(skip_length_delimited_, MsgName)},
+        {replace_term, skip_32, mk_fn(skip_32_, MsgName)}]).
+
+decoder_field_clauses(Bindings, MsgName, MsgDef, AnRes) ->
+    RestExpr = fetch_binding('<Rest>', Bindings),
+    Params = fetch_binding('<Params>', Bindings),
     [begin
+         FillP = case get_field_pass(MsgName, AnRes) of
+                     pass_as_params -> fill;
+                     pass_as_record -> no_fill
+                 end,
+         Fill = compute_decoder_call_fill(FieldDef, FillP),
          Wiretype = case is_packed(FieldDef) of
                         true  -> gpb:encode_wiretype(bytes);
                         false -> gpb:encode_wiretype(Type)
                     end,
-         Key = (FNum bsl 3) bor Wiretype,
-         Fill = if FieldPass == pass_as_params -> fill;
-                   FieldPass == pass_as_record -> no_fill
-                end,
-         indent(8, f("~w -> ~p(Rest~s~s);~n",
-                 [Key, mk_fn(d_field_, MsgName, FName),
-                  case mk_field_decoder_vi_params(FieldDef, Fill) of
-                      ""     -> [];
-                      Params -> [", ", Params]
-                  end,
-                  if FieldPass == pass_as_record -> ", Msg";
-                     FieldPass == pass_as_params -> FieldVars
-                  end]))
+         Selector = (FNum bsl 3) bor Wiretype,
+         gpb_codegen:case_clause(
+           case x of
+               '<selector>' -> '<call>'('<Rest>', '<Fill>', '<Params>')
+           end,
+           [{replace_term, '<selector>', Selector},
+            {replace_term, '<call>', mk_fn(d_field_, MsgName, FName)},
+            {replace_tree, '<Rest>', RestExpr},
+            {splice_trees, '<Fill>', Fill},
+            {splice_trees, '<Params>', Params}])
      end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
+compute_decoder_call_fill(#field{type=Type}=FieldDef, Fill) ->
+    ZeroZero = [?expr(0), ?expr(0)],
+    case is_packed(FieldDef) of
+        false ->
+            case Type of
+                sint32   -> ZeroZero; %% varint-based
+                sint64   -> ZeroZero; %% varint-based
+                int32    -> ZeroZero; %% varint-based
+                int64    -> ZeroZero; %% varint-based
+                uint32   -> ZeroZero; %% varint-based
+                uint64   -> ZeroZero; %% varint-based
+                bool     -> ZeroZero; %% varint-based
+                {enum,_} -> ZeroZero; %% varint-based
+                fixed32  -> if Fill == fill -> ZeroZero; true -> "" end;
+                sfixed32 -> if Fill == fill -> ZeroZero; true -> "" end;
+                float    -> if Fill == fill -> ZeroZero; true -> "" end;
+                fixed64  -> if Fill == fill -> ZeroZero; true -> "" end;
+                sfixed64 -> if Fill == fill -> ZeroZero; true -> "" end;
+                double   -> if Fill == fill -> ZeroZero; true -> "" end;
+                string   -> ZeroZero; %% varint-based
+                bytes    -> ZeroZero; %% varint-based
+                {msg,_}  -> ZeroZero  %% varint-based
+            end;
+        true ->
+            ZeroZero %% length of packed bytes is varint-based
+    end.
+
+
+decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            record_create(
+              MsgName,
+              [begin
+                   #field{name=FName, occurrence=Occurrence}=Field,
+                   FValueExpr =
+                       case Occurrence of
+                           required -> Param;
+                           optional -> Param;
+                           repeated -> ?expr(lists:reverse('<Param>'),
+                                             [{replace_tree, '<Param>', Param}])
+                       end,
+                   {FName, FValueExpr}
+               end
+               || {Field, Param} <- lists:zip(MsgDef, Params)]);
+        pass_as_record ->
+            RevFnName = mk_fn(d_reverse_toplevel_fields_, MsgName),
+            ?expr('<reverse-toplevel-fields>'('<Params>'),
+                  [{replace_term, '<reverse-toplevel-fields>', RevFnName},
+                   {splice_trees, '<Params>', Params}])
+    end.
+
+new_bindings(Tuples) ->
+    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
+
+new_bindings() ->
+    dict:new().
+
+add_binding({Key, Value}, Bindings) ->
+    dict:store(Key, Value, Bindings).
+
+fetch_binding(Key, Bindings) ->
+    dict:fetch(Key, Bindings).
+
+record_create(RecordName, FieldsValueTrees) ->
+    record_update(none, RecordName, FieldsValueTrees).
+
+record_update(Var, RecordName, FieldsValueTrees) ->
+    erl_syntax:record_expr(
+      Var,
+      erl_syntax:atom(RecordName),
+      [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
+       || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
+
+var_f_n(N) ->
+    erl_syntax:variable(?ff("F~w", [N])).
 
 mk_field_decoder_vi_params(#field{type=Type}=FieldDef, Fill) ->
     case is_packed(FieldDef) of
