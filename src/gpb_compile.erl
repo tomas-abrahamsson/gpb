@@ -1465,7 +1465,6 @@ format_decoder_topcase(Indent, Defs, BinVar, MsgNameVar) ->
 
 format_decoders(Defs, AnRes, Opts) ->
     [format_enum_decoders(Defs, AnRes),
-     format_initial_msgs(Defs, AnRes),
      format_msg_decoders(Defs, AnRes, Opts)].
 
 format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
@@ -1479,50 +1478,6 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
       ".\n\n"]
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
-
-format_initial_msgs(Defs, AnRes) ->
-    [format_initial_msg(MsgName, MsgDef, Defs, AnRes)
-     || {{msg, MsgName}, MsgDef} <- Defs].
-
-format_initial_msg(MsgName, MsgDef, Defs, AnRes) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> ""; %% handled in d_read_field_def_<MsgName>/1
-        pass_as_record -> format_initial_msg_par(MsgName, MsgDef, Defs)
-    end.
-
-format_initial_msg_par(MsgName, MsgDef, Defs) ->
-    [f("~p() ->~n", [mk_fn(msg0_, MsgName)]),
-     indent(4, format_initial_msg_record(4, MsgName, MsgDef, Defs)),
-     ".\n\n"].
-
-format_initial_msg_record(Indent, MsgName, MsgDef, Defs) ->
-    MsgNameQLen = flength("~p", [MsgName]),
-    f("#~p{~s}",
-      [MsgName, format_initial_msg_fields(Indent+MsgNameQLen+2, MsgDef, Defs)]).
-
-format_initial_msg_fields(Indent, MsgDef, Defs) ->
-    outdent_first(
-      string:join(
-        [case Field of
-             #field{occurrence=repeated} ->
-                 indent(Indent, f("~p = []", [FName]));
-             #field{type={msg,FMsgName}} ->
-                 FNameQLen = flength("~p", [FName]),
-                 {Type, FMsgDef} = lists:keyfind(Type, 1, Defs),
-                 indent(Indent, f("~p = ~s",
-                                  [FName,
-                                   format_initial_msg_record(Indent+FNameQLen+2,
-                                                             FMsgName, FMsgDef,
-                                                             Defs)]))
-         end
-         || #field{name=FName, type=Type}=Field <- MsgDef,
-            case Field of
-                #field{occurrence=repeated} -> true;
-                #field{occurrence=optional} -> false;
-                #field{type={msg,_}}        -> true;
-                _                           -> false
-            end],
-        ",\n")).
 
 format_msg_decoders(Defs, AnRes, Opts) ->
     [format_msg_decoder(MsgName, MsgDef, AnRes, Opts)
@@ -1573,17 +1528,22 @@ format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
      "\n\n"].
 
 msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
+    FNVExprs = [begin
+                    Value = case Occurrence of
+                                repeated -> [];
+                                required -> undefined;
+                                optional -> undefined
+                            end,
+                    {FName, Value, erl_parse:abstract(Value)}
+                end
+                || #field{name=FName, occurrence=Occurrence} <- MsgDef],
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
-            [erl_parse:abstract(case Occurrence of
-                                    repeated -> [];
-                                    required -> undefined;
-                                    optional -> undefined
-                                end)
-             || #field{occurrence=Occurrence} <- MsgDef];
+            [Expr || {_FName, _Value, Expr} <- FNVExprs];
         pass_as_record ->
-            [?expr('<msg0-call>'(),
-                   [{replace_term, '<msg0-call>', mk_fn(msg0_, MsgName)}])]
+            [record_create(MsgName,
+                           [{FName, Expr} || {FName, Value, Expr} <- FNVExprs,
+                                             Value /= undefined])]
     end.
 
 decoder_params(MsgName, MsgDef, AnRes) ->
