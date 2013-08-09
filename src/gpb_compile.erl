@@ -1488,7 +1488,7 @@ format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
      format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes),
      format_field_decoders(MsgName, MsgDef, AnRes, Opts),
      format_field_adders(MsgName, MsgDef, AnRes),
-     format_field_skippers(MsgName, AnRes)].
+     format_field_skippers(MsgName, MsgDef, AnRes)].
 
 format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
     DecodeMsgFnName = mk_fn(d_msg_, MsgName),
@@ -2246,70 +2246,61 @@ occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
     can_occur_as_sub_msg(MsgName, AnRes) andalso
         lists:member(optional, dict:fetch(MsgName, Occurrences)).
 
-format_field_skippers(MsgName, AnRes) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            NF = get_num_fields(MsgName, AnRes),
-            [format_varint_skipper_pap(MsgName, NF),
-             format_length_delimited_skipper_pap(MsgName, NF),
-             format_bit_skipper_pap(MsgName, 32, NF),
-             format_bit_skipper_pap(MsgName, 64, NF)];
-        pass_as_record ->
-            [format_varint_skipper_par(MsgName),
-             format_length_delimited_skipper_par(MsgName),
-             format_bit_skipper_par(MsgName, 32),
-             format_bit_skipper_par(MsgName, 64)]
-    end.
-
-format_varint_skipper_pap(MsgName, NF) ->
-    SkipFn = mk_fn(skip_varint_, MsgName),
-    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
-    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
-    [f("~p(<<0:1, _:7, Rest/binary>>, _, _~s) ->~n", [SkipFn, PassFieldVars]),
-     f("    ~p(Rest, 0, 0~s);~n", [ReadFieldFn, PassFieldVars]),
-     f("~p(<<1:1, _:7, Rest/binary>>, X1, X2~s) ->~n", [SkipFn, PassFieldVars]),
-     f("    ~p(Rest, X1, X2~s).~n~n", [SkipFn, PassFieldVars])].
-
-format_varint_skipper_par(MsgName) ->
-    SkipFn = mk_fn(skip_varint_, MsgName),
-    [f("~p(<<0:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
-     f("    ~p(Rest, 0, 0, Msg);~n", [mk_fn(d_read_field_def_, MsgName)]),
-     f("~p(<<1:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
-     f("    ~p(Rest, Msg).~n~n", [SkipFn])].
-
-format_length_delimited_skipper_pap(MsgName, NF) ->
-    SkipFn = mk_fn(skip_length_delimited_, MsgName),
-    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
-    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n", [SkipFn, PassFieldVars]),
-     f("    ~p(Rest, N+7, X bsl N + Acc~s);~n", [SkipFn, PassFieldVars]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n", [SkipFn, PassFieldVars]),
-     f("    Length = X bsl N + Acc,~n"),
-     f("    <<_:Length/binary, Rest2/binary>> = Rest,~n"),
-     f("    ~p(Rest2, 0, 0~s).~n~n", [ReadFieldFn, PassFieldVars])].
-
-format_length_delimited_skipper_par(MsgName) ->
-    SkipFn = mk_fn(skip_length_delimited_, MsgName),
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    ~p(Rest, N+7, X bsl N + Acc, Msg);~n", [SkipFn]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    Length = X bsl N + Acc,~n"),
-     f("    <<_:Length/binary, Rest2/binary>> = Rest,~n"),
-     f("    ~p(Rest2, 0, 0, Msg).~n~n", [mk_fn(d_read_field_def_, MsgName)])].
-
-format_bit_skipper_pap(MsgName, BitLen, NF) ->
-    SkipFn = mk_fn(skip_, BitLen, MsgName),
-    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
-    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
-    [f("~p(<<_:~w, Rest/binary>>, _, _~s) ->~n",
-       [SkipFn, BitLen, PassFieldVars]),
-     f("    ~p(Rest, 0, 0~s).~n~n",  [ReadFieldFn, PassFieldVars])].
-
-format_bit_skipper_par(MsgName, BitLen) ->
-    SkipFn = mk_fn(skip_, BitLen, MsgName),
-    [f("~p(<<_:~w, Rest/binary>>, Msg) ->~n", [SkipFn, BitLen]),
-     f("    ~p(Rest, 0, 0, Msg).~n~n",  [mk_fn(d_read_field_def_, MsgName)])].
-
+format_field_skippers(MsgName, MsgDef, AnRes) ->
+    SkipVarintFnName = mk_fn(skip_varint_, MsgName),
+    SkipLenDelimFnName = mk_fn(skip_length_delimited_, MsgName),
+    ReadFieldFnName = mk_fn(d_read_field_def_, MsgName),
+    Params = decoder_params(MsgName, MsgDef, AnRes),
+    Fill = case get_field_pass(MsgName, AnRes) of
+               pass_as_params -> [?expr(Z1), ?expr(Z2)];
+               pass_as_record -> []
+           end,
+    Zeros = case get_field_pass(MsgName, AnRes) of
+                pass_as_params -> [?expr(Z1), ?expr(Z2)];
+                pass_as_record -> [?expr(0), ?expr(0)]
+            end,
+    [%% skip_varint_<MsgName>/2,4
+     gpb_codegen:format_fn(
+       SkipVarintFnName,
+       fun(<<1:1, _:7, Rest/binary>>, '<Fill>', '<Params>') ->
+               '<call-recursively>'(Rest, '<Fill>', '<Params>');
+          (<<0:1, _:7, Rest/binary>>, '<Fill>', '<Params>') ->
+               '<call-read-field>'(Rest, '<Zeros>', '<Params>')
+       end,
+       [{replace_term, '<call-recursively>', SkipVarintFnName},
+        {replace_term, '<call-read-field>', ReadFieldFnName},
+        {splice_trees, '<Fill>', Fill},
+        {splice_trees, '<Zeros>', Zeros},
+        {splice_trees, '<Params>', Params}]),
+     "\n\n",
+     %% skip_length_delimited_<MsgName>/4
+     gpb_codegen:format_fn(
+       SkipLenDelimFnName,
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               '<call-recursively>'(Rest, N+7, X bsl N + Acc, '<Params>');
+          (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               Length = X bsl N + Acc,
+               <<_:Length/binary, Rest2/binary>> = Rest,
+               '<call-read-field>'(Rest2, 0, 0, '<Params>')
+       end,
+       [{replace_term, '<call-recursively>', SkipLenDelimFnName},
+        {replace_term, '<call-read-field>', ReadFieldFnName},
+        {splice_trees, '<Params>', Params}]),
+     "\n\n",
+     %% skip_32_<MsgName>/2,4
+     %% skip_64_<MsgName>/2,4
+     [[gpb_codegen:format_fn(
+         mk_fn(skip_, NumBits, MsgName),
+         fun(<<_:'<NumBits>', Rest/binary>>, '<Fill>', '<Params>') ->
+                 '<call-read-field>'(Rest, '<Zeros>', '<Params>')
+         end,
+         [{replace_term, '<call-read-field>', ReadFieldFnName},
+          {replace_term, '<NumBits>', NumBits},
+          {splice_trees, '<Fill>', Fill},
+          {splice_trees, '<Zeros>', Zeros},
+          {splice_trees, '<Params>', Params}]),
+       "\n\n"]
+      || NumBits <- [32, 64]]].
 
 format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_error_wrapper(MsgName)
