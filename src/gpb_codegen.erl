@@ -37,6 +37,11 @@
 %%   <dt>`gpb_codegen:mk_fn(FnName, Fun, RtTransforms) -> stree()'</dt>
 %%   <dd><p>Like `gpb_codegen:mk_fn/2', but apply `RtTransforms' at run-time
 %%         before returning the syntax tree.</p>
+%%       <p>Inside the `Fun', a call to `call_self' is treated specially
+%%         as a recursive call back to the function. NB: It is implemented
+%%         as a simple term replacement, see below, so any occurrences
+%%         of the atom `call_self' will be replaced regardless of whether
+%%         it is in a function call or not.</p>
 %%       <p>The following `RtTransforms' are available:</p>
 %%       <dl>
 %%         <dt>`{replace_term, Marker::atom(), Replacement::term()}'</dt>
@@ -321,11 +326,12 @@ runtime_fn_transform(FnName, FnParseTree) ->
 
 %%@hidden
 runtime_fn_transform(FnName, FnParseTree, Transforms) ->
+    Transforms2 = Transforms ++ [{replace_term, call_self, FnName}],
     Clauses = erl_syntax:function_clauses(FnParseTree),
     erl_syntax:revert(
       erl_syntax:function(
         erl_syntax:atom(FnName),
-        [lists:foldl(fun apply_transform/2, C, Transforms) || C <- Clauses])).
+        [lists:foldl(fun apply_transform/2, C, Transforms2) || C <- Clauses])).
 
 %%@hidden
 runtime_expr_transform(ExprParseTree) ->

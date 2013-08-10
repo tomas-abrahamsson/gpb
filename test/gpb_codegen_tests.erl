@@ -101,6 +101,14 @@ replaces_function_name_after_splicings_test() ->
                                         [{splice_trees,p,Vars}])),
     4 = M:FnName(2, 2).
 
+recursive_call_test() ->
+    M = ?dummy_mod,
+    {module,M} = l(M, gpb_codegen:mk_fn(fact,
+                                        fun(N) when N == 0 -> 1;
+                                           (N) -> N * call_self(N-1)
+                                        end)),
+    120 = M:fact(5).
+
 can_add_case_clause_test() ->
     M = ?dummy_mod,
     FnName = p,
