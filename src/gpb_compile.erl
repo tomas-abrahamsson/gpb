@@ -1488,14 +1488,14 @@ format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
      format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes),
      format_field_decoders(MsgName, MsgDef, AnRes, Opts),
      format_field_adders(MsgName, MsgDef, AnRes),
-     format_field_skippers(MsgName, MsgDef, AnRes)].
+     format_field_skippers(MsgName, AnRes)].
 
 format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
     DecodeMsgFnName = mk_fn(d_msg_, MsgName),
     DecodeFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
     Key = ?expr(Key),
     Rest = ?expr(Rest),
-    Params = decoder_params(MsgName, MsgDef, AnRes),
+    Params = decoder_params(MsgName, AnRes),
     Bindings = new_bindings([{'<Params>', Params},
                              {'<Key>', Key},
                              {'<Rest>', Rest}]),
@@ -1546,9 +1546,10 @@ msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
                                              Value /= undefined])]
     end.
 
-decoder_params(MsgName, MsgDef, AnRes) ->
+decoder_params(MsgName, AnRes) ->
+    NumFields = get_num_fields(MsgName, AnRes),
     case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> [var_f_n(I) || I <- lists:seq(1, length(MsgDef))];
+        pass_as_params -> [var_f_n(I) || I <- lists:seq(1, NumFields)];
         pass_as_record -> [?expr(Msg)]
     end.
 
@@ -1695,6 +1696,11 @@ record_update(Var, RecordName, FieldsValueTrees) ->
       [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
        || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
 
+%record_access(Var, RecordName, FieldName) ->
+%    erl_syntax:record_access(Var,
+%                             erl_syntax:atom(RecordName),
+%                             erl_syntax:atom(FieldName)).
+
 var_f_n(N) ->
     erl_syntax:variable(?ff("F~w", [N])).
 
@@ -1815,74 +1821,207 @@ format_packed_field_decoder_par(MsgName, FieldDef, Opts) ->
      format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
 
 format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            format_vi_based_field_decoder_pap(MsgName, FieldDef, AnRes, Opts);
-        pass_as_record ->
-            format_vi_based_field_decoder_par(MsgName, FieldDef, Opts)
+    #field{name=FName}=FieldDef,
+    FnName = mk_fn(d_field_, MsgName, FName),
+    ExtValue = ?expr(X bsl N + Acc),
+    FVar = ?expr(NewFValue), %% result is to be put in this variable
+    Rest = ?expr(Rest),
+    Bindings = new_bindings([{'<Value>', ExtValue},
+                             {'<Rest>', Rest}]),
+    Params = decoder_params(MsgName, AnRes),
+    InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
+    BodyTailFn =
+        fun(DecodeExprs, Rest2Var) ->
+                ReadFieldDefFn = mk_fn(d_read_field_def_, MsgName),
+                Params2 = updated_merged_params(MsgName, FieldDef, AnRes,
+                                                FVar, Params),
+                C = ?exprs('<call-read-field>'('<Rest2>', 0, 0, '<Params2>'),
+                           [replace_term('<call-read-field>', ReadFieldDefFn),
+                            replace_tree('<Rest2>', Rest2Var),
+                            splice_trees('<Params2>', Params2)]),
+                DecodeExprs ++ C
+        end,
+    Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
+    gpb_codegen:format_fn(
+      FnName,
+      fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+              '<call-recursively>'(Rest, N + 7, X bsl N + Acc, '<Params>');
+         (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
+              '<body>'
+      end,
+      [replace_term('<call-recursively>', FnName),
+       splice_trees('<Params>', Params),
+       splice_trees('<InParams>', InParams),
+       splice_trees('<body>', Body)]).
+
+%% -> {[Expr], Rest2VarExpr}
+%% where [Expr] is a list of exprs to calculate the resulting decoded value
+decode_int_value(ResVar, Bindings, #field{type=Type}, Opts, TailFn) ->
+    Value = fetch_binding('<Value>', Bindings),
+    Rest = fetch_binding('<Rest>', Bindings),
+    StringsAsBinaries = proplists:get_bool(strings_as_binaries, Opts),
+    case Type of
+        sint32 ->
+            TailFn(decode_zigzag_to_var(ResVar, Value), Rest);
+        sint64 ->
+            TailFn(decode_zigzag_to_var(ResVar, Value), Rest);
+        int32 ->
+            TailFn([uint_to_int_to_var(ResVar, Value, 32)], Rest);
+        int64 ->
+            TailFn([uint_to_int_to_var(ResVar, Value, 64)], Rest);
+        uint32 ->
+            TailFn([assign_to_var(ResVar, Value)], Rest);
+        uint64 ->
+            TailFn([assign_to_var(ResVar, Value)], Rest);
+        bool ->
+            Bool = ?expr('<Res>' = ('<Value>') =/= 0,
+                         [replace_tree('<Res>', ResVar),
+                          replace_tree('<Value>', Value)]),
+            TailFn([Bool], Rest);
+        {enum, EnumName} ->
+            Tmp = ?expr(Tmp),
+            ToSym = [uint_to_int_to_var(Tmp, Value, 32),
+                     ?expr('<Res>' = decode_enum('<Int>'),
+                           [replace_tree('<Res>', ResVar),
+                            replace_term(decode_enum, mk_fn(d_enum_, EnumName)),
+                            replace_tree('<Int>', Tmp)])],
+            TailFn(ToSym, Rest);
+        string when StringsAsBinaries ->
+            Rest2 = ?expr(Rest2),
+            TailFn(unpack_bytes(ResVar, Value, Rest, Rest2, Opts),
+                   Rest2);
+        string when not StringsAsBinaries ->
+            Rest2 = ?expr(Rest2),
+            TailFn(?exprs(Len = '<Value>',
+                          <<Utf8:Len/binary, Rest2/binary>> = '<Rest>',
+                          '<Res>' = unicode:characters_to_list(Utf8, unicode),
+                          [replace_tree('<Value>', Value),
+                           replace_tree('<Rest>', Rest),
+                           replace_tree('<Res>', ResVar)]),
+                   Rest2);
+        bytes ->
+            Rest2 = ?expr(Rest2),
+            TailFn(unpack_bytes(ResVar, Value, Rest, Rest2, Opts),
+                   Rest2);
+        {msg, Msg2Name} ->
+            Rest2 = ?expr(Rest2),
+            TailFn(?exprs(Len = '<Value>',
+                          <<Bs:Len/binary, Rest2/binary>> = '<Rest>',
+                          '<Res>' = decode_msg(Bs, '<sub-msg-name>'),
+                          [replace_tree('<Value>', Value),
+                           replace_tree('<Rest>', Rest),
+                           replace_tree('<Res>', ResVar),
+                           replace_term('<sub-msg-name>', Msg2Name)]),
+                   Rest2)
     end.
 
-format_vi_based_field_decoder_pap(MsgName, FieldDef, AnRes, Opts) ->
-    NF = get_num_fields(MsgName, AnRes),
-    #field{type=Type, rnum=RNum, name=FName}=FieldDef,
-    Merge = classify_field_merge_action(FieldDef),
-    PassFieldVars = [[", ", f("F~w", [I])] || I <- lists:seq(1, NF)],
-    InFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "_";
-                             I == RNum-1, Merge == seqadd    -> f("F~w", [I]);
-                             I == RNum-1, Merge == msgmerge  -> f("F~w", [I]);
-                             I /= RNum-1                     -> f("F~w", [I])
-                          end]
-                   || I <- lists:seq(1, NF)],
-    MergeCode = case Merge of
-                    overwrite -> "";
-                    seqadd    -> f("    FValue2 = [FValue | F~w],~n", [RNum-1]);
-                    msgmerge  -> {msg,FMsgName} = Type,
-                                 f("    FValue2 = if F~w == undefined ->~n"
-                                   "                     FValue;~n"
-                                   "                 true ->~n"
-                                   "                     ~p(F~w, FValue)~n"
-                                   "              end,~n",
-                                   [RNum-1,
-                                    mk_fn(merge_msg_, FMsgName), RNum-1])
-                end,
-    OutFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "FValue";
-                              I == RNum-1, Merge == seqadd    -> "FValue2";
-                              I == RNum-1, Merge == msgmerge  -> "FValue2";
-                              I /= RNum-1                     -> f("F~w", [I])
-                           end]
-                    || I <- lists:seq(1, NF)],
-    BValueExpr = "X bsl N + Acc",
-    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
-                                         Opts),
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
-       "    ~p(Rest, N+7, X bsl N + Acc~s);~n",
-       [mk_fn(d_field_, MsgName, FName), PassFieldVars,
-        mk_fn(d_field_, MsgName, FName), PassFieldVars]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
-       [mk_fn(d_field_, MsgName, FName), InFieldVars]),
-     f("~s",
-       [FValueCode]),
-     f("~s",
-       [MergeCode]),
-     f("    ~p(~s, 0, 0~s).~n",
-       [mk_fn(d_read_field_def_, MsgName), RestVar, OutFieldVars])].
+unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
+    CompilerHasBinary = (catch binary:copy(<<1>>)) == <<1>>,
+    Copy = case proplists:get_value(copy_bytes, Opts, auto) of
+               auto when not CompilerHasBinary -> false;
+               auto when CompilerHasBinary     -> true;
+               true                            -> true;
+               false                           -> false;
+               N when is_integer(N)            -> N;
+               N when is_float(N)              -> N
+           end,
+    Transforms = [replace_tree('<Value>', Value),
+                  replace_tree('<Res>', ResVar),
+                  replace_tree('<Rest>', Rest),
+                  replace_tree('<Rest2>', Rest2),
+                  replace_term('<Copy>', Copy)],
+    if Copy == false ->
+            ?exprs(Len = '<Value>',
+                   <<'<Res>':Len/binary, '<Rest2>'/binary>> = '<Rest>',
+                   Transforms);
+       Copy == true ->
+            ?exprs(Len = '<Value>',
+                   <<Bytes:Len/binary, '<Rest2>'/binary>> = '<Rest>',
+                   '<Res>' = binary:copy(Bytes),
+                   Transforms);
+       is_integer(Copy); is_float(Copy) ->
+            ?exprs(Len = '<Value>',
+                   <<Bytes:Len/binary, '<Rest2>'/binary>> = '<Rest>',
+                   '<Res>' = case binary:referenced_byte_size(Bytes) of
+                                 LB when LB >= byte_size(Bytes) * '<Copy>' ->
+                                     binary:copy(Bytes);
+                                 _ ->
+                                     Bytes
+                             end,
+                   Transforms)
+    end.
 
-format_vi_based_field_decoder_par(MsgName, FieldDef, Opts) ->
-    #field{type=Type, name=FName}=FieldDef,
-    BValueExpr = "X bsl N + Acc",
-    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
-                                         Opts),
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~p(Rest, N+7, X bsl N + Acc, Msg);~n",
-       [mk_fn(d_field_, MsgName, FName),
-        mk_fn(d_field_, MsgName, FName)]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n",
-       [mk_fn(d_field_, MsgName, FName)]),
-     f("~s",
-       [FValueCode]),
-     f("    NewMsg = ~p(FValue, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
-     f("    ~p(~s, 0, 0, NewMsg).~n",
-       [mk_fn(d_read_field_def_, MsgName), RestVar])].
+
+
+updated_merged_params(MsgName, FieldDef, AnRes, NewValue, Params) ->
+    #field{name=FName, rnum=RNum} = FieldDef,
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            PrevValue = lists:nth(RNum - 1, Params),
+            MergedValue = merge_field_exprs(FieldDef, PrevValue, NewValue),
+            lists_setelement(RNum - 1, Params, MergedValue);
+        pass_as_record ->
+            MsgVar = hd(Params),
+            %PrevValue = record_access(MsgVar, MsgName, FName),
+            %MergedValue = merge_field_exprs(FieldDef, PrevValue, NewValue),
+            %[record_update(MsgVar, MsgName, [{FName, MergedValue}])]
+            AddFieldFn = mk_fn(add_field_, MsgName, FName),
+            [?expr('<call-add-field>'('<New>', '<Msg>'),
+                   [replace_term('<call-add-field>', AddFieldFn),
+                    replace_tree('<New>', NewValue),
+                    replace_tree('<Msg>', MsgVar)])]
+    end.
+
+merge_field_exprs(FieldDef, PrevValue, NewValue) ->
+    case classify_field_merge_action(FieldDef) of
+        overwrite ->
+            NewValue;
+        seqadd ->
+            ?expr(['<New>' | '<Acc>'],
+                  [replace_tree('<New>', NewValue),
+                   replace_tree('<Acc>', PrevValue)]);
+        msgmerge ->
+            #field{type={msg,FMsgName}} = FieldDef,
+            ?expr(if '<Prev>' == undefined -> '<New>';
+                     true -> '<merge-msgs>'('<Prev>', '<New>')
+                  end,
+                  [replace_term('<merge-msgs>', mk_fn(merge_msg_, FMsgName)),
+                   replace_tree('<Prev>', PrevValue),
+                   replace_tree('<New>', NewValue)])
+    end.
+
+decoder_in_params(Params, MsgName, FieldDef, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            #field{rnum=RNum} = FieldDef,
+            case classify_field_merge_action(FieldDef) of
+                overwrite -> lists_setelement(RNum-1, Params, ?expr(_));
+                seqadd    -> Params;
+                msgmerge  -> Params
+            end;
+        pass_as_record ->
+            Params
+    end.
+
+assign_to_var(Var, Expr) ->
+    ?expr('<Var>' = '<Expr>',
+          [replace_tree('<Var>', Var),
+           replace_tree('<Expr>', Expr)]).
+
+decode_zigzag_to_var(ResVar, ValueExpr) ->
+    ?exprs(ZValue = '<Value>',
+           '<Res>' = if ZValue band 1 =:= 0 -> ZValue bsr 1;
+                        true                -> -((ZValue + 1) bsr 1)
+                     end,
+           [replace_tree('<Value>', ValueExpr),
+            replace_tree('<Res>', ResVar)]).
+
+uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
+    ?expr(
+       <<'<Res>':'<N>'/signed-native>> = <<('<Value>'):'<N>'/unsigned-native>>,
+       [replace_term('<N>', NumBits),
+        replace_tree('<Res>', ResVar),
+        replace_tree('<Value>', ValueExpr)]).
 
 %% -> {FValueCode, Rest2Var}
 %% Produce code for setting a variable, FValueVar, depending on the
@@ -2246,11 +2385,11 @@ occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
     can_occur_as_sub_msg(MsgName, AnRes) andalso
         lists:member(optional, dict:fetch(MsgName, Occurrences)).
 
-format_field_skippers(MsgName, MsgDef, AnRes) ->
+format_field_skippers(MsgName, AnRes) ->
     SkipVarintFnName = mk_fn(skip_varint_, MsgName),
     SkipLenDelimFnName = mk_fn(skip_length_delimited_, MsgName),
     ReadFieldFnName = mk_fn(d_read_field_def_, MsgName),
-    Params = decoder_params(MsgName, MsgDef, AnRes),
+    Params = decoder_params(MsgName, AnRes),
     Fill = case get_field_pass(MsgName, AnRes) of
                pass_as_params -> [?expr(Z1), ?expr(Z2)];
                pass_as_record -> []
@@ -3429,6 +3568,24 @@ smember_any(Elems, Set) -> %% is any elem a member in the set
 
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
+
+%% lists_replace(N, List, New) -> NewList
+%% Like erlang:setelement, but for a list:
+%% Replace the Nth element in List with a New value.
+lists_setelement(1, [_ | Rest], New) ->
+    [New | Rest];
+lists_setelement(N, [X | Rest], New) when N > 1 ->
+    [X | lists_setelement(N - 1, Rest, New)].
+
+%% Parse tree transform instructions
+replace_term(Marker, NewTerm) when is_atom(Marker) ->
+    {replace_term, Marker, NewTerm}.
+
+replace_tree(Marker, NewTree) when is_atom(Marker) ->
+    {replace_tree, Marker, NewTree}.
+
+splice_trees(Marker, Trees) when is_atom(Marker) ->
+    {splice_trees, Marker, Trees}.
 
 f(F)   -> f(F,[]).
 f(F,A) -> io_lib:format(F,A).
