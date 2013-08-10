@@ -75,6 +75,11 @@
 %%   <dt>`?expr(Expr, RtTransforms)' or
 %%       `gpb_codegen:expr(Expr, RtTransforms)'</dt>
 %%   <dd>Like gpb_codegen:expr/1, but apply `RtTransforms' at run-time.</dd>
+%%   <dt>`?exprs(Expr, ..., RtTransforms)' or
+%%       `gpb_codegen:expr(Expr, ..., RtTransforms)'</dt>
+%%   <dd>Like gpb_codegen:expr/1, but create a list of expressions.
+%%       The last parameter must always be a list of run-time transforms.
+%%       The macro form has support only up to some number of params.</dd>
 %%   <dt>`?case_clause(Pattern [when Guard] -> Body)' or
 %%       `gpb_codegen:case_clause(CaseExpression)'</dt>
 %%   <dd><p>Will be replaced with the syntax tree for the case clause.
@@ -117,10 +122,13 @@
 -export([parse_transform/2]).
 -export([runtime_fn_transform/2, runtime_fn_transform/3]).
 -export([runtime_expr_transform/1, runtime_expr_transform/2]).
+-export([runtime_exprs_transform/2]).
 
 %% Exported just to be able to give a (more informative) error than undef
 -export([mk_fn/2, mk_fn/3, format_fn/2, format_fn/3]).
--export([expr/1, expr/2, case_clause/1, case_clause/2]).
+-export([expr/1, expr/2]).
+-export([exprs/2, exprs/3, exprs/4, exprs/5, exprs/6]). %% as many as in .hrl
+-export([case_clause/1, case_clause/2]).
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
@@ -147,6 +155,17 @@ format_fn(Name, Fun, Ts) -> error_invalid_call(format_fn, [Name, Fun, Ts]).
 expr(E) -> error_invalid_call(expr, [E]).
 %%@hidden
 expr(E, Ts) -> error_invalid_call(expr, [E, Ts]).
+%%@hidden
+exprs(E1, Ts) -> error_invalid_call(exprs, [E1, Ts]).
+%%@hidden
+exprs(E1, E2, Ts) -> error_invalid_call(exprs, [E1, E2, Ts]).
+%%@hidden
+exprs(E1, E2, E3, Ts) -> error_invalid_call(exprs, [E1, E2, E3, Ts]).
+%%@hidden
+exprs(E1, E2, E3, E4, Ts) -> error_invalid_call(exprs, [E1, E2, E3, E4, Ts]).
+%%@hidden
+exprs(E1, E2, E3, E4, E5, Ts) -> error_invalid_call(exprs,
+                                                    [E1, E2, E3, E4, E5, Ts]).
 %%@hidden
 case_clause(CC) -> error_invalid_call(case_clause, [CC]).
 %%@hidden
@@ -212,6 +231,12 @@ transform_node(application, Node, Forms) ->
             mk_apply(?MODULE, runtime_expr_transform,
                      [erl_parse:abstract(erl_syntax:revert(Expr)),
                       RtTransforms]);
+        {?MODULE, {exprs, Arity}} when Arity >= 2 ->
+            ExprsAndRtTransforms = erl_syntax:application_arguments(Node),
+            {Exprs, RtTransforms} = split_out_last(ExprsAndRtTransforms),
+            mk_apply(?MODULE, runtime_exprs_transform,
+                     [erl_parse:abstract(erl_syntax:revert(Exprs)),
+                      RtTransforms]);
         {?MODULE, {case_clause, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
             transform_case_expr_to_parse_tree_for_clause(Expr, []);
@@ -224,6 +249,9 @@ transform_node(application, Node, Forms) ->
 transform_node(_Type, Node, _Forms) ->
     Node.
 
+split_out_last(List) ->
+    [Last | RRest] = lists:reverse(List),
+    {lists:reverse(RRest), Last}.
 
 %% transform a "call" to gpb_codegen:mk_fn(Name, Def, RtTransforms)
 %% into a real (run-time) call to:
@@ -309,6 +337,14 @@ runtime_expr_transform(ExprParseTree, Transforms) ->
       erl_syntax:copy_pos(
         ExprParseTree,
         lists:foldl(fun apply_transform/2, ExprParseTree, Transforms))).
+
+%%@hidden
+runtime_exprs_transform(ExprParseTrees, Transforms) ->
+    [erl_syntax:revert(
+       erl_syntax:copy_pos(
+         ExprParseTree,
+         lists:foldl(fun apply_transform/2, ExprParseTree, Transforms)))
+     || ExprParseTree <- ExprParseTrees].
 
 apply_transform({replace_term, Marker, Replacement}, ParseTree) ->
     erl_syntax_lib:map(term_replacing_mapper(Marker, Replacement),

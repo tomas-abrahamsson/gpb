@@ -177,6 +177,24 @@ runtime_tranforms_for_expr_test() ->
     other     = M:FnName({e4, 3}),
     ok.
 
+runtime_transforms_for_exprs_test() ->
+    E1s = ?exprs(a, [{replace_term, a, 1}]),
+    E2s = ?exprs(a, b, [{replace_term, a, 1}, {replace_term, b, 2}]),
+    true = is_list(E1s),
+    true = is_list(E2s),
+    M = ?dummy_mod,
+    FnName = p,
+    {module, M} = l(M, gpb_codegen:mk_fn(
+                         FnName,
+                         fun(e1) -> {'<e1>'};
+                            (e2) -> {'<e2>'}
+                         end,
+                         [{splice_trees, '<e1>', E1s},
+                          {splice_trees, '<e2>', E2s}])),
+    {1}   = M:FnName(e1),
+    {1,2} = M:FnName(e2),
+    ok.
+
 format_fn_no_rt_transforms_test() ->
     FnName = p,
     S = gpb_codegen:format_fn(FnName, fun(33) -> yes end),
