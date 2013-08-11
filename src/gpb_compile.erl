@@ -377,7 +377,9 @@ merge_warns({ok, MsgDefs}, Warns, msg_defs)      -> {ok, MsgDefs, Warns};
 merge_warns({ok, M, B}, Warns, binary)           -> {ok, M, B, Warns};
 merge_warns({ok, M, B, Warns1}, Warns2, binary)  -> {ok, M, B, Warns2++Warns1};
 merge_warns({error, R}, Warns, _OutFmt)          -> {error, R, Warns};
-merge_warns({error, R, Warns1}, Warns2, _OutFmt) -> {error, R, Warns2++Warns1}.
+merge_warns({error, R, Warns1}, Warns2, _OutFmt) -> {error, R, Warns2++Warns1};
+merge_warns(error, Warns, binary) ->
+    erlang:error({internal_error, generated_code_failed_to_compile, Warns}).
 
 possibly_report_warnings(Result, Opts) ->
     Warns = case Result of
@@ -1696,39 +1698,13 @@ record_update(Var, RecordName, FieldsValueTrees) ->
       [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
        || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
 
-%record_access(Var, RecordName, FieldName) ->
-%    erl_syntax:record_access(Var,
-%                             erl_syntax:atom(RecordName),
-%                             erl_syntax:atom(FieldName)).
+record_access(Var, RecordName, FieldName) ->
+    erl_syntax:record_access(Var,
+                             erl_syntax:atom(RecordName),
+                             erl_syntax:atom(FieldName)).
 
 var_f_n(N) ->
     erl_syntax:variable(?ff("F~w", [N])).
-
-mk_field_decoder_vi_params(#field{type=Type}=FieldDef, Fill) ->
-    case is_packed(FieldDef) of
-        false ->
-            case Type of
-                sint32   -> "0, 0"; %% varint-based
-                sint64   -> "0, 0"; %% varint-based
-                int32    -> "0, 0"; %% varint-based
-                int64    -> "0, 0"; %% varint-based
-                uint32   -> "0, 0"; %% varint-based
-                uint64   -> "0, 0"; %% varint-based
-                bool     -> "0, 0"; %% varint-based
-                {enum,_} -> "0, 0"; %% varint-based
-                fixed32  -> if Fill == fill -> "0, 0"; true -> "" end;
-                sfixed32 -> if Fill == fill -> "0, 0"; true -> "" end;
-                float    -> if Fill == fill -> "0, 0"; true -> "" end;
-                fixed64  -> if Fill == fill -> "0, 0"; true -> "" end;
-                sfixed64 -> if Fill == fill -> "0, 0"; true -> "" end;
-                double   -> if Fill == fill -> "0, 0"; true -> "" end;
-                string   -> "0, 0"; %% varint-based
-                bytes    -> "0, 0"; %% varint-based
-                {msg,_}  -> "0, 0"  %% varint-based
-            end;
-        true ->
-            "0, 0" %% length of packed bytes is varint-based
-    end.
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
     [[format_field_decoder(MsgName, Field, AnRes, Opts), "\n"]
@@ -1762,63 +1738,99 @@ format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
     end.
 
 format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            format_packed_field_decoder_pap(MsgName, FieldDef, AnRes, Opts);
-        pass_as_record ->
-            format_packed_field_decoder_par(MsgName, FieldDef, Opts)
+    #field{name=FName, rnum=RNum, opts=FOpts} = FieldDef,
+    FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
+    Zeros = compute_decoder_call_fill(FieldDefAsNonpacked, no_fill),
+    DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
+    Params = decoder_params(MsgName, AnRes),
+    Param = case get_field_pass(MsgName, AnRes) of
+                pass_as_params ->
+                    lists:nth(RNum - 1, Params);
+                pass_as_record ->
+                    MsgVar = hd(Params),
+                    record_access(MsgVar, MsgName, FName)
+            end,
+    OutParams = case get_field_pass(MsgName, AnRes) of
+                    pass_as_params ->
+                        lists_setelement(RNum - 1, Params, ?expr(NewSeq));
+                    pass_as_record ->
+                        [record_update(hd(Params), MsgName,
+                                       [{FName, ?expr(NewSeq)}])]
+                end,
+    [gpb_codegen:format_fn(
+       DecodePackWrapFn,
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               '<call-recursively>'(Rest, N + 7, X bsl N + Acc, '<Params>');
+          (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
+               Len = X bsl N + Acc,
+               <<PackedBytes:Len/binary, Rest2/binary>> = Rest,
+               NewSeq = decode_packed(PackedBytes, '<Zeros>', '<Param>'),
+               '<call-read-field>'(Rest2, 0, 0, '<OutParams>')
+       end,
+       [replace_term('<call-recursively>', DecodePackWrapFn),
+        splice_trees('<Params>', Params),
+        splice_trees('<InParams>', Params),
+        replace_term(decode_packed, mk_fn(d_packed_field_, MsgName, FName)),
+        splice_trees('<Zeros>', Zeros),
+        replace_tree('<Param>', Param),
+        replace_term('<call-read-field>', mk_fn(d_read_field_def_, MsgName)),
+        splice_trees('<OutParams>', OutParams)]),
+     "\n\n",
+     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
+
+format_packed_field_seq_decoder(MsgName, #field{type=Type}=Field, Opts) ->
+    case Type of
+        fixed32  -> format_dpacked_nonvi(MsgName, Field, 32, [little]);
+        sfixed32 -> format_dpacked_nonvi(MsgName, Field, 32, [little,signed]);
+        float    -> format_dpacked_nonvi(MsgName, Field, 32, [little,float]);
+        fixed64  -> format_dpacked_nonvi(MsgName, Field, 64, [little]);
+        sfixed64 -> format_dpacked_nonvi(MsgName, Field, 64, [little,signed]);
+        double   -> format_dpacked_nonvi(MsgName, Field, 64, [little,float]);
+        _        -> format_dpacked_vi(MsgName, Field, Opts)
     end.
 
-format_packed_field_decoder_pap(MsgName, FieldDef, AnRes, Opts) ->
-    NF = get_num_fields(MsgName, AnRes),
-    #field{name=FName, rnum=RNum, opts=FOpts}=FieldDef,
-    DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
-    FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
-    FieldVars = [[", ", f("F~w", [I])] || I <- lists:seq(1, NF)],
-    InFieldVars = [[", ", if I == RNum-1 -> "AccSeq";
-                             I /= RNum-1 -> f("F~w", [I])
-                          end]
-                   || I <- lists:seq(1, NF)],
-    OutFieldVars = [[", ", if I == RNum-1 -> "NewSeq";
-                              I /= RNum-1 -> f("F~w", [I])
-                           end]
-                    || I <- lists:seq(1, NF)],
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
-       [DecodePackWrapFn, FieldVars]),
-     f("    ~p(Rest, N+7, X bsl N + Acc~s);~n", [DecodePackWrapFn, FieldVars]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
-       [DecodePackWrapFn, InFieldVars]),
-     f("    Len = X bsl N + Acc,~n"),
-     f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
-     f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
-       [mk_fn(d_packed_field_, MsgName, FName),
-        case mk_field_decoder_vi_params(FieldDefAsNonpacked, no_fill) of
-            ""     -> [", "];
-            Params -> [", ", Params, ", "]
-        end]),
-     f("    ~p(Rest2, 0, 0~s).~n~n",
-       [mk_fn(d_read_field_def_, MsgName), OutFieldVars]),
-     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
+format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitTypes) ->
+    FnName = mk_fn(d_packed_field_, MsgName, FName),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(<<Value:'<N>'/'<T>', Rest/binary>>, AccSeq) ->
+               '<call-recursively>'(Rest, [Value | AccSeq]);
+          (<<>>, AccSeq) ->
+               AccSeq
+       end,
+       [replace_term('<call-recursively>', FnName),
+        replace_term('<N>', BitLen),
+        splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes])]),
+     "\n\n"].
 
-format_packed_field_decoder_par(MsgName, FieldDef, Opts) ->
-    #field{name=FName, opts=FOpts}=FieldDef,
-    DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
-    FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
-     f("    ~p(Rest, N+7, X bsl N + Acc, Msg);~n", [DecodePackWrapFn]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, #~p{~p=AccSeq}=Msg) ->~n",
-       [DecodePackWrapFn, MsgName, FName]),
-     f("    Len = X bsl N + Acc,~n"),
-     f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
-     f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
-       [mk_fn(d_packed_field_, MsgName, FName),
-        case mk_field_decoder_vi_params(FieldDefAsNonpacked, no_fill) of
-            ""     -> [", "];
-            Params -> [", ", Params, ", "]
-        end]),
-     f("    NewMsg = Msg#~p{~p=NewSeq},~n", [MsgName, FName]),
-     f("    ~p(Rest2, 0, 0, NewMsg).~n~n", [mk_fn(d_read_field_def_, MsgName)]),
-     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
+format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
+    FnName = mk_fn(d_packed_field_, MsgName, FName),
+    ExtValue = ?expr(X bsl N + Acc),
+    FVar = ?expr(NewFValue), %% result is to be put in this variable
+    Rest = ?expr(Rest),
+    Bindings = new_bindings([{'<Value>', ExtValue},
+                             {'<Rest>', Rest}]),
+    BodyTailFn =
+        fun(DecodeExprs, Rest2Var) ->
+                C = ?exprs('<call-recursively>'('<Rest2>', 0, 0,
+                                                ['<Res>' | AccSeq]),
+                           [replace_tree('<Rest2>', Rest2Var),
+                            replace_tree('<Res>', FVar)]),
+                DecodeExprs ++ C
+        end,
+    Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
+               '<call-recursively>'(Rest, N + 7, X bsl N + Acc, AccSeq);
+          (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
+               '<body>';
+          (<<>>, 0, 0, AccSeq) ->
+               AccSeq
+       end,
+       [splice_trees('<body>', Body),
+        replace_term('<call-recursively>', FnName)]),
+     "\n\n"].
 
 format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     #field{name=FName}=FieldDef,
@@ -2023,119 +2035,6 @@ uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
         replace_tree('<Res>', ResVar),
         replace_tree('<Value>', ValueExpr)]).
 
-%% -> {FValueCode, Rest2Var}
-%% Produce code for setting a variable, FValueVar, depending on the
-%% varint type Type, for the raw unpacked expr, BValueExpr.
-%%
-%% The initial RestVar is the name of the variable holding the rest
-%% of the bytes. An updated -- or the same -- such variable is returned.
-%%
-%% Indent the code to Indent spaces.
-%% The resulting code contains one or more statements that ends with comma.
-mk_unpack_vi(Indent, FValueVar, BValueExpr, Type, RestVar, Opts) ->
-    Rest2Var = RestVar ++ "2",
-    case Type of
-        sint32 ->
-            {[indent(Indent, f("BValue = ~s,~n", [BValueExpr])),
-              indent(Indent, f("~s = ~s,~n",
-                               [FValueVar,
-                                fmt_decode_zigzag(Indent+7, "BValue")]))],
-             RestVar};
-        sint64 ->
-            {[indent(Indent, f("BValue = ~s,~n", [BValueExpr])),
-              indent(Indent, f("~s = ~s,~n",
-                               [FValueVar,
-                                fmt_decode_zigzag(Indent+7, "BValue")]))],
-             RestVar};
-        int32 ->
-            {indent(Indent, f("~s,~n",
-                              [fmt_uint_to_int(BValueExpr, FValueVar, 32)])),
-             RestVar};
-        int64 ->
-            {indent(Indent, f("~s,~n",
-                              [fmt_uint_to_int(BValueExpr, FValueVar, 64)])),
-             RestVar};
-        uint32 ->
-            {indent(Indent, f("~s = ~s,~n", [FValueVar, BValueExpr])),
-             RestVar};
-        uint64 ->
-            {indent(Indent, f("~s = ~s,~n", [FValueVar, BValueExpr])),
-             RestVar};
-        bool ->
-            {indent(Indent, f("~s = ((~s) =/= 0),~n", [FValueVar, BValueExpr])),
-             RestVar};
-        {enum, EnumName} ->
-            {[indent(Indent, f("~s,~n",
-                               [fmt_uint_to_int(BValueExpr, "EnumValue", 32)])),
-              indent(Indent, f("~s = ~p(EnumValue),~n",
-                               [FValueVar, mk_fn(d_enum_, EnumName)]))],
-             RestVar};
-        string ->
-            {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
-              case proplists:get_bool(strings_as_binaries, Opts) of
-                  false ->
-                      [indent(Indent, f("<<Utf8:Len/binary, ~s/binary>> = ~s,~n",
-                                        [Rest2Var, RestVar])),
-                       indent(Indent, f("~s = unicode:characters_to_list("
-                                        "Utf8,unicode),~n",
-                                        [FValueVar]))];
-                  true ->
-                      mk_unpack_bytes(Indent, FValueVar, RestVar, Rest2Var,
-                                      Opts)
-              end],
-             Rest2Var};
-        bytes ->
-            {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
-              mk_unpack_bytes(Indent, FValueVar, RestVar, Rest2Var, Opts)],
-             Rest2Var};
-        {msg,Msg2Name} ->
-            {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
-              indent(Indent, f("<<MsgBytes:Len/binary, ~s/binary>> = ~s,~n",
-                               [Rest2Var, RestVar])),
-              indent(Indent, f("~s = decode_msg(MsgBytes, ~p),~n",
-                               [FValueVar, Msg2Name]))],
-             Rest2Var}
-    end.
-
-mk_unpack_bytes(I, FValueVar, RestVar, Rest2Var, Opts) ->
-    CompilerHasBinary = (catch binary:copy(<<1>>)) == <<1>>,
-    Copy = case proplists:get_value(copy_bytes, Opts, auto) of
-               auto when not CompilerHasBinary -> false;
-               auto when CompilerHasBinary     -> true;
-               true                            -> true;
-               false                           -> false;
-               N when is_integer(N)            -> N;
-               N when is_float(N)              -> N
-           end,
-    if Copy == false ->
-            indent(I, f("<<~s:Len/binary, ~s/binary>> = ~s,~n",
-                        [FValueVar, Rest2Var, RestVar]));
-       Copy == true ->
-            [indent(I, f("<<Bytes:Len/binary, ~s/binary>> = ~s,~n",
-                         [Rest2Var, RestVar])),
-             indent(I, f("~s = binary:copy(Bytes),~n", [FValueVar]))];
-       is_integer(Copy); is_float(Copy) ->
-            I2 = I + length(FValueVar) + length(" = "),
-            [indent(I, f("<<Bytes:Len/binary, ~s/binary>> = ~s,~n",
-                         [Rest2Var, RestVar])),
-             indent(I, f("~s = case binary:referenced_byte_size(Bytes) of~n",
-                            [FValueVar])),
-             indent(I2+4, f("LB when LB >= byte_size(Bytes) * ~w ->~n", [Copy])),
-             indent(I2+4+4, f("binary:copy(Bytes);~n")),
-             indent(I2+4, f("_ ->~n")),
-             indent(I2+4+4, f("Bytes~n")),
-             indent(I2, f("end,~n"))]
-    end.
-
-fmt_uint_to_int(SrcStr, ResultVar, NumBits) ->
-    f("<<~s:~w/signed-native>> = <<(~s):~p/unsigned-native>>",
-      [ResultVar, NumBits, SrcStr, NumBits]).
-
-fmt_decode_zigzag(Indent, VarStr) ->
-    [f(              "if ~s band 1 =:= 0 -> ~s bsr 1;~n", [VarStr, VarStr]),
-     indent(Indent,f("   true -> -((~s + 1) bsr 1)~n", [VarStr])),
-     indent(Indent,f("end"))].
-
 format_uf32_field_decoder(MsgName, FieldDef, AnRes) ->
     format_f_field_decoder(MsgName, 32, 'little', FieldDef, AnRes).
 
@@ -2195,38 +2094,6 @@ format_f_field_decoder_par(MsgName, BitLen, BitType, FieldDef)  ->
      f("    NewMsg = ~p(Value, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
      f("    ~p(Rest, 0, 0, NewMsg).~n",
        [mk_fn(d_read_field_def_, MsgName)])].
-
-format_packed_field_seq_decoder(MsgName, #field{type=Type}=FieldDef, Opts) ->
-    case Type of
-        fixed32  -> format_dpacked_nonvi(MsgName, FieldDef, 32, 'little');
-        sfixed32 -> format_dpacked_nonvi(MsgName, FieldDef, 32, 'little-signed');
-        float    -> format_dpacked_nonvi(MsgName, FieldDef, 32, 'little-float');
-        fixed64  -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little');
-        sfixed64 -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little-signed');
-        double   -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little-float');
-        _        -> format_dpacked_vi(MsgName, FieldDef, Opts)
-    end.
-
-format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitType) ->
-    FnName = mk_fn(d_packed_field_, MsgName, FName),
-    [f("~p(<<Value:~p/~s, Rest/binary>>, AccSeq) ->~n",
-       [FnName, BitLen, BitType]),
-     f("    ~p(Rest, [Value | AccSeq]);~n", [FnName]),
-     f("~p(<<>>, AccSeq) ->~n", [FnName]),
-     f("    AccSeq.~n")].
-
-format_dpacked_vi(MsgName, #field{name=FName, type=Type}, Opts) ->
-    FnName = mk_fn(d_packed_field_, MsgName, FName),
-    BValueExpr = "X bsl N + Acc",
-    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
-                                         Opts),
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
-     f("    ~p(Rest, N+7, X bsl N + Acc, AccSeq);~n", [FnName]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
-     f("~s", [FValueCode]),
-     f("    ~p(~s, 0, 0, [FValue | AccSeq]);~n", [FnName, RestVar]),
-     f("~p(<<>>, 0, 0, AccSeq) ->~n", [FnName]),
-     f("    AccSeq.~n~n")].
 
 format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes) ->
     case get_field_pass(MsgName, AnRes) of
