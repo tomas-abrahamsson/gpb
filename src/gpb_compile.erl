@@ -1513,7 +1513,7 @@ format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
      gpb_codegen:format_fn(
       DecodeFieldDefFnName,
       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
-              '<call-recursively>'(Rest, N+7, X bsl N + Acc, '<Params>');
+              call_self(Rest, N+7, X bsl N + Acc, '<Params>');
          (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
               '<Key>' = X bsl N + Acc,
               '<calls-to-field-decoding-or-skip>';
@@ -1521,7 +1521,6 @@ format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
               '<finalize-result>'
       end,
       [{splice_trees, '<Params>', Params},
-       {replace_term, '<call-recursively>', DecodeFieldDefFnName},
        {replace_tree, '<Key>', Key},
        {replace_tree, '<calls-to-field-decoding-or-skip>',
         decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)},
@@ -1741,7 +1740,6 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     #field{name=FName, rnum=RNum, opts=FOpts} = FieldDef,
     FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
     Zeros = compute_decoder_call_fill(FieldDefAsNonpacked, no_fill),
-    DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
     Params = decoder_params(MsgName, AnRes),
     Param = case get_field_pass(MsgName, AnRes) of
                 pass_as_params ->
@@ -1758,17 +1756,16 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
                                        [{FName, ?expr(NewSeq)}])]
                 end,
     [gpb_codegen:format_fn(
-       DecodePackWrapFn,
+       mk_fn(d_field_, MsgName, FName),
        fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
-               '<call-recursively>'(Rest, N + 7, X bsl N + Acc, '<Params>');
+               call_self(Rest, N + 7, X bsl N + Acc, '<Params>');
           (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
                Len = X bsl N + Acc,
                <<PackedBytes:Len/binary, Rest2/binary>> = Rest,
                NewSeq = decode_packed(PackedBytes, '<Zeros>', '<Param>'),
                '<call-read-field>'(Rest2, 0, 0, '<OutParams>')
        end,
-       [replace_term('<call-recursively>', DecodePackWrapFn),
-        splice_trees('<Params>', Params),
+       [splice_trees('<Params>', Params),
         splice_trees('<InParams>', Params),
         replace_term(decode_packed, mk_fn(d_packed_field_, MsgName, FName)),
         splice_trees('<Zeros>', Zeros),
@@ -1790,21 +1787,18 @@ format_packed_field_seq_decoder(MsgName, #field{type=Type}=Field, Opts) ->
     end.
 
 format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitTypes) ->
-    FnName = mk_fn(d_packed_field_, MsgName, FName),
     [gpb_codegen:format_fn(
-       FnName,
+       mk_fn(d_packed_field_, MsgName, FName),
        fun(<<Value:'<N>'/'<T>', Rest/binary>>, AccSeq) ->
-               '<call-recursively>'(Rest, [Value | AccSeq]);
+               call_self(Rest, [Value | AccSeq]);
           (<<>>, AccSeq) ->
                AccSeq
        end,
-       [replace_term('<call-recursively>', FnName),
-        replace_term('<N>', BitLen),
+       [replace_term('<N>', BitLen),
         splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes])]),
      "\n\n"].
 
 format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
-    FnName = mk_fn(d_packed_field_, MsgName, FName),
     ExtValue = ?expr(X bsl N + Acc),
     FVar = ?expr(NewFValue), %% result is to be put in this variable
     Rest = ?expr(Rest),
@@ -1812,29 +1806,26 @@ format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
                              {'<Rest>', Rest}]),
     BodyTailFn =
         fun(DecodeExprs, Rest2Var) ->
-                C = ?exprs('<call-recursively>'('<Rest2>', 0, 0,
-                                                ['<Res>' | AccSeq]),
+                C = ?exprs(call_self('<Rest2>', 0, 0, ['<Res>' | AccSeq]),
                            [replace_tree('<Rest2>', Rest2Var),
                             replace_tree('<Res>', FVar)]),
                 DecodeExprs ++ C
         end,
     Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
     [gpb_codegen:format_fn(
-       FnName,
+       mk_fn(d_packed_field_, MsgName, FName),
        fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
-               '<call-recursively>'(Rest, N + 7, X bsl N + Acc, AccSeq);
+               call_self(Rest, N + 7, X bsl N + Acc, AccSeq);
           (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
                '<body>';
           (<<>>, 0, 0, AccSeq) ->
                AccSeq
        end,
-       [splice_trees('<body>', Body),
-        replace_term('<call-recursively>', FnName)]),
+       [splice_trees('<body>', Body)]),
      "\n\n"].
 
 format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     #field{name=FName}=FieldDef,
-    FnName = mk_fn(d_field_, MsgName, FName),
     ExtValue = ?expr(X bsl N + Acc),
     FVar = ?expr(NewFValue), %% result is to be put in this variable
     Rest = ?expr(Rest),
@@ -1855,14 +1846,13 @@ format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
         end,
     Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
     gpb_codegen:format_fn(
-      FnName,
+      mk_fn(d_field_, MsgName, FName),
       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
-              '<call-recursively>'(Rest, N + 7, X bsl N + Acc, '<Params>');
+              call_self(Rest, N + 7, X bsl N + Acc, '<Params>');
          (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
               '<body>'
       end,
-      [replace_term('<call-recursively>', FnName),
-       splice_trees('<Params>', Params),
+      [splice_trees('<Params>', Params),
        splice_trees('<InParams>', InParams),
        splice_trees('<body>', Body)]).
 
