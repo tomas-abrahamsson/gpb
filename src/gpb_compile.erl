@@ -1553,14 +1553,14 @@ decoder_params(MsgName, AnRes) ->
         pass_as_record -> [?expr(Msg)]
     end.
 
-decoder_field_calls(Bindings, MsgName, []=_MsgDef, AnRes) ->
+decoder_field_calls(Bindings, MsgName, []=_MsgDef, _AnRes) ->
     Key = fetch_binding('<Key>', Bindings),
     WiretypeExpr = ?expr('<Key>' band 7, [replace_tree('<Key>', Key)]),
     Bindings1 = add_binding({'<wiretype-expr>', WiretypeExpr}, Bindings),
-    decoder_skip_calls(Bindings1, MsgName, AnRes);
+    decoder_skip_calls(Bindings1, MsgName);
 decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
     SkipCalls = decoder_field_calls(Bindings, MsgName, [], AnRes),
-    FieldClauses = decoder_field_clauses(Bindings, MsgName, MsgDef, AnRes),
+    FieldClauses = decoder_field_clauses(Bindings, MsgName, MsgDef),
     ?expr(
        case '<Key>' of
            '<field-clauses>' ->
@@ -1572,39 +1572,29 @@ decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
         splice_clauses('<field-clauses>', FieldClauses),
         replace_tree('<skip-calls>', SkipCalls)]).
 
-decoder_skip_calls(Bindings, MsgName, AnRes) ->
+decoder_skip_calls(Bindings, MsgName) ->
     WiretypeExpr = fetch_binding('<wiretype-expr>', Bindings),
     RestExpr = fetch_binding('<Rest>', Bindings),
     Params = fetch_binding('<Params>', Bindings),
-    Fill = case get_field_pass(MsgName, AnRes) of
-               pass_as_params -> [?expr(0), ?expr(0)];
-               pass_as_record -> []
-           end,
     ?expr(
        case '<wiretype-expr>' of
-           0 -> skip_vi('<Rest>', '<Fill>', '<Params>');
-           1 -> skip_64('<Rest>', '<Fill>', '<Params>');
-           2 -> skip_ld('<Rest>', 0, 0,     '<Params>');
-           5 -> skip_32('<Rest>', '<Fill>', '<Params>')
+           0 -> skip_vi('<Rest>', 0, 0, '<Params>');
+           1 -> skip_64('<Rest>', 0, 0, '<Params>');
+           2 -> skip_ld('<Rest>', 0, 0, '<Params>');
+           5 -> skip_32('<Rest>', 0, 0, '<Params>')
        end,
        [replace_tree('<wiretype-expr>', WiretypeExpr),
         replace_tree('<Rest>', RestExpr),
-        splice_trees('<Fill>', Fill),
         splice_trees('<Params>', Params),
         replace_term(skip_vi, mk_fn(skip_varint_, MsgName)),
         replace_term(skip_64, mk_fn(skip_64_, MsgName)),
         replace_term(skip_ld, mk_fn(skip_length_delimited_, MsgName)),
         replace_term(skip_32, mk_fn(skip_32_, MsgName))]).
 
-decoder_field_clauses(Bindings, MsgName, MsgDef, AnRes) ->
+decoder_field_clauses(Bindings, MsgName, MsgDef) ->
     RestExpr = fetch_binding('<Rest>', Bindings),
     Params = fetch_binding('<Params>', Bindings),
     [begin
-         FillP = case get_field_pass(MsgName, AnRes) of
-                     pass_as_params -> fill;
-                     pass_as_record -> no_fill
-                 end,
-         Fill = compute_decoder_call_fill(FieldDef, FillP),
          Wiretype = case is_packed(FieldDef) of
                         true  -> gpb:encode_wiretype(bytes);
                         false -> gpb:encode_wiretype(Type)
@@ -1612,42 +1602,14 @@ decoder_field_clauses(Bindings, MsgName, MsgDef, AnRes) ->
          Selector = (FNum bsl 3) bor Wiretype,
          gpb_codegen:case_clause(
            case x of
-               '<selector>' -> '<call>'('<Rest>', '<Fill>', '<Params>')
+               '<selector>' -> '<call>'('<Rest>', 0, 0, '<Params>')
            end,
            [replace_term('<selector>', Selector),
             replace_term('<call>', mk_fn(d_field_, MsgName, FName)),
             replace_tree('<Rest>', RestExpr),
-            splice_trees('<Fill>', Fill),
             splice_trees('<Params>', Params)])
      end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
-
-compute_decoder_call_fill(#field{type=Type}=FieldDef, Fill) ->
-    ZeroZero = [?expr(0), ?expr(0)],
-    case is_packed(FieldDef) of
-        false ->
-            case Type of
-                sint32   -> ZeroZero; %% varint-based
-                sint64   -> ZeroZero; %% varint-based
-                int32    -> ZeroZero; %% varint-based
-                int64    -> ZeroZero; %% varint-based
-                uint32   -> ZeroZero; %% varint-based
-                uint64   -> ZeroZero; %% varint-based
-                bool     -> ZeroZero; %% varint-based
-                {enum,_} -> ZeroZero; %% varint-based
-                fixed32  -> if Fill == fill -> ZeroZero; true -> "" end;
-                sfixed32 -> if Fill == fill -> ZeroZero; true -> "" end;
-                float    -> if Fill == fill -> ZeroZero; true -> "" end;
-                fixed64  -> if Fill == fill -> ZeroZero; true -> "" end;
-                sfixed64 -> if Fill == fill -> ZeroZero; true -> "" end;
-                double   -> if Fill == fill -> ZeroZero; true -> "" end;
-                string   -> ZeroZero; %% varint-based
-                bytes    -> ZeroZero; %% varint-based
-                {msg,_}  -> ZeroZero  %% varint-based
-            end;
-        true ->
-            ZeroZero %% length of packed bytes is varint-based
-    end.
 
 decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
     case get_field_pass(MsgName, AnRes) of
@@ -1712,9 +1674,7 @@ format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
     end.
 
 format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
-    #field{name=FName, rnum=RNum, opts=FOpts} = FieldDef,
-    FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
-    Zeros = compute_decoder_call_fill(FieldDefAsNonpacked, no_fill),
+    #field{name=FName, rnum=RNum} = FieldDef,
     Params = decoder_params(MsgName, AnRes),
     Param = case get_field_pass(MsgName, AnRes) of
                 pass_as_params ->
@@ -1737,13 +1697,12 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
           (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
                Len = X bsl N + Acc,
                <<PackedBytes:Len/binary, Rest2/binary>> = Rest,
-               NewSeq = decode_packed(PackedBytes, '<Zeros>', '<Param>'),
+               NewSeq = decode_packed(PackedBytes, 0, 0, '<Param>'),
                '<call-read-field>'(Rest2, 0, 0, '<OutParams>')
        end,
        [splice_trees('<Params>', Params),
         splice_trees('<InParams>', Params),
         replace_term(decode_packed, mk_fn(d_packed_field_, MsgName, FName)),
-        splice_trees('<Zeros>', Zeros),
         replace_tree('<Param>', Param),
         replace_term('<call-read-field>', mk_fn(d_read_field_def_, MsgName)),
         splice_trees('<OutParams>', OutParams)]),
@@ -1761,12 +1720,12 @@ format_packed_field_seq_decoder(MsgName, #field{type=Type}=Field, Opts) ->
         _        -> format_dpacked_vi(MsgName, Field, Opts)
     end.
 
-format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitTypes) ->
+format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitTypes)     ->
     [gpb_codegen:format_fn(
        mk_fn(d_packed_field_, MsgName, FName),
-       fun(<<Value:'<N>'/'<T>', Rest/binary>>, AccSeq) ->
-               call_self(Rest, [Value | AccSeq]);
-          (<<>>, AccSeq) ->
+       fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq) ->
+               call_self(Rest, Z1, Z2, [Value | AccSeq]);
+          (<<>>, _, _, AccSeq) ->
                AccSeq
        end,
        [replace_term('<N>', BitLen),
@@ -1990,25 +1949,15 @@ format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
     Value = ?expr(Value),
     Params2 = updated_merged_params(MsgName, FieldDef, AnRes, Value, Params),
     ReadFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
-    InFill = case get_field_pass(MsgName, AnRes) of
-                 pass_as_params -> [?expr(N1), ?expr(N2)];
-                 pass_as_record -> []
-             end,
-    OutFill = case get_field_pass(MsgName, AnRes) of
-                 pass_as_params -> InFill;
-                 pass_as_record -> [?expr(0), ?expr(0)]
-             end,
     [gpb_codegen:format_fn(
        mk_fn(d_field_, MsgName, FName),
-       fun(<<Value:'<N>'/'<T>', Rest/binary>>, '<InFill>', '<InParams>') ->
-               '<call-read-field>'(Rest, '<OutFill>', '<OutParams>')
+       fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, '<InParams>') ->
+               '<call-read-field>'(Rest, Z1, Z2, '<OutParams>')
        end,
        [replace_term('<N>', BitLen),
         splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes]),
         splice_trees('<InParams>', InParams),
         replace_term('<call-read-field>', ReadFieldDefFnName),
-        splice_trees('<InFill>', InFill),
-        splice_trees('<OutFill>', OutFill),
         splice_trees('<OutParams>', Params2)]),
      "\n\n"].
 
@@ -2153,26 +2102,16 @@ format_field_skippers(MsgName, AnRes) ->
     SkipLenDelimFnName = mk_fn(skip_length_delimited_, MsgName),
     ReadFieldFnName = mk_fn(d_read_field_def_, MsgName),
     Params = decoder_params(MsgName, AnRes),
-    Fill = case get_field_pass(MsgName, AnRes) of
-               pass_as_params -> [?expr(Z1), ?expr(Z2)];
-               pass_as_record -> []
-           end,
-    Zeros = case get_field_pass(MsgName, AnRes) of
-                pass_as_params -> [?expr(Z1), ?expr(Z2)];
-                pass_as_record -> [?expr(0), ?expr(0)]
-            end,
     [%% skip_varint_<MsgName>/2,4
      gpb_codegen:format_fn(
        SkipVarintFnName,
-       fun(<<1:1, _:7, Rest/binary>>, '<Fill>', '<Params>') ->
-               '<call-recursively>'(Rest, '<Fill>', '<Params>');
-          (<<0:1, _:7, Rest/binary>>, '<Fill>', '<Params>') ->
-               '<call-read-field>'(Rest, '<Zeros>', '<Params>')
+       fun(<<1:1, _:7, Rest/binary>>, Z1, Z2, '<Params>') ->
+               '<call-recursively>'(Rest, Z1, Z2, '<Params>');
+          (<<0:1, _:7, Rest/binary>>, Z1, Z2, '<Params>') ->
+               '<call-read-field>'(Rest, Z1,Z2, '<Params>')
        end,
        [replace_term('<call-recursively>', SkipVarintFnName),
         replace_term('<call-read-field>', ReadFieldFnName),
-        splice_trees('<Fill>', Fill),
-        splice_trees('<Zeros>', Zeros),
         splice_trees('<Params>', Params)]),
      "\n\n",
      %% skip_length_delimited_<MsgName>/4
@@ -2193,13 +2132,11 @@ format_field_skippers(MsgName, AnRes) ->
      %% skip_64_<MsgName>/2,4
      [[gpb_codegen:format_fn(
          mk_fn(skip_, NumBits, MsgName),
-         fun(<<_:'<NumBits>', Rest/binary>>, '<Fill>', '<Params>') ->
-                 '<call-read-field>'(Rest, '<Zeros>', '<Params>')
+         fun(<<_:'<NumBits>', Rest/binary>>, Z1, Z2, '<Params>') ->
+                 '<call-read-field>'(Rest, Z1, Z2, '<Params>')
          end,
          [replace_term('<call-read-field>', ReadFieldFnName),
           replace_term('<NumBits>', NumBits),
-          splice_trees('<Fill>', Fill),
-          splice_trees('<Zeros>', Zeros),
           splice_trees('<Params>', Params)]),
        "\n\n"]
       || NumBits <- [32, 64]]].
