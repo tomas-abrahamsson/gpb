@@ -379,7 +379,8 @@ merge_warns({ok, M, B, Warns1}, Warns2, binary)  -> {ok, M, B, Warns2++Warns1};
 merge_warns({error, R}, Warns, _OutFmt)          -> {error, R, Warns};
 merge_warns({error, R, Warns1}, Warns2, _OutFmt) -> {error, R, Warns2++Warns1};
 merge_warns(error, Warns, binary) ->
-    erlang:error({internal_error, generated_code_failed_to_compile, Warns}).
+    erlang:error({internal_error, ?MODULE,
+                  generated_code_failed_to_compile, Warns}).
 
 possibly_report_warnings(Result, Opts) ->
     Warns = case Result of
@@ -1725,12 +1726,12 @@ format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
         uint64   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         bool     -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         {enum,_} -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
-        fixed32  -> format_uf32_field_decoder(MsgName, Field, AnRes);
-        sfixed32 -> format_sf32_field_decoder(MsgName, Field, AnRes);
-        float    -> format_float_field_decoder(MsgName, Field, AnRes);
-        fixed64  -> format_uf64_field_decoder(MsgName, Field, AnRes);
-        sfixed64 -> format_sf64_field_decoder(MsgName, Field, AnRes);
-        double   -> format_double_field_decoder(MsgName, Field, AnRes);
+        fixed32  -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        sfixed32 -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        float    -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        fixed64  -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        sfixed64 -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        double   -> format_fixlen_field_decoder(MsgName, Field, AnRes);
         string   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         bytes    -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         {msg,_}  -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts)
@@ -2025,65 +2026,42 @@ uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
         replace_tree('<Res>', ResVar),
         replace_tree('<Value>', ValueExpr)]).
 
-format_uf32_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 32, 'little', FieldDef, AnRes).
-
-format_sf32_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 32, 'little-signed', FieldDef, AnRes).
-
-format_float_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 32, 'little-float', FieldDef, AnRes).
-
-format_uf64_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 64, 'little', FieldDef, AnRes).
-
-format_sf64_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 64, 'little-signed', FieldDef, AnRes).
-
-format_double_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 64, 'little-float', FieldDef, AnRes).
-
-format_f_field_decoder(MsgName, BitLen, BitType, FieldDef, AnRes) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            format_f_field_decoder_pap(MsgName, BitLen, BitType, FieldDef,
-                                       AnRes);
-        pass_as_record ->
-            format_f_field_decoder_par(MsgName, BitLen, BitType, FieldDef)
-    end.
-
-format_f_field_decoder_pap(MsgName, BitLen, BitType, FieldDef, AnRes) ->
-    NF = get_num_fields(MsgName, AnRes),
-    #field{rnum=RNum, name=FName}=FieldDef,
-    Merge = classify_field_merge_action(FieldDef),
-    InFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "_";
-                             I == RNum-1, Merge == seqadd    -> f("F~w", [I]);
-                             I /= RNum-1                     -> f("F~w", [I])
-                          end]
-                   || I <- lists:seq(1, NF)],
-    MergeCode = case Merge of
-                    overwrite -> "";
-                    seqadd    -> f("    Value2 = [Value | F~w],~n", [RNum-1])
-                end,
-    OutFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "Value";
-                              I == RNum-1, Merge == seqadd    -> "Value2";
-                              I /= RNum-1                     -> f("F~w", [I])
-                           end]
-                    || I <- lists:seq(1, NF)],
-
-    [f("~p(<<Value:~p/~s, Rest/binary>>, _, _~s) ->~n",
-       [mk_fn(d_field_, MsgName, FName), BitLen, BitType, InFieldVars]),
-     f("~s", [MergeCode]),
-     f("    ~p(Rest, 0, 0~s).~n",
-       [mk_fn(d_read_field_def_, MsgName), OutFieldVars])].
-
-format_f_field_decoder_par(MsgName, BitLen, BitType, FieldDef)  ->
-    #field{name=FName}=FieldDef,
-    [f("~p(<<Value:~p/~s, Rest/binary>>, Msg) ->~n",
-       [mk_fn(d_field_, MsgName, FName), BitLen, BitType]),
-     f("    NewMsg = ~p(Value, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
-     f("    ~p(Rest, 0, 0, NewMsg).~n",
-       [mk_fn(d_read_field_def_, MsgName)])].
+format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
+    #field{name=FName, type=Type}=FieldDef,
+    {BitLen, BitTypes} = case Type of
+                             fixed32  -> {32, [little]};
+                             sfixed32 -> {32, [little,signed]};
+                             float    -> {32, [little,float]};
+                             fixed64  -> {64, [little]};
+                             sfixed64 -> {64, [little,signed]};
+                             double   -> {64, [little,float]}
+                         end,
+    Params = decoder_params(MsgName, AnRes),
+    InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
+    Value = ?expr(Value),
+    Params2 = updated_merged_params(MsgName, FieldDef, AnRes, Value, Params),
+    ReadFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
+    InFill = case get_field_pass(MsgName, AnRes) of
+                 pass_as_params -> [?expr(N1), ?expr(N2)];
+                 pass_as_record -> []
+             end,
+    OutFill = case get_field_pass(MsgName, AnRes) of
+                 pass_as_params -> InFill;
+                 pass_as_record -> [?expr(0), ?expr(0)]
+             end,
+    [gpb_codegen:format_fn(
+       mk_fn(d_field_, MsgName, FName),
+       fun(<<Value:'<N>'/'<T>', Rest/binary>>, '<InFill>', '<InParams>') ->
+               '<call-read-field>'(Rest, '<OutFill>', '<OutParams>')
+       end,
+       [replace_term('<N>', BitLen),
+        splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes]),
+        splice_trees('<InParams>', InParams),
+        replace_term('<call-read-field>', ReadFieldDefFnName),
+        splice_trees('<InFill>', InFill),
+        splice_trees('<OutFill>', OutFill),
+        splice_trees('<OutParams>', Params2)]),
+     "\n\n"].
 
 format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes) ->
     case get_field_pass(MsgName, AnRes) of
@@ -3328,11 +3306,15 @@ compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
     ErlCode2 = replace_module_macro(ErlCode, ModAsStr),
     {ok, Toks, _EndLine} = erl_scan:string(ErlCode2),
     FormToks = split_toks_at_dot(Toks),
-    Forms = lists:map(fun(Ts) ->
-                              {ok, Form} = erl_parse:parse_form(Ts),
-                              Form
-                      end,
-                      FormToks),
+    Forms = [case erl_parse:parse_form(Ts) of
+                 {ok, Form} ->
+                     Form;
+                 {error, Reason} ->
+                     erlang:error(
+                       {internal_error,?MODULE,Mod,ErlCode2,MsgDefs,
+                        PossibleNifCode,Opts,Reason})
+             end
+             || Ts <- FormToks],
     {AttrForms, CodeForms} = split_forms_at_first_code(Forms),
     FieldDef = field_record_to_attr_form(),
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
