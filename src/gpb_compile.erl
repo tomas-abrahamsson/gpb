@@ -1887,23 +1887,21 @@ unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
                    Transforms)
     end.
 
-
-
 updated_merged_params(MsgName, FieldDef, AnRes, NewValue, Params) ->
     #field{name=FName, rnum=RNum} = FieldDef,
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
             PrevValue = lists:nth(RNum - 1, Params),
-            MergedValue = merge_field_exprs(FieldDef, PrevValue, NewValue),
+            MergedValue = merge_field_expr(FieldDef, PrevValue, NewValue),
             lists_setelement(RNum - 1, Params, MergedValue);
         pass_as_record ->
             MsgVar = hd(Params),
             PrevValue = record_access(MsgVar, MsgName, FName),
-            MergedValue = merge_field_exprs(FieldDef, PrevValue, NewValue),
+            MergedValue = merge_field_expr(FieldDef, PrevValue, NewValue),
             [record_update(MsgVar, MsgName, [{FName, MergedValue}])]
     end.
 
-merge_field_exprs(FieldDef, PrevValue, NewValue) ->
+merge_field_expr(FieldDef, PrevValue, NewValue) ->
     case classify_field_merge_action(FieldDef) of
         overwrite ->
             NewValue;
@@ -1973,7 +1971,11 @@ add_binding({Key, Value}, Bindings) ->
 fetch_binding(Key, Bindings) ->
     dict:fetch(Key, Bindings).
 
-record_create(RecordName, FieldsValueTrees) ->
+%% Aliases to improve readability
+record_match(RName, Fields) -> record_create_or_match(RName, Fields).
+record_create(RName, Fields) -> record_create_or_match(RName, Fields).
+
+record_create_or_match(RecordName, FieldsValueTrees) ->
     record_update(none, RecordName, FieldsValueTrees).
 
 record_update(Var, RecordName, FieldsValueTrees) ->
@@ -2027,69 +2029,85 @@ format_msg_merge_code(Defs, AnRes) ->
       || {{msg, MsgName}, MsgDef} <- Defs]].
 
 format_merge_msgs_top_level([]) ->
-    [f("merge_msgs(_Prev, New) ->~n"),
-     f("    New.~n"),
-     f("~n")];
+    [gpb_codegen:format_fn(
+       merge_msgs,
+       fun(_Prev, New) -> New end),
+     "\n\n"];
 format_merge_msgs_top_level(MsgNames) ->
-    [f("merge_msgs(Prev, New) when element(1, Prev) == element(1, New) ->~n"),
-     f("   case Prev of~n"),
-     f("       ~s~n", [format_merger_top_level_cases(MsgNames)]),
-     f("   end.~n"),
-     f("~n")].
+    [gpb_codegen:format_fn(
+       merge_msgs,
+       fun(Prev, New) when element(1, Prev) =:= element(1, New) ->
+               case Prev of
+                   '<msg-type>' -> '<merge-call>'
+               end
+       end,
+       [splice_clauses('<msg-type>', merger_top_level_cases(MsgNames))]),
+     "\n\n"].
 
-format_merger_top_level_cases(MsgNames) ->
-    string:join([f("#~p{} -> ~p(Prev, New)", [MName, mk_fn(merge_msg_, MName)])
-                 || MName <- MsgNames],
-                ";\n        ").
-
+merger_top_level_cases(MsgNames) ->
+    [gpb_codegen:case_clause(
+       case dummy of '#Msg{}' -> '<merge-msg>'(Prev, New) end,
+       [replace_tree('#Msg{}', record_match(MsgName, [])),
+        replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))])
+     || MsgName <- MsgNames].
 
 format_msg_merger(MsgName, [], _AnRes) ->
-    MergeFn = mk_fn(merge_msg_, MsgName),
-    [f("~p(_Prev, New) ->~n", [MergeFn]),
-     f("    New.~n~n")];
+    [gpb_codegen:format_fn(
+       mk_fn(merge_msg_, MsgName),
+       fun(_Prev, New) -> New end),
+     "\n\n"];
 format_msg_merger(MsgName, MsgDef, AnRes) ->
-    MergeFn = mk_fn(merge_msg_, MsgName),
-    FInfos = [{classify_field_merge_action(Field), Field} || Field <- MsgDef],
-    ToOverwrite = [Field || {overwrite, Field} <- FInfos],
-    ToMsgMerge  = [Field || {msgmerge, Field} <- FInfos],
-    ToSeqAdd    = [Field || {seqadd, Field} <- FInfos],
+    {PFields, NFields, Mergings} = compute_msg_field_merge_exprs(MsgDef),
+    Transforms = [replace_tree('<Prev>', record_match(MsgName, PFields)),
+                  replace_tree('<New>', record_match(MsgName, NFields)),
+                  replace_tree('<merge>', record_create(MsgName, Mergings))],
+    [case occurs_as_optional_submsg(MsgName, AnRes) of
+        true ->
+             gpb_codegen:format_fn(
+               mk_fn(merge_msg_, MsgName),
+               fun(Prev, undefined)   -> Prev;
+                  (undefined, New)    -> New;
+                  ('<Prev>', '<New>') -> '<merge>'
+               end,
+               Transforms);
+         false ->
+             gpb_codegen:format_fn(
+               mk_fn(merge_msg_, MsgName),
+               fun('<Prev>', '<New>') -> '<merge>' end,
+               Transforms)
+     end,
+     "\n\n"].
 
-    MatchIndent = flength("~p(#~p{", [MergeFn, MsgName]),
-    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
-
-    PFieldMatchings = string:join([f("~p=PF~s", [FName, FName])
-                                   || #field{name=FName} <- MsgDef],
-                                  MatchCommaSep),
-    NFieldMatchings = string:join([f("~p=NF~s", [FName, FName])
-                                   || #field{name=FName} <- MsgDef],
-                                  MatchCommaSep),
-
-    %% FIXME: reverse order?? ie: do NF ++ PF??
-    %%        we'll reverse _top-level_ seq fields lastly when decoding
-    UpdateIndent = flength("    #~p(", [MsgName]),
-    Overwritings = [begin
-                        FUpdateIndent = UpdateIndent + flength("~p = ",[FName]),
-                        [f("~p = if NF~s == undefined -> PF~s;~n",
-                           [FName, FName, FName]),
-                         indent(FUpdateIndent + 3, f("true -> NF~s~n", [FName])),
-                         indent(FUpdateIndent, f("end"))]
-                    end
-                    || #field{name=FName} <- ToOverwrite],
-    SeqAddings = [f("~p = PF~s ++ NF~s", [FName, FName, FName])
-                  || #field{name=FName} <- ToSeqAdd],
-    MsgMergings = [f("~p = ~p(PF~s, NF~s)", [FName, mk_fn(merge_msg_, FMsgName),
-                                             FName, FName])
-                   || #field{name=FName, type={msg,FMsgName}} <- ToMsgMerge],
-    UpdateCommaSep = f(",~n~s", [indent(UpdateIndent, "")]),
-    FieldUpdatings = string:join(Overwritings ++ SeqAddings ++ MsgMergings,
-                                 UpdateCommaSep),
-    FnIndent = flength("~p(", [MergeFn]),
-    [[[f("~p(Prev, undefined) -> Prev;~n", [MergeFn]),
-       f("~p(undefined, New) -> New;~n", [MergeFn])]
-      || occurs_as_optional_submsg(MsgName, AnRes)],
-     f("~p(#~p{~s},~n", [MergeFn, MsgName, PFieldMatchings]),
-     indent(FnIndent, f("#~p{~s}) ->~n", [MsgName, NFieldMatchings])),
-     f("    #~p{~s}.~n~n", [MsgName, FieldUpdatings])].
+compute_msg_field_merge_exprs(MsgDef) ->
+    PFields = [{FName, erl_syntax:variable(?ff("PF~s", [FName]))}
+               || #field{name=FName} <- MsgDef],
+    NFields = [{FName, erl_syntax:variable(?ff("NF~s", [FName]))}
+               || #field{name=FName} <- MsgDef],
+    Mergings =
+    [begin
+         {value, {FName, PF}} = lists:keysearch(FName, 1, PFields),
+         {value, {FName, NF}} = lists:keysearch(FName, 1, NFields),
+         Transforms = [replace_tree('<PF>', PF),
+                       replace_tree('<NF>', NF)],
+         Expr = case classify_field_merge_action(Field) of
+                    overwrite ->
+                        ?expr(if '<NF>' =:= undefined -> '<PF>';
+                                 true                 -> '<NF>'
+                              end,
+                              Transforms);
+                    seqadd ->
+                        ?expr('<PF>' ++ '<NF>', Transforms);
+                    msgmerge ->
+                        #field{type={msg,SubMsgName}}=Field,
+                        MergeFn = mk_fn(merge_msg_, SubMsgName),
+                        NewTranform = replace_term('<merge>', MergeFn),
+                        MTransforms = [NewTranform | Transforms],
+                        ?expr('<merge>'('<PF>', '<NF>'), MTransforms)
+                end,
+         {FName, Expr}
+     end
+     || #field{name=FName}=Field <- MsgDef],
+    {PFields, NFields, Mergings}.
 
 occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
     %% Note: order of evaluation below is important (the exprs of `andalso'):
