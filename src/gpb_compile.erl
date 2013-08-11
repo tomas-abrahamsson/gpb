@@ -1649,7 +1649,6 @@ compute_decoder_call_fill(#field{type=Type}=FieldDef, Fill) ->
             ZeroZero %% length of packed bytes is varint-based
     end.
 
-
 decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
@@ -1680,36 +1679,6 @@ decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
                end
                || #field{name=FName, occurrence=repeated} <- MsgDef])
     end.
-
-new_bindings(Tuples) ->
-    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
-
-new_bindings() ->
-    dict:new().
-
-add_binding({Key, Value}, Bindings) ->
-    dict:store(Key, Value, Bindings).
-
-fetch_binding(Key, Bindings) ->
-    dict:fetch(Key, Bindings).
-
-record_create(RecordName, FieldsValueTrees) ->
-    record_update(none, RecordName, FieldsValueTrees).
-
-record_update(Var, RecordName, FieldsValueTrees) ->
-    erl_syntax:record_expr(
-      Var,
-      erl_syntax:atom(RecordName),
-      [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
-       || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
-
-record_access(Var, RecordName, FieldName) ->
-    erl_syntax:record_access(Var,
-                             erl_syntax:atom(RecordName),
-                             erl_syntax:atom(FieldName)).
-
-var_f_n(N) ->
-    erl_syntax:variable(?ff("F~w", [N])).
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
     [[format_field_decoder(MsgName, Field, AnRes, Opts), "\n"]
@@ -2006,26 +1975,6 @@ decoder_in_params(Params, MsgName, FieldDef, AnRes) ->
             Params
     end.
 
-assign_to_var(Var, Expr) ->
-    ?expr('<Var>' = '<Expr>',
-          [replace_tree('<Var>', Var),
-           replace_tree('<Expr>', Expr)]).
-
-decode_zigzag_to_var(ResVar, ValueExpr) ->
-    ?exprs(ZValue = '<Value>',
-           '<Res>' = if ZValue band 1 =:= 0 -> ZValue bsr 1;
-                        true                -> -((ZValue + 1) bsr 1)
-                     end,
-           [replace_tree('<Value>', ValueExpr),
-            replace_tree('<Res>', ResVar)]).
-
-uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
-    ?expr(
-       <<'<Res>':'<N>'/signed-native>> = <<('<Value>'):'<N>'/unsigned-native>>,
-       [replace_term('<N>', NumBits),
-        replace_tree('<Res>', ResVar),
-        replace_tree('<Value>', ValueExpr)]).
-
 format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
     #field{name=FName, type=Type}=FieldDef,
     {BitLen, BitTypes} = case Type of
@@ -2063,6 +2012,56 @@ format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
         splice_trees('<OutParams>', Params2)]),
      "\n\n"].
 
+new_bindings(Tuples) ->
+    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
+
+new_bindings() ->
+    dict:new().
+
+add_binding({Key, Value}, Bindings) ->
+    dict:store(Key, Value, Bindings).
+
+fetch_binding(Key, Bindings) ->
+    dict:fetch(Key, Bindings).
+
+record_create(RecordName, FieldsValueTrees) ->
+    record_update(none, RecordName, FieldsValueTrees).
+
+record_update(Var, RecordName, FieldsValueTrees) ->
+    erl_syntax:record_expr(
+      Var,
+      erl_syntax:atom(RecordName),
+      [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
+       || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
+
+record_access(Var, RecordName, FieldName) ->
+    erl_syntax:record_access(Var,
+                             erl_syntax:atom(RecordName),
+                             erl_syntax:atom(FieldName)).
+
+var_f_n(N) ->
+    erl_syntax:variable(?ff("F~w", [N])).
+
+assign_to_var(Var, Expr) ->
+    ?expr('<Var>' = '<Expr>',
+          [replace_tree('<Var>', Var),
+           replace_tree('<Expr>', Expr)]).
+
+decode_zigzag_to_var(ResVar, ValueExpr) ->
+    ?exprs(ZValue = '<Value>',
+           '<Res>' = if ZValue band 1 =:= 0 -> ZValue bsr 1;
+                        true                -> -((ZValue + 1) bsr 1)
+                     end,
+           [replace_tree('<Value>', ValueExpr),
+            replace_tree('<Res>', ResVar)]).
+
+uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
+    ?expr(
+       <<'<Res>':'<N>'/signed-native>> = <<('<Value>'):'<N>'/unsigned-native>>,
+       [replace_term('<N>', NumBits),
+        replace_tree('<Res>', ResVar),
+        replace_tree('<Value>', ValueExpr)]).
+
 classify_field_merge_action(FieldDef) ->
     case FieldDef of
         #field{occurrence=required, type={msg, _}} -> msgmerge;
@@ -2071,7 +2070,6 @@ classify_field_merge_action(FieldDef) ->
         #field{occurrence=optional}                -> overwrite;
         #field{occurrence=repeated}                -> seqadd
     end.
-
 
 format_msg_merge_code(Defs, AnRes) ->
     MsgNames = [MsgName || {{msg, MsgName}, _MsgDef} <- Defs],
