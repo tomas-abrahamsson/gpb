@@ -1488,7 +1488,6 @@ format_msg_decoders(Defs, AnRes, Opts) ->
 
 format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
     [format_msg_decoder_read_field(MsgName, MsgDef, AnRes),
-     format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes),
      format_field_decoders(MsgName, MsgDef, AnRes, Opts),
      format_field_skippers(MsgName, AnRes)].
 
@@ -1669,10 +1668,17 @@ decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
                end
                || {Field, Param} <- lists:zip(MsgDef, Params)]);
         pass_as_record ->
-            RevFnName = mk_fn(d_reverse_toplevel_fields_, MsgName),
-            ?expr('<reverse-toplevel-fields>'('<Params>'),
-                  [{replace_term, '<reverse-toplevel-fields>', RevFnName},
-                   {splice_trees, '<Params>', Params}])
+            MsgVar = hd(Params),
+            record_update(
+              MsgVar,
+              MsgName,
+              [begin
+                   FieldAccess = record_access(MsgVar, MsgName, FName),
+                   FValueExpr = ?expr(lists:reverse('<Param>'),
+                                      [{replace_tree, '<Param>', FieldAccess}]),
+                   {FName, FValueExpr}
+               end
+               || #field{name=FName, occurrence=repeated} <- MsgDef])
     end.
 
 new_bindings(Tuples) ->
@@ -2056,37 +2062,6 @@ format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
         splice_trees('<OutFill>', OutFill),
         splice_trees('<OutParams>', Params2)]),
      "\n\n"].
-
-format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> ""; %% handled in d_read_field_def_<Msg>
-        pass_as_record -> format_msg_decoder_reverse_toplevel_par(MsgName,MsgDef)
-    end.
-
-format_msg_decoder_reverse_toplevel_par(MsgName, MsgDef) ->
-    MsgNameQLen = flength("~p", [MsgName]),
-    FieldsToReverse = [F || F <- MsgDef, F#field.occurrence == repeated],
-    if FieldsToReverse /= [] ->
-            FieldMatchings =
-                outdent_first(
-                  string:join(
-                    [indent(8+2+MsgNameQLen, f("~p=F~s", [FName, FName]))
-                     || #field{name=FName} <- FieldsToReverse],
-                    ",\n")),
-            FieldReversings =
-                outdent_first(
-                  string:join(
-                    [indent(8+2+MsgNameQLen, f("~p=lists:reverse(F~s)",
-                                               [FName, FName]))
-                     || #field{name=FName} <- FieldsToReverse],
-                    ",\n")),
-            [f("~p(~n", [mk_fn(d_reverse_toplevel_fields_, MsgName)]),
-             indent(8, f("#~p{~s}=Msg) ->~n", [MsgName, FieldMatchings])),
-             indent(4, f("Msg#~p{~s}.~n~n", [MsgName, FieldReversings]))];
-       true ->
-            [f("~p(Msg) ->~n", [mk_fn(d_reverse_toplevel_fields_, MsgName)]),
-             indent(4, f("Msg.~n~n"))]
-    end.
 
 classify_field_merge_action(FieldDef) ->
     case FieldDef of
