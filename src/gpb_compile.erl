@@ -1490,7 +1490,6 @@ format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
     [format_msg_decoder_read_field(MsgName, MsgDef, AnRes),
      format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes),
      format_field_decoders(MsgName, MsgDef, AnRes, Opts),
-     format_field_adders(MsgName, MsgDef, AnRes),
      format_field_skippers(MsgName, AnRes)].
 
 format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
@@ -1965,14 +1964,9 @@ updated_merged_params(MsgName, FieldDef, AnRes, NewValue, Params) ->
             lists_setelement(RNum - 1, Params, MergedValue);
         pass_as_record ->
             MsgVar = hd(Params),
-            %PrevValue = record_access(MsgVar, MsgName, FName),
-            %MergedValue = merge_field_exprs(FieldDef, PrevValue, NewValue),
-            %[record_update(MsgVar, MsgName, [{FName, MergedValue}])]
-            AddFieldFn = mk_fn(add_field_, MsgName, FName),
-            [?expr('<call-add-field>'('<New>', '<Msg>'),
-                   [replace_term('<call-add-field>', AddFieldFn),
-                    replace_tree('<New>', NewValue),
-                    replace_tree('<Msg>', MsgVar)])]
+            PrevValue = record_access(MsgVar, MsgName, FName),
+            MergedValue = merge_field_exprs(FieldDef, PrevValue, NewValue),
+            [record_update(MsgVar, MsgName, [{FName, MergedValue}])]
     end.
 
 merge_field_exprs(FieldDef, PrevValue, NewValue) ->
@@ -2093,45 +2087,6 @@ format_msg_decoder_reverse_toplevel_par(MsgName, MsgDef) ->
             [f("~p(Msg) ->~n", [mk_fn(d_reverse_toplevel_fields_, MsgName)]),
              indent(4, f("Msg.~n~n"))]
     end.
-
-format_field_adders(MsgName, MsgDef, AnRes) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> ""; %% handled by passing other field params
-        pass_as_record -> format_field_adders(MsgName, MsgDef)
-    end.
-
-format_field_adders(MsgName, MsgDef) ->
-    [case classify_field_merge_action(FieldDef) of
-         msgmerge  ->
-             format_field_msgmerge_adder(MsgName, FieldDef);
-         overwrite ->
-             format_field_overwrite_adder(MsgName, FieldDef);
-         seqadd ->
-             case is_packed(FieldDef) of
-                 false -> format_field_seqappend_adder(MsgName, FieldDef);
-                 true  -> ""
-             end
-     end
-     || FieldDef <- MsgDef].
-
-format_field_overwrite_adder(MsgName, #field{name=FName}) ->
-    FAdderFn = mk_fn(add_field_, MsgName, FName),
-    [f("~p(NewValue, Msg) ->~n", [FAdderFn]),
-     f("    Msg#~p{~p = NewValue}.~n~n", [MsgName, FName])].
-
-format_field_seqappend_adder(MsgName, #field{name=FName}) ->
-    FAdderFn = mk_fn(add_field_, MsgName, FName),
-    [f("~p(NewValue, #~p{~p=PrevElems}=Msg) ->~n", [FAdderFn, MsgName, FName]),
-     f("    Msg#~p{~p = [NewValue | PrevElems]}.~n~n", [MsgName, FName])].
-
-format_field_msgmerge_adder(MsgName, #field{name=FName, type={msg,FMsgName}}) ->
-    FAdderFn = mk_fn(add_field_, MsgName, FName),
-    MergeFn = mk_fn(merge_msg_, FMsgName),
-    [f("~p(NewValue, #~p{~p=undefined}=Msg) ->~n", [FAdderFn, MsgName, FName]),
-     f("    Msg#~p{~p = NewValue};~n", [MsgName, FName]),
-     f("~p(NewValue, #~p{~p=PrevValue}=Msg) ->~n", [FAdderFn, MsgName, FName]),
-     f("    Msg#~p{~p = ~p(PrevValue, NewValue)}.~n~n",
-       [MsgName, FName, MergeFn])].
 
 classify_field_merge_action(FieldDef) ->
     case FieldDef of
