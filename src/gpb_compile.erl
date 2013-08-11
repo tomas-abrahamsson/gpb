@@ -1505,26 +1505,26 @@ format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
        fun(Bin) ->
                '<decode-field-def>'(Bin, 0, 0, '<initial-params>')
        end,
-       [{replace_term, '<decode-field-def>', DecodeFieldDefFnName},
-        {splice_trees, '<initial-params>',
-         msg_decoder_initial_params(MsgName, MsgDef, AnRes)}]),
+       [replace_term('<decode-field-def>', DecodeFieldDefFnName),
+        splice_trees('<initial-params>',
+                     msg_decoder_initial_params(MsgName, MsgDef, AnRes))]),
      "\n\n",
      gpb_codegen:format_fn(
-      DecodeFieldDefFnName,
-      fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
-              call_self(Rest, N+7, X bsl N + Acc, '<Params>');
-         (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
-              '<Key>' = X bsl N + Acc,
-              '<calls-to-field-decoding-or-skip>';
-         (<<>>, 0, 0, '<Params>') ->
-              '<finalize-result>'
-      end,
-      [{splice_trees, '<Params>', Params},
-       {replace_tree, '<Key>', Key},
-       {replace_tree, '<calls-to-field-decoding-or-skip>',
-        decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)},
-       {replace_tree, '<finalize-result>',
-        decoder_finalize_result(Params, MsgName, MsgDef, AnRes)}]),
+       DecodeFieldDefFnName,
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               call_self(Rest, N+7, X bsl N + Acc, '<Params>');
+          (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               '<Key>' = X bsl N + Acc,
+               '<calls-to-field-decoding-or-skip>';
+          (<<>>, 0, 0, '<Params>') ->
+               '<finalize-result>'
+       end,
+       [splice_trees('<Params>', Params),
+        replace_tree('<Key>', Key),
+        replace_tree('<calls-to-field-decoding-or-skip>',
+                     decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
+        replace_tree('<finalize-result>',
+                     decoder_finalize_result(Params, MsgName, MsgDef, AnRes))]),
      "\n\n"].
 
 msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
@@ -1555,7 +1555,7 @@ decoder_params(MsgName, AnRes) ->
 
 decoder_field_calls(Bindings, MsgName, []=_MsgDef, AnRes) ->
     Key = fetch_binding('<Key>', Bindings),
-    WiretypeExpr = ?expr('<Key>' band 7, [{replace_tree, '<Key>', Key}]),
+    WiretypeExpr = ?expr('<Key>' band 7, [replace_tree('<Key>', Key)]),
     Bindings1 = add_binding({'<wiretype-expr>', WiretypeExpr}, Bindings),
     decoder_skip_calls(Bindings1, MsgName, AnRes);
 decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
@@ -1568,9 +1568,9 @@ decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
            _ ->
                '<skip-calls>'
        end,
-       [{replace_tree,   '<Key>', fetch_binding('<Key>', Bindings)},
-        {splice_clauses, '<field-clauses>', FieldClauses},
-        {replace_tree,   '<skip-calls>', SkipCalls}]).
+       [replace_tree('<Key>', fetch_binding('<Key>', Bindings)),
+        splice_clauses('<field-clauses>', FieldClauses),
+        replace_tree('<skip-calls>', SkipCalls)]).
 
 decoder_skip_calls(Bindings, MsgName, AnRes) ->
     WiretypeExpr = fetch_binding('<wiretype-expr>', Bindings),
@@ -1587,14 +1587,14 @@ decoder_skip_calls(Bindings, MsgName, AnRes) ->
            2 -> skip_ld('<Rest>', 0, 0,     '<Params>');
            5 -> skip_32('<Rest>', '<Fill>', '<Params>')
        end,
-       [{replace_tree, '<wiretype-expr>', WiretypeExpr},
-        {replace_tree, '<Rest>', RestExpr},
-        {splice_trees, '<Fill>', Fill},
-        {splice_trees, '<Params>', Params},
-        {replace_term, skip_vi, mk_fn(skip_varint_, MsgName)},
-        {replace_term, skip_64, mk_fn(skip_64_, MsgName)},
-        {replace_term, skip_ld, mk_fn(skip_length_delimited_, MsgName)},
-        {replace_term, skip_32, mk_fn(skip_32_, MsgName)}]).
+       [replace_tree('<wiretype-expr>', WiretypeExpr),
+        replace_tree('<Rest>', RestExpr),
+        splice_trees('<Fill>', Fill),
+        splice_trees('<Params>', Params),
+        replace_term(skip_vi, mk_fn(skip_varint_, MsgName)),
+        replace_term(skip_64, mk_fn(skip_64_, MsgName)),
+        replace_term(skip_ld, mk_fn(skip_length_delimited_, MsgName)),
+        replace_term(skip_32, mk_fn(skip_32_, MsgName))]).
 
 decoder_field_clauses(Bindings, MsgName, MsgDef, AnRes) ->
     RestExpr = fetch_binding('<Rest>', Bindings),
@@ -1614,11 +1614,11 @@ decoder_field_clauses(Bindings, MsgName, MsgDef, AnRes) ->
            case x of
                '<selector>' -> '<call>'('<Rest>', '<Fill>', '<Params>')
            end,
-           [{replace_term, '<selector>', Selector},
-            {replace_term, '<call>', mk_fn(d_field_, MsgName, FName)},
-            {replace_tree, '<Rest>', RestExpr},
-            {splice_trees, '<Fill>', Fill},
-            {splice_trees, '<Params>', Params}])
+           [replace_term('<selector>', Selector),
+            replace_term('<call>', mk_fn(d_field_, MsgName, FName)),
+            replace_tree('<Rest>', RestExpr),
+            splice_trees('<Fill>', Fill),
+            splice_trees('<Params>', Params)])
      end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
@@ -1662,7 +1662,7 @@ decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
                            required -> Param;
                            optional -> Param;
                            repeated -> ?expr(lists:reverse('<Param>'),
-                                             [{replace_tree, '<Param>', Param}])
+                                             [replace_tree('<Param>', Param)])
                        end,
                    {FName, FValueExpr}
                end
@@ -1675,7 +1675,7 @@ decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
               [begin
                    FieldAccess = record_access(MsgVar, MsgName, FName),
                    FValueExpr = ?expr(lists:reverse('<Param>'),
-                                      [{replace_tree, '<Param>', FieldAccess}]),
+                                      [replace_tree('<Param>', FieldAccess)]),
                    {FName, FValueExpr}
                end
                || #field{name=FName, occurrence=repeated} <- MsgDef])
@@ -2171,11 +2171,11 @@ format_field_skippers(MsgName, AnRes) ->
           (<<0:1, _:7, Rest/binary>>, '<Fill>', '<Params>') ->
                '<call-read-field>'(Rest, '<Zeros>', '<Params>')
        end,
-       [{replace_term, '<call-recursively>', SkipVarintFnName},
-        {replace_term, '<call-read-field>', ReadFieldFnName},
-        {splice_trees, '<Fill>', Fill},
-        {splice_trees, '<Zeros>', Zeros},
-        {splice_trees, '<Params>', Params}]),
+       [replace_term('<call-recursively>', SkipVarintFnName),
+        replace_term('<call-read-field>', ReadFieldFnName),
+        splice_trees('<Fill>', Fill),
+        splice_trees('<Zeros>', Zeros),
+        splice_trees('<Params>', Params)]),
      "\n\n",
      %% skip_length_delimited_<MsgName>/4
      gpb_codegen:format_fn(
@@ -2187,9 +2187,9 @@ format_field_skippers(MsgName, AnRes) ->
                <<_:Length/binary, Rest2/binary>> = Rest,
                '<call-read-field>'(Rest2, 0, 0, '<Params>')
        end,
-       [{replace_term, '<call-recursively>', SkipLenDelimFnName},
-        {replace_term, '<call-read-field>', ReadFieldFnName},
-        {splice_trees, '<Params>', Params}]),
+       [replace_term('<call-recursively>', SkipLenDelimFnName),
+        replace_term('<call-read-field>', ReadFieldFnName),
+        splice_trees('<Params>', Params)]),
      "\n\n",
      %% skip_32_<MsgName>/2,4
      %% skip_64_<MsgName>/2,4
@@ -2198,11 +2198,11 @@ format_field_skippers(MsgName, AnRes) ->
          fun(<<_:'<NumBits>', Rest/binary>>, '<Fill>', '<Params>') ->
                  '<call-read-field>'(Rest, '<Zeros>', '<Params>')
          end,
-         [{replace_term, '<call-read-field>', ReadFieldFnName},
-          {replace_term, '<NumBits>', NumBits},
-          {splice_trees, '<Fill>', Fill},
-          {splice_trees, '<Zeros>', Zeros},
-          {splice_trees, '<Params>', Params}]),
+         [replace_term('<call-read-field>', ReadFieldFnName),
+          replace_term('<NumBits>', NumBits),
+          splice_trees('<Fill>', Fill),
+          splice_trees('<Zeros>', Zeros),
+          splice_trees('<Params>', Params)]),
        "\n\n"]
       || NumBits <- [32, 64]]].
 
@@ -3355,6 +3355,9 @@ replace_tree(Marker, NewTree) when is_atom(Marker) ->
 
 splice_trees(Marker, Trees) when is_atom(Marker) ->
     {splice_trees, Marker, Trees}.
+
+splice_clauses(Marker, Clauses) when is_atom(Marker) ->
+    {splice_clauses, Marker, Clauses}.
 
 f(F)   -> f(F,[]).
 f(F,A) -> io_lib:format(F,A).
