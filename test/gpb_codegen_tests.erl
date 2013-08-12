@@ -94,7 +94,7 @@ tree_splicing_2_test() ->
 
 replaces_function_name_after_splicings_test() ->
     M = ?dummy_mod,
-    FnName = p,
+    FnName = fn,
     Vars = [?expr(V), ?expr(V)],
     {module,M} = l(M, gpb_codegen:mk_fn(FnName,
                                         fun(p) -> V + V end,
@@ -219,6 +219,37 @@ format_fn_with_transforms_test() ->
     M = ?dummy_mod,
     {module, M} = ls(M, S),
     yes = M:FnName(88).
+
+splice_fn_clause_test() ->
+    FnClause = ?fn_clause(fun(x, 1) -> a_one end,
+                          [{replace_term, x, a}]),
+    FnName = p,
+    FT = gpb_codegen:mk_fn(FnName, fun(y, 2) -> y_two;
+                                      (mm, _) -> dummy
+                                   end,
+                           [{splice_clauses, mm, [FnClause]}]),
+    M = ?dummy_mod,
+    {module, M} = l(M, FT),
+    a_one = M:FnName(a, 1),
+    y_two = M:FnName(y, 2),
+    ?assertError(function_clause, M:FnName(mm, dummy)),
+    ok.
+
+splice_if_clause_test() ->
+    IfClause = ?if_clause(X == 2 -> r_me, [{replace_term, r_me, two}]),
+    FnName = p,
+    FT = gpb_codegen:mk_fn(FnName, fun(X) ->
+                                           if X == 1 -> one;
+                                              mm -> to_be_replaced
+                                           end
+                                   end,
+                           [{splice_clauses, mm, [IfClause]}]),
+    M = ?dummy_mod,
+    {module, M} = l(M, FT),
+    one = M:FnName(1),
+    two = M:FnName(2),
+    ?assertError(if_clause, M:FnName(mm)),
+    ok.
 
 %% -- helpers ---------------------------
 

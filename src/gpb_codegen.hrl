@@ -6,9 +6,21 @@
 -define(case_clause(Clause),
         gpb_codegen:case_clause(case dummy of Clause end)).
 
--define(case_clause(Clause, Transforms),
+-define(case_clause(Clause, Transforms), % FIXME; Transforms gets misindented
         gpb_codegen:case_clause(case dummy of Clause end,
                                 Transforms)).
+
+-define(fn_clause(FunExpr),
+        gpb_codegen:fn_clause(FunExpr)).
+
+-define(fn_clause(FunExpr, Transforms),
+        gpb_codegen:fn_clause(FunExpr, Transforms)).
+
+-define(if_clause(Clause),
+        gpb_codegen:if_clause(if Clause end)).
+
+-define(if_clause(Clause, Transforms), % FIXME; Transforms gets misindented
+        gpb_codegen:if_clause(if Clause end, Transforms)).
 
 -define(expr(X),
         gpb_codegen:expr(X)).
