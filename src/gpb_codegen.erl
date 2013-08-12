@@ -108,8 +108,9 @@
 %%   </dd>
 %% </dl>
 %%
-%% Note that there is also a runtime dependency to this module
-%% for code produced with this module.
+%% Note that there is also a generation-time dependency (ie at
+%% run-time for the code-generating code) to this module.
+%% The generated code has no dependency to this module, though.
 %% @end
 
 -module(gpb_codegen).
