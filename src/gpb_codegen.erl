@@ -42,6 +42,7 @@
 %%         as a simple term replacement, see below, so any occurrences
 %%         of the atom `call_self' will be replaced regardless of whether
 %%         it is in a function call or not.</p>
+%%       <p>The `RtTransforms' are applied in the order specified.</p>
 %%       <p>The following `RtTransforms' are available:</p>
 %%       <dl>
 %%         <dt>`{replace_term, Marker::atom(), Replacement::term()}'</dt>
