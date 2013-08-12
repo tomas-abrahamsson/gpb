@@ -205,19 +205,21 @@ runtime_transforms_for_exprs_test() ->
 
 format_fn_no_rt_transforms_test() ->
     FnName = p,
-    S = gpb_codegen:format_fn(FnName, fun(33) -> yes end),
-    true = io_lib:printable_list(S),
+    IoList = gpb_codegen:format_fn(FnName, fun(33) -> yes end),
+    true = io_lib:deep_char_list(IoList),
+    $\n = lists:last(lists:flatten(IoList)),
     M = ?dummy_mod,
-    {module, M} = ls(M, S),
+    {module, M} = ls(M, IoList),
     yes = M:FnName(33).
 
 format_fn_with_transforms_test() ->
     FnName = p,
-    S = gpb_codegen:format_fn(FnName, fun(zz) -> yes end,
-                              [{replace_term, zz, 88}]),
-    true = io_lib:printable_list(S),
+    IoList = gpb_codegen:format_fn(FnName, fun(zz) -> yes end,
+                                   [{replace_term, zz, 88}]),
+    true = io_lib:deep_char_list(IoList),
+    $\n = lists:last(lists:flatten(IoList)),
     M = ?dummy_mod,
-    {module, M} = ls(M, S),
+    {module, M} = ls(M, IoList),
     yes = M:FnName(88).
 
 splice_fn_clause_test() ->
@@ -294,8 +296,8 @@ mk_attr(AttrName, AttrValue) ->
       erl_syntax:attribute(erl_syntax:atom(AttrName),
                            [erl_syntax:abstract(AttrValue)])).
 
-ls(Mod, FormAsString) ->
-    {ok, Tokens, _} = erl_scan:string(FormAsString),
+ls(Mod, FormAsIoList) ->
+    {ok, Tokens, _} = erl_scan:string(lists:flatten(FormAsIoList)),
     {ok, Form} = erl_parse:parse_form(Tokens),
     l(Mod, Form).
 

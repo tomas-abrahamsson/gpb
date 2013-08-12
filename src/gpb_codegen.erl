@@ -72,9 +72,10 @@
 %%         </dd>
 %%       </dl>
 %%   </dd>
-%%   <dt>`gpb_codegen:format_fn(FnName, Fun [, RtTransforms]) -> string()'</dt>
+%%   <dt>`gpb_codegen:format_fn(FnName, Fun [, RtTransforms]) -> iolist()'</dt>
 %%   <dd>like `gpb_codegen:mk_fn/2,3', but format the result into
-%%       a string by calling `erl_prettypr:format' </dd>
+%%       an iolist by calling `erl_prettypr:format'. The resulting
+%%       iolist ends with a newline.</dd>
 %%   <dt>`?expr(Expr)' or
 %%       `gpb_codegen:expr(Expr)'</dt>
 %%   <dd>Will be replaced by the syntax tree for a `Expr'.</dd>
@@ -135,6 +136,7 @@
 -export([runtime_fn_transform/2, runtime_fn_transform/3]).
 -export([runtime_expr_transform/1, runtime_expr_transform/2]).
 -export([runtime_exprs_transform/2]).
+-export([erl_prettypr_format_nl/1]).
 
 %% Exported just to be able to give a (more informative) error than undef
 -export([mk_fn/2, mk_fn/3, format_fn/2, format_fn/3]).
@@ -255,14 +257,14 @@ transform_node(application, Node, AllForms) ->
         {?MODULE, {format_fn, 2}} ->
             [FnNameExpr, DefAsFun] = erl_syntax:application_arguments(Node),
             FnClauses = find_fun_form_clauses(DefAsFun, AllForms),
-            mk_apply(erl_prettypr, format,
+            mk_apply(?MODULE, erl_prettypr_format_nl,
                      [mk_runtime_fn_transform_invoker(
                         FnNameExpr, FnClauses, [])]);
         {?MODULE, {format_fn, 3}} ->
             [FnNameExpr, DefAsFun, RtTransforms] =
                 erl_syntax:application_arguments(Node),
             FnClauses = find_fun_form_clauses(DefAsFun, AllForms),
-            mk_apply(erl_prettypr, format,
+            mk_apply(?MODULE, erl_prettypr_format_nl,
                      [mk_runtime_fn_transform_invoker(
                         FnNameExpr, FnClauses, [RtTransforms])]);
         {?MODULE, {expr, 1}} ->
@@ -378,6 +380,11 @@ if_to_parse_tree_for_clause(Expr, RtTransforms) ->
     end.
 
 %% Main entry points at runtime.
+
+%%@hidden
+erl_prettypr_format_nl(Form) ->
+    [erl_prettypr:format(Form), "\n"].
+
 %%@hidden
 runtime_fn_transform(FnName, FnParseTree) ->
     runtime_fn_transform(FnName, FnParseTree, []).
