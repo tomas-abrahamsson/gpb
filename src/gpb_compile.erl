@@ -2064,21 +2064,22 @@ format_msg_merger(MsgName, MsgDef, AnRes) ->
     Transforms = [replace_tree('<Prev>', record_match(MsgName, PFields)),
                   replace_tree('<New>', record_match(MsgName, NFields)),
                   replace_tree('<merge>', record_create(MsgName, Mergings))],
-    case occurs_as_optional_submsg(MsgName, AnRes) of
-        true ->
-            gpb_codegen:format_fn(
-              mk_fn(merge_msg_, MsgName),
-              fun(Prev, undefined)   -> Prev;
-                 (undefined, New)    -> New;
-                 ('<Prev>', '<New>') -> '<merge>'
-              end,
-              Transforms);
-        false ->
-            gpb_codegen:format_fn(
-              mk_fn(merge_msg_, MsgName),
-              fun('<Prev>', '<New>') -> '<merge>' end,
-              Transforms)
-    end.
+    MsgUndefFnClauses =
+        case occurs_as_optional_submsg(MsgName, AnRes) of
+            true ->
+                [?fn_clause(fun(Prev, undefined) -> Prev end),
+                 ?fn_clause(fun(undefined, New)  -> New end)];
+            false ->
+                []
+        end,
+
+    gpb_codegen:format_fn(
+      mk_fn(merge_msg_, MsgName),
+      fun('<msg-undefined-handling>', _) -> '<return-the-defined-msg>';
+         ('<Prev>', '<New>')             -> '<merge>'
+      end,
+      Transforms ++ [splice_clauses('<msg-undefined-handling>',
+                                    MsgUndefFnClauses)]).
 
 compute_msg_field_merge_exprs(MsgDef) ->
     PFields = [{FName, erl_syntax:variable(?ff("PF~s", [FName]))}
