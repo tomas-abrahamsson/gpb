@@ -1479,11 +1479,16 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
     %%        insert a 2-complement in the mapping in order to move computations
     %%        from run-time to compile-time??
-    [[string:join([f("~p(~w) -> ~p",
-                     [mk_fn(d_enum_, EnumName), EnumValue, EnumSym])
-                   || {EnumSym, EnumValue} <- EnumDef],
-                  ";\n"),
-      ".\n\n"]
+    [[gpb_codegen:format_fn(
+        mk_fn(d_enum_, EnumName),
+        fun('<enum-int-value>') -> '<enum-sym>' end,
+        [splice_clauses(
+           '<enum-int-value>',
+           [gpb_codegen:fn_clause(fun('<i>') -> '<s>' end,
+                                  [replace_term('<i>', EnumValue),
+                                   replace_term('<s>', EnumSym)])
+            || {EnumSym, EnumValue} <- EnumDef])])
+      "\n\n"]
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
