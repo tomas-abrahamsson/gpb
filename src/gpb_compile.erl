@@ -1099,10 +1099,8 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        "\n",
        f("~s~n", [format_encoders(Defs, AnRes, Opts)]),
        "\n",
-       f("decode_msg(Bin, MsgName) ->~n"
-         "    ~s.~n",
-         [format_decoder_topcase(4, Defs, "Bin", "MsgName")]),
-       "\n",
+       format_decoders_top_function(Defs),
+       "\n\n",
        if DoNif ->
                f("~s~n", [format_nif_decoder_error_wrappers(
                             Defs, AnRes, Opts)]);
@@ -1457,14 +1455,21 @@ format_varint_encoder() ->
 
 %% -- decoders -----------------------------------------------------
 
-format_decoder_topcase(Indent, Defs, BinVar, MsgNameVar) ->
-    ["case ", MsgNameVar, " of\n",
-     string:join([indent(Indent+4, f("~p -> ~p(~s)",
-                                     [MsgName, mk_fn(d_msg_, MsgName), BinVar]))
-                  || {{msg, MsgName}, _MsgDef} <- Defs],
-                 ";\n"),
-     "\n",
-     indent(Indent, f("end"))].
+format_decoders_top_function(Defs) ->
+    gpb_codegen:format_fn(
+      decode_msg,
+      fun(Bin, MsgName) ->
+              case MsgName of
+                  '<msg-name-case>' -> dummy
+              end
+      end,
+      [splice_clauses(
+         '<msg-name-case>',
+         [gpb_codegen:case_clause(
+            case dummy of '<msg-name>' -> '<decode-call>'(Bin) end,
+            [replace_term('<msg-name>', MsgName),
+             replace_term('<decode-call>', mk_fn(d_msg_, MsgName))])
+          || {{msg,MsgName}, _Fields} <- Defs])]).
 
 format_decoders(Defs, AnRes, Opts) ->
     [format_enum_decoders(Defs, AnRes),
