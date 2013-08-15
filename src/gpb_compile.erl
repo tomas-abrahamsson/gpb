@@ -1479,16 +1479,15 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
     %%        insert a 2-complement in the mapping in order to move computations
     %%        from run-time to compile-time??
-    [[gpb_codegen:format_fn(
-        mk_fn(d_enum_, EnumName),
-        fun('<enum-int-value>') -> '<enum-sym>' end,
-        [splice_clauses(
-           '<enum-int-value>',
-           [gpb_codegen:fn_clause(fun('<i>') -> '<s>' end,
-                                  [replace_term('<i>', EnumValue),
-                                   replace_term('<s>', EnumSym)])
-            || {EnumSym, EnumValue} <- EnumDef])])
-      "\n\n"]
+    [gpb_codegen:format_fn(
+       mk_fn(d_enum_, EnumName),
+       fun('<enum-int-value>') -> '<enum-sym>' end,
+       [splice_clauses(
+          '<enum-int-value>',
+          [gpb_codegen:fn_clause(fun('<i>') -> '<s>' end,
+                                 [replace_term('<i>', EnumValue),
+                                  replace_term('<s>', EnumSym)])
+           || {EnumSym, EnumValue} <- EnumDef])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
@@ -1518,7 +1517,7 @@ format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
        [replace_term('<decode-field-def>', DecodeFieldDefFnName),
         splice_trees('<initial-params>',
                      msg_decoder_initial_params(MsgName, MsgDef, AnRes))]),
-     "\n\n",
+     "\n",
      gpb_codegen:format_fn(
        DecodeFieldDefFnName,
        fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
@@ -1535,7 +1534,7 @@ format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
                      decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
         replace_tree('<finalize-result>',
                      decoder_finalize_result(Params, MsgName, MsgDef, AnRes))]),
-     "\n\n"].
+     "\n"].
 
 msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
     FNVExprs = [begin
@@ -1716,7 +1715,7 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
         replace_tree('<Param>', Param),
         replace_term('<call-read-field>', mk_fn(d_read_field_def_, MsgName)),
         splice_trees('<OutParams>', OutParams)]),
-     "\n\n",
+     "\n",
      format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
 
 format_packed_field_seq_decoder(MsgName, #field{type=Type}=Field, Opts) ->
@@ -1731,16 +1730,15 @@ format_packed_field_seq_decoder(MsgName, #field{type=Type}=Field, Opts) ->
     end.
 
 format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitTypes)     ->
-    [gpb_codegen:format_fn(
-       mk_fn(d_packed_field_, MsgName, FName),
-       fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq) ->
-               call_self(Rest, Z1, Z2, [Value | AccSeq]);
-          (<<>>, _, _, AccSeq) ->
-               AccSeq
-       end,
-       [replace_term('<N>', BitLen),
-        splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes])]),
-     "\n\n"].
+    gpb_codegen:format_fn(
+      mk_fn(d_packed_field_, MsgName, FName),
+      fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, [Value | AccSeq]);
+         (<<>>, _, _, AccSeq) ->
+              AccSeq
+      end,
+      [replace_term('<N>', BitLen),
+       splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes])]).
 
 format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
     ExtValue = ?expr(X bsl N + Acc),
@@ -1756,17 +1754,16 @@ format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
                 DecodeExprs ++ C
         end,
     Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
-    [gpb_codegen:format_fn(
-       mk_fn(d_packed_field_, MsgName, FName),
-       fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
-               call_self(Rest, N + 7, X bsl N + Acc, AccSeq);
-          (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
-               '<body>';
-          (<<>>, 0, 0, AccSeq) ->
-               AccSeq
-       end,
-       [splice_trees('<body>', Body)]),
-     "\n\n"].
+    gpb_codegen:format_fn(
+      mk_fn(d_packed_field_, MsgName, FName),
+      fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
+              call_self(Rest, N + 7, X bsl N + Acc, AccSeq);
+         (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
+              '<body>';
+         (<<>>, 0, 0, AccSeq) ->
+              AccSeq
+      end,
+      [splice_trees('<body>', Body)]).
 
 format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     #field{name=FName}=FieldDef,
@@ -1957,17 +1954,16 @@ format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
     Value = ?expr(Value),
     Params2 = updated_merged_params(MsgName, FieldDef, AnRes, Value, Params),
     ReadFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
-    [gpb_codegen:format_fn(
-       mk_fn(d_field_, MsgName, FName),
-       fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, '<InParams>') ->
-               '<call-read-field>'(Rest, Z1, Z2, '<OutParams>')
-       end,
-       [replace_term('<N>', BitLen),
-        splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes]),
-        splice_trees('<InParams>', InParams),
-        replace_term('<call-read-field>', ReadFieldDefFnName),
-        splice_trees('<OutParams>', Params2)]),
-     "\n\n"].
+    gpb_codegen:format_fn(
+      mk_fn(d_field_, MsgName, FName),
+      fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, '<OutParams>')
+      end,
+      [replace_term('<N>', BitLen),
+       splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes]),
+       splice_trees('<InParams>', InParams),
+       replace_term('<call-read-field>', ReadFieldDefFnName),
+       splice_trees('<OutParams>', Params2)]).
 
 new_bindings(Tuples) ->
     lists:foldl(fun add_binding/2, new_bindings(), Tuples).
@@ -2039,20 +2035,18 @@ format_msg_merge_code(Defs, AnRes) ->
       || {{msg, MsgName}, MsgDef} <- Defs]].
 
 format_merge_msgs_top_level([]) ->
-    [gpb_codegen:format_fn(
-       merge_msgs,
-       fun(_Prev, New) -> New end),
-     "\n\n"];
+    gpb_codegen:format_fn(
+      merge_msgs,
+      fun(_Prev, New) -> New end);
 format_merge_msgs_top_level(MsgNames) ->
-    [gpb_codegen:format_fn(
-       merge_msgs,
-       fun(Prev, New) when element(1, Prev) =:= element(1, New) ->
-               case Prev of
-                   '<msg-type>' -> '<merge-call>'
-               end
-       end,
-       [splice_clauses('<msg-type>', merger_top_level_cases(MsgNames))]),
-     "\n\n"].
+    gpb_codegen:format_fn(
+      merge_msgs,
+      fun(Prev, New) when element(1, Prev) =:= element(1, New) ->
+              case Prev of
+                  '<msg-type>' -> '<merge-call>'
+              end
+      end,
+      [splice_clauses('<msg-type>', merger_top_level_cases(MsgNames))]).
 
 merger_top_level_cases(MsgNames) ->
     [gpb_codegen:case_clause(
@@ -2062,31 +2056,29 @@ merger_top_level_cases(MsgNames) ->
      || MsgName <- MsgNames].
 
 format_msg_merger(MsgName, [], _AnRes) ->
-    [gpb_codegen:format_fn(
-       mk_fn(merge_msg_, MsgName),
-       fun(_Prev, New) -> New end),
-     "\n\n"];
+    gpb_codegen:format_fn(
+      mk_fn(merge_msg_, MsgName),
+      fun(_Prev, New) -> New end);
 format_msg_merger(MsgName, MsgDef, AnRes) ->
     {PFields, NFields, Mergings} = compute_msg_field_merge_exprs(MsgDef),
     Transforms = [replace_tree('<Prev>', record_match(MsgName, PFields)),
                   replace_tree('<New>', record_match(MsgName, NFields)),
                   replace_tree('<merge>', record_create(MsgName, Mergings))],
-    [case occurs_as_optional_submsg(MsgName, AnRes) of
+    case occurs_as_optional_submsg(MsgName, AnRes) of
         true ->
-             gpb_codegen:format_fn(
-               mk_fn(merge_msg_, MsgName),
-               fun(Prev, undefined)   -> Prev;
-                  (undefined, New)    -> New;
-                  ('<Prev>', '<New>') -> '<merge>'
-               end,
-               Transforms);
-         false ->
-             gpb_codegen:format_fn(
-               mk_fn(merge_msg_, MsgName),
-               fun('<Prev>', '<New>') -> '<merge>' end,
-               Transforms)
-     end,
-     "\n\n"].
+            gpb_codegen:format_fn(
+              mk_fn(merge_msg_, MsgName),
+              fun(Prev, undefined)   -> Prev;
+                 (undefined, New)    -> New;
+                 ('<Prev>', '<New>') -> '<merge>'
+              end,
+              Transforms);
+        false ->
+            gpb_codegen:format_fn(
+              mk_fn(merge_msg_, MsgName),
+              fun('<Prev>', '<New>') -> '<merge>' end,
+              Transforms)
+    end.
 
 compute_msg_field_merge_exprs(MsgDef) ->
     PFields = [{FName, erl_syntax:variable(?ff("PF~s", [FName]))}
@@ -2141,7 +2133,7 @@ format_field_skippers(MsgName, AnRes) ->
        [replace_term('<call-recursively>', SkipVarintFnName),
         replace_term('<call-read-field>', ReadFieldFnName),
         splice_trees('<Params>', Params)]),
-     "\n\n",
+     "\n",
      %% skip_length_delimited_<MsgName>/4
      gpb_codegen:format_fn(
        SkipLenDelimFnName,
@@ -2155,7 +2147,7 @@ format_field_skippers(MsgName, AnRes) ->
        [replace_term('<call-recursively>', SkipLenDelimFnName),
         replace_term('<call-read-field>', ReadFieldFnName),
         splice_trees('<Params>', Params)]),
-     "\n\n",
+     "\n",
      %% skip_32_<MsgName>/2,4
      %% skip_64_<MsgName>/2,4
      [[gpb_codegen:format_fn(
@@ -2166,7 +2158,7 @@ format_field_skippers(MsgName, AnRes) ->
          [replace_term('<call-read-field>', ReadFieldFnName),
           replace_term('<NumBits>', NumBits),
           splice_trees('<Params>', Params)]),
-       "\n\n"]
+       "\n"]
       || NumBits <- [32, 64]]].
 
 format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
