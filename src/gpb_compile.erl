@@ -1078,24 +1078,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        %% to about 10000 msgs/s for a set of mixed message samples.
        %% f("-compile(inline).~n"),
        %%
-       f("encode_msg(Msg) ->~n"
-         "    encode_msg(Msg, []).~n~n"),
-       case proplists:get_value(verify, Opts, optionally) of
-           optionally ->
-               f("encode_msg(Msg, Opts) ->~n"
-                 "    case proplists:get_bool(verify, Opts) of~n"
-                 "        true  -> verify_msg(Msg);~n"
-                 "        false -> ok~n"
-                 "    end,~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")]);
-           always ->
-               f("encode_msg(Msg, _Opts) ->~n"
-                 "    verify_msg(Msg),~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")]);
-           never ->
-               f("encode_msg(Msg, _Opts) ->~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")])
-       end,
+       format_encoders_top_function(Defs, Opts),
        "\n",
        f("~s~n", [format_encoders(Defs, AnRes, Opts)]),
        "\n",
@@ -1125,16 +1108,49 @@ format_erl(Mod, Defs, AnRes, Opts) ->
 
 %% -- encoders -----------------------------------------------------
 
-format_encoder_topcase(Indent, Defs, MsgVar) ->
-    IndStr = indent(Indent+4, ""),
-    ["case ", MsgVar, " of\n",
-     IndStr,
-     string:join([f("#~p{} -> ~p(~s)",
-                    [MsgName, mk_fn(e_msg_, MsgName), MsgVar])
-                  || {{msg, MsgName}, _MsgDef} <- Defs],
-                 ";\n"++IndStr),
+format_encoders_top_function(Defs, Opts) ->
+    DoEncodeCaseClauses =
+        [gpb_codegen:case_clause(
+           case dummy of '<m>' -> '<encode-fn>'(Msg) end,
+           [replace_tree('<m>', record_match(MsgName, [])),
+            replace_term('<encode-fn>', mk_fn(e_msg_, MsgName))])
+         || {{msg,MsgName}, _Fields} <- Defs],
+    [gpb_codegen:format_fn(encode_msg, fun(Msg) -> encode_msg(Msg, []) end),
      "\n",
-     indent(Indent, "end")].
+     case proplists:get_value(verify, Opts, optionally) of
+         optionally ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, Opts) ->
+                       case proplists:get_bool(verify, Opts) of
+                           true  -> verify_msg(Msg);
+                           false -> ok
+                       end,
+                       case Msg of
+                           '<msg-cases>' -> '<encode-calls>'
+                       end
+               end,
+               [splice_clauses('<msg-cases>', DoEncodeCaseClauses)]);
+         always ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, _Opts) ->
+                       verify_msg(Msg),
+                       case Msg of
+                           '<msg-cases>' -> '<encode-calls>'
+                       end
+               end,
+               [splice_clauses('<msg-cases>', DoEncodeCaseClauses)]);
+         never ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, _Opts) ->
+                       case Msg of
+                           '<msg-cases>' -> '<encode-calls>'
+                       end
+               end,
+               [splice_clauses('<msg-cases>', DoEncodeCaseClauses)])
+     end].
 
 format_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
