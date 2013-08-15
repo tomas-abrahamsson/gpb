@@ -464,10 +464,22 @@ splice_trees(Marker, Replacements, Tree)   ->
 split_list_on_marker(Elems, Marker) -> split_aux(Elems, Marker, []).
 
 split_aux([X | Rest], Marker, Acc) ->
-    case analyze_atom_as_value(X) of
-        {atom, Marker} -> {lists:reverse(Acc), X, Rest};
-        {atom, _Other} -> split_aux(Rest, Marker, [X | Acc]);
-        non_atom       -> split_aux(Rest, Marker, [X | Acc])
+    case erl_syntax:type(X) of
+        binary_field ->
+            %% The marker (an atom) as a binary_field, will show up
+            %% as a subtree of the subtree of the binary field, but
+            %% must be replaced one level above that, so catch it here.
+            case analyze_binary_field_body_as_atom_as_value(X) of
+                {atom, Marker} -> {lists:reverse(Acc), X, Rest};
+                {atom, _Other} -> split_aux(Rest, Marker, [X | Acc]);
+                non_atom       -> split_aux(Rest, Marker, [X | Acc])
+            end;
+        _OtherType ->
+            case analyze_atom_as_value(X) of
+                {atom, Marker} -> {lists:reverse(Acc), X, Rest};
+                {atom, _Other} -> split_aux(Rest, Marker, [X | Acc]);
+                non_atom       -> split_aux(Rest, Marker, [X | Acc])
+            end
     end;
 split_aux([], _Marker, _Acc) ->
     marker_not_found.
@@ -562,6 +574,9 @@ analyze_guard_as_atom_as_value(G) ->
         _ ->
             non_atom_guard
     end.
+
+analyze_binary_field_body_as_atom_as_value(BinField) ->
+    analyze_atom_as_value(erl_syntax:binary_field_body(BinField)).
 
 %% -> {Name,Arity} | {Module,{Name,Arity}}
 analyze_implicit_fun_name(Tree) ->

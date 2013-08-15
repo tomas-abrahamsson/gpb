@@ -253,6 +253,17 @@ splice_if_clause_test() ->
     ?assertError(if_clause, M:FnName(mm)),
     ok.
 
+can_replace_binary_fields_test() ->
+    F2 = erl_syntax:binary_field(?expr(2), []),
+    F3 = erl_syntax:binary_field(?expr(3), []),
+    FnName = p,
+    FT = gpb_codegen:mk_fn(FnName, fun() -> <<1, morefields>> end,
+                           [{splice_trees, morefields, [F2, F3]}]),
+    M = ?dummy_mod,
+    {module, M} = l(M, FT),
+    <<1,2,3>> = M:FnName().
+
+
 %% -- helpers ---------------------------
 
 mk_test_fn_name() ->
