@@ -1166,8 +1166,7 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
        [splice_clauses(
           '<enum-sym>',
           [begin
-               ViBytes = [erl_parse:abstract(N)
-                          || N <- encode_enum_varint_value(EnumValue)],
+               ViBytes = enum_to_binary_fields(EnumValue),
                gpb_codegen:fn_clause(
                  fun('<s>', Bin) -> <<Bin/binary, '<b>'>> end,
                  [replace_term('<s>', EnumSym),
@@ -1177,9 +1176,13 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
-encode_enum_varint_value(Value) ->
+enum_to_binary_fields(Value) ->
     <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
-    binary_to_list(gpb:encode_varint(N)).
+    varint_to_binary_fields(N).
+
+varint_to_binary_fields(IntValue) ->
+    [erl_syntax:binary_field(?expr('<n>', [replace_term('<n>', N)]), [])
+     || N <- binary_to_list(gpb:encode_varint(IntValue))].
 
 varint_to_byte_text(N) ->
     Bin = gpb:encode_varint(N),
@@ -1189,52 +1192,74 @@ format_msg_encoders(Defs) ->
     [format_msg_encoder(MsgName, MsgDef) || {{msg, MsgName}, MsgDef} <- Defs].
 
 format_msg_encoder(MsgName, []) ->
-    FnName = mk_fn(e_msg_, MsgName),
-    [f("~p(_Msg) ->~n", [FnName]),
-     f("    <<>>.~n~n")];
+    gpb_codegen:format_fn(
+      mk_fn(e_msg_, MsgName),
+      fun(_Msg) ->
+              <<>>
+      end);
 format_msg_encoder(MsgName, MsgDef) ->
+    FNames = [FName || #field{name=FName} <- MsgDef],
+    FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
+    BVars = [var_b_n(I) || I <- lists:seq(1, length(FNames)-1)] ++ [last],
+    {EncodeExprs, _} =
+        lists:mapfoldl(
+          fun({NewBVar, Field, FVar}, PrevBVar) when NewBVar /= last ->
+                  EncExpr = field_encode_expr(MsgName, Field, FVar, PrevBVar),
+                  E = ?expr('<NewB>' = '<encode-expr>',
+                            [replace_tree('<NewB>', NewBVar),
+                             replace_tree('<encode-expr>', EncExpr)]),
+                  {E, NewBVar};
+             ({last, Field, FVar}, PrevBVar) ->
+                  EncExpr = field_encode_expr(MsgName, Field, FVar, PrevBVar),
+                  {EncExpr, dummy}
+          end,
+          ?expr(Bin),
+          lists:zip3(BVars, MsgDef, FVars)),
     FnName = mk_fn(e_msg_, MsgName),
-    MatchIndent = flength("~p(#~p{", [FnName, MsgName]),
-    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
-    FieldMatchings = string:join([f("~p=F~s", [FName, FName])
-                                  || #field{name=FName} <- MsgDef],
-                                 MatchCommaSep),
-    [f("~p(Msg) ->~n", [FnName]),
-     f("    ~p(Msg, <<>>).~n", [FnName]),
-     f("~n"),
-     f("~p(#~p{~s}, Bin0) ->~n", [FnName, MsgName, FieldMatchings]),
-     string:join(
-       [begin
-            FieldEncoderFn = mk_field_encode_fn_name(MsgName, Field),
-            ResultVar = if I == length(MsgDef) -> "";
-                           true                -> f("Bin~w = ", [I])
-                        end,
-            RIndent = lists:flatlength(ResultVar),
-            KeyTxt = mk_key_txt(FNum, Type),
-            if Occurrence == optional ->
-                    f("    ~sif F~s == undefined -> Bin~w;~n"
-                      "    ~*s  true -> ~p(F~s, <<Bin~w/binary, ~s>>)~n"
-                      "    ~*send",
-                      [ResultVar, FName, I-1,
-                       RIndent, "", FieldEncoderFn, FName, I-1, KeyTxt,
-                       RIndent, ""]);
-               Occurrence == repeated ->
-                    f("    ~sif F~s == [] -> Bin~w;~n"
-                      "    ~*s  true -> ~p(F~s, Bin~w)~n"
-                      "    ~*send",
-                      [ResultVar, FName, I-1,
-                       RIndent, "", FieldEncoderFn, FName, I-1,
-                       RIndent, ""]);
-               Occurrence == required ->
-                    f("    ~s~p(F~s, <<Bin~w/binary, ~s>>)",
-                      [ResultVar, FieldEncoderFn, FName, I-1, KeyTxt])
-            end
-        end
-        || {I, #field{name=FName, occurrence=Occurrence, type=Type,
-                      fnum=FNum}=Field} <- index_seq(MsgDef)],
-       ",\n"),
-     ".\n",
-     "\n"].
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Msg) ->
+               call_self(Msg, <<>>)
+       end),
+     "\n",
+     gpb_codegen:format_fn(
+       mk_fn(e_msg_, MsgName),
+       fun('<msg-matching>', Bin) ->
+               '<encode-param-exprs>'
+       end,
+       [replace_tree('<msg-matching>',
+                     record_match(MsgName, lists:zip(FNames, FVars))),
+        splice_trees('<encode-param-exprs>', EncodeExprs)])].
+
+field_encode_expr(MsgName, Field, FVar, PrevBVar) ->
+    FEncoder = mk_field_encode_fn_name(MsgName, Field),
+    #field{occurrence=Occurrence, type=Type, fnum=FNum}=Field,
+    Transforms = [replace_tree('<F>', FVar),
+                  replace_term('<enc>', FEncoder),
+                  replace_tree('<Bin>', PrevBVar),
+                  splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
+    case Occurrence of
+        optional ->
+            ?expr(
+               if '<F>' == undefined -> '<Bin>';
+                  true -> '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+               end,
+               Transforms);
+        repeated ->
+            ?expr(
+               if '<F>' == [] -> '<Bin>';
+                  true -> '<enc>'('<F>', '<Bin>')
+               end,
+               Transforms);
+        required ->
+            ?expr(
+               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>),
+               Transforms)
+    end.
+
+key_to_binary_fields(FNum, Type) ->
+    Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
+    varint_to_binary_fields(Key).
 
 mk_key_txt(FNum, Type) ->
     Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
@@ -2017,8 +2042,11 @@ record_access(Var, RecordName, FieldName) ->
                              erl_syntax:atom(RecordName),
                              erl_syntax:atom(FieldName)).
 
-var_f_n(N) ->
-    erl_syntax:variable(?ff("F~w", [N])).
+var_f_n(N) -> var_n("F", N).
+var_b_n(N) -> var_n("B", N).
+
+var_n(S, N) ->
+    erl_syntax:variable(?ff("~s~w", [S, N])).
 
 assign_to_var(Var, Expr) ->
     ?expr('<Var>' = '<Expr>',
