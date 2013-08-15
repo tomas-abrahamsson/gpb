@@ -1160,21 +1160,26 @@ format_encoders(Defs, AnRes, _Opts) ->
     ].
 
 format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
-    [format_enum_encoder(EnumName, EnumDef)
+    [gpb_codegen:format_fn(
+       mk_fn(e_enum_, EnumName),
+       fun('<enum-sym>', _Bin) -> '<enum-varint-bytes>' end,
+       [splice_clauses(
+          '<enum-sym>',
+          [begin
+               ViBytes = [erl_parse:abstract(N)
+                          || N <- encode_enum_varint_value(EnumValue)],
+               gpb_codegen:fn_clause(
+                 fun('<s>', Bin) -> <<Bin/binary, '<b>'>> end,
+                 [replace_term('<s>', EnumSym),
+                  splice_trees('<b>', ViBytes)])
+           end
+           || {EnumSym, EnumValue} <- EnumDef])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
-format_enum_encoder(EnumName, EnumDef) ->
-    FnName = mk_fn(e_enum_, EnumName),
-    [string:join([f("~p(~p, Bin) -> <<Bin/binary, ~s>>",
-                    [FnName, EnumSym, encode_format_enum_value(EnumValue)])
-                  || {EnumSym, EnumValue} <- EnumDef],
-                 ";\n"),
-     ".\n\n"].
-
-encode_format_enum_value(Value) ->
+encode_enum_varint_value(Value) ->
     <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
-    varint_to_byte_text(N).
+    binary_to_list(gpb:encode_varint(N)).
 
 varint_to_byte_text(N) ->
     Bin = gpb:encode_varint(N),
