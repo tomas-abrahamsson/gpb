@@ -1184,10 +1184,6 @@ varint_to_binary_fields(IntValue) ->
     [erl_syntax:binary_field(?expr('<n>', [replace_term('<n>', N)]), [])
      || N <- binary_to_list(gpb:encode_varint(IntValue))].
 
-varint_to_byte_text(N) ->
-    Bin = gpb:encode_varint(N),
-    string:join([integer_to_list(B) || <<B:8>> <= Bin], ",").
-
 format_msg_encoders(Defs) ->
     [format_msg_encoder(MsgName, MsgDef) || {{msg, MsgName}, MsgDef} <- Defs].
 
@@ -1261,10 +1257,6 @@ key_to_binary_fields(FNum, Type) ->
     Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
     varint_to_binary_fields(Key).
 
-mk_key_txt(FNum, Type) ->
-    Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
-    varint_to_byte_text(Key).
-
 mk_field_encode_fn_name(MsgName, #field{occurrence=repeated, name=FName}) ->
     mk_fn(e_field_, MsgName, FName);
 mk_field_encode_fn_name(MsgName, #field{type={msg,_Msg}, name=FName}) ->
@@ -1305,27 +1297,37 @@ format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef, AnRes) ->
 possibly_format_mfield_encoder(MsgName, #field{type={msg,SubMsg}}=FieldDef,
                                AnRes) ->
     FnName = mk_field_encode_fn_name(MsgName, FieldDef),
-    case is_msgsize_known_at_compiletime(SubMsg, AnRes) of
+    case is_msgsize_known_at_generationtime(SubMsg, AnRes) of
         no ->
-            [f("~p(Msg, Bin) ->~n", [FnName]),
-             f("    SubBin = ~p(Msg, <<>>),~n", [mk_fn(e_msg_, SubMsg)]),
-             f("    Bin2 = e_varint(byte_size(SubBin), Bin),~n"),
-             f("    <<Bin2/binary, SubBin/binary>>.~n~n")];
+            gpb_codegen:format_fn(
+              FnName,
+              fun(Msg, Bin) ->
+                      SubBin = '<encode-msg>'(Msg, <<>>),
+                      Bin2 = e_varint(byte_size(SubBin), Bin),
+                      <<Bin2/binary, SubBin/binary>>
+              end,
+              [replace_term('<encode-msg>', mk_fn(e_msg_, SubMsg))]);
         {yes, MsgSize} when MsgSize > 0 ->
-            MsgSizeTxt = varint_to_byte_text(MsgSize),
-            [f("~p(Msg, Bin) ->~n", [FnName]),
-             f("    Bin2 = <<Bin/binary, ~s>>,~n", [MsgSizeTxt]),
-             f("    ~p(Msg, Bin2).~n~n", [mk_fn(e_msg_, SubMsg)])];
+            MsgSizeBytes = varint_to_binary_fields(MsgSize),
+            gpb_codegen:format_fn(
+              FnName,
+              fun(Msg, Bin) ->
+                      Bin2 = <<Bin/binary, '<msg-size>'>>,
+                      '<encode-msg>'(Msg, Bin2)
+              end,
+              [splice_trees('<msg-size>', MsgSizeBytes),
+               replace_term('<encode-msg>', mk_fn(e_msg_, SubMsg))]);
         {yes, 0} ->
             %% special case, there will not be any e_msg_<MsgName>/2 function
             %% generated, so don't call it.
-            [f("~p(_Msg, Bin) ->~n", [FnName]),
-             f("    <<Bin/binary, 0>>.~n~n")]
+            gpb_codegen:format_fn(
+              FnName,
+              fun(_Msg, Bin) -> <<Bin/binary, 0>> end)
     end;
 possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].
 
-is_msgsize_known_at_compiletime(MsgName, #anres{known_msg_size=MsgSizes}) ->
+is_msgsize_known_at_generationtime(MsgName, #anres{known_msg_size=MsgSizes}) ->
     case dict:fetch(MsgName, MsgSizes) of
         MsgSize when is_integer(MsgSize) ->
             {yes, MsgSize};
@@ -1337,70 +1339,93 @@ format_repeated_field_encoder2(MsgName, #field{fnum=FNum, type=Type}=FDef) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     ElemEncoderFn = mk_field_encode_fn_name(MsgName,
                                             FDef#field{occurrence=required}),
-    KeyTxt = mk_key_txt(FNum, Type),
-    [f("~p([Elem | Rest], Bin) ->~n", [FnName]),
-     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
-     f("    Bin3 = ~p(Elem, Bin2),~n", [ElemEncoderFn]),
-     f("    ~p(Rest, Bin3);~n", [FnName]),
-     f("~p([], Bin) ->~n", [FnName]),
-     f("    Bin.~n~n")].
+    KeyBytes = key_to_binary_fields(FNum, Type),
+    gpb_codegen:format_fn(
+      FnName,
+      fun([Elem | Rest], Bin) ->
+              Bin2 = <<Bin/binary, '<KeyBytes>'>>,
+              Bin3 = '<encode-elem>'(Elem, Bin2),
+              call_self(Rest, Bin3);
+         ([], Bin) ->
+              Bin
+      end,
+      [splice_trees('<KeyBytes>', KeyBytes),
+       replace_term('<encode-elem>', ElemEncoderFn)]).
 
 format_packed_field_encoder2(MsgName, #field{type=Type}=FDef) ->
     case packed_byte_size_can_be_computed(Type) of
         {yes, BitLen, BitType} ->
             format_knownsize_packed_field_encoder2(MsgName, FDef,
-                                                  BitLen, BitType);
+                                                   BitLen, BitType);
         no ->
             format_unknownsize_packed_field_encoder2(MsgName, FDef)
     end.
 
-packed_byte_size_can_be_computed(fixed32)  -> {yes, 32, 'little'};
-packed_byte_size_can_be_computed(sfixed32) -> {yes, 32, 'little-signed'};
-packed_byte_size_can_be_computed(float)    -> {yes, 32, 'little-float'};
-packed_byte_size_can_be_computed(fixed64)  -> {yes, 64, 'little'};
-packed_byte_size_can_be_computed(sfixed64) -> {yes, 64, 'little-signed'};
-packed_byte_size_can_be_computed(double)   -> {yes, 64, 'little-float'};
+packed_byte_size_can_be_computed(fixed32)  -> {yes, 32, [little]};
+packed_byte_size_can_be_computed(sfixed32) -> {yes, 32, [little,signed]};
+packed_byte_size_can_be_computed(float)    -> {yes, 32, [little,float]};
+packed_byte_size_can_be_computed(fixed64)  -> {yes, 64, [little]};
+packed_byte_size_can_be_computed(sfixed64) -> {yes, 64, [little,signed]};
+packed_byte_size_can_be_computed(double)   -> {yes, 64, [little,float]};
 packed_byte_size_can_be_computed(_)        -> no.
 
 format_knownsize_packed_field_encoder2(MsgName, #field{name=FName,
                                                        fnum=FNum}=FDef,
                                       BitLen, BitType) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
-    KeyTxt = mk_key_txt(FNum, bytes),
+    KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
-    [f("~p(Elems, Bin) when Elems =/= [] ->~n", [FnName]),
-     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
-     f("    Bin3 = e_varint(length(Elems) * ~w, Bin2),~n", [BitLen div 8]),
-     f("    ~p(Elems, Bin3);~n", [PackedFnName]),
-     f("~p([], Bin) ->~n", [FnName]),
-     f("    Bin.~n"),
-     f("~n"),
-     f("~p([Value | Rest], Bin) ->~n", [PackedFnName]),
-     f("    Bin2 = <<Bin/binary, Value:~w/~s>>,~n", [BitLen, BitType]),
-     f("    ~p(Rest, Bin2);~n", [PackedFnName]),
-     f("~p([], Bin) ->~n", [PackedFnName]),
-     f("    Bin.~n~n")].
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Elems, Bin) when Elems =/= [] ->
+               Bin2 = <<Bin/binary, '<KeyBytes>'>>,
+               Bin3 = e_varint(length(Elems) * '<ElemLen>', Bin2),
+               '<encode-packed>'(Elems, Bin3);
+          ([], Bin) ->
+               Bin
+       end,
+       [splice_trees('<KeyBytes>', KeyBytes),
+        replace_term('<ElemLen>', BitLen div 8),
+        replace_term('<encode-packed>', PackedFnName)]),
+     gpb_codegen:format_fn(
+       PackedFnName,
+       fun([Value | Rest], Bin) ->
+               Bin2 = <<Bin/binary, Value:'<Size>'/'<BitType>'>>,
+               call_self(Rest, Bin2);
+          ([], Bin) ->
+               Bin
+       end,
+       [replace_term('<Size>', BitLen),
+        splice_trees('<BitType>', [erl_syntax:atom(T) || T <- BitType])])].
 
 format_unknownsize_packed_field_encoder2(MsgName, #field{name=FName,
                                                          fnum=FNum}=FDef) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     ElemEncoderFn = mk_field_encode_fn_name(MsgName,
                                             FDef#field{occurrence=required}),
-    KeyTxt = mk_key_txt(FNum, bytes),
+    KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
-    [f("~p(Elems, Bin) when Elems =/= [] ->~n", [FnName]),
-     f("    SubBin = ~p(Elems, <<>>),~n", [PackedFnName]),
-     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
-     f("    Bin3 = e_varint(byte_size(SubBin), Bin2),~n"),
-     f("    <<Bin3/binary, SubBin/binary>>;~n"),
-     f("~p([], Bin) ->~n", [FnName]),
-     f("    Bin.~n"),
-     f("~n"),
-     f("~p([Value | Rest], Bin) ->~n", [PackedFnName]),
-     f("    Bin2 = ~p(Value, Bin),~n", [ElemEncoderFn]),
-     f("    ~p(Rest, Bin2);~n", [PackedFnName]),
-     f("~p([], Bin) ->~n", [PackedFnName]),
-     f("    Bin.~n~n")].
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Elems, Bin) when Elems =/= [] ->
+               SubBin = '<encode-packed>'(Elems, <<>>),
+               Bin2 = <<Bin/binary, '<KeyBytes>'>>,
+               Bin3 = e_varint(byte_size(SubBin), Bin2),
+               <<Bin3/binary, SubBin/binary>>;
+          ([], Bin) ->
+               Bin
+       end,
+       [splice_trees('<KeyBytes>', KeyBytes),
+        replace_term('<encode-packed>', PackedFnName)]),
+     gpb_codegen:format_fn(
+       PackedFnName,
+       fun([Value | Rest], Bin) ->
+               Bin2 = '<encode-elem>'(Value, Bin),
+               call_self(Rest, Bin2);
+          ([], Bin) ->
+               Bin
+       end,
+       [replace_term('<encode-elem>', ElemEncoderFn)])].
 
 format_type_encoders(AnRes) ->
     [format_varlength_field_encoders(AnRes),
@@ -1422,12 +1447,12 @@ format_fixlength_field_encoders(AnRes) ->
     NeedsFixed64  = needs_f_enc(fixed64, AnRes),
     NeedsSFixed64 = needs_f_enc(sfixed64, AnRes),
     NeedsDouble   = needs_f_enc(double, AnRes),
-    [[format_fixed_encoder(fixed32,  32, 'little')        || NeedsFixed32],
-     [format_fixed_encoder(sfixed32, 32, 'little-signed') || NeedsSFixed32],
-     [format_fixed_encoder(float,    32, 'little-float')  || NeedsFloat],
-     [format_fixed_encoder(fixed64,  64, 'little')        || NeedsFixed64],
-     [format_fixed_encoder(sfixed64, 64, 'little-signed') || NeedsSFixed64],
-     [format_fixed_encoder(double,   64, 'little-float')  || NeedsDouble]].
+    [[format_fixed_encoder(fixed32,  32, [little])        || NeedsFixed32],
+     [format_fixed_encoder(sfixed32, 32, [little,signed]) || NeedsSFixed32],
+     [format_fixed_encoder(float,    32, [little,float])  || NeedsFloat],
+     [format_fixed_encoder(fixed64,  64, [little])        || NeedsFixed64],
+     [format_fixed_encoder(sfixed64, 64, [little,signed]) || NeedsSFixed64],
+     [format_fixed_encoder(double,   64, [little,float])  || NeedsDouble]].
 
 needs_f_enc(FixedType, #anres{used_types=UsedTypes, fixlen_types=FTypes}) ->
     %% If a fixlength-type occurs _only_ as a packed repeated field,
@@ -1458,46 +1483,67 @@ at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
               SubMsgNames).
 
 format_sint_encoder() ->
-    [f("e_type_sint(Value, Bin) when Value >= 0 ->~n"),
-     f("    e_varint(Value * 2, Bin);~n"),
-     f("e_type_sint(Value, Bin) ->~n"),
-     f("    e_varint(Value * -2 - 1, Bin).~n~n")].
+    gpb_codegen:format_fn(
+      e_type_sint,
+      fun(Value, Bin) when Value >= 0 ->
+              e_varint(Value * 2, Bin);
+         (Value, Bin) ->
+              e_varint(Value * -2 - 1, Bin)
+      end).
 
 format_int_encoder(Type, BitLen) ->
-    FnName = mk_fn(e_type_, Type),
-    [f("~p(Value, Bin) when 0 =< Value, Value =< 127 ->~n", [FnName]),
-     f("    <<Bin/binary, Value>>; %% fast path~n"),
-     f("~p(Value, Bin) ->~n", [FnName]),
-     f("    <<N:~w/unsigned-native>> = <<Value:~w/signed-native>>,~n",
-       [BitLen, BitLen]),
-     f("    e_varint(N, Bin).~n~n")].
+    gpb_codegen:format_fn(
+      mk_fn(e_type_, Type),
+      fun(Value, Bin) when 0 =< Value, Value =< 127 ->
+              <<Bin/binary, Value>>; %% fast path
+         (Value, Bin) ->
+              <<N:'<Sz>'/unsigned-native>> = <<Value:'<Sz>'/signed-native>>,
+              e_varint(N, Bin)
+      end,
+      [replace_term('<Sz>', BitLen)]).
 
 format_bool_encoder() ->
-    [f("e_type_bool(true, Bin)  -> <<Bin/binary, 1>>;~n"),
-     f("e_type_bool(false, Bin) -> <<Bin/binary, 0>>.~n~n")].
+    gpb_codegen:format_fn(
+      e_type_bool,
+      fun(true, Bin)  -> <<Bin/binary, 1>>;
+         (false, Bin) -> <<Bin/binary, 0>>
+      end).
 
 format_fixed_encoder(Type, BitLen, BitType) ->
-    FnName = mk_fn(e_type_, Type),
-    [f("~p(Value, Bin) ->~n", [FnName]),
-     f("    <<Bin/binary, Value:~p/~s>>.~n~n", [BitLen, BitType])].
+    gpb_codegen:format_fn(
+      mk_fn(e_type_, Type),
+      fun(Value, Bin) ->
+              <<Bin/binary, Value:'<Sz>'/'<T>'>>
+      end,
+      [replace_term('<Sz>', BitLen),
+       splice_trees('<T>', [erl_syntax:atom(T) || T <- BitType])]).
 
 format_string_encoder() ->
-    [f("e_type_string(S, Bin) ->~n"),
-     f("    Utf8 = unicode:characters_to_binary(S),~n"),
-     f("    Bin2 = e_varint(byte_size(Utf8), Bin),~n"),
-     f("    <<Bin2/binary, Utf8/binary>>.~n~n")].
+    gpb_codegen:format_fn(
+      e_type_string,
+      fun(S, Bin) ->
+              Utf8 = unicode:characters_to_binary(S),
+              Bin2 = e_varint(byte_size(Utf8), Bin),
+              <<Bin2/binary, Utf8/binary>>
+      end).
 
 format_bytes_encoder() ->
-    [f("e_type_bytes(Bytes, Bin) ->~n"),
-     f("    Bin2 = e_varint(byte_size(Bytes), Bin),~n"),
-     f("    <<Bin2/binary, Bytes/binary>>.~n~n")].
+    gpb_codegen:format_fn(
+      e_type_bytes,
+      fun(Bytes, Bin) ->
+              Bin2 = e_varint(byte_size(Bytes), Bin),
+              <<Bin2/binary, Bytes/binary>>
+      end).
 
 format_varint_encoder() ->
-    [f("e_varint(N, Bin) when N =< 127 ->~n"),
-     f("    <<Bin/binary, N>>;~n"),
-     f("e_varint(N, Bin) ->~n"),
-     f("    Bin2 = <<Bin/binary, (N band 127 bor 128)>>,~n"),
-     f("    e_varint(N bsr 7, Bin2).~n~n")].
+    gpb_codegen:format_fn(
+      e_varint,
+      fun(N, Bin) when N =< 127 ->
+              <<Bin/binary, N>>;
+         (N, Bin) ->
+              Bin2 = <<Bin/binary, (N band 127 bor 128)>>,
+              call_self(N bsr 7, Bin2)
+      end).
 
 %% -- decoders -----------------------------------------------------
 
