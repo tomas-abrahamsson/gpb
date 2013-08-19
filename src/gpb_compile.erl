@@ -1093,8 +1093,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        "\n",
        f("~s~n", [format_msg_merge_code(Defs, AnRes)]),
        "\n",
-       f("verify_msg(Msg) ->~n" %% Option to use gpb:verify_msg??
-         "    ~s.~n", [format_verifier_topcase(4, Defs, "Msg")]),
+       format_verifiers_top_function(Defs),
        "\n",
        f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
        "\n",
@@ -2269,17 +2268,24 @@ format_msg_nif_error_wrapper(MsgName) ->
 
 %% -- verifiers -----------------------------------------------------
 
-format_verifier_topcase(Indent, Defs, MsgVar) ->
-    IndStr = indent(Indent+4, ""),
-    ElseCase = "_ -> mk_type_error(not_a_known_message, Msg, [])",
-    ["case ", MsgVar, " of\n",
-     IndStr,
-     string:join([f("#~p{} -> ~p(~s, [~p])",
-                    [MsgName, mk_fn(v_msg_, MsgName), MsgVar, MsgName])
-                  || {{msg, MsgName}, _MsgDef} <- Defs] ++ [ElseCase],
-                 ";\n"++IndStr),
-     "\n",
-     indent(Indent, "end")].
+format_verifiers_top_function(Defs) ->
+    gpb_codegen:format_fn(
+      verify_msg,
+      fun(Msg) ->
+              case Msg of
+                  '<msg-cases>' -> verify_it;
+                  _ -> mk_type_error(not_a_known_message, Msg, [])
+              end
+      end,
+      [splice_clauses(
+         '<msg-cases>',
+         [gpb_codegen:case_clause(
+            case dummy of '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>'])
+            end,
+            [replace_tree('<msg-match>', record_match(MsgName, [])),
+             replace_term('<verify-msg>', mk_fn(v_msg_, MsgName)),
+             replace_term('<MsgName>', MsgName)])
+          || {{msg, MsgName}, _MsgDef} <- Defs])]).
 
 format_verifiers(Defs, AnRes, _Opts) ->
     [format_msg_verifiers(Defs, AnRes),
@@ -2292,58 +2298,74 @@ format_msg_verifiers(Defs, AnRes) ->
     [format_msg_verifier(MsgName, MsgDef, AnRes)
      || {{msg,MsgName}, MsgDef} <- Defs].
 
-format_msg_verifier(MsgName, [], AnRes) ->
-    FnName = mk_fn(v_msg_, MsgName),
-    [f("~p(#~p{}, _Path) ->~n", [FnName, MsgName]),
-     f("    ok"),
-     [[f(     ";~n"),
-       f("~p(X, Path) ->~n", [FnName]),
-       f("    mk_type_error({expected_msg,~p}, X, Path)", [MsgName])]
-      || can_occur_as_sub_msg(MsgName, AnRes)],
-     f(".~n~n")];
 format_msg_verifier(MsgName, MsgDef, AnRes) ->
-    FnName = mk_fn(v_msg_, MsgName),
-    MatchIndent = flength("~p(#~p{", [FnName, MsgName]),
-    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
-    FieldMatchings = string:join([f("~p=F~s", [FName, FName])
-                                  || #field{name=FName} <- MsgDef],
-                                 MatchCommaSep),
-    [f("~p(#~p{~s}, Path) ->~n", [FnName, MsgName, FieldMatchings]),
-     [begin
-          FVerifierFn = case Type of
-                            {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
-                            {enum,EnumName} -> mk_fn(v_enum_, EnumName);
-                            Type            -> mk_fn(v_type_, Type)
-                        end,
-          [indent_lines(
-             4,
-             case Occurrence of
-                 required ->
-                     %% FIXME: check especially for `undefined'
-                     %% and if found, error out with required_field_not_set
-                     %% specifying expected type
-                     [f("~p(F~s, [~p | Path])", [FVerifierFn, FName, FName])];
-                 repeated ->
-                     [f("if is_list(F~s) ->~n", [FName]),
-                      f("       [~p(Elem, [~p | Path]) || Elem <- F~s];~n",
-                        [FVerifierFn, FName, FName]),
-                      f("   true ->~n"),
-                      f("       mk_type_error({invalid_list_of,~p},F~s,Path)~n",
-                        [Type, FName]),
-                      f("end")];
-                 optional ->
-                     [f("[~p(F~s, [~p | Path]) || F~s /= undefined]",
-                        [FVerifierFn, FName, FName, FName])]
-             end),
-           f(",~n")]
-      end
-      || #field{name=FName, type=Type, occurrence=Occurrence} <- MsgDef],
-     f("    ok"),
-     [[f(     ";~n"),
-       f("~p(X, Path) ->~n", [FnName]),
-       f("    mk_type_error({expected_msg,~p}, X, Path)", [MsgName])]
-      || can_occur_as_sub_msg(MsgName, AnRes)],
-     f(".~n~n")].
+    ElseClause =
+        case can_occur_as_sub_msg(MsgName, AnRes) of
+            true ->
+                [gpb_codegen:fn_clause(
+                   fun(X, Path) ->
+                           mk_type_error({expected_msg,'<MsgName>'}, X, Path)
+                   end,
+                   [replace_term('<MsgName>', MsgName)])];
+            false ->
+                []
+        end,
+    FVars = [{var_f_n(I), Field} || {I, Field} <- index_seq(MsgDef)],
+    RFields = [{FName, Var} || {Var, #field{name=FName}} <- FVars],
+    if MsgDef == [] ->
+            gpb_codegen:format_fn(
+              mk_fn(v_msg_, MsgName),
+              fun('<msg-match>', _Path) -> ok;
+                 ('<else-clause>', _) -> expr
+              end,
+              [replace_tree('<msg-match>', record_match(MsgName, RFields)),
+               splice_clauses('<else-clause>', ElseClause)]);
+       MsgDef /= [] ->
+            gpb_codegen:format_fn(
+              mk_fn(v_msg_, MsgName),
+              fun('<msg-match>', Path) -> '<field-verifications>', ok;
+                 ('<else-clause>', _) -> expr
+              end,
+              [replace_tree('<msg-match>', record_match(MsgName, RFields)),
+               splice_trees('<field-verifications>', field_verifiers(FVars)),
+               splice_clauses('<else-clause>', ElseClause)])
+    end.
+
+field_verifiers(FVars) ->
+    [begin
+         FVerifierFn = case Type of
+                           {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
+                           {enum,EnumName} -> mk_fn(v_enum_, EnumName);
+                           Type            -> mk_fn(v_type_, Type)
+                       end,
+         Replacements = [replace_term('<verify-fn>', FVerifierFn),
+                         replace_tree('<F>', FVar),
+                         replace_term('<FName>', FName),
+                         replace_term('<Type>', Type)],
+         case Occurrence of
+             required ->
+                 %% FIXME: check especially for `undefined'
+                 %% and if found, error out with required_field_not_set
+                 %% specifying expected type
+                 ?expr('<verify-fn>'('<F>', ['<FName>' | Path]),
+                       Replacements);
+             repeated ->
+                 ?expr(if is_list('<F>') ->
+                               ['<verify-fn>'(Elem, ['<FName>' | Path])
+                                || Elem <- '<F>'];
+                          true ->
+                               mk_type_error(
+                                 {invalid_list_of, '<Type>'}, '<F>', Path)
+                       end,
+                       Replacements);
+             optional ->
+                 ?expr(if '<F>' == undefined -> ok;
+                          true -> '<verify-fn>'('<F>', ['<FName>', Path])
+                       end,
+                       Replacements)
+         end
+     end
+     || {FVar, #field{name=FName, type=Type, occurrence=Occurrence}} <- FVars].
 
 can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
     sets:is_element({msg,MsgName}, UsedTypes).
@@ -3431,9 +3453,6 @@ splice_clauses(Marker, Clauses) when is_atom(Marker) ->
 
 f(F)   -> f(F,[]).
 f(F,A) -> io_lib:format(F,A).
-
-%flength(F) -> iolist_size(f(F)).
-flength(F, A) -> iolist_size(f(F, A)).
 
 flatten_iolist(IoList) ->
     binary_to_list(iolist_to_binary(IoList)).
