@@ -2354,11 +2354,16 @@ format_enum_verifiers(Defs, #anres{used_types=UsedTypes}) ->
         smember({enum, EnumName}, UsedTypes)].
 
 format_enum_verifier(EnumName, EnumMembers) ->
-    FnName = mk_fn(v_enum_, EnumName),
-    [[f("~p(~p, _) -> ok;~n", [FnName, EnumSym]) || {EnumSym,_} <- EnumMembers],
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error({invalid_enum,~p}, X, Path).~n", [EnumName]),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_enum_, EnumName),
+      fun('<sym>', _Path) -> ok;
+         (X, Path) -> mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
+      end,
+      [splice_clauses('<sym>', [gpb_codegen:fn_clause(
+                                  fun('<sym>', _Path) -> ok end,
+                                  [replace_term('<sym>', EnumSym)])
+                                || {EnumSym, _Value} <- EnumMembers]),
+       replace_term('<EnumName>', EnumName)]).
 
 format_type_verifiers(#anres{used_types=UsedTypes}) ->
     [[format_int_verifier(sint32, signed, 32)   || smember(sint32, UsedTypes)],
@@ -2378,7 +2383,6 @@ format_type_verifiers(#anres{used_types=UsedTypes}) ->
      [format_bytes_verifier()                   || smember(bytes, UsedTypes)]].
 
 format_int_verifier(IntType, Signedness, NumBits) ->
-    FnName = mk_fn(v_type_, IntType),
     Min = case Signedness of
               unsigned -> 0;
               signed   -> -(1 bsl (NumBits-1))
@@ -2387,70 +2391,85 @@ format_int_verifier(IntType, Signedness, NumBits) ->
               unsigned -> 1 bsl NumBits - 1;
               signed   -> 1 bsl (NumBits-1) - 1
           end,
-    [f("~p(N, _P) when ~w =< N, N =< ~w ->~n", [FnName, Min, Max]),
-     f("    ok;~n"),
-     f("~p(N, Path) when is_integer(N) ->~n", [FnName]),
-     f("    mk_type_error({value_out_of_range, ~p, ~p, ~w}, N, Path);~n",
-       [IntType, Signedness, NumBits]),
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error({bad_integer, ~p, ~p, ~w}, X, Path).~n",
-       [IntType, Signedness, NumBits]),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, IntType),
+      fun(N, _Path) when '<Min>' =< N, N =< '<Max>' ->
+              ok;
+         (N, Path) when is_integer(Path) ->
+              mk_type_error({value_out_of_range, '<details>'}, N, Path);
+         (X, Path) ->
+              mk_type_error({bad_integer, '<details>'}, X, Path)
+      end,
+      [replace_term('<Min>', Min),
+       replace_term('<Max>', Max),
+       splice_trees('<details>', [erl_syntax:atom(IntType),
+                                  erl_syntax:atom(Signedness),
+                                  erl_syntax:integer(NumBits)])]).
 
 format_bool_verifier() ->
-    FnName = mk_fn(v_type_, bool),
-    [f("~p(false, _Path) -> ok;~n", [FnName]),
-     f("~p(true, _Path)  -> ok;~n", [FnName]),
-     f("~p(X, Path)  -> mk_type_error(bad_boolean_value, X, Path).~n",
-       [FnName]),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, bool),
+      fun(false, _Path) -> ok;
+         (true, _Path)  -> ok;
+         (X, Path) -> mk_type_error(bad_boolean_value, X, Path)
+      end).
 
 format_float_verifier(FlType) ->
-    FnName = mk_fn(v_type_, FlType),
-    [f("~p(N, _Path) when is_float(N) -> ok;~n", [FnName]),
-     %% It seems a float for the corresponding integer value is
-     %% indeed packed when doing <<Integer:32/little-float>>.
-     %% So let verify accept integers too.
-     %% When such a value is unpacked, we get a float.
-     f("~p(N, _Path) when is_integer(N) -> ok;~n", [FnName]),
-     f("~p(X, Path)  -> mk_type_error(bad_~w_value, X, Path).~n",
-       [FnName, FlType]),
-     f("~n")].
+    BadTypeOfValue = list_to_atom(lists:concat(["bad_", FlType, "_value"])),
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, FlType),
+      fun(N, _Path) when is_float(N) -> ok;
+         %% It seems a float for the corresponding integer value is
+         %% indeed packed when doing <<Integer:32/little-float>>.
+         %% So let verify accept integers too.
+         %% When such a value is unpacked, we get a float.
+         (N, _Path) when is_integer(N) -> ok;
+         (X, Path) -> mk_type_error('<bad_x_value>', X, Path)
+      end,
+      [replace_term('<bad_x_value>', BadTypeOfValue)]).
 
 format_string_verifier() ->
-    FnName = mk_fn(v_type_, string),
-    [f("~p(S, Path) when is_list(S) ->~n", [FnName]),
-     f("    try unicode:characters_to_binary(S),~n"),
-     f("        ok~n"),
-     f("    catch error:badarg ->~n"),
-     f("        mk_type_error(bad_unicode_string, S, Path)~n"),
-     f("    end;~n"),
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error(bad_unicode_string, X, Path).~n"),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, string),
+      fun(S, Path) when is_list(S) ->
+              try
+                  unicode:characters_to_binary(S),
+                  ok
+              catch error:badarg ->
+                      mk_type_error(bad_unicode_string, S, Path)
+              end;
+         (X, Path) ->
+              mk_type_error(bad_unicode_string, X, Path)
+      end).
 
 format_bytes_verifier() ->
-    FnName = mk_fn(v_type_, bytes),
-    [f("~p(B, _Path) when is_binary(B) ->~n", [FnName]),
-     f("    ok;~n"),
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error(bad_binary_value, X, Path).~n"),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, bytes),
+      fun(B, _Path) when is_binary(B) ->
+              ok;
+         (X, Path) ->
+              mk_type_error(bad_binary_value, X, Path)
+      end).
 
 format_verifier_auxiliaries() ->
-    [f("mk_type_error(Error, ValueSeen, Path) ->~n"),
-     f("    Path2 = prettify_path(Path),~n"),
-     f("    erlang:error({gpb_type_error,~n"),
-     f("                  {Error, [{value, ValueSeen},{path, Path2}]}}).~n"),
-     f("~n"),
-     f("prettify_path([]) ->~n"),
-     f("    top_level;~n"),
-     f("prettify_path(PathR) ->~n"),
-     f("    list_to_atom(~n"),
-     f("      string:join(~n"),
-     f("        lists:map(fun atom_to_list/1, lists:reverse(PathR)),~n"),
-     f("        \".\")).~n"),
-     f("~n")].
+    [gpb_codegen:format_fn(
+       mk_type_error,
+       fun(Error, ValueSeen, Path) ->
+               Path2 = prettify_path(Path),
+               erlang:error({gpb_type_error,
+                             {Error, [{value, ValueSeen},{path, Path2}]}})
+       end),
+     "\n",
+     gpb_codegen:format_fn(
+       prettify_path,
+       fun([]) ->
+               top_level;
+          (PathR) ->
+               list_to_atom(
+                 string:join(
+                   lists:map(fun atom_to_list/1, lists:reverse(PathR)),
+                   "."))
+       end)].
 
 %% -- message defs -----------------------------------------------------
 
