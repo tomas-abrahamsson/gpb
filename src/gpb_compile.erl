@@ -2500,15 +2500,18 @@ format_verifier_auxiliaries() ->
 format_introspection(Defs) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
-    [f("get_msg_defs() ->~n"
-       "    [~s].~n", [outdent_first(format_msgs_and_enums(5, Defs))]),
-     f("~n"),
-     f("get_msg_names() ->~n"
-       "    ~p.~n", [[MsgName || {{msg,MsgName},_Fields} <- Defs]]),
-     f("~n"),
-     f("get_enum_names() ->~n"
-       "    ~p.~n", [[EnumName || {{enum,EnumName},_Enums} <- Defs]]),
-     f("~n"),
+    [gpb_codegen:format_fn(
+       get_msg_defs, fun() -> '<Defs>' end,
+       [replace_tree('<Defs>', def_trees(EnumDefs, MsgDefs))]),
+     "\n",
+     gpb_codegen:format_fn(
+       get_msg_names, fun() -> '<Names>' end,
+       [replace_term('<Names>', [MsgName || {{msg,MsgName}, _} <- Defs])]),
+     "\n",
+     gpb_codegen:format_fn(
+       get_enum_names, fun() -> '<Names>' end,
+       [replace_term('<Names>', [EnumName || {{enum,EnumName}, _} <- Defs])]),
+     "\n",
      format_fetch_msg_defs(MsgDefs),
      f("~n"),
      format_fetch_enum_defs(EnumDefs),
@@ -2522,79 +2525,79 @@ format_introspection(Defs) ->
      format_get_package_name(Defs)
     ].
 
+def_trees(EnumDefs, MsgDefs) ->
+    EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
+    MsgDefTrees = [msg_def_tree(MsgDef) || MsgDef <- MsgDefs],
+    erl_syntax:list(EnumDefTrees ++ MsgDefTrees).
 
-format_msgs_and_enums(Indent, Defs) ->
-    Enums = [Item || {{enum, _}, _}=Item <- Defs],
-    Msgs  = [Item || {{msg, _}, _}=Item <- Defs],
-    [format_enums(Indent, Enums),
-     if Enums /= [], Msgs /= [] -> ",\n";
-        true                    -> ""
-     end,
-     format_msgs(Indent, Msgs)].
+msg_def_tree({{msg, MsgName}, Fields}) ->
+    erl_syntax:tuple(
+      [erl_syntax:tuple([erl_syntax:atom(msg), erl_syntax:atom(MsgName)]),
+       fields_tree(Fields)]).
 
-format_enums(Indent, Enums) ->
-    string:join([f("~s~p", [indent(Indent,""), Enum]) || Enum <- Enums],
-                ",\n").
+fields_tree(Fields) ->
+    erl_syntax:list([field_tree(Field) || Field <- Fields]).
 
-format_msgs(Indent, Msgs) ->
-    string:join([indent(Indent,
-                        f("{~w,~n~s[~s]}",
-                          [{msg,Msg},
-                           indent(Indent+1, ""),
-                           outdent_first(format_efields(Indent+2, Fields))]))
-                 || {{msg,Msg},Fields} <- Msgs],
-                ",\n").
-
-format_efields(Indent, Fields) ->
-    string:join([format_efield(Indent, Field) || Field <- Fields],
-                ",\n").
-
-format_efield(I, #field{name=N, fnum=F, rnum=R, type=T,
-                        occurrence=Occurrence, opts=Opts}) ->
-
-    [indent(I, f("#field{name=~w, fnum=~w, rnum=~w, type=~w,~n", [N,F,R,T])),
-     indent(I, f("       occurrence=~w,~n", [Occurrence])),
-     indent(I, f("       opts=~p}", [Opts]))].
+field_tree(#field{}=F) ->
+    [field | FValues] = tuple_to_list(F),
+    FNames = record_info(fields, field),
+    record_create(field,
+                  lists:zip(FNames,
+                            [erl_parse:abstract(FValue) || FValue <- FValues])).
 
 format_fetch_msg_defs([]) ->
-    f("fetch_msg_def(MsgName) ->~n"
-      "    erlang:error({no_such_msg, MsgName}).~n");
+    gpb_codegen:format_fn(
+      fetch_msg_def,
+      fun(MsgName) -> erlang:error({no_such_msg, MsgName}) end);
 format_fetch_msg_defs(_MsgDefs) ->
-    f("fetch_msg_def(MsgName) ->~n"
-      "    case find_msg_def(MsgName) of~n"
-      "        Fs when is_list(Fs) -> Fs;~n"
-      "        error               -> erlang:error({no_such_msg, MsgName})~n"
-      "    end.~n").
+    gpb_codegen:format_fn(
+      fetch_msg_def,
+      fun(MsgName) ->
+              case find_msg_def(MsgName) of
+                  Fs when is_list(Fs) -> Fs;
+                  error               -> erlang:error({no_such_msg, MsgName})
+              end
+      end).
 
 format_fetch_enum_defs([]) ->
-    f("fetch_enum_def(EnumName) ->~n"
-      "    erlang:error({no_such_enum,EnumName}).~n");
+    gpb_codegen:format_fn(
+      fetch_enum_def,
+      fun(EnumName) -> erlang:error({no_such_enum, EnumName}) end);
 format_fetch_enum_defs(_EnumDefs) ->
-    f("fetch_enum_def(EnumName) ->~n"
-      "    case find_enum_def(EnumName) of~n"
-      "        Es when is_list(Es) -> Es;~n"
-      "        error               -> erlang:error({no_such_enum,EnumName})~n"
-      "    end.~n").
+    gpb_codegen:format_fn(
+      fetch_enum_def,
+      fun(EnumName) ->
+              case find_enum_def(EnumName) of
+                  Es when is_list(Es) -> Es;
+                  error               -> erlang:error({no_such_enum, EnumName})
+              end
+      end).
 
-format_find_msg_defs([]) ->
-    f("find_msg_def(_) ->~n"
-      "    error.~n");
 format_find_msg_defs(Msgs) ->
-    [[[f("find_msg_def(~p) ->~n", [MsgName]),
-       f("    [~s];~n", [outdent_first(format_efields(4+1, Fields))])]
-      || {{msg, MsgName}, Fields} <- Msgs],
-     f("find_msg_def(_) ->~n"
-       "    error.~n")].
+    gpb_codegen:format_fn(
+      find_msg_def,
+      fun('<MsgName>') -> '<Fields>';
+         (_) -> error
+      end,
+      [splice_clauses('<MsgName>',
+                      [gpb_codegen:fn_clause(
+                         fun('<MsgName>') -> '<Fields>' end,
+                         [replace_term('<MsgName>', MsgName),
+                          replace_tree('<Fields>', fields_tree(Fields))])
+                       || {{msg, MsgName}, Fields} <- Msgs])]).
 
-format_find_enum_defs([]) ->
-    f("find_enum_def(_) ->~n"
-      "    error.~n");
 format_find_enum_defs(Enums) ->
-    [[[f("find_enum_def(~p) ->~n", [EnumName]),
-       f("    ~p;~n", [EnumValues])]
-      || {{enum, EnumName}, EnumValues} <- Enums],
-     f("find_enum_def(_) ->~n"
-       "    error.~n")].
+    gpb_codegen:format_fn(
+      find_enum_def,
+      fun('<EnumName>') -> '<Values>';
+         (_) -> error
+      end,
+      [splice_clauses('<EnumName>',
+                      [gpb_codegen:fn_clause(
+                         fun('<EnumName>') -> '<Values>' end,
+                         [replace_term('<EnumName>', EnumName),
+                          replace_term('<Values>', Values)])
+                       || {{enum, EnumName}, Values} <- Enums])]).
 
 format_enum_value_symbol_converter_exports(Defs) ->
     [f("-export([enum_symbol_by_value/2, enum_value_by_symbol/2]).~n"),
@@ -2610,49 +2613,69 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
     %% by `format_enum_decoders' is that this function generates
     %% value/symbol converters for all enums, not only for the ones
     %% that are used in messags.
-    [string:join([begin
-                      ToSymFnName = mk_fn(enum_symbol_by_value_, EnumName),
-                      f("enum_symbol_by_value(~p, V) -> ~p(V)",
-                        [EnumName, ToSymFnName])
-                  end
-                  || {{enum, EnumName}, _EnumDef} <- EnumDefs],
-                 ";\n"),
-     ".\n\n",
-     string:join([begin
-                      ToValFnName = mk_fn(enum_value_by_symbol_, EnumName),
-                      f("enum_value_by_symbol(~p, S) -> ~p(S)",
-                        [EnumName, ToValFnName])
-                  end
-                  || {{enum, EnumName}, _EnumDef} <- EnumDefs],
-                 ";\n"),
-     ".\n\n",
-     [[string:join([begin
-                        FnName = mk_fn(enum_symbol_by_value_, EnumName),
-                        f("~p(~w) -> ~p", [FnName, EnumValue, EnumSym])
-                    end
-                    || {EnumSym, EnumValue} <- EnumDef],
-                   ";\n"),
-       ".\n\n",
-       string:join([begin
-                        FnName = mk_fn(enum_value_by_symbol_, EnumName),
-                        f("~p(~w) -> ~p", [FnName, EnumSym, EnumValue])
-                    end
-                    || {EnumSym, EnumValue} <- EnumDef],
-                   ";\n"),
-       ".\n\n"]
+    [gpb_codegen:format_fn(
+       enum_symbol_by_value,
+       fun('<EnumName>', Value) -> 'cvt'(Value) end,
+       [splice_clauses(
+          '<EnumName>',
+          [gpb_codegen:fn_clause(
+             fun('<EnumName>', Value) -> 'cvt'(Value) end,
+             [replace_term('<EnumName>', EnumName),
+              replace_term('cvt', mk_fn(enum_symbol_by_value_, EnumName))])
+           || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
+     "\n",
+     gpb_codegen:format_fn(
+       enum_value_by_symbol,
+       fun('<EnumName>', Sym) -> 'cvt'(Sym) end,
+       [splice_clauses(
+          '<EnumName>',
+          [gpb_codegen:fn_clause(
+             fun('<EnumName>', Sym) -> 'cvt'(Sym) end,
+             [replace_term('<EnumName>', EnumName),
+              replace_term('cvt', mk_fn(enum_value_by_symbol_, EnumName))])
+           || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
+     "\n",
+     [[gpb_codegen:format_fn(
+         mk_fn(enum_symbol_by_value_, EnumName),
+         fun('<Value>') -> '<Sym>' end,
+         [splice_clauses(
+            '<Value>',
+            [gpb_codegen:fn_clause(
+               fun('<Value>') -> '<Sym>' end,
+               [replace_term('<Value>', EnumValue),
+                replace_term('<Sym>', EnumSym)])
+             || {EnumSym, EnumValue} <- EnumDef])]),
+       "\n",
+       gpb_codegen:format_fn(
+         mk_fn(enum_value_by_symbol_, EnumName),
+         fun('<Sym>') -> '<Value>' end,
+         [splice_clauses(
+            '<Sym>',
+            [gpb_codegen:fn_clause(
+               fun('<Sym>') -> '<Value>' end,
+               [replace_term('<Value>', EnumValue),
+                replace_term('<Sym>', EnumSym)])
+             || {EnumSym, EnumValue} <- EnumDef])])]
       || {{enum, EnumName}, EnumDef} <- EnumDefs]];
 format_enum_value_symbol_converters([]=_EnumDefs) ->
-    [f("enum_symbol_by_value(E, V) -> erlang:error({no_enum_defs,E,V}).~n"),
-     f("enum_value_by_symbol(E, V) -> erlang:error({no_enum_defs,E,V}).~n")].
+    [gpb_codegen:format_fn(
+       enum_symbol_by_value,
+       fun(E, V) -> erlang:error({no_enum_defs, E, V}) end),
+     "\n",
+     gpb_codegen:format_fn(
+       enum_value_by_symbol,
+       fun(E, V) -> erlang:error({no_enum_defs, E, V}) end),
+     "\n"].
 
 format_get_package_name(Defs) ->
     case lists:keyfind(package, 1, Defs) of
         false ->
-            f("get_package_name() ->~n"
-              "    undefined.~n");
+            gpb_codegen:format_fn(
+              get_package_name, fun() -> undefined end);
         {package, Package} ->
-            f("get_package_name() ->~n"
-              "    ~p.~n", [Package])
+            gpb_codegen:format_fn(
+              get_package_name, fun() -> '<Package>' end,
+              [replace_term('<Package>', Package)])
     end.
 
 %% -- hrl -----------------------------------------------------
