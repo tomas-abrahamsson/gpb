@@ -1108,48 +1108,38 @@ format_erl(Mod, Defs, AnRes, Opts) ->
 %% -- encoders -----------------------------------------------------
 
 format_encoders_top_function(Defs, Opts) ->
-    DoEncodeCaseClauses =
-        [gpb_codegen:case_clause(
-           case dummy of '<m>' -> '<encode-fn>'(Msg) end,
-           [replace_tree('<m>', record_match(MsgName, [])),
-            replace_term('<encode-fn>', mk_fn(e_msg_, MsgName))])
-         || {{msg,MsgName}, _Fields} <- Defs],
+    Verify = proplists:get_value(verify, Opts, optionally),
     [gpb_codegen:format_fn(encode_msg, fun(Msg) -> encode_msg(Msg, []) end),
      "\n",
-     case proplists:get_value(verify, Opts, optionally) of
-         optionally ->
-             gpb_codegen:format_fn(
-               encode_msg,
-               fun(Msg, Opts) ->
-                       case proplists:get_bool(verify, Opts) of
-                           true  -> verify_msg(Msg);
-                           false -> ok
-                       end,
-                       case Msg of
-                           '<msg-cases>' -> '<encode-calls>'
-                       end
-               end,
-               [splice_clauses('<msg-cases>', DoEncodeCaseClauses)]);
-         always ->
-             gpb_codegen:format_fn(
-               encode_msg,
-               fun(Msg, _Opts) ->
-                       verify_msg(Msg),
-                       case Msg of
-                           '<msg-cases>' -> '<encode-calls>'
-                       end
-               end,
-               [splice_clauses('<msg-cases>', DoEncodeCaseClauses)]);
-         never ->
-             gpb_codegen:format_fn(
-               encode_msg,
-               fun(Msg, _Opts) ->
-                       case Msg of
-                           '<msg-cases>' -> '<encode-calls>'
-                       end
-               end,
-               [splice_clauses('<msg-cases>', DoEncodeCaseClauses)])
-     end].
+     gpb_codegen:format_fn(
+       encode_msg,
+       fun(Msg, '<Opts>') ->
+               '<possibly-verify-msg>',
+               case Msg of
+                   '<msg-match>' -> 'encode'(Msg)
+               end
+       end,
+       [replace_tree('<Opts>', case Verify of
+                                   optionally -> ?expr(Opts);
+                                   always     -> ?expr(_Opts);
+                                   never      -> ?expr(_Opts)
+                               end),
+        splice_trees('<possibly-verify-msg>',
+                     case Verify of
+                         optionally ->
+                             [?expr(case proplists:get_bool(verify, Opts) of
+                                       true  -> verify_msg(Msg);
+                                       false -> ok
+                                   end)];
+                         always ->
+                             [?expr(verify_msg(Msg))];
+                         never ->
+                             []
+                     end),
+        repeat_clauses('<msg-match>',
+                       [[replace_tree('<msg-match>', record_match(MsgName, [])),
+                         replace_term('encode', mk_fn(e_msg_, MsgName))]
+                        || {{msg,MsgName}, _Fields} <- Defs])])].
 
 format_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
