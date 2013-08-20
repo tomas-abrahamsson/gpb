@@ -253,6 +253,22 @@ splice_if_clause_test() ->
     ?assertError(if_clause, M:FnName(mm)),
     ok.
 
+splice_receive_clause_test() ->
+    RClause1 = ?receive_clause(a -> x, [{replace_term, x, 1}]),
+    RClause2 = ?receive_clause(b -> y, [{replace_term, y, 2}]),
+    FnName = p,
+    FT = gpb_codegen:mk_fn(FnName, fun(X) ->
+                                           receive mm -> dummy end
+                                   end,
+                           [{splice_clauses, mm, [RClause1, RClause2]}]),
+    M = ?dummy_mod,
+    {module, M} = l(M, FT),
+    self() ! a,
+    1 = M:FnName(a),
+    self() ! b,
+    2 = M:FnName(b),
+    ok.
+
 can_replace_binary_fields_test() ->
     F2 = erl_syntax:binary_field(?expr(2), []),
     F3 = erl_syntax:binary_field(?expr(3), []),

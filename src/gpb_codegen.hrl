@@ -22,6 +22,12 @@
 -define(if_clause(Clause, Transforms), % FIXME; Transforms gets misindented
         gpb_codegen:if_clause(if Clause end, Transforms)).
 
+-define(receive_clause(Clause),
+        gpb_codegen:receive_clause(receive Clause end)).
+
+-define(receive_clause(Clause, Transforms), % FIXME; Transforms gets misindented
+        gpb_codegen:receive_clause(receive Clause end, Transforms)).
+
 -define(expr(X),
         gpb_codegen:expr(X)).
 

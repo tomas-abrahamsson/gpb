@@ -140,6 +140,10 @@
 %%   <dt>`?fn_clause(fun(...) -> ... end, [, RtTransforms])' or
 %%       `gpb_codegen:fn_clause(FunExpression[, RtTransforms])'</dt>
 %%   <dd>Like `?case_clause/1,2' but for function clauses.</dd>
+%%   <dt>`?receive_clause(Pattern -> Body, [, RtTransforms])' or
+%%       `gpb_codegen:receive_clause(receive ... -> ... end[, RtTransforms])'
+%%   </dt>
+%%   <dd>Like `?case_clause/1,2' but for receive clauses.</dd>
 %% </dl>
 %%
 %% Note that there is also a generation-time dependency (ie at
@@ -161,6 +165,7 @@
 -export([case_clause/1, case_clause/2]).
 -export([fn_clause/1, fn_clause/2]).
 -export([if_clause/1, if_clause/2]).
+-export([receive_clause/1, receive_clause/2]).
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
@@ -210,6 +215,10 @@ fn_clause(FC, Ts) -> error_invalid_call(fn_clause, [FC, Ts]).
 if_clause(FC) -> error_invalid_call(if_clause, [FC]).
 %%@hidden
 if_clause(FC, Ts) -> error_invalid_call(if_clause, [FC, Ts]).
+%%@hidden
+receive_clause(FC) -> error_invalid_call(receive_clause, [FC]).
+%%@hidden
+receive_clause(FC, Ts) -> error_invalid_call(receive_clause, [FC, Ts]).
 
 error_invalid_call(Fn, Args) ->
     erlang:error({badcall, {{?MODULE, Fn, Args},
@@ -317,6 +326,12 @@ transform_node(application, Node, AllForms) ->
         {?MODULE, {if_clause, 2}} ->
             [Expr, RtTransforms] = erl_syntax:application_arguments(Node),
             if_to_parse_tree_for_clause(Expr, [RtTransforms]);
+        {?MODULE, {receive_clause, 1}} ->
+            [Expr] = erl_syntax:application_arguments(Node),
+            receive_to_parse_tree_for_clause(Expr, []);
+        {?MODULE, {receive_clause, 2}} ->
+            [Expr, RtTransforms] = erl_syntax:application_arguments(Node),
+            receive_to_parse_tree_for_clause(Expr, [RtTransforms]);
         _X ->
             Node
     end;
@@ -388,6 +403,17 @@ if_to_parse_tree_for_clause(Expr, RtTransforms) ->
     case erl_syntax:type(Expr) of
         if_expr ->
             [Clause | _] = erl_syntax:if_expr_clauses(Expr),
+            AbsSyntaxTree = erl_parse:abstract(erl_syntax:revert(Clause)),
+            mk_apply(?MODULE, runtime_expr_transform,
+                     [AbsSyntaxTree | RtTransforms]);
+        _OtherType ->
+            Expr
+    end.
+
+receive_to_parse_tree_for_clause(Expr, RtTransforms) ->
+    case erl_syntax:type(Expr) of
+        receive_expr ->
+            [Clause | _] = erl_syntax:receive_expr_clauses(Expr),
             AbsSyntaxTree = erl_parse:abstract(erl_syntax:revert(Clause)),
             mk_apply(?MODULE, runtime_expr_transform,
                      [AbsSyntaxTree | RtTransforms]);
@@ -564,6 +590,18 @@ transform_clauses(CMarker, CTransformer, Tree) ->
                               New = CTransformer(MarkerClause, 'if'),
                               Cs1 = Before ++ New ++ After,
                               erl_syntax:if_expr(Cs1)
+                      end;
+                  receive_expr ->
+                      Cs = erl_syntax:receive_expr_clauses(Node),
+                      Tmo = erl_syntax:receive_expr_timeout(Node),
+                      Action = erl_syntax:receive_expr_action(Node), %% after
+                      case split_clauses_on_marker(Cs, CMarker, 'if') of
+                          marker_not_found ->
+                              Node;
+                          {Before, MarkerClause, After} ->
+                              New = CTransformer(MarkerClause, 'receive'),
+                              Cs1 = Before ++ New ++ After,
+                              erl_syntax:receive_expr(Cs1, Tmo, Action)
                       end;
                   _Other ->
                       Node
