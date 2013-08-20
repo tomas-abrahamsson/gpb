@@ -2261,10 +2261,12 @@ format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
      || {{msg, MsgName}, _MsgDef} <- Defs].
 
 format_msg_nif_error_wrapper(MsgName) ->
-    FnName = mk_fn(d_msg_, MsgName),
-    f("~p(Bin) ->~n"
-      "    erlang:nif_error({error,{nif_not_loaded,~p}}, [Bin]).~n~n",
-     [FnName, MsgName]).
+    gpb_codegen:format_fn(
+      mk_fn(d_msg_, MsgName),
+      fun(Bin) ->
+              erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Bin])
+      end,
+      [replace_term('<msg-name>', MsgName)]).
 
 %% -- verifiers -----------------------------------------------------
 
