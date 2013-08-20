@@ -70,6 +70,22 @@
 %%           Use the `?case_clause/1' macro to create a syntax tree
 %%           for a case clause.
 %%         </dd>
+%%         <dt>`{repeat_clauses, Marker::atom, Rep::[[transform()]]}'</dt>
+%%         <dd><p>Repeat template clauses zero or more times: as many times
+%%             as `length(Rep)'. For each repetition, apply the
+%%             list of transformations to the clause, be it a function clause,
+%%             case clause etc.</p><p>Example: a transformation</p>
+%%             <pre>
+%%                gpb_codegen:format_fn(
+%%                   SomeName,
+%%                   fun(s)     -&gt; v;
+%%                      (Other) -&gt; erlang:error({not_found, Other})
+%%                   end,
+%%                   [{repeat_clauses, s,
+%%                     [[{replace_term, s, Sym}, {replace_term, v, Value}]
+%%                      || {Sym, Value} &lt;- Mapping]}])
+%%             </pre>
+%%         </dd>
 %%       </dl>
 %%   </dd>
 %%   <dt>`gpb_codegen:format_fn(FnName, Fun [, RtTransforms]) -> iolist()'</dt>
@@ -393,8 +409,7 @@ runtime_fn_transform(FnName, FnParseTree) ->
 runtime_fn_transform(FnName, FnParseTree, Transforms) ->
     Clauses = erl_syntax:function_clauses(FnParseTree),
     erl_syntax:revert(
-      lists:foldl(
-        fun apply_transform/2,
+      apply_transforms(
         erl_syntax:function(erl_syntax:atom(FnName), Clauses),
         Transforms ++ [{replace_term, call_self, FnName}])).
 
@@ -407,15 +422,18 @@ runtime_expr_transform(ExprParseTree, Transforms) ->
     erl_syntax:revert(
       erl_syntax:copy_pos(
         ExprParseTree,
-        lists:foldl(fun apply_transform/2, ExprParseTree, Transforms))).
+        apply_transforms(ExprParseTree, Transforms))).
 
 %%@hidden
 runtime_exprs_transform(ExprParseTrees, Transforms) ->
     [erl_syntax:revert(
        erl_syntax:copy_pos(
          ExprParseTree,
-         lists:foldl(fun apply_transform/2, ExprParseTree, Transforms)))
+         apply_transforms(ExprParseTree, Transforms)))
      || ExprParseTree <- ExprParseTrees].
+
+apply_transforms(ParseTree, Transforms) ->
+    lists:foldl(fun apply_transform/2, ParseTree, Transforms).
 
 apply_transform({replace_term, Marker, Replacement}, ParseTree) ->
     erl_syntax_lib:map(term_replacing_mapper(Marker, Replacement),
@@ -425,8 +443,10 @@ apply_transform({replace_tree, Marker, Replacement}, ParseTree) ->
                        ParseTree);
 apply_transform({splice_trees, Marker, Replacements}, ParseTree) ->
     splice_trees(Marker, Replacements, ParseTree);
-apply_transform({splice_clauses, CaseMarker, Replacements}, ParseTree) ->
-    splice_clauses(CaseMarker, Replacements, ParseTree).
+apply_transform({splice_clauses, Marker, Replacements}, ParseTree) ->
+    splice_clauses(Marker, Replacements, ParseTree);
+apply_transform({repeat_clauses, Marker, Repetitions}, ParseTree) ->
+    repeat_clauses(Marker, Repetitions, ParseTree).
 
 
 term_replacing_mapper(Marker, Replacement) ->
@@ -485,6 +505,21 @@ split_aux([], _Marker, _Acc) ->
     marker_not_found.
 
 splice_clauses(CMarker, Replacements, Tree) ->
+    transform_clauses(
+      CMarker,
+      fun(_MarkerClause, _ClauseType) -> Replacements end,
+      Tree).
+
+repeat_clauses(CMarker, Repetitions, Tree) ->
+    transform_clauses(
+      CMarker,
+      fun(TemplateClause, _Type) ->
+              [apply_transforms(TemplateClause, Transforms)
+               || Transforms <- Repetitions]
+      end,
+      Tree).
+
+transform_clauses(CMarker, CTransformer, Tree) ->
     erl_syntax_lib:map(
       fun(Node) ->
               case erl_syntax:type(Node) of
@@ -494,8 +529,9 @@ splice_clauses(CMarker, Replacements, Tree) ->
                       case split_clauses_on_marker(Cs, CMarker, 'case') of
                           marker_not_found ->
                               Node;
-                          {Before, _MarkerClause, After} ->
-                              Cs1 = Before ++ Replacements ++ After,
+                          {Before, MarkerClause, After} ->
+                              New = CTransformer(MarkerClause, 'case'),
+                              Cs1 = Before ++ New ++ After,
                               erl_syntax:case_expr(Arg, Cs1)
                       end;
                   fun_expr ->
@@ -503,8 +539,9 @@ splice_clauses(CMarker, Replacements, Tree) ->
                       case split_clauses_on_marker(Cs, CMarker, 'fun') of
                           marker_not_found ->
                               Node;
-                          {Before, _MarkerClause, After} ->
-                              Cs1 = Before ++ Replacements ++ After,
+                          {Before, MarkerClause, After} ->
+                              New = CTransformer(MarkerClause, 'fun'),
+                              Cs1 = Before ++ New ++ After,
                               erl_syntax:fun_expr(Cs1)
                       end;
                   function ->
@@ -513,8 +550,9 @@ splice_clauses(CMarker, Replacements, Tree) ->
                       case split_clauses_on_marker(Cs, CMarker, function) of
                           marker_not_found ->
                               Node;
-                          {Before, _MarkerClause, After} ->
-                              Cs1 = Before ++ Replacements ++ After,
+                          {Before, MarkerClause, After} ->
+                              New = CTransformer(MarkerClause, function),
+                              Cs1 = Before ++ New ++ After,
                               erl_syntax:function(FnName, Cs1)
                       end;
                   if_expr ->
@@ -522,8 +560,9 @@ splice_clauses(CMarker, Replacements, Tree) ->
                       case split_clauses_on_marker(Cs, CMarker, 'if') of
                           marker_not_found ->
                               Node;
-                          {Before, _MarkerClause, After} ->
-                              Cs1 = Before ++ Replacements ++ After,
+                          {Before, MarkerClause, After} ->
+                              New = CTransformer(MarkerClause, 'if'),
+                              Cs1 = Before ++ New ++ After,
                               erl_syntax:if_expr(Cs1)
                       end;
                   _Other ->

@@ -264,6 +264,23 @@ can_replace_binary_fields_test() ->
     <<1,2,3>> = M:FnName().
 
 
+repeat_clauses_test() ->
+    FnName = p,
+    FT = gpb_codegen:mk_fn(FnName,
+                           fun(n, m) -> {m, n} end,
+                           [{repeat_clauses,n,
+                             [[{replace_term, n, N}, {replace_term, m, N+1}]
+                              || N <- [1,2,3]]}]),
+    M = ?dummy_mod,
+    {module, M} = l(M, FT),
+    {2,1} = M:FnName(1, 2),
+    {3,2} = M:FnName(2, 3),
+    {4,3} = M:FnName(3, 4),
+    ?assertError(function_clause, M:FnName(0,1)),
+    ?assertError(function_clause, M:FnName(1,1)),
+    ?assertError(function_clause, M:FnName(4,5)),
+    ok.
+
 %% -- helpers ---------------------------
 
 mk_test_fn_name() ->
