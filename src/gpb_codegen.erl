@@ -16,9 +16,15 @@
 %%% License along with this library; if not, write to the Free
 %%% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
-%% @doc This is a parse tranform, called by the parser/compiler,
-%% together with runtime support for successive transformation of
-%% syntax trees.
+%% @doc
+%% This module is only used internally within the `gpb'.
+%% You do not need to use it to compile a protobuf file. You will
+%% use it indirectly though, since the protobuf compiler uses it heavily.
+%% Thus, this documentatation is mostly for internal use.
+%%
+%% This module implements a parse tranform, to create syntax trees,
+%% together with runtime support for subsequent transformation of
+%% those syntax trees.
 %%
 %% Include the file `gpb_codegen.hrl' or specify
 %% `-compile({parse_transform,gpb_codegen}).'
