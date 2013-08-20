@@ -1610,13 +1610,10 @@ format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
      "\n"].
 
 msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
-    FNVExprs = [begin
-                    Value = case Occurrence of
-                                repeated -> [];
-                                required -> undefined;
-                                optional -> undefined
-                            end,
-                    {FName, Value, erl_parse:abstract(Value)}
+    FNVExprs = [case Occurrence of
+                    repeated -> {FName, [],        ?expr([])};
+                    required -> {FName, undefined, ?expr(undefined)};
+                    optional -> {FName, undefined, ?expr(undefined)}
                 end
                 || #field{name=FName, occurrence=Occurrence} <- MsgDef],
     case get_field_pass(MsgName, AnRes) of
@@ -1641,55 +1638,51 @@ decoder_field_calls(Bindings, MsgName, []=_MsgDef, _AnRes) ->
     Bindings1 = add_binding({'<wiretype-expr>', WiretypeExpr}, Bindings),
     decoder_skip_calls(Bindings1, MsgName);
 decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
+    Key = fetch_binding('<Key>', Bindings),
+    Rest = fetch_binding('<Rest>', Bindings),
+    Params = fetch_binding('<Params>', Bindings),
     SkipCalls = decoder_field_calls(Bindings, MsgName, [], AnRes),
-    FieldClauses = decoder_field_clauses(Bindings, MsgName, MsgDef),
-    ?expr(
-       case '<Key>' of
-           '<field-clauses>' ->
-               '<dummy>';
-           _ ->
-               '<skip-calls>'
+    FieldSelects = decoder_field_selectors(MsgName, MsgDef),
+    ?expr(case '<Key>' of
+              '<selector>' -> 'decode_field'('<Rest>', 0, 0, '<Params>');
+              _            -> '<skip-calls>'
        end,
-       [replace_tree('<Key>', fetch_binding('<Key>', Bindings)),
-        splice_clauses('<field-clauses>', FieldClauses),
+       [replace_tree('<Key>', Key),
+        repeat_clauses('<selector>',
+                       [[replace_term('<selector>', Selector),
+                         replace_term('decode_field', DecodeFn),
+                         replace_tree('<Rest>', Rest),
+                         splice_trees('<Params>', Params)]
+                        || {Selector, DecodeFn} <- FieldSelects]),
         replace_tree('<skip-calls>', SkipCalls)]).
 
 decoder_skip_calls(Bindings, MsgName) ->
     WiretypeExpr = fetch_binding('<wiretype-expr>', Bindings),
     RestExpr = fetch_binding('<Rest>', Bindings),
     Params = fetch_binding('<Params>', Bindings),
-    ?expr(
-       case '<wiretype-expr>' of
-           0 -> skip_vi('<Rest>', 0, 0, '<Params>');
-           1 -> skip_64('<Rest>', 0, 0, '<Params>');
-           2 -> skip_ld('<Rest>', 0, 0, '<Params>');
-           5 -> skip_32('<Rest>', 0, 0, '<Params>')
-       end,
-       [replace_tree('<wiretype-expr>', WiretypeExpr),
-        replace_tree('<Rest>', RestExpr),
-        splice_trees('<Params>', Params),
-        replace_term(skip_vi, mk_fn(skip_varint_, MsgName)),
-        replace_term(skip_64, mk_fn(skip_64_, MsgName)),
-        replace_term(skip_ld, mk_fn(skip_length_delimited_, MsgName)),
-        replace_term(skip_32, mk_fn(skip_32_, MsgName))]).
+    ?expr(case '<wiretype-expr>' of
+              0 -> skip_vi('<Rest>', 0, 0, '<Params>');
+              1 -> skip_64('<Rest>', 0, 0, '<Params>');
+              2 -> skip_ld('<Rest>', 0, 0, '<Params>');
+              5 -> skip_32('<Rest>', 0, 0, '<Params>')
+          end,
+          [replace_tree('<wiretype-expr>', WiretypeExpr),
+           replace_tree('<Rest>', RestExpr),
+           splice_trees('<Params>', Params),
+           replace_term(skip_vi, mk_fn(skip_varint_, MsgName)),
+           replace_term(skip_64, mk_fn(skip_64_, MsgName)),
+           replace_term(skip_ld, mk_fn(skip_length_delimited_, MsgName)),
+           replace_term(skip_32, mk_fn(skip_32_, MsgName))]).
 
-decoder_field_clauses(Bindings, MsgName, MsgDef) ->
-    RestExpr = fetch_binding('<Rest>', Bindings),
-    Params = fetch_binding('<Params>', Bindings),
+decoder_field_selectors(MsgName, MsgDef) ->
     [begin
          Wiretype = case is_packed(FieldDef) of
                         true  -> gpb:encode_wiretype(bytes);
                         false -> gpb:encode_wiretype(Type)
                     end,
          Selector = (FNum bsl 3) bor Wiretype,
-         gpb_codegen:case_clause(
-           case x of
-               '<selector>' -> '<call>'('<Rest>', 0, 0, '<Params>')
-           end,
-           [replace_term('<selector>', Selector),
-            replace_term('<call>', mk_fn(d_field_, MsgName, FName)),
-            replace_tree('<Rest>', RestExpr),
-            splice_trees('<Params>', Params)])
+         DecodeFn = mk_fn(d_field_, MsgName, FName),
+         {Selector, DecodeFn}
      end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
