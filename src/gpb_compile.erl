@@ -1161,17 +1161,14 @@ format_encoders(Defs, AnRes, _Opts) ->
 format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
     [gpb_codegen:format_fn(
        mk_fn(e_enum_, EnumName),
-       fun('<enum-sym>', _Bin) -> '<enum-varint-bytes>' end,
-       [splice_clauses(
-          '<enum-sym>',
-          [begin
-               ViBytes = enum_to_binary_fields(EnumValue),
-               gpb_codegen:fn_clause(
-                 fun('<s>', Bin) -> <<Bin/binary, '<b>'>> end,
-                 [replace_term('<s>', EnumSym),
-                  splice_trees('<b>', ViBytes)])
-           end
-           || {EnumSym, EnumValue} <- EnumDef])])
+       fun('<EnumSym>', Bin) -> <<Bin/binary, '<varint-bytes>'>> end,
+       [repeat_clauses('<EnumSym>',
+                       [begin
+                            ViBytes = enum_to_binary_fields(EnumValue),
+                            [replace_term('<EnumSym>', EnumSym),
+                             splice_trees('<varint-bytes>', ViBytes)]
+                        end
+                        || {EnumSym, EnumValue} <- EnumDef])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
@@ -1551,16 +1548,13 @@ format_decoders_top_function(Defs) ->
       decode_msg,
       fun(Bin, MsgName) ->
               case MsgName of
-                  '<msg-name-case>' -> dummy
+                  '<MsgName>' -> '<decode-call>'(Bin)
               end
       end,
-      [splice_clauses(
-         '<msg-name-case>',
-         [gpb_codegen:case_clause(
-            case dummy of '<msg-name>' -> '<decode-call>'(Bin) end,
-            [replace_term('<msg-name>', MsgName),
-             replace_term('<decode-call>', mk_fn(d_msg_, MsgName))])
-          || {{msg,MsgName}, _Fields} <- Defs])]).
+      [repeat_clauses('<MsgName>',
+                      [[replace_term('<MsgName>', MsgName),
+                        replace_term('<decode-call>', mk_fn(d_msg_, MsgName))]
+                       || {{msg,MsgName}, _Fields} <- Defs])]).
 
 format_decoders(Defs, AnRes, Opts) ->
     [format_enum_decoders(Defs, AnRes),
@@ -1572,13 +1566,11 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %%        from run-time to compile-time??
     [gpb_codegen:format_fn(
        mk_fn(d_enum_, EnumName),
-       fun('<enum-int-value>') -> '<enum-sym>' end,
-       [splice_clauses(
-          '<enum-int-value>',
-          [gpb_codegen:fn_clause(fun('<i>') -> '<s>' end,
-                                 [replace_term('<i>', EnumValue),
-                                  replace_term('<s>', EnumSym)])
-           || {EnumSym, EnumValue} <- EnumDef])])
+       fun('<EnumValue>') -> '<EnumSym>' end,
+       [repeat_clauses('<EnumValue>',
+                       [[replace_term('<EnumValue>', EnumValue),
+                         replace_term('<EnumSym>', EnumSym)]
+                        || {EnumSym, EnumValue} <- EnumDef])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
@@ -2275,18 +2267,15 @@ format_verifiers_top_function(Defs) ->
       verify_msg,
       fun(Msg) ->
               case Msg of
-                  '<msg-cases>' -> verify_it;
+                  '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>']);
                   _ -> mk_type_error(not_a_known_message, Msg, [])
               end
       end,
-      [splice_clauses(
-         '<msg-cases>',
-         [gpb_codegen:case_clause(
-            case dummy of '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>'])
-            end,
-            [replace_tree('<msg-match>', record_match(MsgName, [])),
-             replace_term('<verify-msg>', mk_fn(v_msg_, MsgName)),
-             replace_term('<MsgName>', MsgName)])
+      [repeat_clauses(
+         '<msg-match>',
+         [[replace_tree('<msg-match>', record_match(MsgName, [])),
+           replace_term('<verify-msg>', mk_fn(v_msg_, MsgName)),
+           replace_term('<MsgName>', MsgName)]
           || {{msg, MsgName}, _MsgDef} <- Defs])]).
 
 format_verifiers(Defs, AnRes, _Opts) ->
@@ -2318,7 +2307,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes) ->
             gpb_codegen:format_fn(
               mk_fn(v_msg_, MsgName),
               fun('<msg-match>', _Path) -> ok;
-                 ('<else-clause>', _) -> expr
+                 ('<else-clause>', _) -> dummy_expr
               end,
               [replace_tree('<msg-match>', record_match(MsgName, RFields)),
                splice_clauses('<else-clause>', ElseClause)]);
@@ -2326,7 +2315,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes) ->
             gpb_codegen:format_fn(
               mk_fn(v_msg_, MsgName),
               fun('<msg-match>', Path) -> '<field-verifications>', ok;
-                 ('<else-clause>', _) -> expr
+                 ('<else-clause>', _) -> dummy_expr
               end,
               [replace_tree('<msg-match>', record_match(MsgName, RFields)),
                splice_trees('<field-verifications>', field_verifiers(FVars)),
@@ -2383,9 +2372,7 @@ format_enum_verifier(EnumName, EnumMembers) ->
       fun('<sym>', _Path) -> ok;
          (X, Path) -> mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
       end,
-      [splice_clauses('<sym>', [gpb_codegen:fn_clause(
-                                  fun('<sym>', _Path) -> ok end,
-                                  [replace_term('<sym>', EnumSym)])
+      [repeat_clauses('<sym>', [[replace_term('<sym>', EnumSym)]
                                 || {EnumSym, _Value} <- EnumMembers]),
        replace_term('<EnumName>', EnumName)]).
 
@@ -2579,11 +2566,9 @@ format_find_msg_defs(Msgs) ->
       fun('<MsgName>') -> '<Fields>';
          (_) -> error
       end,
-      [splice_clauses('<MsgName>',
-                      [gpb_codegen:fn_clause(
-                         fun('<MsgName>') -> '<Fields>' end,
-                         [replace_term('<MsgName>', MsgName),
-                          replace_tree('<Fields>', fields_tree(Fields))])
+      [repeat_clauses('<MsgName>',
+                      [[replace_term('<MsgName>', MsgName),
+                        replace_tree('<Fields>', fields_tree(Fields))]
                        || {{msg, MsgName}, Fields} <- Msgs])]).
 
 format_find_enum_defs(Enums) ->
@@ -2592,11 +2577,9 @@ format_find_enum_defs(Enums) ->
       fun('<EnumName>') -> '<Values>';
          (_) -> error
       end,
-      [splice_clauses('<EnumName>',
-                      [gpb_codegen:fn_clause(
-                         fun('<EnumName>') -> '<Values>' end,
-                         [replace_term('<EnumName>', EnumName),
-                          replace_term('<Values>', Values)])
+      [repeat_clauses('<EnumName>',
+                      [[replace_term('<EnumName>', EnumName),
+                        replace_term('<Values>', Values)]
                        || {{enum, EnumName}, Values} <- Enums])]).
 
 format_enum_value_symbol_converter_exports(Defs) ->
@@ -2616,46 +2599,36 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
     [gpb_codegen:format_fn(
        enum_symbol_by_value,
        fun('<EnumName>', Value) -> 'cvt'(Value) end,
-       [splice_clauses(
+       [repeat_clauses(
           '<EnumName>',
-          [gpb_codegen:fn_clause(
-             fun('<EnumName>', Value) -> 'cvt'(Value) end,
-             [replace_term('<EnumName>', EnumName),
-              replace_term('cvt', mk_fn(enum_symbol_by_value_, EnumName))])
+          [[replace_term('<EnumName>', EnumName),
+            replace_term('cvt', mk_fn(enum_symbol_by_value_, EnumName))]
            || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
      "\n",
      gpb_codegen:format_fn(
        enum_value_by_symbol,
        fun('<EnumName>', Sym) -> 'cvt'(Sym) end,
-       [splice_clauses(
+       [repeat_clauses(
           '<EnumName>',
-          [gpb_codegen:fn_clause(
-             fun('<EnumName>', Sym) -> 'cvt'(Sym) end,
-             [replace_term('<EnumName>', EnumName),
-              replace_term('cvt', mk_fn(enum_value_by_symbol_, EnumName))])
+          [[replace_term('<EnumName>', EnumName),
+            replace_term('cvt', mk_fn(enum_value_by_symbol_, EnumName))]
            || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
      "\n",
      [[gpb_codegen:format_fn(
          mk_fn(enum_symbol_by_value_, EnumName),
          fun('<Value>') -> '<Sym>' end,
-         [splice_clauses(
-            '<Value>',
-            [gpb_codegen:fn_clause(
-               fun('<Value>') -> '<Sym>' end,
-               [replace_term('<Value>', EnumValue),
-                replace_term('<Sym>', EnumSym)])
-             || {EnumSym, EnumValue} <- EnumDef])]),
+         [repeat_clauses('<Value>',
+                         [[replace_term('<Value>', EnumValue),
+                           replace_term('<Sym>', EnumSym)]
+                          || {EnumSym, EnumValue} <- EnumDef])]),
        "\n",
        gpb_codegen:format_fn(
          mk_fn(enum_value_by_symbol_, EnumName),
          fun('<Sym>') -> '<Value>' end,
-         [splice_clauses(
-            '<Sym>',
-            [gpb_codegen:fn_clause(
-               fun('<Sym>') -> '<Value>' end,
-               [replace_term('<Value>', EnumValue),
-                replace_term('<Sym>', EnumSym)])
-             || {EnumSym, EnumValue} <- EnumDef])])]
+         [repeat_clauses('<Sym>',
+                         [[replace_term('<Value>', EnumValue),
+                           replace_term('<Sym>', EnumSym)]
+                          || {EnumSym, EnumValue} <- EnumDef])])]
       || {{enum, EnumName}, EnumDef} <- EnumDefs]];
 format_enum_value_symbol_converters([]=_EnumDefs) ->
     [gpb_codegen:format_fn(
@@ -3475,6 +3448,9 @@ splice_trees(Marker, Trees) when is_atom(Marker) ->
 
 splice_clauses(Marker, Clauses) when is_atom(Marker) ->
     {splice_clauses, Marker, Clauses}.
+
+repeat_clauses(Marker, RepetitionReplacements) ->
+    {repeat_clauses, Marker, RepetitionReplacements}.
 
 f(F)   -> f(F,[]).
 f(F,A) -> io_lib:format(F,A).
