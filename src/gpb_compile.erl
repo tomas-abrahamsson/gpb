@@ -2273,37 +2273,25 @@ format_msg_verifiers(Defs, AnRes) ->
      || {{msg,MsgName}, MsgDef} <- Defs].
 
 format_msg_verifier(MsgName, MsgDef, AnRes) ->
-    ElseClause =
-        case can_occur_as_sub_msg(MsgName, AnRes) of
-            true ->
-                [gpb_codegen:fn_clause(
-                   fun(X, Path) ->
-                           mk_type_error({expected_msg,'<MsgName>'}, X, Path)
-                   end,
-                   [replace_term('<MsgName>', MsgName)])];
-            false ->
-                []
-        end,
     FVars = [{var_f_n(I), Field} || {I, Field} <- index_seq(MsgDef)],
     RFields = [{FName, Var} || {Var, #field{name=FName}} <- FVars],
-    if MsgDef == [] ->
-            gpb_codegen:format_fn(
-              mk_fn(v_msg_, MsgName),
-              fun('<msg-match>', _Path) -> ok;
-                 ('<else-clause>', _) -> dummy_expr
-              end,
-              [replace_tree('<msg-match>', record_match(MsgName, RFields)),
-               splice_clauses('<else-clause>', ElseClause)]);
-       MsgDef /= [] ->
-            gpb_codegen:format_fn(
-              mk_fn(v_msg_, MsgName),
-              fun('<msg-match>', Path) -> '<field-verifications>', ok;
-                 ('<else-clause>', _) -> dummy_expr
-              end,
-              [replace_tree('<msg-match>', record_match(MsgName, RFields)),
-               splice_trees('<field-verifications>', field_verifiers(FVars)),
-               splice_clauses('<else-clause>', ElseClause)])
-    end.
+    gpb_codegen:format_fn(
+      mk_fn(v_msg_, MsgName),
+      fun('<msg-match>', '<Path>') ->
+              '<verify-fields>',
+              ok;
+         ('<X>', Path) ->
+              mk_type_error({expected_msg,'<MsgName>'}, X, Path)
+      end,
+      [replace_tree('<msg-match>', record_match(MsgName, RFields)),
+       replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
+                                 MsgDef /= [] -> ?expr(Path)
+                              end),
+       splice_trees('<verify-fields>', field_verifiers(FVars)),
+       repeat_clauses('<X>', case can_occur_as_sub_msg(MsgName, AnRes) of
+                                 true  -> [[replace_tree('<X>', ?expr(X))]];
+                                 false -> [] %% omit the else clause
+                             end)]).
 
 field_verifiers(FVars) ->
     [begin
