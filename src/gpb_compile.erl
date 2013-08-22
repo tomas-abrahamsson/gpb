@@ -1574,40 +1574,71 @@ format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
      format_field_skippers(MsgName, AnRes)].
 
 format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
-    DecodeMsgFnName = mk_fn(d_msg_, MsgName),
-    DecodeFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
     Key = ?expr(Key),
     Rest = ?expr(Rest),
     Params = decoder_params(MsgName, AnRes),
     Bindings = new_bindings([{'<Params>', Params},
                              {'<Key>', Key},
                              {'<Rest>', Rest}]),
-    [gpb_codegen:format_fn(
-       DecodeMsgFnName,
-       fun(Bin) ->
-               '<decode-field-def>'(Bin, 0, 0, '<initial-params>')
-       end,
-       [replace_term('<decode-field-def>', DecodeFieldDefFnName),
-        splice_trees('<initial-params>',
-                     msg_decoder_initial_params(MsgName, MsgDef, AnRes))]),
-     "\n",
-     gpb_codegen:format_fn(
-       DecodeFieldDefFnName,
-       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
-               call_self(Rest, N+7, X bsl N + Acc, '<Params>');
-          (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
-               '<Key>' = X bsl N + Acc,
-               '<calls-to-field-decoding-or-skip>';
-          (<<>>, 0, 0, '<Params>') ->
-               '<finalize-result>'
-       end,
-       [splice_trees('<Params>', Params),
-        replace_tree('<Key>', Key),
-        replace_tree('<calls-to-field-decoding-or-skip>',
-                     decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
-        replace_tree('<finalize-result>',
-                     decoder_finalize_result(Params, MsgName, MsgDef, AnRes))]),
-     "\n"].
+    [format_msg_init_decoder(MsgName, MsgDef, AnRes),
+     format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes),
+     format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes)].
+
+format_msg_init_decoder(MsgName, MsgDef, AnRes) ->
+    gpb_codegen:format_fn(
+      mk_fn(d_msg_, MsgName),
+      fun(Bin) -> '<decode-field-fp>'(Bin, 0, 0, '<initial-params>') end,
+      [replace_term('<decode-field-fp>', mk_fn(dfp_read_field_def_, MsgName)),
+       splice_trees('<initial-params>',
+                    msg_decoder_initial_params(MsgName, MsgDef, AnRes))]).
+
+format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
+    %% The fast-path decoder directly matches the minimal varint form
+    %% of the field-number combined with the wiretype.
+    %% Unrecognized fields fall back to the more generic decoder-loop
+    Params = fetch_binding('<Params>', Bindings),
+    gpb_codegen:format_fn(
+      mk_fn(dfp_read_field_def_, MsgName),
+      fun('<precomputed-binary-match>', Z1, Z2, '<Params>') ->
+              '<calls-to-field-decoding>';
+         (<<>>, 0, 0, '<Params>') ->
+              '<finalize-result>';
+         (Other, Z1, Z2, '<Params>') ->
+              '<decode-general>'(Other, Z1, Z2, '<Params>')
+      end,
+      [splice_trees('<Params>', Params),
+       repeat_clauses(
+         '<precomputed-binary-match>',
+         [[replace_tree('<precomputed-binary-match>', BinMatch),
+           replace_tree('<calls-to-field-decoding>', FnCall)]
+          || {BinMatch, FnCall} <- decoder_fp(Bindings, MsgName, MsgDef)]),
+       replace_tree('<finalize-result>',
+                    decoder_finalize_result(Params, MsgName, MsgDef, AnRes)),
+       replace_term('<decode-general>', mk_fn(dg_read_field_def_, MsgName))]).
+
+format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
+    %% The more general field selecting decoder
+    %% Stuff that ends up here: non-minimal varint forms and field to skip
+    Key = fetch_binding('<Key>', Bindings),
+    Rest = fetch_binding('<Rest>', Bindings),
+    Params = fetch_binding('<Params>', Bindings),
+    gpb_codegen:format_fn(
+      mk_fn(dg_read_field_def_, MsgName),
+      fun(<<1:1, X:7, '<Rest>'/binary>>, N, Acc, '<Params>') ->
+              call_self('<Rest>', N+7, X bsl N + Acc, '<Params>');
+         (<<0:1, X:7, '<Rest>'/binary>>, N, Acc, '<Params>') ->
+              '<Key>' = X bsl N + Acc,
+              '<calls-to-field-decoding-or-skip>';
+         (<<>>, 0, 0, '<Params>') ->
+              '<finalize-result>'
+      end,
+      [replace_tree('<Key>', Key),
+       replace_tree('<Rest>', Rest),
+       splice_trees('<Params>', Params),
+       replace_tree('<calls-to-field-decoding-or-skip>',
+                    decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
+       replace_tree('<finalize-result>',
+                    decoder_finalize_result(Params, MsgName, MsgDef, AnRes))]).
 
 msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
     FNVExprs = [case Occurrence of
@@ -1631,6 +1662,23 @@ decoder_params(MsgName, AnRes) ->
         pass_as_params -> [var_f_n(I) || I <- lists:seq(1, NumFields)];
         pass_as_record -> [?expr(Msg)]
     end.
+
+%% compute info for the fast-path field recognition/decoding-call
+decoder_fp(Bindings, MsgName, MsgDef) ->
+    Rest = fetch_binding('<Rest>', Bindings),
+    Params = fetch_binding('<Params>', Bindings),
+    [begin
+         BMatch = ?expr(<<'<field-and-wiretype-bytes>', '<Rest>'/binary>>,
+                        [splice_trees('<field-and-wiretype-bytes>',
+                                      varint_to_binary_fields(Selector)),
+                         replace_tree('<Rest>', Rest)]),
+         FnCall = ?expr('decode_field'('<Rest>', Z1, Z2, '<Params>'),
+                        [replace_term('decode_field', DecodeFn),
+                         replace_tree('<Rest>', Rest),
+                         splice_trees('<Params>', Params)]),
+         {BMatch, FnCall}
+     end
+     || {Selector, DecodeFn} <- decoder_field_selectors(MsgName, MsgDef)].
 
 decoder_field_calls(Bindings, MsgName, []=_MsgDef, _AnRes) ->
     Key = fetch_binding('<Key>', Bindings),
@@ -1779,7 +1827,7 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
         splice_trees('<InParams>', Params),
         replace_term(decode_packed, mk_fn(d_packed_field_, MsgName, FName)),
         replace_tree('<Param>', Param),
-        replace_term('<call-read-field>', mk_fn(d_read_field_def_, MsgName)),
+        replace_term('<call-read-field>', mk_fn(dfp_read_field_def_, MsgName)),
         splice_trees('<OutParams>', OutParams)]),
      "\n",
      format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
@@ -1842,7 +1890,7 @@ format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
     BodyTailFn =
         fun(DecodeExprs, Rest2Var) ->
-                ReadFieldDefFn = mk_fn(d_read_field_def_, MsgName),
+                ReadFieldDefFn = mk_fn(dfp_read_field_def_, MsgName),
                 Params2 = updated_merged_params(MsgName, FieldDef, AnRes,
                                                 FVar, Params),
                 C = ?exprs('<call-read-field>'('<Rest2>', 0, 0, '<Params2>'),
@@ -2019,7 +2067,7 @@ format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
     InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
     Value = ?expr(Value),
     Params2 = updated_merged_params(MsgName, FieldDef, AnRes, Value, Params),
-    ReadFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
+    ReadFieldDefFnName = mk_fn(dfp_read_field_def_, MsgName),
     gpb_codegen:format_fn(
       mk_fn(d_field_, MsgName, FName),
       fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, '<InParams>') ->
@@ -2193,7 +2241,7 @@ occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
 format_field_skippers(MsgName, AnRes) ->
     SkipVarintFnName = mk_fn(skip_varint_, MsgName),
     SkipLenDelimFnName = mk_fn(skip_length_delimited_, MsgName),
-    ReadFieldFnName = mk_fn(d_read_field_def_, MsgName),
+    ReadFieldFnName = mk_fn(dfp_read_field_def_, MsgName),
     Params = decoder_params(MsgName, AnRes),
     [%% skip_varint_<MsgName>/2,4
      gpb_codegen:format_fn(
