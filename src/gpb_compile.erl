@@ -2050,6 +2050,9 @@ record_create(RName, Fields) -> record_create_or_match(RName, Fields).
 record_create_or_match(RecordName, FieldsValueTrees) ->
     record_update(none, RecordName, FieldsValueTrees).
 
+record_update(Var, _RecordName, []) when Var /= none ->
+    %% No updates to be made, maybe no fields
+    Var;
 record_update(Var, RecordName, FieldsValueTrees) ->
     erl_syntax:record_expr(
       Var,
