@@ -463,11 +463,12 @@ runtime_expr_transform(ExprParseTree, Transforms) ->
 runtime_exprs_transform(ExprParseTrees, Transforms) ->
     with_increased_backtrace_depth(
       fun() ->
-              [erl_syntax:revert(
-                 erl_syntax:copy_pos(
-                   ExprParseTree,
-                   apply_transforms(ExprParseTree, Transforms)))
-               || ExprParseTree <- ExprParseTrees]
+              %% To be able to apply the splice_trees also on the
+              %% top-level, transform this into a single expr:
+              %% begin ... end. Such an expr is called a block.
+              Block1 = erl_syntax:block_expr(ExprParseTrees),
+              Block2 = apply_transforms(Block1, Transforms),
+              [erl_syntax:revert(E) || E <- erl_syntax:block_expr_body(Block2)]
       end).
 
 apply_transforms(ParseTree, Transforms) ->

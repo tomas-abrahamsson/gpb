@@ -203,6 +203,18 @@ runtime_transforms_for_exprs_test() ->
     {1,2} = M:FnName(e2),
     ok.
 
+splice_trees_of_exprs_at_top_level_test() ->
+    Es = ?exprs(b, cd, e, [{splice_trees, cd, ?exprs(c, d, [])}]),
+    M = ?dummy_mod,
+    FnName = p,
+    Fn = gpb_codegen:mk_fn(
+           FnName,
+           fun() -> {a, exprs_go_here, f} end,
+           [{splice_trees, exprs_go_here, Es}]),
+    {module, M} = l(M, Fn),
+    {a, b, c, d, e, f} = M:FnName(),
+    ok.
+
 format_fn_no_rt_transforms_test() ->
     FnName = p,
     IoList = gpb_codegen:format_fn(FnName, fun(33) -> yes end),
