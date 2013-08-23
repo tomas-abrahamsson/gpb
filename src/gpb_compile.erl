@@ -25,6 +25,7 @@
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
+-include("gpb_codegen.hrl").
 
 -record(ft, {type, occurrence, is_packed}).
 -record(anres, %% result of analysis
@@ -39,6 +40,7 @@
                                          %%            pass_as_params
         }).
 
+-define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
 %% @spec file(File) -> ok | {error, Reason}
 %% @equiv file(File, [])
@@ -375,7 +377,10 @@ merge_warns({ok, MsgDefs}, Warns, msg_defs)      -> {ok, MsgDefs, Warns};
 merge_warns({ok, M, B}, Warns, binary)           -> {ok, M, B, Warns};
 merge_warns({ok, M, B, Warns1}, Warns2, binary)  -> {ok, M, B, Warns2++Warns1};
 merge_warns({error, R}, Warns, _OutFmt)          -> {error, R, Warns};
-merge_warns({error, R, Warns1}, Warns2, _OutFmt) -> {error, R, Warns2++Warns1}.
+merge_warns({error, R, Warns1}, Warns2, _OutFmt) -> {error, R, Warns2++Warns1};
+merge_warns(error, Warns, binary) ->
+    erlang:error({internal_error, ?MODULE,
+                  generated_code_failed_to_compile, Warns}).
 
 possibly_report_warnings(Result, Opts) ->
     Warns = case Result of
@@ -537,6 +542,7 @@ c() ->
 %% fields across files, such as the `protoc' does.
 -spec c([string() | atom()]) -> no_return().
 c([F | _]=Files) when is_atom(F); is_list(F) -> %% invoked with -s or -run
+    erlang:system_flag(backtrace_depth, 32),
     FileNames = [if File == undefined -> undefined;
                     is_atom(File)     -> atom_to_list(File);
                     is_list(File)     -> File
@@ -1072,31 +1078,12 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        %% to about 10000 msgs/s for a set of mixed message samples.
        %% f("-compile(inline).~n"),
        %%
-       f("encode_msg(Msg) ->~n"
-         "    encode_msg(Msg, []).~n~n"),
-       case proplists:get_value(verify, Opts, optionally) of
-           optionally ->
-               f("encode_msg(Msg, Opts) ->~n"
-                 "    case proplists:get_bool(verify, Opts) of~n"
-                 "        true  -> verify_msg(Msg);~n"
-                 "        false -> ok~n"
-                 "    end,~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")]);
-           always ->
-               f("encode_msg(Msg, _Opts) ->~n"
-                 "    verify_msg(Msg),~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")]);
-           never ->
-               f("encode_msg(Msg, _Opts) ->~n"
-                 "    ~s.~n", [format_encoder_topcase(4, Defs, "Msg")])
-       end,
+       format_encoders_top_function(Defs, Opts),
        "\n",
        f("~s~n", [format_encoders(Defs, AnRes, Opts)]),
        "\n",
-       f("decode_msg(Bin, MsgName) ->~n"
-         "    ~s.~n",
-         [format_decoder_topcase(4, Defs, "Bin", "MsgName")]),
-       "\n",
+       format_decoders_top_function(Defs),
+       "\n\n",
        if DoNif ->
                f("~s~n", [format_nif_decoder_error_wrappers(
                             Defs, AnRes, Opts)]);
@@ -1106,8 +1093,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        "\n",
        f("~s~n", [format_msg_merge_code(Defs, AnRes)]),
        "\n",
-       f("verify_msg(Msg) ->~n" %% Option to use gpb:verify_msg??
-         "    ~s.~n", [format_verifier_topcase(4, Defs, "Msg")]),
+       format_verifiers_top_function(Defs),
        "\n",
        f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
        "\n",
@@ -1121,16 +1107,39 @@ format_erl(Mod, Defs, AnRes, Opts) ->
 
 %% -- encoders -----------------------------------------------------
 
-format_encoder_topcase(Indent, Defs, MsgVar) ->
-    IndStr = indent(Indent+4, ""),
-    ["case ", MsgVar, " of\n",
-     IndStr,
-     string:join([f("#~p{} -> ~p(~s)",
-                    [MsgName, mk_fn(e_msg_, MsgName), MsgVar])
-                  || {{msg, MsgName}, _MsgDef} <- Defs],
-                 ";\n"++IndStr),
+format_encoders_top_function(Defs, Opts) ->
+    Verify = proplists:get_value(verify, Opts, optionally),
+    [gpb_codegen:format_fn(encode_msg, fun(Msg) -> encode_msg(Msg, []) end),
      "\n",
-     indent(Indent, "end")].
+     gpb_codegen:format_fn(
+       encode_msg,
+       fun(Msg, '<Opts>') ->
+               '<possibly-verify-msg>',
+               case Msg of
+                   '<msg-match>' -> 'encode'(Msg)
+               end
+       end,
+       [replace_tree('<Opts>', case Verify of
+                                   optionally -> ?expr(Opts);
+                                   always     -> ?expr(_Opts);
+                                   never      -> ?expr(_Opts)
+                               end),
+        splice_trees('<possibly-verify-msg>',
+                     case Verify of
+                         optionally ->
+                             [?expr(case proplists:get_bool(verify, Opts) of
+                                       true  -> verify_msg(Msg);
+                                       false -> ok
+                                   end)];
+                         always ->
+                             [?expr(verify_msg(Msg))];
+                         never ->
+                             []
+                     end),
+        repeat_clauses('<msg-match>',
+                       [[replace_tree('<msg-match>', record_match(MsgName, [])),
+                         replace_term('encode', mk_fn(e_msg_, MsgName))]
+                        || {{msg,MsgName}, _Fields} <- Defs])])].
 
 format_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
@@ -1140,80 +1149,99 @@ format_encoders(Defs, AnRes, _Opts) ->
     ].
 
 format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
-    [format_enum_encoder(EnumName, EnumDef)
+    [gpb_codegen:format_fn(
+       mk_fn(e_enum_, EnumName),
+       fun('<EnumSym>', Bin) -> <<Bin/binary, '<varint-bytes>'>> end,
+       [repeat_clauses('<EnumSym>',
+                       [begin
+                            ViBytes = enum_to_binary_fields(EnumValue),
+                            [replace_term('<EnumSym>', EnumSym),
+                             splice_trees('<varint-bytes>', ViBytes)]
+                        end
+                        || {EnumSym, EnumValue} <- EnumDef])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
-format_enum_encoder(EnumName, EnumDef) ->
-    FnName = mk_fn(e_enum_, EnumName),
-    [string:join([f("~p(~p, Bin) -> <<Bin/binary, ~s>>",
-                    [FnName, EnumSym, encode_format_enum_value(EnumValue)])
-                  || {EnumSym, EnumValue} <- EnumDef],
-                 ";\n"),
-     ".\n\n"].
-
-encode_format_enum_value(Value) ->
+enum_to_binary_fields(Value) ->
     <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
-    varint_to_byte_text(N).
+    varint_to_binary_fields(N).
 
-varint_to_byte_text(N) ->
-    Bin = gpb:encode_varint(N),
-    string:join([integer_to_list(B) || <<B:8>> <= Bin], ",").
+varint_to_binary_fields(IntValue) ->
+    [erl_syntax:binary_field(?expr('<n>', [replace_term('<n>', N)]), [])
+     || N <- binary_to_list(gpb:encode_varint(IntValue))].
 
 format_msg_encoders(Defs) ->
     [format_msg_encoder(MsgName, MsgDef) || {{msg, MsgName}, MsgDef} <- Defs].
 
 format_msg_encoder(MsgName, []) ->
-    FnName = mk_fn(e_msg_, MsgName),
-    [f("~p(_Msg) ->~n", [FnName]),
-     f("    <<>>.~n~n")];
+    gpb_codegen:format_fn(
+      mk_fn(e_msg_, MsgName),
+      fun(_Msg) ->
+              <<>>
+      end);
 format_msg_encoder(MsgName, MsgDef) ->
+    FNames = [FName || #field{name=FName} <- MsgDef],
+    FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
+    BVars = [var_b_n(I) || I <- lists:seq(1, length(FNames)-1)] ++ [last],
+    {EncodeExprs, _} =
+        lists:mapfoldl(
+          fun({NewBVar, Field, FVar}, PrevBVar) when NewBVar /= last ->
+                  EncExpr = field_encode_expr(MsgName, Field, FVar, PrevBVar),
+                  E = ?expr('<NewB>' = '<encode-expr>',
+                            [replace_tree('<NewB>', NewBVar),
+                             replace_tree('<encode-expr>', EncExpr)]),
+                  {E, NewBVar};
+             ({last, Field, FVar}, PrevBVar) ->
+                  EncExpr = field_encode_expr(MsgName, Field, FVar, PrevBVar),
+                  {EncExpr, dummy}
+          end,
+          ?expr(Bin),
+          lists:zip3(BVars, MsgDef, FVars)),
     FnName = mk_fn(e_msg_, MsgName),
-    MatchIndent = flength("~p(#~p{", [FnName, MsgName]),
-    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
-    FieldMatchings = string:join([f("~p=F~s", [FName, FName])
-                                  || #field{name=FName} <- MsgDef],
-                                 MatchCommaSep),
-    [f("~p(Msg) ->~n", [FnName]),
-     f("    ~p(Msg, <<>>).~n", [FnName]),
-     f("~n"),
-     f("~p(#~p{~s}, Bin0) ->~n", [FnName, MsgName, FieldMatchings]),
-     string:join(
-       [begin
-            FieldEncoderFn = mk_field_encode_fn_name(MsgName, Field),
-            ResultVar = if I == length(MsgDef) -> "";
-                           true                -> f("Bin~w = ", [I])
-                        end,
-            RIndent = lists:flatlength(ResultVar),
-            KeyTxt = mk_key_txt(FNum, Type),
-            if Occurrence == optional ->
-                    f("    ~sif F~s == undefined -> Bin~w;~n"
-                      "    ~*s  true -> ~p(F~s, <<Bin~w/binary, ~s>>)~n"
-                      "    ~*send",
-                      [ResultVar, FName, I-1,
-                       RIndent, "", FieldEncoderFn, FName, I-1, KeyTxt,
-                       RIndent, ""]);
-               Occurrence == repeated ->
-                    f("    ~sif F~s == [] -> Bin~w;~n"
-                      "    ~*s  true -> ~p(F~s, Bin~w)~n"
-                      "    ~*send",
-                      [ResultVar, FName, I-1,
-                       RIndent, "", FieldEncoderFn, FName, I-1,
-                       RIndent, ""]);
-               Occurrence == required ->
-                    f("    ~s~p(F~s, <<Bin~w/binary, ~s>>)",
-                      [ResultVar, FieldEncoderFn, FName, I-1, KeyTxt])
-            end
-        end
-        || {I, #field{name=FName, occurrence=Occurrence, type=Type,
-                      fnum=FNum}=Field} <- index_seq(MsgDef)],
-       ",\n"),
-     ".\n",
-     "\n"].
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Msg) ->
+               call_self(Msg, <<>>)
+       end),
+     "\n",
+     gpb_codegen:format_fn(
+       mk_fn(e_msg_, MsgName),
+       fun('<msg-matching>', Bin) ->
+               '<encode-param-exprs>'
+       end,
+       [replace_tree('<msg-matching>',
+                     record_match(MsgName, lists:zip(FNames, FVars))),
+        splice_trees('<encode-param-exprs>', EncodeExprs)])].
 
-mk_key_txt(FNum, Type) ->
+field_encode_expr(MsgName, Field, FVar, PrevBVar) ->
+    FEncoder = mk_field_encode_fn_name(MsgName, Field),
+    #field{occurrence=Occurrence, type=Type, fnum=FNum}=Field,
+    Transforms = [replace_tree('<F>', FVar),
+                  replace_term('<enc>', FEncoder),
+                  replace_tree('<Bin>', PrevBVar),
+                  splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
+    case Occurrence of
+        optional ->
+            ?expr(
+               if '<F>' == undefined -> '<Bin>';
+                  true -> '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+               end,
+               Transforms);
+        repeated ->
+            ?expr(
+               if '<F>' == [] -> '<Bin>';
+                  true -> '<enc>'('<F>', '<Bin>')
+               end,
+               Transforms);
+        required ->
+            ?expr(
+               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>),
+               Transforms)
+    end.
+
+key_to_binary_fields(FNum, Type) ->
     Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
-    varint_to_byte_text(Key).
+    varint_to_binary_fields(Key).
 
 mk_field_encode_fn_name(MsgName, #field{occurrence=repeated, name=FName}) ->
     mk_fn(e_field_, MsgName, FName);
@@ -1255,27 +1283,37 @@ format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef, AnRes) ->
 possibly_format_mfield_encoder(MsgName, #field{type={msg,SubMsg}}=FieldDef,
                                AnRes) ->
     FnName = mk_field_encode_fn_name(MsgName, FieldDef),
-    case is_msgsize_known_at_compiletime(SubMsg, AnRes) of
+    case is_msgsize_known_at_generationtime(SubMsg, AnRes) of
         no ->
-            [f("~p(Msg, Bin) ->~n", [FnName]),
-             f("    SubBin = ~p(Msg, <<>>),~n", [mk_fn(e_msg_, SubMsg)]),
-             f("    Bin2 = e_varint(byte_size(SubBin), Bin),~n"),
-             f("    <<Bin2/binary, SubBin/binary>>.~n~n")];
+            gpb_codegen:format_fn(
+              FnName,
+              fun(Msg, Bin) ->
+                      SubBin = '<encode-msg>'(Msg, <<>>),
+                      Bin2 = e_varint(byte_size(SubBin), Bin),
+                      <<Bin2/binary, SubBin/binary>>
+              end,
+              [replace_term('<encode-msg>', mk_fn(e_msg_, SubMsg))]);
         {yes, MsgSize} when MsgSize > 0 ->
-            MsgSizeTxt = varint_to_byte_text(MsgSize),
-            [f("~p(Msg, Bin) ->~n", [FnName]),
-             f("    Bin2 = <<Bin/binary, ~s>>,~n", [MsgSizeTxt]),
-             f("    ~p(Msg, Bin2).~n~n", [mk_fn(e_msg_, SubMsg)])];
+            MsgSizeBytes = varint_to_binary_fields(MsgSize),
+            gpb_codegen:format_fn(
+              FnName,
+              fun(Msg, Bin) ->
+                      Bin2 = <<Bin/binary, '<msg-size>'>>,
+                      '<encode-msg>'(Msg, Bin2)
+              end,
+              [splice_trees('<msg-size>', MsgSizeBytes),
+               replace_term('<encode-msg>', mk_fn(e_msg_, SubMsg))]);
         {yes, 0} ->
             %% special case, there will not be any e_msg_<MsgName>/2 function
             %% generated, so don't call it.
-            [f("~p(_Msg, Bin) ->~n", [FnName]),
-             f("    <<Bin/binary, 0>>.~n~n")]
+            gpb_codegen:format_fn(
+              FnName,
+              fun(_Msg, Bin) -> <<Bin/binary, 0>> end)
     end;
 possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].
 
-is_msgsize_known_at_compiletime(MsgName, #anres{known_msg_size=MsgSizes}) ->
+is_msgsize_known_at_generationtime(MsgName, #anres{known_msg_size=MsgSizes}) ->
     case dict:fetch(MsgName, MsgSizes) of
         MsgSize when is_integer(MsgSize) ->
             {yes, MsgSize};
@@ -1287,70 +1325,93 @@ format_repeated_field_encoder2(MsgName, #field{fnum=FNum, type=Type}=FDef) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     ElemEncoderFn = mk_field_encode_fn_name(MsgName,
                                             FDef#field{occurrence=required}),
-    KeyTxt = mk_key_txt(FNum, Type),
-    [f("~p([Elem | Rest], Bin) ->~n", [FnName]),
-     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
-     f("    Bin3 = ~p(Elem, Bin2),~n", [ElemEncoderFn]),
-     f("    ~p(Rest, Bin3);~n", [FnName]),
-     f("~p([], Bin) ->~n", [FnName]),
-     f("    Bin.~n~n")].
+    KeyBytes = key_to_binary_fields(FNum, Type),
+    gpb_codegen:format_fn(
+      FnName,
+      fun([Elem | Rest], Bin) ->
+              Bin2 = <<Bin/binary, '<KeyBytes>'>>,
+              Bin3 = '<encode-elem>'(Elem, Bin2),
+              call_self(Rest, Bin3);
+         ([], Bin) ->
+              Bin
+      end,
+      [splice_trees('<KeyBytes>', KeyBytes),
+       replace_term('<encode-elem>', ElemEncoderFn)]).
 
 format_packed_field_encoder2(MsgName, #field{type=Type}=FDef) ->
     case packed_byte_size_can_be_computed(Type) of
         {yes, BitLen, BitType} ->
             format_knownsize_packed_field_encoder2(MsgName, FDef,
-                                                  BitLen, BitType);
+                                                   BitLen, BitType);
         no ->
             format_unknownsize_packed_field_encoder2(MsgName, FDef)
     end.
 
-packed_byte_size_can_be_computed(fixed32)  -> {yes, 32, 'little'};
-packed_byte_size_can_be_computed(sfixed32) -> {yes, 32, 'little-signed'};
-packed_byte_size_can_be_computed(float)    -> {yes, 32, 'little-float'};
-packed_byte_size_can_be_computed(fixed64)  -> {yes, 64, 'little'};
-packed_byte_size_can_be_computed(sfixed64) -> {yes, 64, 'little-signed'};
-packed_byte_size_can_be_computed(double)   -> {yes, 64, 'little-float'};
+packed_byte_size_can_be_computed(fixed32)  -> {yes, 32, [little]};
+packed_byte_size_can_be_computed(sfixed32) -> {yes, 32, [little,signed]};
+packed_byte_size_can_be_computed(float)    -> {yes, 32, [little,float]};
+packed_byte_size_can_be_computed(fixed64)  -> {yes, 64, [little]};
+packed_byte_size_can_be_computed(sfixed64) -> {yes, 64, [little,signed]};
+packed_byte_size_can_be_computed(double)   -> {yes, 64, [little,float]};
 packed_byte_size_can_be_computed(_)        -> no.
 
 format_knownsize_packed_field_encoder2(MsgName, #field{name=FName,
                                                        fnum=FNum}=FDef,
                                       BitLen, BitType) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
-    KeyTxt = mk_key_txt(FNum, bytes),
+    KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
-    [f("~p(Elems, Bin) when Elems =/= [] ->~n", [FnName]),
-     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
-     f("    Bin3 = e_varint(length(Elems) * ~w, Bin2),~n", [BitLen div 8]),
-     f("    ~p(Elems, Bin3);~n", [PackedFnName]),
-     f("~p([], Bin) ->~n", [FnName]),
-     f("    Bin.~n"),
-     f("~n"),
-     f("~p([Value | Rest], Bin) ->~n", [PackedFnName]),
-     f("    Bin2 = <<Bin/binary, Value:~w/~s>>,~n", [BitLen, BitType]),
-     f("    ~p(Rest, Bin2);~n", [PackedFnName]),
-     f("~p([], Bin) ->~n", [PackedFnName]),
-     f("    Bin.~n~n")].
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Elems, Bin) when Elems =/= [] ->
+               Bin2 = <<Bin/binary, '<KeyBytes>'>>,
+               Bin3 = e_varint(length(Elems) * '<ElemLen>', Bin2),
+               '<encode-packed>'(Elems, Bin3);
+          ([], Bin) ->
+               Bin
+       end,
+       [splice_trees('<KeyBytes>', KeyBytes),
+        replace_term('<ElemLen>', BitLen div 8),
+        replace_term('<encode-packed>', PackedFnName)]),
+     gpb_codegen:format_fn(
+       PackedFnName,
+       fun([Value | Rest], Bin) ->
+               Bin2 = <<Bin/binary, Value:'<Size>'/'<BitType>'>>,
+               call_self(Rest, Bin2);
+          ([], Bin) ->
+               Bin
+       end,
+       [replace_term('<Size>', BitLen),
+        splice_trees('<BitType>', [erl_syntax:atom(T) || T <- BitType])])].
 
 format_unknownsize_packed_field_encoder2(MsgName, #field{name=FName,
                                                          fnum=FNum}=FDef) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     ElemEncoderFn = mk_field_encode_fn_name(MsgName,
                                             FDef#field{occurrence=required}),
-    KeyTxt = mk_key_txt(FNum, bytes),
+    KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
-    [f("~p(Elems, Bin) when Elems =/= [] ->~n", [FnName]),
-     f("    SubBin = ~p(Elems, <<>>),~n", [PackedFnName]),
-     f("    Bin2 = <<Bin/binary, ~s>>,~n", [KeyTxt]),
-     f("    Bin3 = e_varint(byte_size(SubBin), Bin2),~n"),
-     f("    <<Bin3/binary, SubBin/binary>>;~n"),
-     f("~p([], Bin) ->~n", [FnName]),
-     f("    Bin.~n"),
-     f("~n"),
-     f("~p([Value | Rest], Bin) ->~n", [PackedFnName]),
-     f("    Bin2 = ~p(Value, Bin),~n", [ElemEncoderFn]),
-     f("    ~p(Rest, Bin2);~n", [PackedFnName]),
-     f("~p([], Bin) ->~n", [PackedFnName]),
-     f("    Bin.~n~n")].
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Elems, Bin) when Elems =/= [] ->
+               SubBin = '<encode-packed>'(Elems, <<>>),
+               Bin2 = <<Bin/binary, '<KeyBytes>'>>,
+               Bin3 = e_varint(byte_size(SubBin), Bin2),
+               <<Bin3/binary, SubBin/binary>>;
+          ([], Bin) ->
+               Bin
+       end,
+       [splice_trees('<KeyBytes>', KeyBytes),
+        replace_term('<encode-packed>', PackedFnName)]),
+     gpb_codegen:format_fn(
+       PackedFnName,
+       fun([Value | Rest], Bin) ->
+               Bin2 = '<encode-elem>'(Value, Bin),
+               call_self(Rest, Bin2);
+          ([], Bin) ->
+               Bin
+       end,
+       [replace_term('<encode-elem>', ElemEncoderFn)])].
 
 format_type_encoders(AnRes) ->
     [format_varlength_field_encoders(AnRes),
@@ -1372,12 +1433,12 @@ format_fixlength_field_encoders(AnRes) ->
     NeedsFixed64  = needs_f_enc(fixed64, AnRes),
     NeedsSFixed64 = needs_f_enc(sfixed64, AnRes),
     NeedsDouble   = needs_f_enc(double, AnRes),
-    [[format_fixed_encoder(fixed32,  32, 'little')        || NeedsFixed32],
-     [format_fixed_encoder(sfixed32, 32, 'little-signed') || NeedsSFixed32],
-     [format_fixed_encoder(float,    32, 'little-float')  || NeedsFloat],
-     [format_fixed_encoder(fixed64,  64, 'little')        || NeedsFixed64],
-     [format_fixed_encoder(sfixed64, 64, 'little-signed') || NeedsSFixed64],
-     [format_fixed_encoder(double,   64, 'little-float')  || NeedsDouble]].
+    [[format_fixed_encoder(fixed32,  32, [little])        || NeedsFixed32],
+     [format_fixed_encoder(sfixed32, 32, [little,signed]) || NeedsSFixed32],
+     [format_fixed_encoder(float,    32, [little,float])  || NeedsFloat],
+     [format_fixed_encoder(fixed64,  64, [little])        || NeedsFixed64],
+     [format_fixed_encoder(sfixed64, 64, [little,signed]) || NeedsSFixed64],
+     [format_fixed_encoder(double,   64, [little,float])  || NeedsDouble]].
 
 needs_f_enc(FixedType, #anres{used_types=UsedTypes, fixlen_types=FTypes}) ->
     %% If a fixlength-type occurs _only_ as a packed repeated field,
@@ -1408,125 +1469,100 @@ at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
               SubMsgNames).
 
 format_sint_encoder() ->
-    [f("e_type_sint(Value, Bin) when Value >= 0 ->~n"),
-     f("    e_varint(Value * 2, Bin);~n"),
-     f("e_type_sint(Value, Bin) ->~n"),
-     f("    e_varint(Value * -2 - 1, Bin).~n~n")].
+    gpb_codegen:format_fn(
+      e_type_sint,
+      fun(Value, Bin) when Value >= 0 ->
+              e_varint(Value * 2, Bin);
+         (Value, Bin) ->
+              e_varint(Value * -2 - 1, Bin)
+      end).
 
 format_int_encoder(Type, BitLen) ->
-    FnName = mk_fn(e_type_, Type),
-    [f("~p(Value, Bin) when 0 =< Value, Value =< 127 ->~n", [FnName]),
-     f("    <<Bin/binary, Value>>; %% fast path~n"),
-     f("~p(Value, Bin) ->~n", [FnName]),
-     f("    <<N:~w/unsigned-native>> = <<Value:~w/signed-native>>,~n",
-       [BitLen, BitLen]),
-     f("    e_varint(N, Bin).~n~n")].
+    gpb_codegen:format_fn(
+      mk_fn(e_type_, Type),
+      fun(Value, Bin) when 0 =< Value, Value =< 127 ->
+              <<Bin/binary, Value>>; %% fast path
+         (Value, Bin) ->
+              <<N:'<Sz>'/unsigned-native>> = <<Value:'<Sz>'/signed-native>>,
+              e_varint(N, Bin)
+      end,
+      [replace_term('<Sz>', BitLen)]).
 
 format_bool_encoder() ->
-    [f("e_type_bool(true, Bin)  -> <<Bin/binary, 1>>;~n"),
-     f("e_type_bool(false, Bin) -> <<Bin/binary, 0>>.~n~n")].
+    gpb_codegen:format_fn(
+      e_type_bool,
+      fun(true, Bin)  -> <<Bin/binary, 1>>;
+         (false, Bin) -> <<Bin/binary, 0>>
+      end).
 
 format_fixed_encoder(Type, BitLen, BitType) ->
-    FnName = mk_fn(e_type_, Type),
-    [f("~p(Value, Bin) ->~n", [FnName]),
-     f("    <<Bin/binary, Value:~p/~s>>.~n~n", [BitLen, BitType])].
+    gpb_codegen:format_fn(
+      mk_fn(e_type_, Type),
+      fun(Value, Bin) ->
+              <<Bin/binary, Value:'<Sz>'/'<T>'>>
+      end,
+      [replace_term('<Sz>', BitLen),
+       splice_trees('<T>', [erl_syntax:atom(T) || T <- BitType])]).
 
 format_string_encoder() ->
-    [f("e_type_string(S, Bin) ->~n"),
-     f("    Utf8 = unicode:characters_to_binary(S),~n"),
-     f("    Bin2 = e_varint(byte_size(Utf8), Bin),~n"),
-     f("    <<Bin2/binary, Utf8/binary>>.~n~n")].
+    gpb_codegen:format_fn(
+      e_type_string,
+      fun(S, Bin) ->
+              Utf8 = unicode:characters_to_binary(S),
+              Bin2 = e_varint(byte_size(Utf8), Bin),
+              <<Bin2/binary, Utf8/binary>>
+      end).
 
 format_bytes_encoder() ->
-    [f("e_type_bytes(Bytes, Bin) ->~n"),
-     f("    Bin2 = e_varint(byte_size(Bytes), Bin),~n"),
-     f("    <<Bin2/binary, Bytes/binary>>.~n~n")].
+    gpb_codegen:format_fn(
+      e_type_bytes,
+      fun(Bytes, Bin) ->
+              Bin2 = e_varint(byte_size(Bytes), Bin),
+              <<Bin2/binary, Bytes/binary>>
+      end).
 
 format_varint_encoder() ->
-    [f("e_varint(N, Bin) when N =< 127 ->~n"),
-     f("    <<Bin/binary, N>>;~n"),
-     f("e_varint(N, Bin) ->~n"),
-     f("    Bin2 = <<Bin/binary, (N band 127 bor 128)>>,~n"),
-     f("    e_varint(N bsr 7, Bin2).~n~n")].
+    gpb_codegen:format_fn(
+      e_varint,
+      fun(N, Bin) when N =< 127 ->
+              <<Bin/binary, N>>;
+         (N, Bin) ->
+              Bin2 = <<Bin/binary, (N band 127 bor 128)>>,
+              call_self(N bsr 7, Bin2)
+      end).
 
 %% -- decoders -----------------------------------------------------
 
-format_decoder_topcase(Indent, Defs, BinVar, MsgNameVar) ->
-    ["case ", MsgNameVar, " of\n",
-     string:join([indent(Indent+4, f("~p -> ~p(~s)",
-                                     [MsgName, mk_fn(d_msg_, MsgName), BinVar]))
-                  || {{msg, MsgName}, _MsgDef} <- Defs],
-                 ";\n"),
-     "\n",
-     indent(Indent, f("end"))].
+format_decoders_top_function(Defs) ->
+    gpb_codegen:format_fn(
+      decode_msg,
+      fun(Bin, MsgName) ->
+              case MsgName of
+                  '<MsgName>' -> '<decode-call>'(Bin)
+              end
+      end,
+      [repeat_clauses('<MsgName>',
+                      [[replace_term('<MsgName>', MsgName),
+                        replace_term('<decode-call>', mk_fn(d_msg_, MsgName))]
+                       || {{msg,MsgName}, _Fields} <- Defs])]).
 
 format_decoders(Defs, AnRes, Opts) ->
     [format_enum_decoders(Defs, AnRes),
-     format_initial_msgs(Defs, AnRes),
      format_msg_decoders(Defs, AnRes, Opts)].
 
 format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
     %%        insert a 2-complement in the mapping in order to move computations
     %%        from run-time to compile-time??
-    [[string:join([f("~p(~w) -> ~p",
-                     [mk_fn(d_enum_, EnumName), EnumValue, EnumSym])
-                   || {EnumSym, EnumValue} <- EnumDef],
-                  ";\n"),
-      ".\n\n"]
+    [gpb_codegen:format_fn(
+       mk_fn(d_enum_, EnumName),
+       fun('<EnumValue>') -> '<EnumSym>' end,
+       [repeat_clauses('<EnumValue>',
+                       [[replace_term('<EnumValue>', EnumValue),
+                         replace_term('<EnumSym>', EnumSym)]
+                        || {EnumSym, EnumValue} <- EnumDef])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
-
-format_initial_msgs(Defs, AnRes) ->
-    [format_initial_msg(MsgName, MsgDef, Defs, AnRes)
-     || {{msg, MsgName}, MsgDef} <- Defs].
-
-format_initial_msg(MsgName, MsgDef, Defs, AnRes) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> ""; %% handled in d_read_field_def_<MsgName>/1
-        pass_as_record -> format_initial_msg_par(MsgName, MsgDef, Defs)
-    end.
-
-format_initial_msg_par(MsgName, MsgDef, Defs) ->
-    [f("~p() ->~n", [mk_fn(msg0_, MsgName)]),
-     indent(4, format_initial_msg_record(4, MsgName, MsgDef, Defs)),
-     ".\n\n"].
-
-format_initial_msg_record(Indent, MsgName, MsgDef, Defs) ->
-    MsgNameQLen = flength("~p", [MsgName]),
-    f("#~p{~s}",
-      [MsgName, format_initial_msg_fields(Indent+MsgNameQLen+2, MsgDef, Defs)]).
-
-format_initial_msg_fields(Indent, MsgDef, Defs) ->
-    outdent_first(
-      string:join(
-        [case Field of
-             #field{occurrence=repeated} ->
-                 indent(Indent, f("~p = []", [FName]));
-             #field{type={msg,FMsgName}} ->
-                 FNameQLen = flength("~p", [FName]),
-                 {Type, FMsgDef} = lists:keyfind(Type, 1, Defs),
-                 indent(Indent, f("~p = ~s",
-                                  [FName,
-                                   format_initial_msg_record(Indent+FNameQLen+2,
-                                                             FMsgName, FMsgDef,
-                                                             Defs)]))
-         end
-         || #field{name=FName, type=Type}=Field <- MsgDef,
-            case Field of
-                #field{occurrence=repeated} -> true;
-                #field{occurrence=optional} -> false;
-                #field{type={msg,_}}        -> true;
-                _                           -> false
-            end],
-        ",\n")).
-
-format_initial_field_values(MsgDef) ->
-    [[", ", case Occurrence of
-                repeated -> "[]";
-                required -> "undefined"; %% Use default value? (if available)
-                optional -> "undefined"
-            end] || #field{occurrence = Occurrence} <- MsgDef].
 
 format_msg_decoders(Defs, AnRes, Opts) ->
     [format_msg_decoder(MsgName, MsgDef, AnRes, Opts)
@@ -1534,160 +1570,151 @@ format_msg_decoders(Defs, AnRes, Opts) ->
 
 format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
     [format_msg_decoder_read_field(MsgName, MsgDef, AnRes),
-     format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes),
      format_field_decoders(MsgName, MsgDef, AnRes, Opts),
-     format_field_adders(MsgName, MsgDef, AnRes),
      format_field_skippers(MsgName, AnRes)].
 
 format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
+    DecodeMsgFnName = mk_fn(d_msg_, MsgName),
+    DecodeFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
+    Key = ?expr(Key),
+    Rest = ?expr(Rest),
+    Params = decoder_params(MsgName, AnRes),
+    Bindings = new_bindings([{'<Params>', Params},
+                             {'<Key>', Key},
+                             {'<Rest>', Rest}]),
+    [gpb_codegen:format_fn(
+       DecodeMsgFnName,
+       fun(Bin) ->
+               '<decode-field-def>'(Bin, 0, 0, '<initial-params>')
+       end,
+       [replace_term('<decode-field-def>', DecodeFieldDefFnName),
+        splice_trees('<initial-params>',
+                     msg_decoder_initial_params(MsgName, MsgDef, AnRes))]),
+     "\n",
+     gpb_codegen:format_fn(
+       DecodeFieldDefFnName,
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               call_self(Rest, N+7, X bsl N + Acc, '<Params>');
+          (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               '<Key>' = X bsl N + Acc,
+               '<calls-to-field-decoding-or-skip>';
+          (<<>>, 0, 0, '<Params>') ->
+               '<finalize-result>'
+       end,
+       [splice_trees('<Params>', Params),
+        replace_tree('<Key>', Key),
+        replace_tree('<calls-to-field-decoding-or-skip>',
+                     decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
+        replace_tree('<finalize-result>',
+                     decoder_finalize_result(Params, MsgName, MsgDef, AnRes))]),
+     "\n"].
+
+msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
+    FNVExprs = [case Occurrence of
+                    repeated -> {FName, [],        ?expr([])};
+                    required -> {FName, undefined, ?expr(undefined)};
+                    optional -> {FName, undefined, ?expr(undefined)}
+                end
+                || #field{name=FName, occurrence=Occurrence} <- MsgDef],
     case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> format_msg_decoder_read_field_pap(MsgName, MsgDef);
-        pass_as_record -> format_msg_decoder_read_field_par(MsgName, MsgDef)
+        pass_as_params ->
+            [Expr || {_FName, _Value, Expr} <- FNVExprs];
+        pass_as_record ->
+            [record_create(MsgName,
+                           [{FName, Expr} || {FName, Value, Expr} <- FNVExprs,
+                                             Value /= undefined])]
     end.
 
-format_msg_decoder_read_field_pap(MsgName, MsgDef) ->
-    FieldVars = [f(", F~w", [I]) || I <- lists:seq(1,length(MsgDef))],
-    ReadFieldCases = format_read_field_cases(MsgName, MsgDef, pass_as_params,
-                                             FieldVars),
-    MsgIndent = flength("    #~p{", [MsgName]),
-    FieldSets = string:join([case Occurrence of
-                                 required -> f("~p = F~w", [FName, I]);
-                                 optional -> f("~p = F~w", [FName, I]);
-                                 repeated -> f("~p = lists:reverse(F~w)",
-                                               [FName, I])
-                             end
-                             || {I, #field{occurrence=Occurrence,
-                                           name=FName}} <- index_seq(MsgDef)],
-                            f(",~n~s",[indent(MsgIndent, "")])),
-    [f("~p(Bin) ->~n", [mk_fn(d_msg_, MsgName)]),
-     f("    ~p(Bin, 0, 0~s).~n",
-       [mk_fn(d_read_field_def_, MsgName),
-        format_initial_field_values(MsgDef)]),
-     "\n",
-     f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
-       "    ~p(Rest, N+7, X bsl N + Acc~s);~n",
-       [mk_fn(d_read_field_def_, MsgName), FieldVars,
-        mk_fn(d_read_field_def_, MsgName), FieldVars]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
-       "    Key = X bsl N + Acc,~n",
-       [mk_fn(d_read_field_def_, MsgName), FieldVars]),
-     if ReadFieldCases == [] ->
-             f("    case Key band 7 of  %% WireType~n"
-               "        0 -> 'skip_varint_~s'(Rest, 1, 1~s);~n"
-               "        1 -> 'skip_64_~s'(Rest, 1, 1~s);~n"
-               "        2 -> 'skip_length_delimited_~s'(Rest, 0, 0~s);~n"
-               "        5 -> 'skip_32_~s'(Rest, 1, 1~s)~n"
-               "    end;~n",
-               [MsgName, FieldVars,
-                MsgName, FieldVars,
-                MsgName, FieldVars,
-                MsgName, FieldVars]);
-        true ->
-             f("    case Key of~n"
-               "~s"
-               "        _ ->~n"
-               "            case Key band 7 of %% wiretype~n"
-               "                0 -> 'skip_varint_~s'(Rest, 1, 1~s);~n"
-               "                1 -> 'skip_64_~s'(Rest, 1, 1~s);~n"
-               "                2 -> 'skip_length_delimited_~s'(Rest,0,0~s);~n"
-               "                5 -> 'skip_32_~s'(Rest, 1, 1~s)~n"
-               "            end~n"
-               "    end;~n",
-               [ReadFieldCases,
-                MsgName, FieldVars,
-                MsgName, FieldVars,
-                MsgName, FieldVars,
-                MsgName, FieldVars])
-     end,
-     f("~p(<<>>, 0, 0~s) ->~n", [mk_fn(d_read_field_def_, MsgName), FieldVars]),
-     f("    #~p{~s}.~n~n", [MsgName, FieldSets])].
+decoder_params(MsgName, AnRes) ->
+    NumFields = get_num_fields(MsgName, AnRes),
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params -> [var_f_n(I) || I <- lists:seq(1, NumFields)];
+        pass_as_record -> [?expr(Msg)]
+    end.
 
-format_msg_decoder_read_field_par(MsgName, MsgDef) ->
-    ReadFieldCases = format_read_field_cases(MsgName, MsgDef, pass_as_record, x),
-    [f("~p(Bin) ->~n", [mk_fn(d_msg_, MsgName)]),
-     indent(4, f("Msg0 = ~s(),~n", [mk_fn(msg0_, MsgName)])),
-     indent(4, f("~p(Bin, 0, 0, Msg0).~n", [mk_fn(d_read_field_def_, MsgName)])),
-     "\n",
-     f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~p(Rest, N+7, X bsl N + Acc, Msg);~n",
-       [mk_fn(d_read_field_def_, MsgName),
-        mk_fn(d_read_field_def_, MsgName)]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    Key = X bsl N + Acc,~n", [mk_fn(d_read_field_def_, MsgName)]),
-     if ReadFieldCases == [] ->
-             f("    case Key band 7 of  %% WireType~n"
-               "        0 -> 'skip_varint_~s'(Rest, Msg);~n"
-               "        1 -> 'skip_64_~s'(Rest, Msg);~n"
-               "        2 -> 'skip_length_delimited_~s'(Rest, 0, 0, Msg);~n"
-               "        5 -> 'skip_32_~s'(Rest, Msg)~n"
-               "    end;~n",
-               [MsgName,MsgName,MsgName,MsgName]);
-        true ->
-             f("    case Key of~n"
-               "~s"
-               "        _ ->~n"
-               "            case Key band 7 of %% wiretype~n"
-               "                0 -> 'skip_varint_~s'(Rest, Msg);~n"
-               "                1 -> 'skip_64_~s'(Rest, Msg);~n"
-               "                2 -> 'skip_length_delimited_~s'(Rest,0,0,Msg);~n"
-               "                5 -> 'skip_32_~s'(Rest, Msg)~n"
-               "            end~n"
-               "    end;~n",
-               [ReadFieldCases,
-                MsgName,MsgName,MsgName,MsgName])
-     end,
-     f("~p(<<>>, 0, 0, Msg) ->~n"
-       "    ~p(Msg).~n~n",
-       [mk_fn(d_read_field_def_, MsgName),
-        mk_fn(d_reverse_toplevel_fields_, MsgName)])].
+decoder_field_calls(Bindings, MsgName, []=_MsgDef, _AnRes) ->
+    Key = fetch_binding('<Key>', Bindings),
+    WiretypeExpr = ?expr('<Key>' band 7, [replace_tree('<Key>', Key)]),
+    Bindings1 = add_binding({'<wiretype-expr>', WiretypeExpr}, Bindings),
+    decoder_skip_calls(Bindings1, MsgName);
+decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
+    Key = fetch_binding('<Key>', Bindings),
+    Rest = fetch_binding('<Rest>', Bindings),
+    Params = fetch_binding('<Params>', Bindings),
+    SkipCalls = decoder_field_calls(Bindings, MsgName, [], AnRes),
+    FieldSelects = decoder_field_selectors(MsgName, MsgDef),
+    ?expr(case '<Key>' of
+              '<selector>' -> 'decode_field'('<Rest>', 0, 0, '<Params>');
+              _            -> '<skip-calls>'
+       end,
+       [replace_tree('<Key>', Key),
+        repeat_clauses('<selector>',
+                       [[replace_term('<selector>', Selector),
+                         replace_term('decode_field', DecodeFn),
+                         replace_tree('<Rest>', Rest),
+                         splice_trees('<Params>', Params)]
+                        || {Selector, DecodeFn} <- FieldSelects]),
+        replace_tree('<skip-calls>', SkipCalls)]).
 
-format_read_field_cases(MsgName, MsgDef, FieldPass, FieldVars) ->
+decoder_skip_calls(Bindings, MsgName) ->
+    WiretypeExpr = fetch_binding('<wiretype-expr>', Bindings),
+    RestExpr = fetch_binding('<Rest>', Bindings),
+    Params = fetch_binding('<Params>', Bindings),
+    ?expr(case '<wiretype-expr>' of
+              0 -> skip_vi('<Rest>', 0, 0, '<Params>');
+              1 -> skip_64('<Rest>', 0, 0, '<Params>');
+              2 -> skip_ld('<Rest>', 0, 0, '<Params>');
+              5 -> skip_32('<Rest>', 0, 0, '<Params>')
+          end,
+          [replace_tree('<wiretype-expr>', WiretypeExpr),
+           replace_tree('<Rest>', RestExpr),
+           splice_trees('<Params>', Params),
+           replace_term(skip_vi, mk_fn(skip_varint_, MsgName)),
+           replace_term(skip_64, mk_fn(skip_64_, MsgName)),
+           replace_term(skip_ld, mk_fn(skip_length_delimited_, MsgName)),
+           replace_term(skip_32, mk_fn(skip_32_, MsgName))]).
+
+decoder_field_selectors(MsgName, MsgDef) ->
     [begin
          Wiretype = case is_packed(FieldDef) of
                         true  -> gpb:encode_wiretype(bytes);
                         false -> gpb:encode_wiretype(Type)
                     end,
-         Key = (FNum bsl 3) bor Wiretype,
-         Fill = if FieldPass == pass_as_params -> fill;
-                   FieldPass == pass_as_record -> no_fill
-                end,
-         indent(8, f("~w -> ~p(Rest~s~s);~n",
-                 [Key, mk_fn(d_field_, MsgName, FName),
-                  case mk_field_decoder_vi_params(FieldDef, Fill) of
-                      ""     -> [];
-                      Params -> [", ", Params]
-                  end,
-                  if FieldPass == pass_as_record -> ", Msg";
-                     FieldPass == pass_as_params -> FieldVars
-                  end]))
+         Selector = (FNum bsl 3) bor Wiretype,
+         DecodeFn = mk_fn(d_field_, MsgName, FName),
+         {Selector, DecodeFn}
      end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
-
-mk_field_decoder_vi_params(#field{type=Type}=FieldDef, Fill) ->
-    case is_packed(FieldDef) of
-        false ->
-            case Type of
-                sint32   -> "0, 0"; %% varint-based
-                sint64   -> "0, 0"; %% varint-based
-                int32    -> "0, 0"; %% varint-based
-                int64    -> "0, 0"; %% varint-based
-                uint32   -> "0, 0"; %% varint-based
-                uint64   -> "0, 0"; %% varint-based
-                bool     -> "0, 0"; %% varint-based
-                {enum,_} -> "0, 0"; %% varint-based
-                fixed32  -> if Fill == fill -> "0, 0"; true -> "" end;
-                sfixed32 -> if Fill == fill -> "0, 0"; true -> "" end;
-                float    -> if Fill == fill -> "0, 0"; true -> "" end;
-                fixed64  -> if Fill == fill -> "0, 0"; true -> "" end;
-                sfixed64 -> if Fill == fill -> "0, 0"; true -> "" end;
-                double   -> if Fill == fill -> "0, 0"; true -> "" end;
-                string   -> "0, 0"; %% varint-based
-                bytes    -> "0, 0"; %% varint-based
-                {msg,_}  -> "0, 0"  %% varint-based
-            end;
-        true ->
-            "0, 0" %% length of packed bytes is varint-based
+decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            record_create(
+              MsgName,
+              [begin
+                   #field{name=FName, occurrence=Occurrence}=Field,
+                   FValueExpr =
+                       case Occurrence of
+                           required -> Param;
+                           optional -> Param;
+                           repeated -> ?expr(lists:reverse('<Param>'),
+                                             [replace_tree('<Param>', Param)])
+                       end,
+                   {FName, FValueExpr}
+               end
+               || {Field, Param} <- lists:zip(MsgDef, Params)]);
+        pass_as_record ->
+            MsgVar = hd(Params),
+            record_update(
+              MsgVar,
+              MsgName,
+              [begin
+                   FieldAccess = record_access(MsgVar, MsgName, FName),
+                   FValueExpr = ?expr(lists:reverse('<Param>'),
+                                      [replace_tree('<Param>', FieldAccess)]),
+                   {FName, FValueExpr}
+               end
+               || #field{name=FName, occurrence=repeated} <- MsgDef])
     end.
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
@@ -1710,221 +1737,194 @@ format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
         uint64   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         bool     -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         {enum,_} -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
-        fixed32  -> format_uf32_field_decoder(MsgName, Field, AnRes);
-        sfixed32 -> format_sf32_field_decoder(MsgName, Field, AnRes);
-        float    -> format_float_field_decoder(MsgName, Field, AnRes);
-        fixed64  -> format_uf64_field_decoder(MsgName, Field, AnRes);
-        sfixed64 -> format_sf64_field_decoder(MsgName, Field, AnRes);
-        double   -> format_double_field_decoder(MsgName, Field, AnRes);
+        fixed32  -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        sfixed32 -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        float    -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        fixed64  -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        sfixed64 -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        double   -> format_fixlen_field_decoder(MsgName, Field, AnRes);
         string   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         bytes    -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         {msg,_}  -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts)
     end.
 
 format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            format_packed_field_decoder_pap(MsgName, FieldDef, AnRes, Opts);
-        pass_as_record ->
-            format_packed_field_decoder_par(MsgName, FieldDef, Opts)
+    #field{name=FName, rnum=RNum} = FieldDef,
+    Params = decoder_params(MsgName, AnRes),
+    Param = case get_field_pass(MsgName, AnRes) of
+                pass_as_params ->
+                    lists:nth(RNum - 1, Params);
+                pass_as_record ->
+                    MsgVar = hd(Params),
+                    record_access(MsgVar, MsgName, FName)
+            end,
+    OutParams = case get_field_pass(MsgName, AnRes) of
+                    pass_as_params ->
+                        lists_setelement(RNum - 1, Params, ?expr(NewSeq));
+                    pass_as_record ->
+                        [record_update(hd(Params), MsgName,
+                                       [{FName, ?expr(NewSeq)}])]
+                end,
+    [gpb_codegen:format_fn(
+       mk_fn(d_field_, MsgName, FName),
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               call_self(Rest, N + 7, X bsl N + Acc, '<Params>');
+          (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
+               Len = X bsl N + Acc,
+               <<PackedBytes:Len/binary, Rest2/binary>> = Rest,
+               NewSeq = decode_packed(PackedBytes, 0, 0, '<Param>'),
+               '<call-read-field>'(Rest2, 0, 0, '<OutParams>')
+       end,
+       [splice_trees('<Params>', Params),
+        splice_trees('<InParams>', Params),
+        replace_term(decode_packed, mk_fn(d_packed_field_, MsgName, FName)),
+        replace_tree('<Param>', Param),
+        replace_term('<call-read-field>', mk_fn(d_read_field_def_, MsgName)),
+        splice_trees('<OutParams>', OutParams)]),
+     "\n",
+     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
+
+format_packed_field_seq_decoder(MsgName, #field{type=Type}=Field, Opts) ->
+    case Type of
+        fixed32  -> format_dpacked_nonvi(MsgName, Field, 32, [little]);
+        sfixed32 -> format_dpacked_nonvi(MsgName, Field, 32, [little,signed]);
+        float    -> format_dpacked_nonvi(MsgName, Field, 32, [little,float]);
+        fixed64  -> format_dpacked_nonvi(MsgName, Field, 64, [little]);
+        sfixed64 -> format_dpacked_nonvi(MsgName, Field, 64, [little,signed]);
+        double   -> format_dpacked_nonvi(MsgName, Field, 64, [little,float]);
+        _        -> format_dpacked_vi(MsgName, Field, Opts)
     end.
 
-format_packed_field_decoder_pap(MsgName, FieldDef, AnRes, Opts) ->
-    NF = get_num_fields(MsgName, AnRes),
-    #field{name=FName, rnum=RNum, opts=FOpts}=FieldDef,
-    DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
-    FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
-    FieldVars = [[", ", f("F~w", [I])] || I <- lists:seq(1, NF)],
-    InFieldVars = [[", ", if I == RNum-1 -> "AccSeq";
-                             I /= RNum-1 -> f("F~w", [I])
-                          end]
-                   || I <- lists:seq(1, NF)],
-    OutFieldVars = [[", ", if I == RNum-1 -> "NewSeq";
-                              I /= RNum-1 -> f("F~w", [I])
-                           end]
-                    || I <- lists:seq(1, NF)],
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
-       [DecodePackWrapFn, FieldVars]),
-     f("    ~p(Rest, N+7, X bsl N + Acc~s);~n", [DecodePackWrapFn, FieldVars]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
-       [DecodePackWrapFn, InFieldVars]),
-     f("    Len = X bsl N + Acc,~n"),
-     f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
-     f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
-       [mk_fn(d_packed_field_, MsgName, FName),
-        case mk_field_decoder_vi_params(FieldDefAsNonpacked, no_fill) of
-            ""     -> [", "];
-            Params -> [", ", Params, ", "]
-        end]),
-     f("    ~p(Rest2, 0, 0~s).~n~n",
-       [mk_fn(d_read_field_def_, MsgName), OutFieldVars]),
-     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
+format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitTypes)     ->
+    gpb_codegen:format_fn(
+      mk_fn(d_packed_field_, MsgName, FName),
+      fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, [Value | AccSeq]);
+         (<<>>, _, _, AccSeq) ->
+              AccSeq
+      end,
+      [replace_term('<N>', BitLen),
+       splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes])]).
 
-format_packed_field_decoder_par(MsgName, FieldDef, Opts) ->
-    #field{name=FName, opts=FOpts}=FieldDef,
-    DecodePackWrapFn = mk_fn(d_field_, MsgName, FName),
-    FieldDefAsNonpacked = FieldDef#field{opts = FOpts -- [packed]},
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [DecodePackWrapFn]),
-     f("    ~p(Rest, N+7, X bsl N + Acc, Msg);~n", [DecodePackWrapFn]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, #~p{~p=AccSeq}=Msg) ->~n",
-       [DecodePackWrapFn, MsgName, FName]),
-     f("    Len = X bsl N + Acc,~n"),
-     f("    <<PackedBytes:Len/binary, Rest2/binary>> = Rest,~n"),
-     f("    NewSeq = ~p(PackedBytes~sAccSeq),~n",
-       [mk_fn(d_packed_field_, MsgName, FName),
-        case mk_field_decoder_vi_params(FieldDefAsNonpacked, no_fill) of
-            ""     -> [", "];
-            Params -> [", ", Params, ", "]
-        end]),
-     f("    NewMsg = Msg#~p{~p=NewSeq},~n", [MsgName, FName]),
-     f("    ~p(Rest2, 0, 0, NewMsg).~n~n", [mk_fn(d_read_field_def_, MsgName)]),
-     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
+format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
+    ExtValue = ?expr(X bsl N + Acc),
+    FVar = ?expr(NewFValue), %% result is to be put in this variable
+    Rest = ?expr(Rest),
+    Bindings = new_bindings([{'<Value>', ExtValue},
+                             {'<Rest>', Rest}]),
+    BodyTailFn =
+        fun(DecodeExprs, Rest2Var) ->
+                C = ?exprs(call_self('<Rest2>', 0, 0, ['<Res>' | AccSeq]),
+                           [replace_tree('<Rest2>', Rest2Var),
+                            replace_tree('<Res>', FVar)]),
+                DecodeExprs ++ C
+        end,
+    Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
+    gpb_codegen:format_fn(
+      mk_fn(d_packed_field_, MsgName, FName),
+      fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
+              call_self(Rest, N + 7, X bsl N + Acc, AccSeq);
+         (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
+              '<body>';
+         (<<>>, 0, 0, AccSeq) ->
+              AccSeq
+      end,
+      [splice_trees('<body>', Body)]).
 
 format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            format_vi_based_field_decoder_pap(MsgName, FieldDef, AnRes, Opts);
-        pass_as_record ->
-            format_vi_based_field_decoder_par(MsgName, FieldDef, Opts)
-    end.
+    #field{name=FName}=FieldDef,
+    ExtValue = ?expr(X bsl N + Acc),
+    FVar = ?expr(NewFValue), %% result is to be put in this variable
+    Rest = ?expr(Rest),
+    Bindings = new_bindings([{'<Value>', ExtValue},
+                             {'<Rest>', Rest}]),
+    Params = decoder_params(MsgName, AnRes),
+    InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
+    BodyTailFn =
+        fun(DecodeExprs, Rest2Var) ->
+                ReadFieldDefFn = mk_fn(d_read_field_def_, MsgName),
+                Params2 = updated_merged_params(MsgName, FieldDef, AnRes,
+                                                FVar, Params),
+                C = ?exprs('<call-read-field>'('<Rest2>', 0, 0, '<Params2>'),
+                           [replace_term('<call-read-field>', ReadFieldDefFn),
+                            replace_tree('<Rest2>', Rest2Var),
+                            splice_trees('<Params2>', Params2)]),
+                DecodeExprs ++ C
+        end,
+    Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
+    gpb_codegen:format_fn(
+      mk_fn(d_field_, MsgName, FName),
+      fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+              call_self(Rest, N + 7, X bsl N + Acc, '<Params>');
+         (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
+              '<body>'
+      end,
+      [splice_trees('<Params>', Params),
+       splice_trees('<InParams>', InParams),
+       splice_trees('<body>', Body)]).
 
-format_vi_based_field_decoder_pap(MsgName, FieldDef, AnRes, Opts) ->
-    NF = get_num_fields(MsgName, AnRes),
-    #field{type=Type, rnum=RNum, name=FName}=FieldDef,
-    Merge = classify_field_merge_action(FieldDef),
-    PassFieldVars = [[", ", f("F~w", [I])] || I <- lists:seq(1, NF)],
-    InFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "_";
-                             I == RNum-1, Merge == seqadd    -> f("F~w", [I]);
-                             I == RNum-1, Merge == msgmerge  -> f("F~w", [I]);
-                             I /= RNum-1                     -> f("F~w", [I])
-                          end]
-                   || I <- lists:seq(1, NF)],
-    MergeCode = case Merge of
-                    overwrite -> "";
-                    seqadd    -> f("    FValue2 = [FValue | F~w],~n", [RNum-1]);
-                    msgmerge  -> {msg,FMsgName} = Type,
-                                 f("    FValue2 = if F~w == undefined ->~n"
-                                   "                     FValue;~n"
-                                   "                 true ->~n"
-                                   "                     ~p(F~w, FValue)~n"
-                                   "              end,~n",
-                                   [RNum-1,
-                                    mk_fn(merge_msg_, FMsgName), RNum-1])
-                end,
-    OutFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "FValue";
-                              I == RNum-1, Merge == seqadd    -> "FValue2";
-                              I == RNum-1, Merge == msgmerge  -> "FValue2";
-                              I /= RNum-1                     -> f("F~w", [I])
-                           end]
-                    || I <- lists:seq(1, NF)],
-    BValueExpr = "X bsl N + Acc",
-    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
-                                         Opts),
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n"
-       "    ~p(Rest, N+7, X bsl N + Acc~s);~n",
-       [mk_fn(d_field_, MsgName, FName), PassFieldVars,
-        mk_fn(d_field_, MsgName, FName), PassFieldVars]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n",
-       [mk_fn(d_field_, MsgName, FName), InFieldVars]),
-     f("~s",
-       [FValueCode]),
-     f("~s",
-       [MergeCode]),
-     f("    ~p(~s, 0, 0~s).~n",
-       [mk_fn(d_read_field_def_, MsgName), RestVar, OutFieldVars])].
-
-format_vi_based_field_decoder_par(MsgName, FieldDef, Opts) ->
-    #field{type=Type, name=FName}=FieldDef,
-    BValueExpr = "X bsl N + Acc",
-    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
-                                         Opts),
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n"
-       "    ~p(Rest, N+7, X bsl N + Acc, Msg);~n",
-       [mk_fn(d_field_, MsgName, FName),
-        mk_fn(d_field_, MsgName, FName)]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n",
-       [mk_fn(d_field_, MsgName, FName)]),
-     f("~s",
-       [FValueCode]),
-     f("    NewMsg = ~p(FValue, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
-     f("    ~p(~s, 0, 0, NewMsg).~n",
-       [mk_fn(d_read_field_def_, MsgName), RestVar])].
-
-%% -> {FValueCode, Rest2Var}
-%% Produce code for setting a variable, FValueVar, depending on the
-%% varint type Type, for the raw unpacked expr, BValueExpr.
-%%
-%% The initial RestVar is the name of the variable holding the rest
-%% of the bytes. An updated -- or the same -- such variable is returned.
-%%
-%% Indent the code to Indent spaces.
-%% The resulting code contains one or more statements that ends with comma.
-mk_unpack_vi(Indent, FValueVar, BValueExpr, Type, RestVar, Opts) ->
-    Rest2Var = RestVar ++ "2",
+%% -> {[Expr], Rest2VarExpr}
+%% where [Expr] is a list of exprs to calculate the resulting decoded value
+decode_int_value(ResVar, Bindings, #field{type=Type}, Opts, TailFn) ->
+    Value = fetch_binding('<Value>', Bindings),
+    Rest = fetch_binding('<Rest>', Bindings),
+    StringsAsBinaries = proplists:get_bool(strings_as_binaries, Opts),
     case Type of
         sint32 ->
-            {[indent(Indent, f("BValue = ~s,~n", [BValueExpr])),
-              indent(Indent, f("~s = ~s,~n",
-                               [FValueVar,
-                                fmt_decode_zigzag(Indent+7, "BValue")]))],
-             RestVar};
+            TailFn(decode_zigzag_to_var(ResVar, Value), Rest);
         sint64 ->
-            {[indent(Indent, f("BValue = ~s,~n", [BValueExpr])),
-              indent(Indent, f("~s = ~s,~n",
-                               [FValueVar,
-                                fmt_decode_zigzag(Indent+7, "BValue")]))],
-             RestVar};
+            TailFn(decode_zigzag_to_var(ResVar, Value), Rest);
         int32 ->
-            {indent(Indent, f("~s,~n",
-                              [fmt_uint_to_int(BValueExpr, FValueVar, 32)])),
-             RestVar};
+            TailFn([uint_to_int_to_var(ResVar, Value, 32)], Rest);
         int64 ->
-            {indent(Indent, f("~s,~n",
-                              [fmt_uint_to_int(BValueExpr, FValueVar, 64)])),
-             RestVar};
+            TailFn([uint_to_int_to_var(ResVar, Value, 64)], Rest);
         uint32 ->
-            {indent(Indent, f("~s = ~s,~n", [FValueVar, BValueExpr])),
-             RestVar};
+            TailFn([assign_to_var(ResVar, Value)], Rest);
         uint64 ->
-            {indent(Indent, f("~s = ~s,~n", [FValueVar, BValueExpr])),
-             RestVar};
+            TailFn([assign_to_var(ResVar, Value)], Rest);
         bool ->
-            {indent(Indent, f("~s = ((~s) =/= 0),~n", [FValueVar, BValueExpr])),
-             RestVar};
+            Bool = ?expr('<Res>' = ('<Value>') =/= 0,
+                         [replace_tree('<Res>', ResVar),
+                          replace_tree('<Value>', Value)]),
+            TailFn([Bool], Rest);
         {enum, EnumName} ->
-            {[indent(Indent, f("~s,~n",
-                               [fmt_uint_to_int(BValueExpr, "EnumValue", 32)])),
-              indent(Indent, f("~s = ~p(EnumValue),~n",
-                               [FValueVar, mk_fn(d_enum_, EnumName)]))],
-             RestVar};
-        string ->
-            {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
-              case proplists:get_bool(strings_as_binaries, Opts) of
-                  false ->
-                      [indent(Indent, f("<<Utf8:Len/binary, ~s/binary>> = ~s,~n",
-                                        [Rest2Var, RestVar])),
-                       indent(Indent, f("~s = unicode:characters_to_list("
-                                        "Utf8,unicode),~n",
-                                        [FValueVar]))];
-                  true ->
-                      mk_unpack_bytes(Indent, FValueVar, RestVar, Rest2Var,
-                                      Opts)
-              end],
-             Rest2Var};
+            Tmp = ?expr(Tmp),
+            ToSym = [uint_to_int_to_var(Tmp, Value, 32),
+                     ?expr('<Res>' = decode_enum('<Int>'),
+                           [replace_tree('<Res>', ResVar),
+                            replace_term(decode_enum, mk_fn(d_enum_, EnumName)),
+                            replace_tree('<Int>', Tmp)])],
+            TailFn(ToSym, Rest);
+        string when StringsAsBinaries ->
+            Rest2 = ?expr(Rest2),
+            TailFn(unpack_bytes(ResVar, Value, Rest, Rest2, Opts),
+                   Rest2);
+        string when not StringsAsBinaries ->
+            Rest2 = ?expr(Rest2),
+            TailFn(?exprs(Len = '<Value>',
+                          <<Utf8:Len/binary, Rest2/binary>> = '<Rest>',
+                          '<Res>' = unicode:characters_to_list(Utf8, unicode),
+                          [replace_tree('<Value>', Value),
+                           replace_tree('<Rest>', Rest),
+                           replace_tree('<Res>', ResVar)]),
+                   Rest2);
         bytes ->
-            {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
-              mk_unpack_bytes(Indent, FValueVar, RestVar, Rest2Var, Opts)],
-             Rest2Var};
-        {msg,Msg2Name} ->
-            {[indent(Indent, f("Len = ~s,~n", [BValueExpr])),
-              indent(Indent, f("<<MsgBytes:Len/binary, ~s/binary>> = ~s,~n",
-                               [Rest2Var, RestVar])),
-              indent(Indent, f("~s = decode_msg(MsgBytes, ~p),~n",
-                               [FValueVar, Msg2Name]))],
-             Rest2Var}
+            Rest2 = ?expr(Rest2),
+            TailFn(unpack_bytes(ResVar, Value, Rest, Rest2, Opts),
+                   Rest2);
+        {msg, Msg2Name} ->
+            Rest2 = ?expr(Rest2),
+            TailFn(?exprs(Len = '<Value>',
+                          <<Bs:Len/binary, Rest2/binary>> = '<Rest>',
+                          '<Res>' = decode_msg(Bs, '<sub-msg-name>'),
+                          [replace_tree('<Value>', Value),
+                           replace_tree('<Rest>', Rest),
+                           replace_tree('<Res>', ResVar),
+                           replace_term('<sub-msg-name>', Msg2Name)]),
+                   Rest2)
     end.
 
-mk_unpack_bytes(I, FValueVar, RestVar, Rest2Var, Opts) ->
+unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
     CompilerHasBinary = (catch binary:copy(<<1>>)) == <<1>>,
     Copy = case proplists:get_value(copy_bytes, Opts, auto) of
                auto when not CompilerHasBinary -> false;
@@ -1934,196 +1934,162 @@ mk_unpack_bytes(I, FValueVar, RestVar, Rest2Var, Opts) ->
                N when is_integer(N)            -> N;
                N when is_float(N)              -> N
            end,
+    Transforms = [replace_tree('<Value>', Value),
+                  replace_tree('<Res>', ResVar),
+                  replace_tree('<Rest>', Rest),
+                  replace_tree('<Rest2>', Rest2),
+                  replace_term('<Copy>', Copy)],
     if Copy == false ->
-            indent(I, f("<<~s:Len/binary, ~s/binary>> = ~s,~n",
-                        [FValueVar, Rest2Var, RestVar]));
+            ?exprs(Len = '<Value>',
+                   <<'<Res>':Len/binary, '<Rest2>'/binary>> = '<Rest>',
+                   Transforms);
        Copy == true ->
-            [indent(I, f("<<Bytes:Len/binary, ~s/binary>> = ~s,~n",
-                         [Rest2Var, RestVar])),
-             indent(I, f("~s = binary:copy(Bytes),~n", [FValueVar]))];
+            ?exprs(Len = '<Value>',
+                   <<Bytes:Len/binary, '<Rest2>'/binary>> = '<Rest>',
+                   '<Res>' = binary:copy(Bytes),
+                   Transforms);
        is_integer(Copy); is_float(Copy) ->
-            I2 = I + length(FValueVar) + length(" = "),
-            [indent(I, f("<<Bytes:Len/binary, ~s/binary>> = ~s,~n",
-                         [Rest2Var, RestVar])),
-             indent(I, f("~s = case binary:referenced_byte_size(Bytes) of~n",
-                            [FValueVar])),
-             indent(I2+4, f("LB when LB >= byte_size(Bytes) * ~w ->~n", [Copy])),
-             indent(I2+4+4, f("binary:copy(Bytes);~n")),
-             indent(I2+4, f("_ ->~n")),
-             indent(I2+4+4, f("Bytes~n")),
-             indent(I2, f("end,~n"))]
+            ?exprs(Len = '<Value>',
+                   <<Bytes:Len/binary, '<Rest2>'/binary>> = '<Rest>',
+                   '<Res>' = case binary:referenced_byte_size(Bytes) of
+                                 LB when LB >= byte_size(Bytes) * '<Copy>' ->
+                                     binary:copy(Bytes);
+                                 _ ->
+                                     Bytes
+                             end,
+                   Transforms)
     end.
 
-fmt_uint_to_int(SrcStr, ResultVar, NumBits) ->
-    f("<<~s:~w/signed-native>> = <<(~s):~p/unsigned-native>>",
-      [ResultVar, NumBits, SrcStr, NumBits]).
-
-fmt_decode_zigzag(Indent, VarStr) ->
-    [f(              "if ~s band 1 =:= 0 -> ~s bsr 1;~n", [VarStr, VarStr]),
-     indent(Indent,f("   true -> -((~s + 1) bsr 1)~n", [VarStr])),
-     indent(Indent,f("end"))].
-
-format_uf32_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 32, 'little', FieldDef, AnRes).
-
-format_sf32_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 32, 'little-signed', FieldDef, AnRes).
-
-format_float_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 32, 'little-float', FieldDef, AnRes).
-
-format_uf64_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 64, 'little', FieldDef, AnRes).
-
-format_sf64_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 64, 'little-signed', FieldDef, AnRes).
-
-format_double_field_decoder(MsgName, FieldDef, AnRes) ->
-    format_f_field_decoder(MsgName, 64, 'little-float', FieldDef, AnRes).
-
-format_f_field_decoder(MsgName, BitLen, BitType, FieldDef, AnRes) ->
+updated_merged_params(MsgName, FieldDef, AnRes, NewValue, Params) ->
+    #field{name=FName, rnum=RNum} = FieldDef,
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
-            format_f_field_decoder_pap(MsgName, BitLen, BitType, FieldDef,
-                                       AnRes);
+            PrevValue = lists:nth(RNum - 1, Params),
+            MergedValue = merge_field_expr(FieldDef, PrevValue, NewValue),
+            lists_setelement(RNum - 1, Params, MergedValue);
         pass_as_record ->
-            format_f_field_decoder_par(MsgName, BitLen, BitType, FieldDef)
+            MsgVar = hd(Params),
+            PrevValue = record_access(MsgVar, MsgName, FName),
+            MergedValue = merge_field_expr(FieldDef, PrevValue, NewValue),
+            [record_update(MsgVar, MsgName, [{FName, MergedValue}])]
     end.
 
-format_f_field_decoder_pap(MsgName, BitLen, BitType, FieldDef, AnRes) ->
-    NF = get_num_fields(MsgName, AnRes),
-    #field{rnum=RNum, name=FName}=FieldDef,
-    Merge = classify_field_merge_action(FieldDef),
-    InFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "_";
-                             I == RNum-1, Merge == seqadd    -> f("F~w", [I]);
-                             I /= RNum-1                     -> f("F~w", [I])
-                          end]
-                   || I <- lists:seq(1, NF)],
-    MergeCode = case Merge of
-                    overwrite -> "";
-                    seqadd    -> f("    Value2 = [Value | F~w],~n", [RNum-1])
-                end,
-    OutFieldVars = [[", ", if I == RNum-1, Merge == overwrite -> "Value";
-                              I == RNum-1, Merge == seqadd    -> "Value2";
-                              I /= RNum-1                     -> f("F~w", [I])
-                           end]
-                    || I <- lists:seq(1, NF)],
-
-    [f("~p(<<Value:~p/~s, Rest/binary>>, _, _~s) ->~n",
-       [mk_fn(d_field_, MsgName, FName), BitLen, BitType, InFieldVars]),
-     f("~s", [MergeCode]),
-     f("    ~p(Rest, 0, 0~s).~n",
-       [mk_fn(d_read_field_def_, MsgName), OutFieldVars])].
-
-format_f_field_decoder_par(MsgName, BitLen, BitType, FieldDef)  ->
-    #field{name=FName}=FieldDef,
-    [f("~p(<<Value:~p/~s, Rest/binary>>, Msg) ->~n",
-       [mk_fn(d_field_, MsgName, FName), BitLen, BitType]),
-     f("    NewMsg = ~p(Value, Msg),~n", [mk_fn(add_field_, MsgName, FName)]),
-     f("    ~p(Rest, 0, 0, NewMsg).~n",
-       [mk_fn(d_read_field_def_, MsgName)])].
-
-format_packed_field_seq_decoder(MsgName, #field{type=Type}=FieldDef, Opts) ->
-    case Type of
-        fixed32  -> format_dpacked_nonvi(MsgName, FieldDef, 32, 'little');
-        sfixed32 -> format_dpacked_nonvi(MsgName, FieldDef, 32, 'little-signed');
-        float    -> format_dpacked_nonvi(MsgName, FieldDef, 32, 'little-float');
-        fixed64  -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little');
-        sfixed64 -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little-signed');
-        double   -> format_dpacked_nonvi(MsgName, FieldDef, 64, 'little-float');
-        _        -> format_dpacked_vi(MsgName, FieldDef, Opts)
+merge_field_expr(FieldDef, PrevValue, NewValue) ->
+    case classify_field_merge_action(FieldDef) of
+        overwrite ->
+            NewValue;
+        seqadd ->
+            ?expr(['<New>' | '<Acc>'],
+                  [replace_tree('<New>', NewValue),
+                   replace_tree('<Acc>', PrevValue)]);
+        msgmerge ->
+            #field{type={msg,FMsgName}} = FieldDef,
+            ?expr(if '<Prev>' == undefined -> '<New>';
+                     true -> '<merge-msgs>'('<Prev>', '<New>')
+                  end,
+                  [replace_term('<merge-msgs>', mk_fn(merge_msg_, FMsgName)),
+                   replace_tree('<Prev>', PrevValue),
+                   replace_tree('<New>', NewValue)])
     end.
 
-format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitType) ->
-    FnName = mk_fn(d_packed_field_, MsgName, FName),
-    [f("~p(<<Value:~p/~s, Rest/binary>>, AccSeq) ->~n",
-       [FnName, BitLen, BitType]),
-     f("    ~p(Rest, [Value | AccSeq]);~n", [FnName]),
-     f("~p(<<>>, AccSeq) ->~n", [FnName]),
-     f("    AccSeq.~n")].
-
-format_dpacked_vi(MsgName, #field{name=FName, type=Type}, Opts) ->
-    FnName = mk_fn(d_packed_field_, MsgName, FName),
-    BValueExpr = "X bsl N + Acc",
-    {FValueCode, RestVar} = mk_unpack_vi(4, "FValue", BValueExpr, Type, "Rest",
-                                         Opts),
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
-     f("    ~p(Rest, N+7, X bsl N + Acc, AccSeq);~n", [FnName]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->~n", [FnName]),
-     f("~s", [FValueCode]),
-     f("    ~p(~s, 0, 0, [FValue | AccSeq]);~n", [FnName, RestVar]),
-     f("~p(<<>>, 0, 0, AccSeq) ->~n", [FnName]),
-     f("    AccSeq.~n~n")].
-
-format_msg_decoder_reverse_toplevel(MsgName, MsgDef, AnRes) ->
+decoder_in_params(Params, MsgName, FieldDef, AnRes) ->
     case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> ""; %% handled in d_read_field_def_<Msg>
-        pass_as_record -> format_msg_decoder_reverse_toplevel_par(MsgName,MsgDef)
+        pass_as_params ->
+            #field{rnum=RNum} = FieldDef,
+            case classify_field_merge_action(FieldDef) of
+                overwrite -> lists_setelement(RNum-1, Params, ?expr(_));
+                seqadd    -> Params;
+                msgmerge  -> Params
+            end;
+        pass_as_record ->
+            Params
     end.
 
-format_msg_decoder_reverse_toplevel_par(MsgName, MsgDef) ->
-    MsgNameQLen = flength("~p", [MsgName]),
-    FieldsToReverse = [F || F <- MsgDef, F#field.occurrence == repeated],
-    if FieldsToReverse /= [] ->
-            FieldMatchings =
-                outdent_first(
-                  string:join(
-                    [indent(8+2+MsgNameQLen, f("~p=F~s", [FName, FName]))
-                     || #field{name=FName} <- FieldsToReverse],
-                    ",\n")),
-            FieldReversings =
-                outdent_first(
-                  string:join(
-                    [indent(8+2+MsgNameQLen, f("~p=lists:reverse(F~s)",
-                                               [FName, FName]))
-                     || #field{name=FName} <- FieldsToReverse],
-                    ",\n")),
-            [f("~p(~n", [mk_fn(d_reverse_toplevel_fields_, MsgName)]),
-             indent(8, f("#~p{~s}=Msg) ->~n", [MsgName, FieldMatchings])),
-             indent(4, f("Msg#~p{~s}.~n~n", [MsgName, FieldReversings]))];
-       true ->
-            [f("~p(Msg) ->~n", [mk_fn(d_reverse_toplevel_fields_, MsgName)]),
-             indent(4, f("Msg.~n~n"))]
-    end.
+format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
+    #field{name=FName, type=Type}=FieldDef,
+    {BitLen, BitTypes} = case Type of
+                             fixed32  -> {32, [little]};
+                             sfixed32 -> {32, [little,signed]};
+                             float    -> {32, [little,float]};
+                             fixed64  -> {64, [little]};
+                             sfixed64 -> {64, [little,signed]};
+                             double   -> {64, [little,float]}
+                         end,
+    Params = decoder_params(MsgName, AnRes),
+    InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
+    Value = ?expr(Value),
+    Params2 = updated_merged_params(MsgName, FieldDef, AnRes, Value, Params),
+    ReadFieldDefFnName = mk_fn(d_read_field_def_, MsgName),
+    gpb_codegen:format_fn(
+      mk_fn(d_field_, MsgName, FName),
+      fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, '<OutParams>')
+      end,
+      [replace_term('<N>', BitLen),
+       splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes]),
+       splice_trees('<InParams>', InParams),
+       replace_term('<call-read-field>', ReadFieldDefFnName),
+       splice_trees('<OutParams>', Params2)]).
 
-format_field_adders(MsgName, MsgDef, AnRes) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params -> ""; %% handled by passing other field params
-        pass_as_record -> format_field_adders(MsgName, MsgDef)
-    end.
+new_bindings(Tuples) ->
+    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
 
-format_field_adders(MsgName, MsgDef) ->
-    [case classify_field_merge_action(FieldDef) of
-         msgmerge  ->
-             format_field_msgmerge_adder(MsgName, FieldDef);
-         overwrite ->
-             format_field_overwrite_adder(MsgName, FieldDef);
-         seqadd ->
-             case is_packed(FieldDef) of
-                 false -> format_field_seqappend_adder(MsgName, FieldDef);
-                 true  -> ""
-             end
-     end
-     || FieldDef <- MsgDef].
+new_bindings() ->
+    dict:new().
 
-format_field_overwrite_adder(MsgName, #field{name=FName}) ->
-    FAdderFn = mk_fn(add_field_, MsgName, FName),
-    [f("~p(NewValue, Msg) ->~n", [FAdderFn]),
-     f("    Msg#~p{~p = NewValue}.~n~n", [MsgName, FName])].
+add_binding({Key, Value}, Bindings) ->
+    dict:store(Key, Value, Bindings).
 
-format_field_seqappend_adder(MsgName, #field{name=FName}) ->
-    FAdderFn = mk_fn(add_field_, MsgName, FName),
-    [f("~p(NewValue, #~p{~p=PrevElems}=Msg) ->~n", [FAdderFn, MsgName, FName]),
-     f("    Msg#~p{~p = [NewValue | PrevElems]}.~n~n", [MsgName, FName])].
+fetch_binding(Key, Bindings) ->
+    dict:fetch(Key, Bindings).
 
-format_field_msgmerge_adder(MsgName, #field{name=FName, type={msg,FMsgName}}) ->
-    FAdderFn = mk_fn(add_field_, MsgName, FName),
-    MergeFn = mk_fn(merge_msg_, FMsgName),
-    [f("~p(NewValue, #~p{~p=undefined}=Msg) ->~n", [FAdderFn, MsgName, FName]),
-     f("    Msg#~p{~p = NewValue};~n", [MsgName, FName]),
-     f("~p(NewValue, #~p{~p=PrevValue}=Msg) ->~n", [FAdderFn, MsgName, FName]),
-     f("    Msg#~p{~p = ~p(PrevValue, NewValue)}.~n~n",
-       [MsgName, FName, MergeFn])].
+%% Aliases to improve readability
+record_match(RName, Fields) -> record_create_or_match(RName, Fields).
+record_create(RName, Fields) -> record_create_or_match(RName, Fields).
+
+record_create_or_match(RecordName, FieldsValueTrees) ->
+    record_update(none, RecordName, FieldsValueTrees).
+
+record_update(Var, _RecordName, []) when Var /= none ->
+    %% No updates to be made, maybe no fields
+    Var;
+record_update(Var, RecordName, FieldsValueTrees) ->
+    erl_syntax:record_expr(
+      Var,
+      erl_syntax:atom(RecordName),
+      [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
+       || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
+
+record_access(Var, RecordName, FieldName) ->
+    erl_syntax:record_access(Var,
+                             erl_syntax:atom(RecordName),
+                             erl_syntax:atom(FieldName)).
+
+var_f_n(N) -> var_n("F", N).
+var_b_n(N) -> var_n("B", N).
+
+var_n(S, N) ->
+    erl_syntax:variable(?ff("~s~w", [S, N])).
+
+assign_to_var(Var, Expr) ->
+    ?expr('<Var>' = '<Expr>',
+          [replace_tree('<Var>', Var),
+           replace_tree('<Expr>', Expr)]).
+
+decode_zigzag_to_var(ResVar, ValueExpr) ->
+    ?exprs(ZValue = '<Value>',
+           '<Res>' = if ZValue band 1 =:= 0 -> ZValue bsr 1;
+                        true                -> -((ZValue + 1) bsr 1)
+                     end,
+           [replace_tree('<Value>', ValueExpr),
+            replace_tree('<Res>', ResVar)]).
+
+uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
+    ?expr(
+       <<'<Res>':'<N>'/signed-native>> = <<('<Value>'):'<N>'/unsigned-native>>,
+       [replace_term('<N>', NumBits),
+        replace_tree('<Res>', ResVar),
+        replace_tree('<Value>', ValueExpr)]).
 
 classify_field_merge_action(FieldDef) ->
     case FieldDef of
@@ -2134,7 +2100,6 @@ classify_field_merge_action(FieldDef) ->
         #field{occurrence=repeated}                -> seqadd
     end.
 
-
 format_msg_merge_code(Defs, AnRes) ->
     MsgNames = [MsgName || {{msg, MsgName}, _MsgDef} <- Defs],
     [format_merge_msgs_top_level(MsgNames),
@@ -2142,69 +2107,82 @@ format_msg_merge_code(Defs, AnRes) ->
       || {{msg, MsgName}, MsgDef} <- Defs]].
 
 format_merge_msgs_top_level([]) ->
-    [f("merge_msgs(_Prev, New) ->~n"),
-     f("    New.~n"),
-     f("~n")];
+    gpb_codegen:format_fn(
+      merge_msgs,
+      fun(_Prev, New) -> New end);
 format_merge_msgs_top_level(MsgNames) ->
-    [f("merge_msgs(Prev, New) when element(1, Prev) == element(1, New) ->~n"),
-     f("   case Prev of~n"),
-     f("       ~s~n", [format_merger_top_level_cases(MsgNames)]),
-     f("   end.~n"),
-     f("~n")].
+    gpb_codegen:format_fn(
+      merge_msgs,
+      fun(Prev, New) when element(1, Prev) =:= element(1, New) ->
+              case Prev of
+                  '<msg-type>' -> '<merge-call>'
+              end
+      end,
+      [splice_clauses('<msg-type>', merger_top_level_cases(MsgNames))]).
 
-format_merger_top_level_cases(MsgNames) ->
-    string:join([f("#~p{} -> ~p(Prev, New)", [MName, mk_fn(merge_msg_, MName)])
-                 || MName <- MsgNames],
-                ";\n        ").
-
+merger_top_level_cases(MsgNames) ->
+    [gpb_codegen:case_clause(
+       case dummy of '#Msg{}' -> '<merge-msg>'(Prev, New) end,
+       [replace_tree('#Msg{}', record_match(MsgName, [])),
+        replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))])
+     || MsgName <- MsgNames].
 
 format_msg_merger(MsgName, [], _AnRes) ->
-    MergeFn = mk_fn(merge_msg_, MsgName),
-    [f("~p(_Prev, New) ->~n", [MergeFn]),
-     f("    New.~n~n")];
+    gpb_codegen:format_fn(
+      mk_fn(merge_msg_, MsgName),
+      fun(_Prev, New) -> New end);
 format_msg_merger(MsgName, MsgDef, AnRes) ->
-    MergeFn = mk_fn(merge_msg_, MsgName),
-    FInfos = [{classify_field_merge_action(Field), Field} || Field <- MsgDef],
-    ToOverwrite = [Field || {overwrite, Field} <- FInfos],
-    ToMsgMerge  = [Field || {msgmerge, Field} <- FInfos],
-    ToSeqAdd    = [Field || {seqadd, Field} <- FInfos],
+    {PFields, NFields, Mergings} = compute_msg_field_merge_exprs(MsgDef),
+    Transforms = [replace_tree('<Prev>', record_match(MsgName, PFields)),
+                  replace_tree('<New>', record_match(MsgName, NFields)),
+                  replace_tree('<merge>', record_create(MsgName, Mergings))],
+    MsgUndefFnClauses =
+        case occurs_as_optional_submsg(MsgName, AnRes) of
+            true ->
+                [?fn_clause(fun(Prev, undefined) -> Prev end),
+                 ?fn_clause(fun(undefined, New)  -> New end)];
+            false ->
+                []
+        end,
 
-    MatchIndent = flength("~p(#~p{", [MergeFn, MsgName]),
-    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
+    gpb_codegen:format_fn(
+      mk_fn(merge_msg_, MsgName),
+      fun('<msg-undefined-handling>', _) -> '<return-the-defined-msg>';
+         ('<Prev>', '<New>')             -> '<merge>'
+      end,
+      Transforms ++ [splice_clauses('<msg-undefined-handling>',
+                                    MsgUndefFnClauses)]).
 
-    PFieldMatchings = string:join([f("~p=PF~s", [FName, FName])
-                                   || #field{name=FName} <- MsgDef],
-                                  MatchCommaSep),
-    NFieldMatchings = string:join([f("~p=NF~s", [FName, FName])
-                                   || #field{name=FName} <- MsgDef],
-                                  MatchCommaSep),
-
-    %% FIXME: reverse order?? ie: do NF ++ PF??
-    %%        we'll reverse _top-level_ seq fields lastly when decoding
-    UpdateIndent = flength("    #~p(", [MsgName]),
-    Overwritings = [begin
-                        FUpdateIndent = UpdateIndent + flength("~p = ",[FName]),
-                        [f("~p = if NF~s == undefined -> PF~s;~n",
-                           [FName, FName, FName]),
-                         indent(FUpdateIndent + 3, f("true -> NF~s~n", [FName])),
-                         indent(FUpdateIndent, f("end"))]
-                    end
-                    || #field{name=FName} <- ToOverwrite],
-    SeqAddings = [f("~p = PF~s ++ NF~s", [FName, FName, FName])
-                  || #field{name=FName} <- ToSeqAdd],
-    MsgMergings = [f("~p = ~p(PF~s, NF~s)", [FName, mk_fn(merge_msg_, FMsgName),
-                                             FName, FName])
-                   || #field{name=FName, type={msg,FMsgName}} <- ToMsgMerge],
-    UpdateCommaSep = f(",~n~s", [indent(UpdateIndent, "")]),
-    FieldUpdatings = string:join(Overwritings ++ SeqAddings ++ MsgMergings,
-                                 UpdateCommaSep),
-    FnIndent = flength("~p(", [MergeFn]),
-    [[[f("~p(Prev, undefined) -> Prev;~n", [MergeFn]),
-       f("~p(undefined, New) -> New;~n", [MergeFn])]
-      || occurs_as_optional_submsg(MsgName, AnRes)],
-     f("~p(#~p{~s},~n", [MergeFn, MsgName, PFieldMatchings]),
-     indent(FnIndent, f("#~p{~s}) ->~n", [MsgName, NFieldMatchings])),
-     f("    #~p{~s}.~n~n", [MsgName, FieldUpdatings])].
+compute_msg_field_merge_exprs(MsgDef) ->
+    PFields = [{FName, erl_syntax:variable(?ff("PF~s", [FName]))}
+               || #field{name=FName} <- MsgDef],
+    NFields = [{FName, erl_syntax:variable(?ff("NF~s", [FName]))}
+               || #field{name=FName} <- MsgDef],
+    Mergings =
+    [begin
+         {value, {FName, PF}} = lists:keysearch(FName, 1, PFields),
+         {value, {FName, NF}} = lists:keysearch(FName, 1, NFields),
+         Transforms = [replace_tree('<PF>', PF),
+                       replace_tree('<NF>', NF)],
+         Expr = case classify_field_merge_action(Field) of
+                    overwrite ->
+                        ?expr(if '<NF>' =:= undefined -> '<PF>';
+                                 true                 -> '<NF>'
+                              end,
+                              Transforms);
+                    seqadd ->
+                        ?expr('<PF>' ++ '<NF>', Transforms);
+                    msgmerge ->
+                        #field{type={msg,SubMsgName}}=Field,
+                        MergeFn = mk_fn(merge_msg_, SubMsgName),
+                        NewTranform = replace_term('<merge>', MergeFn),
+                        MTransforms = [NewTranform | Transforms],
+                        ?expr('<merge>'('<PF>', '<NF>'), MTransforms)
+                end,
+         {FName, Expr}
+     end
+     || #field{name=FName}=Field <- MsgDef],
+    {PFields, NFields, Mergings}.
 
 occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
     %% Note: order of evaluation below is important (the exprs of `andalso'):
@@ -2213,93 +2191,78 @@ occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
         lists:member(optional, dict:fetch(MsgName, Occurrences)).
 
 format_field_skippers(MsgName, AnRes) ->
-    case get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            NF = get_num_fields(MsgName, AnRes),
-            [format_varint_skipper_pap(MsgName, NF),
-             format_length_delimited_skipper_pap(MsgName, NF),
-             format_bit_skipper_pap(MsgName, 32, NF),
-             format_bit_skipper_pap(MsgName, 64, NF)];
-        pass_as_record ->
-            [format_varint_skipper_par(MsgName),
-             format_length_delimited_skipper_par(MsgName),
-             format_bit_skipper_par(MsgName, 32),
-             format_bit_skipper_par(MsgName, 64)]
-    end.
-
-format_varint_skipper_pap(MsgName, NF) ->
-    SkipFn = mk_fn(skip_varint_, MsgName),
-    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
-    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
-    [f("~p(<<0:1, _:7, Rest/binary>>, _, _~s) ->~n", [SkipFn, PassFieldVars]),
-     f("    ~p(Rest, 0, 0~s);~n", [ReadFieldFn, PassFieldVars]),
-     f("~p(<<1:1, _:7, Rest/binary>>, X1, X2~s) ->~n", [SkipFn, PassFieldVars]),
-     f("    ~p(Rest, X1, X2~s).~n~n", [SkipFn, PassFieldVars])].
-
-format_varint_skipper_par(MsgName) ->
-    SkipFn = mk_fn(skip_varint_, MsgName),
-    [f("~p(<<0:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
-     f("    ~p(Rest, 0, 0, Msg);~n", [mk_fn(d_read_field_def_, MsgName)]),
-     f("~p(<<1:1, _:7, Rest/binary>>, Msg) ->~n", [SkipFn]),
-     f("    ~p(Rest, Msg).~n~n", [SkipFn])].
-
-format_length_delimited_skipper_pap(MsgName, NF) ->
-    SkipFn = mk_fn(skip_length_delimited_, MsgName),
-    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
-    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc~s) ->~n", [SkipFn, PassFieldVars]),
-     f("    ~p(Rest, N+7, X bsl N + Acc~s);~n", [SkipFn, PassFieldVars]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc~s) ->~n", [SkipFn, PassFieldVars]),
-     f("    Length = X bsl N + Acc,~n"),
-     f("    <<_:Length/binary, Rest2/binary>> = Rest,~n"),
-     f("    ~p(Rest2, 0, 0~s).~n~n", [ReadFieldFn, PassFieldVars])].
-
-format_length_delimited_skipper_par(MsgName) ->
-    SkipFn = mk_fn(skip_length_delimited_, MsgName),
-    [f("~p(<<1:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    ~p(Rest, N+7, X bsl N + Acc, Msg);~n", [SkipFn]),
-     f("~p(<<0:1, X:7, Rest/binary>>, N, Acc, Msg) ->~n", [SkipFn]),
-     f("    Length = X bsl N + Acc,~n"),
-     f("    <<_:Length/binary, Rest2/binary>> = Rest,~n"),
-     f("    ~p(Rest2, 0, 0, Msg).~n~n", [mk_fn(d_read_field_def_, MsgName)])].
-
-format_bit_skipper_pap(MsgName, BitLen, NF) ->
-    SkipFn = mk_fn(skip_, BitLen, MsgName),
-    ReadFieldFn = mk_fn(d_read_field_def_, MsgName),
-    PassFieldVars = [f(", F~w", [I]) || I <- lists:seq(1,NF)],
-    [f("~p(<<_:~w, Rest/binary>>, _, _~s) ->~n",
-       [SkipFn, BitLen, PassFieldVars]),
-     f("    ~p(Rest, 0, 0~s).~n~n",  [ReadFieldFn, PassFieldVars])].
-
-format_bit_skipper_par(MsgName, BitLen) ->
-    SkipFn = mk_fn(skip_, BitLen, MsgName),
-    [f("~p(<<_:~w, Rest/binary>>, Msg) ->~n", [SkipFn, BitLen]),
-     f("    ~p(Rest, 0, 0, Msg).~n~n",  [mk_fn(d_read_field_def_, MsgName)])].
-
+    SkipVarintFnName = mk_fn(skip_varint_, MsgName),
+    SkipLenDelimFnName = mk_fn(skip_length_delimited_, MsgName),
+    ReadFieldFnName = mk_fn(d_read_field_def_, MsgName),
+    Params = decoder_params(MsgName, AnRes),
+    [%% skip_varint_<MsgName>/2,4
+     gpb_codegen:format_fn(
+       SkipVarintFnName,
+       fun(<<1:1, _:7, Rest/binary>>, Z1, Z2, '<Params>') ->
+               '<call-recursively>'(Rest, Z1, Z2, '<Params>');
+          (<<0:1, _:7, Rest/binary>>, Z1, Z2, '<Params>') ->
+               '<call-read-field>'(Rest, Z1,Z2, '<Params>')
+       end,
+       [replace_term('<call-recursively>', SkipVarintFnName),
+        replace_term('<call-read-field>', ReadFieldFnName),
+        splice_trees('<Params>', Params)]),
+     "\n",
+     %% skip_length_delimited_<MsgName>/4
+     gpb_codegen:format_fn(
+       SkipLenDelimFnName,
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               '<call-recursively>'(Rest, N+7, X bsl N + Acc, '<Params>');
+          (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+               Length = X bsl N + Acc,
+               <<_:Length/binary, Rest2/binary>> = Rest,
+               '<call-read-field>'(Rest2, 0, 0, '<Params>')
+       end,
+       [replace_term('<call-recursively>', SkipLenDelimFnName),
+        replace_term('<call-read-field>', ReadFieldFnName),
+        splice_trees('<Params>', Params)]),
+     "\n",
+     %% skip_32_<MsgName>/2,4
+     %% skip_64_<MsgName>/2,4
+     [[gpb_codegen:format_fn(
+         mk_fn(skip_, NumBits, MsgName),
+         fun(<<_:'<NumBits>', Rest/binary>>, Z1, Z2, '<Params>') ->
+                 '<call-read-field>'(Rest, Z1, Z2, '<Params>')
+         end,
+         [replace_term('<call-read-field>', ReadFieldFnName),
+          replace_term('<NumBits>', NumBits),
+          splice_trees('<Params>', Params)]),
+       "\n"]
+      || NumBits <- [32, 64]]].
 
 format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
 
 format_msg_nif_error_wrapper(MsgName) ->
-    FnName = mk_fn(d_msg_, MsgName),
-    f("~p(Bin) ->~n"
-      "    erlang:nif_error({error,{nif_not_loaded,~p}}, [Bin]).~n~n",
-     [FnName, MsgName]).
+    gpb_codegen:format_fn(
+      mk_fn(d_msg_, MsgName),
+      fun(Bin) ->
+              erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Bin])
+      end,
+      [replace_term('<msg-name>', MsgName)]).
 
 %% -- verifiers -----------------------------------------------------
 
-format_verifier_topcase(Indent, Defs, MsgVar) ->
-    IndStr = indent(Indent+4, ""),
-    ElseCase = "_ -> mk_type_error(not_a_known_message, Msg, [])",
-    ["case ", MsgVar, " of\n",
-     IndStr,
-     string:join([f("#~p{} -> ~p(~s, [~p])",
-                    [MsgName, mk_fn(v_msg_, MsgName), MsgVar, MsgName])
-                  || {{msg, MsgName}, _MsgDef} <- Defs] ++ [ElseCase],
-                 ";\n"++IndStr),
-     "\n",
-     indent(Indent, "end")].
+format_verifiers_top_function(Defs) ->
+    gpb_codegen:format_fn(
+      verify_msg,
+      fun(Msg) ->
+              case Msg of
+                  '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>']);
+                  _ -> mk_type_error(not_a_known_message, Msg, [])
+              end
+      end,
+      [repeat_clauses(
+         '<msg-match>',
+         [[replace_tree('<msg-match>', record_match(MsgName, [])),
+           replace_term('<verify-msg>', mk_fn(v_msg_, MsgName)),
+           replace_term('<MsgName>', MsgName)]
+          || {{msg, MsgName}, _MsgDef} <- Defs])]).
 
 format_verifiers(Defs, AnRes, _Opts) ->
     [format_msg_verifiers(Defs, AnRes),
@@ -2312,58 +2275,62 @@ format_msg_verifiers(Defs, AnRes) ->
     [format_msg_verifier(MsgName, MsgDef, AnRes)
      || {{msg,MsgName}, MsgDef} <- Defs].
 
-format_msg_verifier(MsgName, [], AnRes) ->
-    FnName = mk_fn(v_msg_, MsgName),
-    [f("~p(#~p{}, _Path) ->~n", [FnName, MsgName]),
-     f("    ok"),
-     [[f(     ";~n"),
-       f("~p(X, Path) ->~n", [FnName]),
-       f("    mk_type_error({expected_msg,~p}, X, Path)", [MsgName])]
-      || can_occur_as_sub_msg(MsgName, AnRes)],
-     f(".~n~n")];
 format_msg_verifier(MsgName, MsgDef, AnRes) ->
-    FnName = mk_fn(v_msg_, MsgName),
-    MatchIndent = flength("~p(#~p{", [FnName, MsgName]),
-    MatchCommaSep = f(",~n~s", [indent(MatchIndent, "")]),
-    FieldMatchings = string:join([f("~p=F~s", [FName, FName])
-                                  || #field{name=FName} <- MsgDef],
-                                 MatchCommaSep),
-    [f("~p(#~p{~s}, Path) ->~n", [FnName, MsgName, FieldMatchings]),
-     [begin
-          FVerifierFn = case Type of
-                            {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
-                            {enum,EnumName} -> mk_fn(v_enum_, EnumName);
-                            Type            -> mk_fn(v_type_, Type)
-                        end,
-          [indent_lines(
-             4,
-             case Occurrence of
-                 required ->
-                     %% FIXME: check especially for `undefined'
-                     %% and if found, error out with required_field_not_set
-                     %% specifying expected type
-                     [f("~p(F~s, [~p | Path])", [FVerifierFn, FName, FName])];
-                 repeated ->
-                     [f("if is_list(F~s) ->~n", [FName]),
-                      f("       [~p(Elem, [~p | Path]) || Elem <- F~s];~n",
-                        [FVerifierFn, FName, FName]),
-                      f("   true ->~n"),
-                      f("       mk_type_error({invalid_list_of,~p},F~s,Path)~n",
-                        [Type, FName]),
-                      f("end")];
-                 optional ->
-                     [f("[~p(F~s, [~p | Path]) || F~s /= undefined]",
-                        [FVerifierFn, FName, FName, FName])]
-             end),
-           f(",~n")]
-      end
-      || #field{name=FName, type=Type, occurrence=Occurrence} <- MsgDef],
-     f("    ok"),
-     [[f(     ";~n"),
-       f("~p(X, Path) ->~n", [FnName]),
-       f("    mk_type_error({expected_msg,~p}, X, Path)", [MsgName])]
-      || can_occur_as_sub_msg(MsgName, AnRes)],
-     f(".~n~n")].
+    FVars = [{var_f_n(I), Field} || {I, Field} <- index_seq(MsgDef)],
+    RFields = [{FName, Var} || {Var, #field{name=FName}} <- FVars],
+    gpb_codegen:format_fn(
+      mk_fn(v_msg_, MsgName),
+      fun('<msg-match>', '<Path>') ->
+              '<verify-fields>',
+              ok;
+         ('<X>', Path) ->
+              mk_type_error({expected_msg,'<MsgName>'}, X, Path)
+      end,
+      [replace_tree('<msg-match>', record_match(MsgName, RFields)),
+       replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
+                                 MsgDef /= [] -> ?expr(Path)
+                              end),
+       splice_trees('<verify-fields>', field_verifiers(FVars)),
+       repeat_clauses('<X>', case can_occur_as_sub_msg(MsgName, AnRes) of
+                                 true  -> [[replace_tree('<X>', ?expr(X))]];
+                                 false -> [] %% omit the else clause
+                             end)]).
+
+field_verifiers(FVars) ->
+    [begin
+         FVerifierFn = case Type of
+                           {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
+                           {enum,EnumName} -> mk_fn(v_enum_, EnumName);
+                           Type            -> mk_fn(v_type_, Type)
+                       end,
+         Replacements = [replace_term('<verify-fn>', FVerifierFn),
+                         replace_tree('<F>', FVar),
+                         replace_term('<FName>', FName),
+                         replace_term('<Type>', Type)],
+         case Occurrence of
+             required ->
+                 %% FIXME: check especially for `undefined'
+                 %% and if found, error out with required_field_not_set
+                 %% specifying expected type
+                 ?expr('<verify-fn>'('<F>', ['<FName>' | Path]),
+                       Replacements);
+             repeated ->
+                 ?expr(if is_list('<F>') ->
+                               ['<verify-fn>'(Elem, ['<FName>' | Path])
+                                || Elem <- '<F>'];
+                          true ->
+                               mk_type_error(
+                                 {invalid_list_of, '<Type>'}, '<F>', Path)
+                       end,
+                       Replacements);
+             optional ->
+                 ?expr(if '<F>' == undefined -> ok;
+                          true -> '<verify-fn>'('<F>', ['<FName>', Path])
+                       end,
+                       Replacements)
+         end
+     end
+     || {FVar, #field{name=FName, type=Type, occurrence=Occurrence}} <- FVars].
 
 can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
     sets:is_element({msg,MsgName}, UsedTypes).
@@ -2374,11 +2341,14 @@ format_enum_verifiers(Defs, #anres{used_types=UsedTypes}) ->
         smember({enum, EnumName}, UsedTypes)].
 
 format_enum_verifier(EnumName, EnumMembers) ->
-    FnName = mk_fn(v_enum_, EnumName),
-    [[f("~p(~p, _) -> ok;~n", [FnName, EnumSym]) || {EnumSym,_} <- EnumMembers],
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error({invalid_enum,~p}, X, Path).~n", [EnumName]),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_enum_, EnumName),
+      fun('<sym>', _Path) -> ok;
+         (X, Path) -> mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
+      end,
+      [repeat_clauses('<sym>', [[replace_term('<sym>', EnumSym)]
+                                || {EnumSym, _Value} <- EnumMembers]),
+       replace_term('<EnumName>', EnumName)]).
 
 format_type_verifiers(#anres{used_types=UsedTypes}) ->
     [[format_int_verifier(sint32, signed, 32)   || smember(sint32, UsedTypes)],
@@ -2398,7 +2368,6 @@ format_type_verifiers(#anres{used_types=UsedTypes}) ->
      [format_bytes_verifier()                   || smember(bytes, UsedTypes)]].
 
 format_int_verifier(IntType, Signedness, NumBits) ->
-    FnName = mk_fn(v_type_, IntType),
     Min = case Signedness of
               unsigned -> 0;
               signed   -> -(1 bsl (NumBits-1))
@@ -2407,85 +2376,103 @@ format_int_verifier(IntType, Signedness, NumBits) ->
               unsigned -> 1 bsl NumBits - 1;
               signed   -> 1 bsl (NumBits-1) - 1
           end,
-    [f("~p(N, _P) when ~w =< N, N =< ~w ->~n", [FnName, Min, Max]),
-     f("    ok;~n"),
-     f("~p(N, Path) when is_integer(N) ->~n", [FnName]),
-     f("    mk_type_error({value_out_of_range, ~p, ~p, ~w}, N, Path);~n",
-       [IntType, Signedness, NumBits]),
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error({bad_integer, ~p, ~p, ~w}, X, Path).~n",
-       [IntType, Signedness, NumBits]),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, IntType),
+      fun(N, _Path) when '<Min>' =< N, N =< '<Max>' ->
+              ok;
+         (N, Path) when is_integer(Path) ->
+              mk_type_error({value_out_of_range, '<details>'}, N, Path);
+         (X, Path) ->
+              mk_type_error({bad_integer, '<details>'}, X, Path)
+      end,
+      [replace_term('<Min>', Min),
+       replace_term('<Max>', Max),
+       splice_trees('<details>', [erl_syntax:atom(IntType),
+                                  erl_syntax:atom(Signedness),
+                                  erl_syntax:integer(NumBits)])]).
 
 format_bool_verifier() ->
-    FnName = mk_fn(v_type_, bool),
-    [f("~p(false, _Path) -> ok;~n", [FnName]),
-     f("~p(true, _Path)  -> ok;~n", [FnName]),
-     f("~p(X, Path)  -> mk_type_error(bad_boolean_value, X, Path).~n",
-       [FnName]),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, bool),
+      fun(false, _Path) -> ok;
+         (true, _Path)  -> ok;
+         (X, Path) -> mk_type_error(bad_boolean_value, X, Path)
+      end).
 
 format_float_verifier(FlType) ->
-    FnName = mk_fn(v_type_, FlType),
-    [f("~p(N, _Path) when is_float(N) -> ok;~n", [FnName]),
-     %% It seems a float for the corresponding integer value is
-     %% indeed packed when doing <<Integer:32/little-float>>.
-     %% So let verify accept integers too.
-     %% When such a value is unpacked, we get a float.
-     f("~p(N, _Path) when is_integer(N) -> ok;~n", [FnName]),
-     f("~p(X, Path)  -> mk_type_error(bad_~w_value, X, Path).~n",
-       [FnName, FlType]),
-     f("~n")].
+    BadTypeOfValue = list_to_atom(lists:concat(["bad_", FlType, "_value"])),
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, FlType),
+      fun(N, _Path) when is_float(N) -> ok;
+         %% It seems a float for the corresponding integer value is
+         %% indeed packed when doing <<Integer:32/little-float>>.
+         %% So let verify accept integers too.
+         %% When such a value is unpacked, we get a float.
+         (N, _Path) when is_integer(N) -> ok;
+         (X, Path) -> mk_type_error('<bad_x_value>', X, Path)
+      end,
+      [replace_term('<bad_x_value>', BadTypeOfValue)]).
 
 format_string_verifier() ->
-    FnName = mk_fn(v_type_, string),
-    [f("~p(S, Path) when is_list(S) ->~n", [FnName]),
-     f("    try unicode:characters_to_binary(S),~n"),
-     f("        ok~n"),
-     f("    catch error:badarg ->~n"),
-     f("        mk_type_error(bad_unicode_string, S, Path)~n"),
-     f("    end;~n"),
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error(bad_unicode_string, X, Path).~n"),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, string),
+      fun(S, Path) when is_list(S) ->
+              try
+                  unicode:characters_to_binary(S),
+                  ok
+              catch error:badarg ->
+                      mk_type_error(bad_unicode_string, S, Path)
+              end;
+         (X, Path) ->
+              mk_type_error(bad_unicode_string, X, Path)
+      end).
 
 format_bytes_verifier() ->
-    FnName = mk_fn(v_type_, bytes),
-    [f("~p(B, _Path) when is_binary(B) ->~n", [FnName]),
-     f("    ok;~n"),
-     f("~p(X, Path) ->~n", [FnName]),
-     f("    mk_type_error(bad_binary_value, X, Path).~n"),
-     f("~n")].
+    gpb_codegen:format_fn(
+      mk_fn(v_type_, bytes),
+      fun(B, _Path) when is_binary(B) ->
+              ok;
+         (X, Path) ->
+              mk_type_error(bad_binary_value, X, Path)
+      end).
 
 format_verifier_auxiliaries() ->
-    [f("mk_type_error(Error, ValueSeen, Path) ->~n"),
-     f("    Path2 = prettify_path(Path),~n"),
-     f("    erlang:error({gpb_type_error,~n"),
-     f("                  {Error, [{value, ValueSeen},{path, Path2}]}}).~n"),
-     f("~n"),
-     f("prettify_path([]) ->~n"),
-     f("    top_level;~n"),
-     f("prettify_path(PathR) ->~n"),
-     f("    list_to_atom(~n"),
-     f("      string:join(~n"),
-     f("        lists:map(fun atom_to_list/1, lists:reverse(PathR)),~n"),
-     f("        \".\")).~n"),
-     f("~n")].
+    [gpb_codegen:format_fn(
+       mk_type_error,
+       fun(Error, ValueSeen, Path) ->
+               Path2 = prettify_path(Path),
+               erlang:error({gpb_type_error,
+                             {Error, [{value, ValueSeen},{path, Path2}]}})
+       end),
+     "\n",
+     gpb_codegen:format_fn(
+       prettify_path,
+       fun([]) ->
+               top_level;
+          (PathR) ->
+               list_to_atom(
+                 string:join(
+                   lists:map(fun atom_to_list/1, lists:reverse(PathR)),
+                   "."))
+       end)].
 
 %% -- message defs -----------------------------------------------------
 
 format_introspection(Defs) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
-    [f("get_msg_defs() ->~n"
-       "    [~s].~n", [outdent_first(format_msgs_and_enums(5, Defs))]),
-     f("~n"),
-     f("get_msg_names() ->~n"
-       "    ~p.~n", [[MsgName || {{msg,MsgName},_Fields} <- Defs]]),
-     f("~n"),
-     f("get_enum_names() ->~n"
-       "    ~p.~n", [[EnumName || {{enum,EnumName},_Enums} <- Defs]]),
-     f("~n"),
+    [gpb_codegen:format_fn(
+       get_msg_defs, fun() -> '<Defs>' end,
+       [replace_tree('<Defs>', def_trees(EnumDefs, MsgDefs))]),
+     "\n",
+     gpb_codegen:format_fn(
+       get_msg_names, fun() -> '<Names>' end,
+       [replace_term('<Names>', [MsgName || {{msg,MsgName}, _} <- Defs])]),
+     "\n",
+     gpb_codegen:format_fn(
+       get_enum_names, fun() -> '<Names>' end,
+       [replace_term('<Names>', [EnumName || {{enum,EnumName}, _} <- Defs])]),
+     "\n",
      format_fetch_msg_defs(MsgDefs),
      f("~n"),
      format_fetch_enum_defs(EnumDefs),
@@ -2499,79 +2486,75 @@ format_introspection(Defs) ->
      format_get_package_name(Defs)
     ].
 
+def_trees(EnumDefs, MsgDefs) ->
+    EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
+    MsgDefTrees = [msg_def_tree(MsgDef) || MsgDef <- MsgDefs],
+    erl_syntax:list(EnumDefTrees ++ MsgDefTrees).
 
-format_msgs_and_enums(Indent, Defs) ->
-    Enums = [Item || {{enum, _}, _}=Item <- Defs],
-    Msgs  = [Item || {{msg, _}, _}=Item <- Defs],
-    [format_enums(Indent, Enums),
-     if Enums /= [], Msgs /= [] -> ",\n";
-        true                    -> ""
-     end,
-     format_msgs(Indent, Msgs)].
+msg_def_tree({{msg, MsgName}, Fields}) ->
+    erl_syntax:tuple(
+      [erl_syntax:tuple([erl_syntax:atom(msg), erl_syntax:atom(MsgName)]),
+       fields_tree(Fields)]).
 
-format_enums(Indent, Enums) ->
-    string:join([f("~s~p", [indent(Indent,""), Enum]) || Enum <- Enums],
-                ",\n").
+fields_tree(Fields) ->
+    erl_syntax:list([field_tree(Field) || Field <- Fields]).
 
-format_msgs(Indent, Msgs) ->
-    string:join([indent(Indent,
-                        f("{~w,~n~s[~s]}",
-                          [{msg,Msg},
-                           indent(Indent+1, ""),
-                           outdent_first(format_efields(Indent+2, Fields))]))
-                 || {{msg,Msg},Fields} <- Msgs],
-                ",\n").
-
-format_efields(Indent, Fields) ->
-    string:join([format_efield(Indent, Field) || Field <- Fields],
-                ",\n").
-
-format_efield(I, #field{name=N, fnum=F, rnum=R, type=T,
-                        occurrence=Occurrence, opts=Opts}) ->
-
-    [indent(I, f("#field{name=~w, fnum=~w, rnum=~w, type=~w,~n", [N,F,R,T])),
-     indent(I, f("       occurrence=~w,~n", [Occurrence])),
-     indent(I, f("       opts=~p}", [Opts]))].
+field_tree(#field{}=F) ->
+    [field | FValues] = tuple_to_list(F),
+    FNames = record_info(fields, field),
+    record_create(field,
+                  lists:zip(FNames,
+                            [erl_parse:abstract(FValue) || FValue <- FValues])).
 
 format_fetch_msg_defs([]) ->
-    f("fetch_msg_def(MsgName) ->~n"
-      "    erlang:error({no_such_msg, MsgName}).~n");
+    gpb_codegen:format_fn(
+      fetch_msg_def,
+      fun(MsgName) -> erlang:error({no_such_msg, MsgName}) end);
 format_fetch_msg_defs(_MsgDefs) ->
-    f("fetch_msg_def(MsgName) ->~n"
-      "    case find_msg_def(MsgName) of~n"
-      "        Fs when is_list(Fs) -> Fs;~n"
-      "        error               -> erlang:error({no_such_msg, MsgName})~n"
-      "    end.~n").
+    gpb_codegen:format_fn(
+      fetch_msg_def,
+      fun(MsgName) ->
+              case find_msg_def(MsgName) of
+                  Fs when is_list(Fs) -> Fs;
+                  error               -> erlang:error({no_such_msg, MsgName})
+              end
+      end).
 
 format_fetch_enum_defs([]) ->
-    f("fetch_enum_def(EnumName) ->~n"
-      "    erlang:error({no_such_enum,EnumName}).~n");
+    gpb_codegen:format_fn(
+      fetch_enum_def,
+      fun(EnumName) -> erlang:error({no_such_enum, EnumName}) end);
 format_fetch_enum_defs(_EnumDefs) ->
-    f("fetch_enum_def(EnumName) ->~n"
-      "    case find_enum_def(EnumName) of~n"
-      "        Es when is_list(Es) -> Es;~n"
-      "        error               -> erlang:error({no_such_enum,EnumName})~n"
-      "    end.~n").
+    gpb_codegen:format_fn(
+      fetch_enum_def,
+      fun(EnumName) ->
+              case find_enum_def(EnumName) of
+                  Es when is_list(Es) -> Es;
+                  error               -> erlang:error({no_such_enum, EnumName})
+              end
+      end).
 
-format_find_msg_defs([]) ->
-    f("find_msg_def(_) ->~n"
-      "    error.~n");
 format_find_msg_defs(Msgs) ->
-    [[[f("find_msg_def(~p) ->~n", [MsgName]),
-       f("    [~s];~n", [outdent_first(format_efields(4+1, Fields))])]
-      || {{msg, MsgName}, Fields} <- Msgs],
-     f("find_msg_def(_) ->~n"
-       "    error.~n")].
+    gpb_codegen:format_fn(
+      find_msg_def,
+      fun('<MsgName>') -> '<Fields>';
+         (_) -> error
+      end,
+      [repeat_clauses('<MsgName>',
+                      [[replace_term('<MsgName>', MsgName),
+                        replace_tree('<Fields>', fields_tree(Fields))]
+                       || {{msg, MsgName}, Fields} <- Msgs])]).
 
-format_find_enum_defs([]) ->
-    f("find_enum_def(_) ->~n"
-      "    error.~n");
 format_find_enum_defs(Enums) ->
-    [[[f("find_enum_def(~p) ->~n", [EnumName]),
-       f("    ~p;~n", [EnumValues])]
-      || {{enum, EnumName}, EnumValues} <- Enums],
-     f("find_enum_def(_) ->~n"
-       "    error.~n")].
+    gpb_codegen:format_fn(
+      find_enum_def,
+      fun('<EnumName>') -> '<Values>';
+         (_) -> error
+      end,
+      [repeat_clauses('<EnumName>',
+                      [[replace_term('<EnumName>', EnumName),
+                        replace_term('<Values>', Values)]
+                       || {{enum, EnumName}, Values} <- Enums])]).
 
 format_enum_value_symbol_converter_exports(Defs) ->
     [f("-export([enum_symbol_by_value/2, enum_value_by_symbol/2]).~n"),
@@ -2587,49 +2570,59 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
     %% by `format_enum_decoders' is that this function generates
     %% value/symbol converters for all enums, not only for the ones
     %% that are used in messags.
-    [string:join([begin
-                      ToSymFnName = mk_fn(enum_symbol_by_value_, EnumName),
-                      f("enum_symbol_by_value(~p, V) -> ~p(V)",
-                        [EnumName, ToSymFnName])
-                  end
-                  || {{enum, EnumName}, _EnumDef} <- EnumDefs],
-                 ";\n"),
-     ".\n\n",
-     string:join([begin
-                      ToValFnName = mk_fn(enum_value_by_symbol_, EnumName),
-                      f("enum_value_by_symbol(~p, S) -> ~p(S)",
-                        [EnumName, ToValFnName])
-                  end
-                  || {{enum, EnumName}, _EnumDef} <- EnumDefs],
-                 ";\n"),
-     ".\n\n",
-     [[string:join([begin
-                        FnName = mk_fn(enum_symbol_by_value_, EnumName),
-                        f("~p(~w) -> ~p", [FnName, EnumValue, EnumSym])
-                    end
-                    || {EnumSym, EnumValue} <- EnumDef],
-                   ";\n"),
-       ".\n\n",
-       string:join([begin
-                        FnName = mk_fn(enum_value_by_symbol_, EnumName),
-                        f("~p(~w) -> ~p", [FnName, EnumSym, EnumValue])
-                    end
-                    || {EnumSym, EnumValue} <- EnumDef],
-                   ";\n"),
-       ".\n\n"]
+    [gpb_codegen:format_fn(
+       enum_symbol_by_value,
+       fun('<EnumName>', Value) -> 'cvt'(Value) end,
+       [repeat_clauses(
+          '<EnumName>',
+          [[replace_term('<EnumName>', EnumName),
+            replace_term('cvt', mk_fn(enum_symbol_by_value_, EnumName))]
+           || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
+     "\n",
+     gpb_codegen:format_fn(
+       enum_value_by_symbol,
+       fun('<EnumName>', Sym) -> 'cvt'(Sym) end,
+       [repeat_clauses(
+          '<EnumName>',
+          [[replace_term('<EnumName>', EnumName),
+            replace_term('cvt', mk_fn(enum_value_by_symbol_, EnumName))]
+           || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
+     "\n",
+     [[gpb_codegen:format_fn(
+         mk_fn(enum_symbol_by_value_, EnumName),
+         fun('<Value>') -> '<Sym>' end,
+         [repeat_clauses('<Value>',
+                         [[replace_term('<Value>', EnumValue),
+                           replace_term('<Sym>', EnumSym)]
+                          || {EnumSym, EnumValue} <- EnumDef])]),
+       "\n",
+       gpb_codegen:format_fn(
+         mk_fn(enum_value_by_symbol_, EnumName),
+         fun('<Sym>') -> '<Value>' end,
+         [repeat_clauses('<Sym>',
+                         [[replace_term('<Value>', EnumValue),
+                           replace_term('<Sym>', EnumSym)]
+                          || {EnumSym, EnumValue} <- EnumDef])])]
       || {{enum, EnumName}, EnumDef} <- EnumDefs]];
 format_enum_value_symbol_converters([]=_EnumDefs) ->
-    [f("enum_symbol_by_value(E, V) -> erlang:error({no_enum_defs,E,V}).~n"),
-     f("enum_value_by_symbol(E, V) -> erlang:error({no_enum_defs,E,V}).~n")].
+    [gpb_codegen:format_fn(
+       enum_symbol_by_value,
+       fun(E, V) -> erlang:error({no_enum_defs, E, V}) end),
+     "\n",
+     gpb_codegen:format_fn(
+       enum_value_by_symbol,
+       fun(E, V) -> erlang:error({no_enum_defs, E, V}) end),
+     "\n"].
 
 format_get_package_name(Defs) ->
     case lists:keyfind(package, 1, Defs) of
         false ->
-            f("get_package_name() ->~n"
-              "    undefined.~n");
+            gpb_codegen:format_fn(
+              get_package_name, fun() -> undefined end);
         {package, Package} ->
-            f("get_package_name() ->~n"
-              "    ~p.~n", [Package])
+            gpb_codegen:format_fn(
+              get_package_name, fun() -> '<Package>' end,
+              [replace_term('<Package>', Package)])
     end.
 
 %% -- hrl -----------------------------------------------------
@@ -3307,11 +3300,15 @@ compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
     ErlCode2 = replace_module_macro(ErlCode, ModAsStr),
     {ok, Toks, _EndLine} = erl_scan:string(ErlCode2),
     FormToks = split_toks_at_dot(Toks),
-    Forms = lists:map(fun(Ts) ->
-                              {ok, Form} = erl_parse:parse_form(Ts),
-                              Form
-                      end,
-                      FormToks),
+    Forms = [case erl_parse:parse_form(Ts) of
+                 {ok, Form} ->
+                     Form;
+                 {error, Reason} ->
+                     erlang:error(
+                       {internal_error,?MODULE,Mod,ErlCode2,MsgDefs,
+                        PossibleNifCode,Opts,Reason})
+             end
+             || Ts <- FormToks],
     {AttrForms, CodeForms} = split_forms_at_first_code(Forms),
     FieldDef = field_record_to_attr_form(),
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
@@ -3405,11 +3402,32 @@ smember_any(Elems, Set) -> %% is any elem a member in the set
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
 
+%% lists_replace(N, List, New) -> NewList
+%% Like erlang:setelement, but for a list:
+%% Replace the Nth element in List with a New value.
+lists_setelement(1, [_ | Rest], New) ->
+    [New | Rest];
+lists_setelement(N, [X | Rest], New) when N > 1 ->
+    [X | lists_setelement(N - 1, Rest, New)].
+
+%% Parse tree transform instructions
+replace_term(Marker, NewTerm) when is_atom(Marker) ->
+    {replace_term, Marker, NewTerm}.
+
+replace_tree(Marker, NewTree) when is_atom(Marker) ->
+    {replace_tree, Marker, NewTree}.
+
+splice_trees(Marker, Trees) when is_atom(Marker) ->
+    {splice_trees, Marker, Trees}.
+
+splice_clauses(Marker, Clauses) when is_atom(Marker) ->
+    {splice_clauses, Marker, Clauses}.
+
+repeat_clauses(Marker, RepetitionReplacements) ->
+    {repeat_clauses, Marker, RepetitionReplacements}.
+
 f(F)   -> f(F,[]).
 f(F,A) -> io_lib:format(F,A).
-
-%flength(F) -> iolist_size(f(F)).
-flength(F, A) -> iolist_size(f(F, A)).
 
 flatten_iolist(IoList) ->
     binary_to_list(iolist_to_binary(IoList)).

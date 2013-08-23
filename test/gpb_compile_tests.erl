@@ -22,6 +22,8 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
+-export([test_nifs/1]). %% set whether to test nifs or not
+
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
 %% for gpb and for the code that gpb_compile generates.
@@ -829,12 +831,13 @@ generates_nif_as_binary_and_file_test() ->
 
 nif_code_test_() ->
     {Descr, Tests} =
-        case {find_protoc(), find_cplusplus_compiler()} of
-            {false,_} -> {"Protoc not found, not trying to compile", []};
-            {_,false} -> {"C++ compiler not found, not trying to compile", []};
-            {_,_}     -> {"nif tests",
-                          [{"Nif compiles", fun nif_compiles/0},
-                           {"Nif encode decode", fun nif_encode_decode/0}]}
+        case {want_nif_tests(), find_protoc(), find_cplusplus_compiler()} of
+            {false,_,_} -> {"Protoc tests not wanted", []};
+            {_,false,_} -> {"Protoc not found, not trying to compile", []};
+            {_,_,false} -> {"No C++ compiler found, not trying to compile", []};
+            {_,_,_}     -> {"nif tests",
+                            [{"Nif compiles", fun nif_compiles/0},
+                             {"Nif encode decode", fun nif_encode_decode/0}]}
         end,
     %% Without increased timeout, this test frequently times
     %% out on my slow laptop (1.6 GHz Atom N270)
@@ -941,6 +944,25 @@ with_tmpcode(Module, Code, Fun) ->
         Fun()
     after
         unload_code(Module)
+    end.
+
+test_nifs(Boolean) when is_boolean(Boolean) ->
+    os:putenv("GPB_NIF_TESTS", lists:concat([Boolean])).
+
+want_nif_tests() ->
+    %% It can be useful to disable nif testing due to the
+    %% behaviour in the libprotoc, that if it detects loading
+    %% a proto definition with the same name as it already
+    %% has loaded, it will refuse, and may stop the entire
+    %% erlang-vm. See the documentation in gpb_compile:c/1,2,
+    %% the `nif' option, for further details. I have seen it
+    %% halt the entire erlang-vm when tests failed, which is
+    %% a pity e.g. when the vm is in an interactive inferior
+    %% emacs window
+    case os:getenv("GPB_NIF_TESTS") of
+        false   -> true; %% default is to test nifs
+        "true"  -> true;
+        "false" -> false
     end.
 
 find_cplusplus_compiler() ->
