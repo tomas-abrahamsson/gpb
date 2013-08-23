@@ -177,14 +177,10 @@
 
 %%@hidden
 parse_transform(Forms, Opts) ->
-    %% Sometimes the backtrace depth is too small, causing
-    %% truncated stack traces, making it hard to see where things got awry
-    %% Up it temporarily.  Hope it has no ill effects, expect it to be
-    %% called mainly at compile-time.
-    Old = erlang:system_flag(backtrace_depth, 32),
-    Res = transform_forms(Forms, Opts),
-    erlang:system_flag(backtrace_depth, Old),
-    Res.
+    with_increased_backtrace_depth(
+      fun() ->
+              transform_forms(Forms, Opts)
+      end).
 
 %%@hidden
 mk_fn(Name, Fun) -> error_invalid_call(mk_fn, [Name, Fun]).
@@ -431,7 +427,8 @@ receive_to_parse_tree_for_clause(Expr, RtTransforms) ->
 
 %%@hidden
 erl_prettypr_format_nl(Form) ->
-    [erl_prettypr:format(Form), "\n"].
+    with_increased_backtrace_depth(
+      fun() -> [erl_prettypr:format(Form), "\n"] end).
 
 %%@hidden
 runtime_fn_transform(FnName, FnParseTree) ->
@@ -439,11 +436,14 @@ runtime_fn_transform(FnName, FnParseTree) ->
 
 %%@hidden
 runtime_fn_transform(FnName, FnParseTree, Transforms) ->
-    Clauses = erl_syntax:function_clauses(FnParseTree),
-    erl_syntax:revert(
-      apply_transforms(
-        erl_syntax:function(erl_syntax:atom(FnName), Clauses),
-        Transforms ++ [{replace_term, call_self, FnName}])).
+    with_increased_backtrace_depth(
+      fun() ->
+              Clauses = erl_syntax:function_clauses(FnParseTree),
+              erl_syntax:revert(
+                apply_transforms(
+                  erl_syntax:function(erl_syntax:atom(FnName), Clauses),
+                  Transforms ++ [{replace_term, call_self, FnName}]))
+      end).
 
 %%@hidden
 runtime_expr_transform(ExprParseTree) ->
@@ -451,18 +451,24 @@ runtime_expr_transform(ExprParseTree) ->
 
 %%@hidden
 runtime_expr_transform(ExprParseTree, Transforms) ->
-    erl_syntax:revert(
-      erl_syntax:copy_pos(
-        ExprParseTree,
-        apply_transforms(ExprParseTree, Transforms))).
+    with_increased_backtrace_depth(
+      fun() ->
+              erl_syntax:revert(
+                erl_syntax:copy_pos(
+                  ExprParseTree,
+                  apply_transforms(ExprParseTree, Transforms)))
+      end).
 
 %%@hidden
 runtime_exprs_transform(ExprParseTrees, Transforms) ->
-    [erl_syntax:revert(
-       erl_syntax:copy_pos(
-         ExprParseTree,
-         apply_transforms(ExprParseTree, Transforms)))
-     || ExprParseTree <- ExprParseTrees].
+    with_increased_backtrace_depth(
+      fun() ->
+              [erl_syntax:revert(
+                 erl_syntax:copy_pos(
+                   ExprParseTree,
+                   apply_transforms(ExprParseTree, Transforms)))
+               || ExprParseTree <- ExprParseTrees]
+      end).
 
 apply_transforms(ParseTree, Transforms) ->
     lists:foldl(fun apply_transform/2, ParseTree, Transforms).
@@ -676,4 +682,34 @@ analyze_atom_as_value(Node) ->
     case erl_syntax:type(Node) of
         atom -> {atom, erl_syntax:atom_value(Node)};
         _    -> non_atom
+    end.
+
+with_increased_backtrace_depth(Fun) ->
+    %% The backtrace_depth is quite often too short,
+    %% when things go wrong inside the parse transform,
+    %% or during the runtime application of additional transforms.
+    %%
+    %% The backtrace_depth controls how many levels of stack
+    %% to include in the crash, too few levels means we only
+    %% see the innermost function calls, not the originating
+    %% top-level calls, making it difficult to debug errors.
+    %%
+    %% So: up it (temporarily).
+    %%
+    %% It is 8 in current Erlang/OTPs, but take some precautions
+    %% in case it gets increased or changed in future versions.
+    New = 32,
+    try erlang:system_flag(backtrace_depth, New) of
+        Old when Old < New ->
+            try Fun()
+            after erlang:system_flag(backtrace_depth, Old)
+            end;
+        Old when Old == New ->
+            Fun();
+        Old when Old > New ->
+            %% Don't decrease it!
+            erlang:system_flag(backtrace_depth, Old),
+            Fun()
+    catch error:badarg -> %% Not available
+            Fun()
     end.
