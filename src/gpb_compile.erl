@@ -1103,7 +1103,31 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("    \"~s\".~n", [gpb:version_as_string()]),
        "\n",
        f("gpb_version_as_list() ->~n"),
-       f("    ~w.~n", [gpb:version_as_list()])]).
+       f("    ~s.~n", [gpb_version_as_list_pretty()])]).
+
+gpb_version_as_list_pretty() ->
+    %% The version "2.2-60-gb0decf3" is rendered with ~w
+    %% as: [2,2,0,0,60,[103,98,48,100,101,99,102,51]]
+    %% this function renders it as [2,2,0,0,60,"gb0decf3"]
+    %% which is exactly the same, but easier for humans to read.
+    {V, SubStrs} =
+        lists:mapfoldl(fun(N, Acc) when is_integer(N) -> {N, Acc};
+                          (S, Acc) when is_list(S) -> {x, Acc++[S]}
+                       end,
+                       [],
+                       gpb:version_as_list()),
+    S2 = remove_whitespaces(?ff("~p~n", [V])),
+    r_strs(S2, $x, SubStrs).
+
+remove_whitespaces(S)  -> [C || C <- S, not is_whitespace_char(C)].
+is_whitespace_char($\s) -> true;
+is_whitespace_char($\t) -> true;
+is_whitespace_char($\n) -> true;
+is_whitespace_char(_)   -> false.
+
+r_strs([M | Tl], M, [S|Rest]) -> ?ff("~p", [S]) ++ r_strs(Tl, M, Rest);
+r_strs([C | Tl], M, SubStrs)  -> [C | r_strs(Tl, M, SubStrs)];
+r_strs("", _M, [])            -> "".
 
 %% -- encoders -----------------------------------------------------
 
