@@ -1186,14 +1186,6 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
-enum_to_binary_fields(Value) ->
-    <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
-    varint_to_binary_fields(N).
-
-varint_to_binary_fields(IntValue) ->
-    [erl_syntax:binary_field(?expr('<n>', [replace_term('<n>', N)]), [])
-     || N <- binary_to_list(gpb:encode_varint(IntValue))].
-
 format_msg_encoders(Defs) ->
     [format_msg_encoder(MsgName, MsgDef) || {{msg, MsgName}, MsgDef} <- Defs].
 
@@ -1262,10 +1254,6 @@ field_encode_expr(MsgName, Field, FVar, PrevBVar) ->
                '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>),
                Transforms)
     end.
-
-key_to_binary_fields(FNum, Type) ->
-    Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
-    varint_to_binary_fields(Key).
 
 mk_field_encode_fn_name(MsgName, #field{occurrence=repeated, name=FName}) ->
     mk_fn(e_field_, MsgName, FName);
@@ -2103,46 +2091,6 @@ format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
        replace_term('<call-read-field>', ReadFieldDefFnName),
        splice_trees('<OutParams>', Params2)]).
 
-new_bindings(Tuples) ->
-    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
-
-new_bindings() ->
-    dict:new().
-
-add_binding({Key, Value}, Bindings) ->
-    dict:store(Key, Value, Bindings).
-
-fetch_binding(Key, Bindings) ->
-    dict:fetch(Key, Bindings).
-
-%% Aliases to improve readability
-record_match(RName, Fields) -> record_create_or_match(RName, Fields).
-record_create(RName, Fields) -> record_create_or_match(RName, Fields).
-
-record_create_or_match(RecordName, FieldsValueTrees) ->
-    record_update(none, RecordName, FieldsValueTrees).
-
-record_update(Var, _RecordName, []) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-record_update(Var, RecordName, FieldsValueTrees) ->
-    erl_syntax:record_expr(
-      Var,
-      erl_syntax:atom(RecordName),
-      [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
-       || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
-
-record_access(Var, RecordName, FieldName) ->
-    erl_syntax:record_access(Var,
-                             erl_syntax:atom(RecordName),
-                             erl_syntax:atom(FieldName)).
-
-var_f_n(N) -> var_n("F", N).
-var_b_n(N) -> var_n("B", N).
-
-var_n(S, N) ->
-    erl_syntax:variable(?ff("~s~w", [S, N])).
-
 assign_to_var(Var, Expr) ->
     ?expr('<Var>' = '<Expr>',
           [replace_tree('<Var>', Var),
@@ -2432,8 +2380,8 @@ format_type_verifiers(#anres{used_types=UsedTypes}) ->
      [format_bool_verifier()                    || smember(bool, UsedTypes)],
      [format_int_verifier(fixed32, unsigned, 32)|| smember(fixed32, UsedTypes)],
      [format_int_verifier(fixed64, unsigned, 64)|| smember(fixed64, UsedTypes)],
-     [format_int_verifier(sfixed32,signed, 32)  || smember(sfixed32, UsedTypes)],
-     [format_int_verifier(sfixed64,signed, 64)  || smember(sfixed64, UsedTypes)],
+     [format_int_verifier(sfixed32,signed, 32)  || smember(sfixed32,UsedTypes)],
+     [format_int_verifier(sfixed64,signed, 64)  || smember(sfixed64,UsedTypes)],
      [format_float_verifier(float)              || smember(float, UsedTypes)],
      [format_float_verifier(double)             || smember(double, UsedTypes)],
      [format_string_verifier()                  || smember(string, UsedTypes)],
@@ -3454,6 +3402,58 @@ combine_erlcode_with_niftxt(ErlCode, NifTxt) ->
      {nif, NifTxt}].
 
 %% -- internal utilities -----------------------------------------------------
+
+new_bindings(Tuples) ->
+    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
+
+new_bindings() ->
+    dict:new().
+
+add_binding({Key, Value}, Bindings) ->
+    dict:store(Key, Value, Bindings).
+
+fetch_binding(Key, Bindings) ->
+    dict:fetch(Key, Bindings).
+
+%% Aliases to improve readability
+record_match(RName, Fields) -> record_create_or_match(RName, Fields).
+record_create(RName, Fields) -> record_create_or_match(RName, Fields).
+
+record_create_or_match(RecordName, FieldsValueTrees) ->
+    record_update(none, RecordName, FieldsValueTrees).
+
+record_update(Var, _RecordName, []) when Var /= none ->
+    %% No updates to be made, maybe no fields
+    Var;
+record_update(Var, RecordName, FieldsValueTrees) ->
+    erl_syntax:record_expr(
+      Var,
+      erl_syntax:atom(RecordName),
+      [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
+       || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
+
+record_access(Var, RecordName, FieldName) ->
+    erl_syntax:record_access(Var,
+                             erl_syntax:atom(RecordName),
+                             erl_syntax:atom(FieldName)).
+
+var_f_n(N) -> var_n("F", N).
+var_b_n(N) -> var_n("B", N).
+
+var_n(S, N) ->
+    erl_syntax:variable(?ff("~s~w", [S, N])).
+
+enum_to_binary_fields(Value) ->
+    <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
+    varint_to_binary_fields(N).
+
+key_to_binary_fields(FNum, Type) ->
+    Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
+    varint_to_binary_fields(Key).
+
+varint_to_binary_fields(IntValue) ->
+    [erl_syntax:binary_field(?expr('<n>', [replace_term('<n>', N)]), [])
+     || N <- binary_to_list(gpb:encode_varint(IntValue))].
 
 is_packed(#field{opts=Opts}) ->
     lists:member(packed, Opts).
