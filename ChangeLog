@@ -1,4 +1,11 @@
 -*- coding: utf-8 -*-
+Version 3.0
+2013-08-24
+	* Improve decoding performance by roughly 8--19%
+	* Completely rewrite the code generator. Use a parse-transform
+	  instead of formatting and assembling strings.
+	* Minor improvement in the generated code for version_as_list.
+
 Version 2.3
 2013-08-18
 	* Fix Rebar compile on non-GNU systems, such as Mac OS X, thanks
