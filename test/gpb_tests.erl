@@ -52,6 +52,22 @@ encode_varint_test() ->
     <<127>>    = gpb:encode_varint(127),
     <<128, 1>> = gpb:encode_varint(128),
     <<150, 1>> = gpb:encode_varint(150).
+
+field_proplist_conversion_test() ->
+    F1 = #field{name=a,fnum=1,rnum=2, type=int32, occurrence=required, opts=[]},
+    PL1 = [{name,a},{fnum,1}, {rnum,2}, {type,int32},
+           {occurrence,required}, {opts,[]}],
+
+    PL1   = gpb:field_record_to_proplist(F1),
+    F1    = gpb:proplist_to_field_record(PL1),
+
+    [PL1] = gpb:field_records_to_proplists([F1]),
+    [F1]  = gpb:proplists_to_field_records([PL1]),
+
+    ED = {{enum,e},[{a,1}]}, %% an unrelated enum def, must not be clobbered
+    [{{msg,m},[PL1]}, ED] = gpb:defs_records_to_proplists([{{msg,m},[F1]},ED]),
+    [{{msg,m},[F1]},  ED] = gpb:proplists_to_defs_records([{{msg,m},[PL1]},ED]).
+
 -endif.  %% gpb_compile_common_tests end of non-shared code ^^^^^^^^^^
 
 -record(m1,{a}).

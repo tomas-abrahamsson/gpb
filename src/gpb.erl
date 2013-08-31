@@ -25,6 +25,9 @@
 -export([encode_varint/1, decode_varint/1]).
 -export([encode_wiretype/1, decode_wiretype/1]).
 -export([version_as_string/0, version_as_list/0]).
+-export([field_records_to_proplists/1, proplists_to_field_records/1]).
+-export([field_record_to_proplist/1,   proplist_to_field_record/1]).
+-export([defs_records_to_proplists/1,  proplists_to_defs_records/1]).
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 -include("../include/gpb_version.hrl").
@@ -637,6 +640,45 @@ mk_type_error(Error, ValueSeen, Path) ->
                                                 "."))
             end,
     erlang:error({gpb_type_error, {Error, [{value, ValueSeen},{path, Path2}]}}).
+
+%% --
+
+%% Conversion functions between various forms of #field{} and a proplist
+%% with keys being the #field{} record's field names.
+
+defs_records_to_proplists(Defs) ->
+    [case Def of
+         {{msg,Msg}, Fields} ->
+             {{msg,Msg}, field_records_to_proplists(Fields)};
+         Other ->
+             Other
+     end
+     || Def <- Defs].
+
+proplists_to_defs_records(Defs) ->
+    [case Def of
+         {{msg,Msg}, PropList} ->
+             {{msg,Msg}, proplists_to_field_records(PropList)};
+         Other ->
+             Other
+     end
+     || Def <- Defs].
+
+field_records_to_proplists(Fields) when is_list(Fields) ->
+    [field_record_to_proplist(F) || F <- Fields].
+
+field_record_to_proplist(#field{}=F) ->
+    Names = record_info(fields, field),
+    lists:zip(Names, tl(tuple_to_list(F))).
+
+proplists_to_field_records(PLs) ->
+    [proplist_to_field_record(PL) || PL <- PLs].
+
+proplist_to_field_record(PL) when is_list(PL) ->
+    Names = record_info(fields, field),
+    list_to_tuple([field | [proplists:get_value(Name, PL) || Name <- Names]]).
+
+%% --
 
 is_packed(#field{opts=Opts}) ->
     lists:member(packed, Opts).

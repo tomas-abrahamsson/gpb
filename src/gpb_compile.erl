@@ -54,6 +54,7 @@ file(File) ->
 %%                   {verify, optionally | always | never} |
 %%                   {copy_bytes, true | false | auto | integer() | float()} |
 %%                   {strings_as_binaries, boolean()} | strings_as_binaries |
+%%                   {defs_as_proplists, boolean()} | defs_as_proplists |
 %%                   {nif,boolean()} | nif |
 %%                   {load_nif, LoadNif} |
 %%                   {i, directory()} |
@@ -142,6 +143,16 @@ file(File) ->
 %% or as binaries (UTF-8 encoded). The `copy_bytes' option applies
 %% to strings as well, when the `strings_as_binaries' option is set.
 %% Upon encoding, both binaries and lists are accepted.
+%%
+%% The `defs_as_proplists' option changes the generated introspection
+%% functions `find_msg_def' and `get_msg_defs' to return the description
+%% of each message field as a proplist, instead of as a `#field{}' record.
+%% The purpose is to make the generated code completely independent
+%% of gpb, at compile-time (it is already independent at run-time).
+%% The keys of the proplist are the names of the record fields in the
+%% `#field{}' record.  See also {@link gpb:proplists_to_field_records()}
+%% and related functions for conversion functions between these two
+%% formats.
 %%
 %% The `{o,directory()}' option specifies directory to use for storing
 %% the generated `.erl' and `.hrl' files. Default is the same
@@ -529,6 +540,10 @@ c() ->
 %%   <dt>`-strbin'</dt>
 %%   <dd>Specify that decoded strings should be returend as binaries,
 %%       instead of as strings (lists).</dd>
+%%   <dt>`-pldefs'</dt>
+%%   <dd>Specify that introspection functions shall return proplists
+%%       instead of `#field{}' records, to make the generated code
+%%       completely free of even compile-time dependencies to gpb.</dd>
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instad of `-include', which is the default.</dd>
@@ -624,6 +639,10 @@ show_help() ->
       "    -strbin~n"
       "          Specify that decoded strings should be returend as binaries,~n"
       "          instead of as strings (lists).~n"
+      "    -pldefs~n"
+      "          Specify that introspection functions shall return proplists~n"
+      "          instead of #field{} records, to make the generated code~n"
+      "          completely free of even compile-time dependencies to gpb.~n"
       "    -il~n"
       "          Generate code that includes gpb.hrl using -include_lib~n"
       "          instad of -include, which is the default.~n"
@@ -658,6 +677,7 @@ parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
                                         error     -> false
                                     end;
 parse_opt({"strbin", []})        -> {true, strings_as_binaries};
+parse_opt({"pldefs", []})        -> {true, defs_as_proplists};
 parse_opt({"il", []})            -> {true, include_as_lib};
 parse_opt({"h", _})              -> {true, help};
 parse_opt({"-help", _})          -> {true, help};
@@ -1064,10 +1084,15 @@ format_erl(Mod, Defs, AnRes, Opts) ->
          "\n"]
         || DoNif],
        f("-include(\"~s.hrl\").~n", [Mod]),
-       if AsLib ->
-               f("-include_lib(\"gpb/include/gpb.hrl\").~n");
-          not AsLib ->
-               f("-include(\"gpb.hrl\").~n")
+       case get_field_format_by_opts(Opts) of
+           fields_as_records ->
+               if AsLib ->
+                       f("-include_lib(\"gpb/include/gpb.hrl\").~n");
+                  not AsLib ->
+                       f("-include(\"gpb.hrl\").~n")
+               end;
+           fields_as_proplists ->
+               ""
        end,
        "\n",
        [[f("~s~n", [format_load_nif(Mod, Opts)]),
@@ -1097,7 +1122,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        "\n",
        f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
        "\n",
-       format_introspection(Defs),
+       format_introspection(Defs, Opts),
        "\n",
        f("gpb_version_as_string() ->~n"),
        f("    \"~s\".~n", [gpb:version_as_string()]),
@@ -2478,12 +2503,12 @@ format_verifier_auxiliaries() ->
 
 %% -- message defs -----------------------------------------------------
 
-format_introspection(Defs) ->
+format_introspection(Defs, Opts) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
     [gpb_codegen:format_fn(
        get_msg_defs, fun() -> '<Defs>' end,
-       [replace_tree('<Defs>', def_trees(EnumDefs, MsgDefs))]),
+       [replace_tree('<Defs>', def_trees(EnumDefs, MsgDefs, Opts))]),
      "\n",
      gpb_codegen:format_fn(
        get_msg_names, fun() -> '<Names>' end,
@@ -2497,7 +2522,7 @@ format_introspection(Defs) ->
      f("~n"),
      format_fetch_enum_defs(EnumDefs),
      f("~n"),
-     format_find_msg_defs(MsgDefs),
+     format_find_msg_defs(MsgDefs, Opts),
      f("~n"),
      format_find_enum_defs(EnumDefs),
      f("~n"),
@@ -2506,18 +2531,29 @@ format_introspection(Defs) ->
      format_get_package_name(Defs)
     ].
 
-def_trees(EnumDefs, MsgDefs) ->
+def_trees(EnumDefs, MsgDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
-    MsgDefTrees = [msg_def_tree(MsgDef) || MsgDef <- MsgDefs],
+    MsgDefTrees = [msg_def_tree(MsgDef, Opts) || MsgDef <- MsgDefs],
     erl_syntax:list(EnumDefTrees ++ MsgDefTrees).
 
-msg_def_tree({{msg, MsgName}, Fields}) ->
+msg_def_tree({{msg, MsgName}, Fields}, Opts) ->
     erl_syntax:tuple(
       [erl_syntax:tuple([erl_syntax:atom(msg), erl_syntax:atom(MsgName)]),
-       fields_tree(Fields)]).
+       fields_tree(Fields, Opts)]).
 
-fields_tree(Fields) ->
-    erl_syntax:list([field_tree(Field) || Field <- Fields]).
+fields_tree(Fields, Opts) ->
+    case get_field_format_by_opts(Opts) of
+        fields_as_records   ->
+            erl_syntax:list([field_tree(Field) || Field <- Fields]);
+        fields_as_proplists ->
+            erl_parse:abstract(gpb:field_records_to_proplists(Fields))
+    end.
+
+get_field_format_by_opts(Opts) ->
+    case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
+        false -> fields_as_records; %% default
+        true  -> fields_as_proplists
+    end.
 
 field_tree(#field{}=F) ->
     [field | FValues] = tuple_to_list(F),
@@ -2554,7 +2590,7 @@ format_fetch_enum_defs(_EnumDefs) ->
               end
       end).
 
-format_find_msg_defs(Msgs) ->
+format_find_msg_defs(Msgs, Opts) ->
     gpb_codegen:format_fn(
       find_msg_def,
       fun('<MsgName>') -> '<Fields>';
@@ -2562,7 +2598,7 @@ format_find_msg_defs(Msgs) ->
       end,
       [repeat_clauses('<MsgName>',
                       [[replace_term('<MsgName>', MsgName),
-                        replace_tree('<Fields>', fields_tree(Fields))]
+                        replace_tree('<Fields>', fields_tree(Fields, Opts))]
                        || {{msg, MsgName}, Fields} <- Msgs])]).
 
 format_find_enum_defs(Enums) ->
@@ -2575,6 +2611,7 @@ format_find_enum_defs(Enums) ->
                       [[replace_term('<EnumName>', EnumName),
                         replace_term('<Values>', Values)]
                        || {{enum, EnumName}, Values} <- Enums])]).
+
 
 format_enum_value_symbol_converter_exports(Defs) ->
     [f("-export([enum_symbol_by_value/2, enum_value_by_symbol/2]).~n"),
