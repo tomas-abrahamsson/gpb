@@ -202,3 +202,17 @@ this version is fetched, is the git tag.   (If you are importing
 gpb into another version control system than git, or using another
 build tool than rebar, you might have to adapt rebar.config and
 src/gpb.app.src accordingly.)
+
+
+Contributing
+------------
+
+Contributions are welcome, preferrably as pull requests or git patches
+or git fetch requests.  Here are some guide lines:
+
+* Use only spaces for indentation, no tabs
+* The code must fit 80 columns
+* Verify that the code and documentation compiles and that tests are ok:
+  rebar clean compile eunit doc xref
+* If you add a feature, test cases are most welcome,
+  so that the feature won't get lost in any future refactorization
