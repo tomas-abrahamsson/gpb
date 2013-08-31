@@ -219,15 +219,34 @@ introspection_package_name_test() ->
     undefined = M:get_package_name(),
     unload_code(M).
 
-introspection_msg_names_test() ->
+introspection_msgs_test() ->
     M = compile_iolist(["message msg1 { required uint32 f1=1; }"]),
     [msg1] = M:get_msg_names(),
+    [#field{name=f1, type=uint32, fnum=1}] = M:find_msg_def(msg1),
+    [#field{name=f1, type=uint32, fnum=1}] = M:fetch_msg_def(msg1),
+    error = M:find_msg_def(msg_ee),
+    ?assertError(_, M:fetch_msg_def(msg_ee)),
     unload_code(M).
 
-introspection_enum_names_test() ->
+introspection_enums_test() ->
+    %% Names
     M = compile_iolist(["enum e1 { n1=1; n2=2; }",
                         "message msg1 { required uint32 f1=1; }"]),
     [e1] = M:get_enum_names(),
+    %% find and fetch
+    [{n1,1},{n2,2}] = M:find_enum_def(e1),
+    error = M:find_enum_def(ee),
+    [{n1,1},{n2,2}] = M:fetch_enum_def(e1),
+    ?assertError(_, M:fetch_enum_def(ee)),
+    %% symbol <--> value mapping
+    n1 = M:enum_symbol_by_value(e1, 1),
+    n2 = M:enum_symbol_by_value(e1, 2),
+    n1 = M:enum_symbol_by_value_e1(1),
+    n2 = M:enum_symbol_by_value_e1(2),
+    1  = M:enum_value_by_symbol(e1, n1),
+    2  = M:enum_value_by_symbol(e1, n2),
+    1  = M:enum_value_by_symbol_e1(n1),
+    2  = M:enum_value_by_symbol_e1(n2),
     unload_code(M).
 
 introspection_defs_as_proplists_test() ->
