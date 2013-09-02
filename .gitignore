@@ -14,3 +14,7 @@
 /src/gpb_scan.erl
 # Dest dir for benchmarking artifacts
 /benchmarks/tmp/
+# Code for generation of description: generated files
+/descr_src/gpb_compile_descr.beam
+/descr_src/gpb_descriptor.erl
+/descr_src/gpb_descriptor.hrl

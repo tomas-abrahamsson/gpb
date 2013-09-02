@@ -1,4 +1,4 @@
-%%% Copyright (C) 2010-2011  Tomas Abrahamsson
+%%% Copyright (C) 2010-2013  Tomas Abrahamsson
 %%%
 %%% Author: Tomas Abrahamsson <tab@lysator.liu.se>
 %%%
@@ -55,6 +55,7 @@ file(File) ->
 %%                   {copy_bytes, true | false | auto | integer() | float()} |
 %%                   {strings_as_binaries, boolean()} | strings_as_binaries |
 %%                   {defs_as_proplists, boolean()} | defs_as_proplists |
+%%                   {descriptor,boolean()} | descriptor |
 %%                   {nif,boolean()} | nif |
 %%                   {load_nif, LoadNif} |
 %%                   {i, directory()} |
@@ -153,6 +154,13 @@ file(File) ->
 %% `#field{}' record.  See also {@link gpb:proplists_to_field_records()}
 %% and related functions for conversion functions between these two
 %% formats.
+%%
+%% The `descriptor' option specifies whether or not to generate a
+%% function, descriptor/0, which returns a binary that describes the
+%% proto file(s) contents according to the protobuf's `descriptor.proto'.
+%% The default is to not generate such a description.  The generated
+%% description binary is most likely not identical to what `protoc'
+%% would generate, but the contents is roughly equivalent.
 %%
 %% The `{o,directory()}' option specifies directory to use for storing
 %% the generated `.erl' and `.hrl' files. Default is the same
@@ -582,6 +590,8 @@ show_help() ->
       "    -il~n"
       "          Generate code that includes gpb.hrl using -include_lib~n"
       "          instad of -include, which is the default.~n"
+      "    -descr~n"
+      "          Generate self-description information.~n"
       "    --help  -h~n"
       "          Show help~n"
       "    --version  -V~n"
@@ -615,6 +625,7 @@ parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
 parse_opt({"strbin", []})        -> {true, strings_as_binaries};
 parse_opt({"pldefs", []})        -> {true, defs_as_proplists};
 parse_opt({"il", []})            -> {true, include_as_lib};
+parse_opt({"descr", []})         -> {true, {descriptor,true}};
 parse_opt({"h", _})              -> {true, help};
 parse_opt({"-help", _})          -> {true, help};
 parse_opt({"V", _})              -> {true, version};
@@ -1013,6 +1024,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
        format_enum_value_symbol_converter_exports(Defs),
        f("-export([get_package_name/0]).~n"),
+       [f("-export([descriptor/0]).~n") || get_gen_descriptor_by_opts(Opts)],
        f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
        [["-on_load(load_nif/0).\n",
@@ -2464,7 +2476,9 @@ format_introspection(Defs, Opts) ->
      f("~n"),
      format_enum_value_symbol_converters(EnumDefs),
      f("~n"),
-     format_get_package_name(Defs)
+     format_get_package_name(Defs),
+     f("~n"),
+     format_descriptor(Defs, Opts)
     ].
 
 def_trees(EnumDefs, MsgDefs, Opts) ->
@@ -2617,6 +2631,33 @@ format_get_package_name(Defs) ->
               get_package_name, fun() -> '<Package>' end,
               [replace_term('<Package>', Package)])
     end.
+
+format_descriptor(Defs, Opts) ->
+    case get_gen_descriptor_by_opts(Opts) of
+        true ->
+            try gpb_compile_descr:encode_defs_to_descriptor(Defs) of
+                Bin when is_binary(Bin) ->
+                    gpb_codegen:format_fn(
+                      descriptor, fun() -> 'bin' end,
+                      [replace_term(bin, Bin)])
+            catch error:undef ->
+                    ST = erlang:get_stacktrace(),
+                    case {element(1,hd(ST)), element(2,hd(ST))} of
+                        {gpb_compile_descr, encode_defs_to_descriptor} ->
+                            gpb_codegen:format_fn(
+                              descriptor,
+                              fun() -> erlang:error(descr_not_avail) end);
+                        _ ->
+                            %% other error
+                            erlang:raise(error, undef, ST)
+                    end
+            end;
+        false ->
+            ""
+    end.
+
+get_gen_descriptor_by_opts(Opts) ->
+    proplists:get_bool(descriptor, Opts).
 
 %% -- hrl -----------------------------------------------------
 
