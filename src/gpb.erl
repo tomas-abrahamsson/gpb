@@ -1,4 +1,4 @@
-%%% Copyright (C) 2010-2011  Tomas Abrahamsson
+%%% Copyright (C) 2010-2013  Tomas Abrahamsson
 %%%
 %%% Author: Tomas Abrahamsson <tab@lysator.liu.se>
 %%%
