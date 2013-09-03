@@ -513,25 +513,24 @@ c([F | _]=Files) when is_atom(F); is_list(F) -> %% invoked with -s or -run
     PlainArgs = init:get_plain_arguments(),
     Opts1 = parse_opts(Args, PlainArgs),
     Opts2 = [report_warnings, report_errors] ++ Opts1,
-    [case determine_cmdline_op(Opts2, FileName) of
-         error  ->
-             show_help(),
-             halt(1);
-         show_help  ->
-             show_help(),
-             halt(0);
-         show_version  ->
-             show_version(),
-             halt(0);
-         compile ->
-             case file(FileName, Opts2) of
-                 ok ->
-                     halt(0);
-                 {error, _Reason} ->
-                     halt(1)
-             end
-     end
-     || FileName <- FileNames],
+    Results = [case determine_cmdline_op(Opts2, FileName) of
+                   error  ->
+                       show_help(),
+                       halt(1);
+                   show_help  ->
+                       show_help(),
+                       halt(0);
+                   show_version  ->
+                       show_version(),
+                       halt(0);
+                   compile ->
+                       file(FileName, Opts2)
+               end
+               || FileName <- FileNames],
+    case lists:usort(Results) of
+        [ok]  -> halt(0);
+        _Errs -> halt(1)
+    end,
     timer:sleep(infinity). %% give init:stop time to do its work
 
 determine_cmdline_op(Opts, FileName) ->
