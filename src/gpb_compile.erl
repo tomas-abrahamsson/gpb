@@ -532,6 +532,8 @@ c() ->
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instad of `-include', which is the default.</dd>
+%%   <dt>`-type'</dt>
+%%   <dd>Enables `::Type()' annotations in the generated .hrl file.</dd>
 %%   <dt>`--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
 %%   <dt>`--version' or `-V'</dt>
@@ -627,6 +629,8 @@ show_help() ->
       "    -il~n"
       "          Generate code that includes gpb.hrl using -include_lib~n"
       "          instad of -include, which is the default.~n"
+      "    -type~n"
+      "          Enables `::Type()' annotations in the generated .hrl file.~n"
       "    --help  -h~n"
       "          Show help~n"
       "    --version  -V~n"
@@ -659,6 +663,7 @@ parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
                                     end;
 parse_opt({"strbin", []})        -> {true, strings_as_binaries};
 parse_opt({"il", []})            -> {true, include_as_lib};
+parse_opt({"type", []})          -> {true, type_specs};
 parse_opt({"h", _})              -> {true, help};
 parse_opt({"-help", _})          -> {true, help};
 parse_opt({"V", _})              -> {true, version};
