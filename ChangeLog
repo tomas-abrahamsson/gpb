@@ -12,6 +12,8 @@ ToBeFilledIn
 	including gpb.hrl at compiletime. (There's no run-time dependency)
 	* Add possibility to prefix message/record and names and module
 	names to avoid name collisions.
+	* Add -type to the commad line options, thanks to Louis-Philippe
+	Gauthier. Previously it existed only as an Erlang API option.
 
 Version 3.0
 2013-08-24

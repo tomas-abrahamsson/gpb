@@ -513,6 +513,8 @@ c() ->
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instad of `-include', which is the default.</dd>
+%%   <dt>`-type'</dt>
+%%   <dd>Enables `::Type()' annotations in the generated .hrl file.</dd>
 %%   <dt>`--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
 %%   <dt>`--version' or `-V'</dt>
@@ -615,6 +617,8 @@ show_help() ->
       "    -il~n"
       "          Generate code that includes gpb.hrl using -include_lib~n"
       "          instad of -include, which is the default.~n"
+      "    -type~n"
+      "          Enables `::Type()' annotations in the generated .hrl file.~n"
       "    -descr~n"
       "          Generate self-description information.~n"
       "    --help  -h~n"
@@ -652,6 +656,7 @@ parse_opt({"pldefs", []})        -> {true, defs_as_proplists};
 parse_opt({"msgprefix", [P]})    -> {true, {msg_name_prefix, P}};
 parse_opt({"modprefix", [P]})    -> {true, {module_name_prefix, P}};
 parse_opt({"il", []})            -> {true, include_as_lib};
+parse_opt({"type", []})          -> {true, type_specs};
 parse_opt({"descr", []})         -> {true, {descriptor,true}};
 parse_opt({"h", _})              -> {true, help};
 parse_opt({"-help", _})          -> {true, help};
