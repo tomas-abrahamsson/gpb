@@ -68,6 +68,14 @@ Features of gpb
    - `?gpb_version`  (in gpb_version.hrl)
    - `?'GeneratedCode_gpb_version'  (in GeneratedCode.hrl)
 
+   The gpb can also generate a self-description of the proto file.
+   The self-description is a description of the proto file, encoded to
+   a binary using the descriptor.proto that comes with the Google
+   protocol buffers library. Note that such an encoded self-descriptions
+   won't be byte-by-byte identical to what the Google protocol buffers
+   compiler will generate for the same proto, but should be roughly
+   equivalent.
+
 *  Reporting of errors in .proto files
 
    Gpb is not very good at error reporting, especially referencing
@@ -202,6 +210,10 @@ this version is fetched, is the git tag.   (If you are importing
 gpb into another version control system than git, or using another
 build tool than rebar, you might have to adapt rebar.config and
 src/gpb.app.src accordingly.)
+
+Places to update when making a new version:
+* Write about the changes in the ChangeLog file
+* tag it in git
 
 
 Contributing
