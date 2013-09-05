@@ -1,4 +1,18 @@
 -*- coding: utf-8 -*-
+Version ToBeFilledIn
+ToBeFilledIn
+
+	* Bugfix compilation of several files (only the first file
+	was actually compiled, even if several files were specified)
+	* Add possibility to generate and encode a descriptor, which is a
+	self-describing byte-blob according to descriptor.proto.
+	* Add possibility to make the generated code compile-time
+	independent of gpb by generating the introspection information to
+	proplists instead of to #field{} records. The latter required
+	including gpb.hrl at compiletime. (There's no run-time dependency)
+	* Add possibility to prefix message/record and names and module
+	names to avoid name collisions.
+
 Version 3.0
 2013-08-24
 	* Improve decoding performance by roughly 8--19%
