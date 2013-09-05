@@ -365,6 +365,22 @@ fetches_imports_test() ->
                                "enum    e1 { a = 17; }"]),
     ["a/b/c.proto", "d/e/f.proto"] = gpb_parse:fetch_imports(Elems).
 
+can_prefix_record_names_test() ->
+    {ok, Defs} = parse_lines(["enum    e1 {a=1; b=2;}",
+                              "message m1 {required e1 f1=1;}",
+                              "message m2 {required m1 f2=1;}",
+                              "service s1 {",
+                              "  rpc req(m1) returns (m2) {};",
+                              "}",
+                              "extend m1 { optional uint32 fm2=2; }"]),
+    [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+     {{msg,p_m1}, [#field{name=f1, type={enum,e1}}, #field{name=fm2}]},
+     {{msg,p_m2}, [#field{type={msg,p_m1}}]}, %% type is a msg: to be prefixed
+     {{service,s1}, %% not prefixed
+      [{req,p_m1,p_m2}]} %% both argument and result msgs to be prefixed
+    ] =
+        do_process_sort_defs(Defs, [{msg_name_prefix, "p_"}]).
+
 verify_ingores_import_statements_test() ->
     ok = do_parse_verify_defs(["import \"Y.proto\";",
                                "message m2 { required uint32 x = 1; }"]).

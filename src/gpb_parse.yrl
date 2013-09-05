@@ -271,10 +271,12 @@ literal_value({_TokenType, _Line, Value}) -> Value.
 post_process(Defs, Opts) ->
     case resolve_names(Defs, Opts) of
         {ok, Defs2} ->
-            {ok, normalize_msg_field_options( %% Sort it?
-                   enumerate_msg_fields(
-                     reformat_names(
-                       extend_msgs(Defs2))))};
+            {ok, possibly_prefix_msgs(
+                   normalize_msg_field_options( %% Sort it?
+                     enumerate_msg_fields(
+                       reformat_names(
+                         extend_msgs(Defs2)))),
+                   Opts)};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -762,6 +764,48 @@ opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
         false -> lists:keydelete(Opt, 1, Opts);
         true  -> [Opt | lists:keydelete(Opt, 1, Opts)]
     end.
+
+possibly_prefix_msgs(Defs, Opts) ->
+    case proplists:get_value(msg_name_prefix, Opts) of
+        undefined ->
+            Defs;
+        Prefix ->
+            prefix_msgs(Prefix, Defs)
+    end.
+
+
+prefix_msgs(Prefix, Defs) ->
+    lists:map(fun({{msg,Name}, Fields}) ->
+                      {{msg,prefix_name(Prefix, Name)},
+                       prefix_fields(Prefix, Fields)};
+                 ({{extensions,Name}, Exts}) ->
+                      {{extensions,prefix_name(Prefix, Name)}, Exts};
+                 ({{service,Name}, RPCs}) ->
+                      {{service,Name}, prefix_rpcs(Prefix, RPCs)};
+                 (OtherElem) ->
+                      OtherElem
+              end,
+              Defs).
+
+prefix_fields(Prefix, Fields) ->
+    lists:map(
+      fun(#field{type={msg,MsgName}}=F) ->
+              F#field{type={msg,prefix_name(Prefix, MsgName)}};
+         (#field{}=F) ->
+              F
+      end,
+      Fields).
+
+prefix_name(Prefix, Name) ->
+    list_to_atom(lists:concat([Prefix, Name])).
+
+prefix_rpcs(Prefix, RPCs) ->
+    lists:map(fun({RpcName, Arg, Return}) ->
+                      NewArg = prefix_name(Prefix, Arg),
+                      NewReturn = prefix_name(Prefix, Return),
+                      {RpcName, NewArg, NewReturn}
+              end,
+              RPCs).
 
 %% `Defs' is expected to be parsed, but not necessarily post_processed.
 fetch_imports(Defs) ->

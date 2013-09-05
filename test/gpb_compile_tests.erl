@@ -318,6 +318,59 @@ dotted_names_gives_no_compilation_error_test() ->
     M1Msg = M:decode_msg(Data, m1),
     unload_code(M).
 
+%% --- module/msg name prefix ---------------
+module_msg_name_prefix_test() ->
+    Proto = <<"message msg1 { required uint32 f1=1; }\n">>,
+    Master = self(),
+    ReadInput = fun(FName) -> Master ! {read, FName}, {ok, Proto} end,
+    ReportOutput = fun(FName, Contents) ->
+                           Ext = list_to_atom(tl(filename:extension(FName))),
+                           Master ! {write, {Ext, FName, Contents}},
+                           ok
+                   end,
+    FileOpOpt = mk_fileop_opt([{read_file, ReadInput},
+                               {write_file, ReportOutput}]),
+    ModPrefix = "mp_",
+    MsgPrefix = "mm_",
+    ok = gpb_compile:file("m.proto",
+                          [FileOpOpt, {i,"."},
+                           {module_name_prefix, ModPrefix},
+                           {msg_name_prefix, MsgPrefix}]),
+    receive
+        {read, "m.proto"} -> ok;
+        {read, "mp_m.proto"} -> erlang:error("proto prefixed!");
+        {read, X} -> erlang:error("reading from odd file", X)
+    end,
+    receive
+        {write, {hrl, "mp_m.hrl", Hrl}} ->
+            assert_contains_regexp(Hrl, "mm_msg1"),
+            ok;
+        {write, {hrl, "m.hrl", _}} ->
+            erlang:error("hrl file not prefixed!");
+        {write, {hrl, X2, C2}} ->
+            erlang:error({"writing odd hrl file!", X2, C2})
+    end,
+    receive
+        {write, {erl, "mp_m.erl", Erl}} ->
+            assert_contains_regexp(Erl, "-include.*\"mp_m.hrl\""),
+            assert_contains_regexp(Erl, "-module.*mp_m"),
+            assert_contains_regexp(Erl, "mm_msg1"),
+            ok;
+        {write, {erl, "m.erl", _}} ->
+            erlang:error("erl file not prefixed!");
+        {write, {erl, X3, C3}} ->
+            erlang:error({"writing odd erl file!", X3, C3})
+    end,
+    ok.
+
+assert_contains_regexp(IoData, Re) ->
+    case re:run(IoData, Re) of
+        {match, _} -> ok;
+        nomatch    ->
+            ?debugFmt("~nERROR: Regexp ~s not found in:~n~s~n", [Re, IoData]),
+            erlang:error({"Re ", Re, "not found in", IoData})
+    end.
+
 %% --- bytes ----------
 
 copy_bytes_unconditionally_test() ->
@@ -1254,10 +1307,13 @@ unload_code(Mod) ->
 find_unused_module() -> find_unused_module(1).
 
 find_unused_module(N) ->
-    ModNameCandidate = list_to_atom(f("~s-tmp-~w", [?MODULE, N])),
+    find_unused_module("", N).
+
+find_unused_module(Prefix, N) ->
+    ModNameCandidate = list_to_atom(f("~s~s-tmp-~w", [Prefix, ?MODULE, N])),
     case code:is_loaded(ModNameCandidate) of
         false    -> ModNameCandidate;
-        {file,_} -> find_unused_module(N+1)
+        {file,_} -> find_unused_module(Prefix, N+1)
     end.
 
 id(X) -> X.

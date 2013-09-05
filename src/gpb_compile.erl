@@ -229,7 +229,8 @@ file(File, Opts1) ->
     case parse_file(File, Opts2) of
         {ok, Defs} ->
             Ext = filename:extension(File),
-            Mod = list_to_atom(filename:basename(File, Ext)),
+            Mod = list_to_atom(possibly_prefix_mod(filename:basename(File, Ext),
+                                                   Opts2)),
             DefaultOutDir = filename:dirname(File),
             Opts3 = Opts2 ++ [{o,DefaultOutDir}],
             msg_defs(Mod, Defs, Opts3);
@@ -264,6 +265,15 @@ unless_defined_set(OptionToTestFor, OptionToSet, Opts) ->
         true  -> Opts;
         false -> [OptionToSet | Opts]
     end.
+
+possibly_prefix_mod(BaseNameNoExt, Opts) ->
+    case proplists:get_value(module_name_prefix, Opts) of
+        undefined ->
+            BaseNameNoExt;
+        Prefix ->
+            lists:concat([Prefix, BaseNameNoExt])
+    end.
+
 
 %% @spec msg_defs(Mod, Defs) -> CompRet
 %% @equiv msg_defs(Mod, Defs, [])
@@ -490,6 +500,16 @@ c() ->
 %%   <dd>Specify that introspection functions shall return proplists
 %%       instead of `#field{}' records, to make the generated code
 %%       completely free of even compile-time dependencies to gpb.</dd>
+%%   <dt>`-msgprefix Prefix'</dt>
+%%   <dd>Prefix each message with `Prefix'. This can be useful to
+%%       when including different sub-projects that have colliding
+%%       message names.</dd>
+%%   <dt>`-modprefix Prefix'</dt>
+%%   <dd>Prefix each module with `Prefix'. Normally the module name of
+%%       the generated code is based on the name of the `.proto' file.
+%%       This option prepends a prefix to the module name, which can be
+%%       useful when including different sub-projects that have
+%%       colliding proto file names.</dd>
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instad of `-include', which is the default.</dd>
@@ -588,6 +608,10 @@ show_help() ->
       "          Specify that introspection functions shall return proplists~n"
       "          instead of #field{} records, to make the generated code~n"
       "          completely free of even compile-time dependencies to gpb.~n"
+      "    -msgprefix Prefix~n"
+      "          Prefix each message with Prefix.~n"
+      "    -modprefix Prefix~n"
+      "          Prefix the module name with Prefix.~n"
       "    -il~n"
       "          Generate code that includes gpb.hrl using -include_lib~n"
       "          instad of -include, which is the default.~n"
@@ -625,6 +649,8 @@ parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
                                     end;
 parse_opt({"strbin", []})        -> {true, strings_as_binaries};
 parse_opt({"pldefs", []})        -> {true, defs_as_proplists};
+parse_opt({"msgprefix", [P]})    -> {true, {msg_name_prefix, P}};
+parse_opt({"modprefix", [P]})    -> {true, {module_name_prefix, P}};
 parse_opt({"il", []})            -> {true, include_as_lib};
 parse_opt({"descr", []})         -> {true, {descriptor,true}};
 parse_opt({"h", _})              -> {true, help};
