@@ -2319,7 +2319,8 @@ format_msg_verifier(MsgName, MsgDef, AnRes) ->
        repeat_clauses('<X>', case can_occur_as_sub_msg(MsgName, AnRes) of
                                  true  -> [[replace_tree('<X>', ?expr(X))]];
                                  false -> [] %% omit the else clause
-                             end)]).
+                             end),
+       replace_term('<MsgName>', MsgName)]).
 
 field_verifiers(FVars) ->
     [begin
