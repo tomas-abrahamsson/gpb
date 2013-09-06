@@ -274,40 +274,35 @@ transform_node(application, Node, AllForms) ->
         {?MODULE, {mk_fn, 2}} ->
             [FnNameExpr, DefAsFun] = erl_syntax:application_arguments(Node),
             FnClauses = find_fun_form_clauses(DefAsFun, AllForms),
-            mk_runtime_fn_transform_invoker(FnNameExpr, FnClauses, []);
+            mk_runtime_fn_transform_revert_invoker(FnNameExpr, FnClauses, []);
         {?MODULE, {mk_fn, 3}} ->
             [FnNameExpr, DefAsFun, RtTransforms] =
                 erl_syntax:application_arguments(Node),
             FnClauses = find_fun_form_clauses(DefAsFun, AllForms),
-            mk_runtime_fn_transform_invoker(FnNameExpr, FnClauses,
-                                            [RtTransforms]);
+            mk_runtime_fn_transform_revert_invoker(FnNameExpr, FnClauses,
+                                                   [RtTransforms]);
         {?MODULE, {format_fn, 2}} ->
             [FnNameExpr, DefAsFun] = erl_syntax:application_arguments(Node),
             FnClauses = find_fun_form_clauses(DefAsFun, AllForms),
-            mk_apply(?MODULE, erl_prettypr_format_nl,
-                     [mk_runtime_fn_transform_invoker(
-                        FnNameExpr, FnClauses, [])]);
+            mk_runtime_fn_transform_format_invoker(FnNameExpr, FnClauses, []);
         {?MODULE, {format_fn, 3}} ->
             [FnNameExpr, DefAsFun, RtTransforms] =
                 erl_syntax:application_arguments(Node),
             FnClauses = find_fun_form_clauses(DefAsFun, AllForms),
-            mk_apply(?MODULE, erl_prettypr_format_nl,
-                     [mk_runtime_fn_transform_invoker(
-                        FnNameExpr, FnClauses, [RtTransforms])]);
+            mk_runtime_fn_transform_format_invoker(FnNameExpr, FnClauses,
+                                                   [RtTransforms]);
         {?MODULE, {expr, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
-            erl_parse:abstract(erl_syntax:revert(Expr));
+            erl_syntax:abstract(Expr);
         {?MODULE, {expr, 2}} ->
             [Expr, RtTransforms] = erl_syntax:application_arguments(Node),
             mk_apply(?MODULE, runtime_expr_transform,
-                     [erl_parse:abstract(erl_syntax:revert(Expr)),
-                      RtTransforms]);
+                     [erl_syntax:abstract(Expr), RtTransforms]);
         {?MODULE, {exprs, Arity}} when Arity >= 2 ->
             ExprsAndRtTransforms = erl_syntax:application_arguments(Node),
             {Exprs, RtTransforms} = split_out_last(ExprsAndRtTransforms),
             mk_apply(?MODULE, runtime_exprs_transform,
-                     [erl_parse:abstract(erl_syntax:revert(Exprs)),
-                      RtTransforms]);
+                     [erl_syntax:abstract(Exprs), RtTransforms]);
         {?MODULE, {case_clause, 1}} ->
             [Expr] = erl_syntax:application_arguments(Node),
             case_expr_to_parse_tree_for_clause(Expr, []);
@@ -373,18 +368,26 @@ find_function_clauses([Form | Rest], FnName, Arity) ->
 find_function_clauses([], FnName, Arity) ->
     erlang:error({reference_to_undefined_function,FnName,Arity}).
 
-mk_runtime_fn_transform_invoker(FnNameExpr, FnClauses, RtTransforms) ->
+mk_runtime_fn_transform_revert_invoker(FnNameExpr, FnClauses, RtTransforms) ->
     DummyFnName = erl_syntax:atom(fn_name_to_be_replaced_at_runtime),
-    mk_apply(?MODULE, runtime_fn_transform,
-             [FnNameExpr,
-              erl_parse:abstract(
-                erl_syntax:revert(
-                  erl_syntax:function(DummyFnName, FnClauses)))
-              | RtTransforms]).
+    mk_apply(erl_syntax, revert,
+             [mk_apply(?MODULE, runtime_fn_transform,
+                       [FnNameExpr,
+                        erl_syntax:abstract(erl_syntax:function(DummyFnName,
+                                                                FnClauses))
+                        | RtTransforms])]).
+
+mk_runtime_fn_transform_format_invoker(FnNameExpr, FnClauses, RtTransforms) ->
+    DummyFnName = erl_syntax:atom(fn_name_to_be_replaced_at_runtime),
+    mk_apply(?MODULE, erl_prettypr_format_nl,
+             [mk_apply(?MODULE, runtime_fn_transform,
+                       [FnNameExpr,
+                        erl_parse:abstract(erl_syntax:function(DummyFnName,
+                                                               FnClauses))
+                        | RtTransforms])]).
 
 mk_apply(M, F, Args) when is_atom(M), is_atom(F) ->
-    erl_syntax:revert(
-      erl_syntax:application(erl_syntax:atom(M), erl_syntax:atom(F), Args)).
+    erl_syntax:application(erl_syntax:atom(M), erl_syntax:atom(F), Args).
 
 case_expr_to_parse_tree_for_clause(Expr, RtTransforms) ->
     case erl_syntax:type(Expr) of
@@ -439,10 +442,9 @@ runtime_fn_transform(FnName, FnParseTree, Transforms) ->
     with_increased_backtrace_depth(
       fun() ->
               Clauses = erl_syntax:function_clauses(FnParseTree),
-              erl_syntax:revert(
-                apply_transforms(
-                  erl_syntax:function(erl_syntax:atom(FnName), Clauses),
-                  Transforms ++ [{replace_term, call_self, FnName}]))
+              apply_transforms(
+                erl_syntax:function(erl_syntax:atom(FnName), Clauses),
+                Transforms ++ [{replace_term, call_self, FnName}])
       end).
 
 %%@hidden
@@ -453,10 +455,9 @@ runtime_expr_transform(ExprParseTree) ->
 runtime_expr_transform(ExprParseTree, Transforms) ->
     with_increased_backtrace_depth(
       fun() ->
-              erl_syntax:revert(
-                erl_syntax:copy_pos(
-                  ExprParseTree,
-                  apply_transforms(ExprParseTree, Transforms)))
+              erl_syntax:copy_pos(
+                ExprParseTree,
+                apply_transforms(ExprParseTree, Transforms))
       end).
 
 %%@hidden
@@ -468,7 +469,7 @@ runtime_exprs_transform(ExprParseTrees, Transforms) ->
               %% begin ... end. Such an expr is called a block.
               Block1 = erl_syntax:block_expr(ExprParseTrees),
               Block2 = apply_transforms(Block1, Transforms),
-              [erl_syntax:revert(E) || E <- erl_syntax:block_expr_body(Block2)]
+              erl_syntax:block_expr_body(Block2)
       end).
 
 apply_transforms(ParseTree, Transforms) ->
