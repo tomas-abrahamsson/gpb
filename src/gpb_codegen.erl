@@ -428,7 +428,7 @@ receive_to_parse_tree_for_clause(Expr, RtTransforms) ->
 %%@hidden
 erl_prettypr_format_nl(Form) ->
     with_increased_backtrace_depth(
-      fun() -> [erl_prettypr:format(Form), "\n"] end).
+      fun() -> [erl_prettypr:format(Form), "\n\n"] end).
 
 %%@hidden
 runtime_fn_transform(FnName, FnParseTree) ->
