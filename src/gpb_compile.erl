@@ -58,6 +58,7 @@ file(File) ->
 %%                   {strings_as_binaries, boolean()} | strings_as_binaries |
 %%                   {defs_as_proplists, boolean()} | defs_as_proplists |
 %%                   {descriptor,boolean()} | descriptor |
+%%                   {maps,boolean()} | maps |
 %%                   {nif,boolean()} | nif |
 %%                   {load_nif, LoadNif} |
 %%                   {i, directory()} |
@@ -175,9 +176,20 @@ file(File) ->
 %% overrides any `{o,directory()}' option, and similarly for the
 %% other file-type specific output options.
 %%
-%% The `nif' option will cause the compiler to generate nif C++ code
-%% for that can be linked with the Google protobuf C++ library.
-%% Read the file `README.nif-cc' for more info.
+%% The `maps' option will generate a protobuf encoder/decoder that
+%% uses maps instead of records. It will not generate any `.hrl' file,
+%% and the functions `encode_msg', `merge_msgs' and `verify_msg' will
+%% take the message name as an additional parameter. The introspection
+%% will generate message field descriptions as maps instead of as
+%% `#field{}' records, unless, of course `defs_as_proplists' is specified,
+%% in which case they will be proplists instead. This option is not
+%% compatible with the `nif' option.
+%%
+%% The `nif' option will cause the compiler to generate code which
+%% decoding code is nif C++ code. The generated can be linked with the
+%% Google protobuf C++ library.  Read the file `README.nif-cc' for
+%% more info. This option is not compatible with the `maps' option;
+%% the generated C++ decoding code would still create records.
 %%
 %% The `binary' option will cause the generated and compiled code be
 %% returned as a binary. No files will be written. The return value
@@ -300,9 +312,15 @@ msg_defs(Mod, Defs0, Opts0) ->
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs, Opts2),
-    Res1 = do_msg_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
-    return_or_report_warnings_or_errors(Res1, Warns, Opts2,
-                                        get_output_format(Opts2)).
+    case verify_opts(Opts2) of
+        ok ->
+            Res1 = do_msg_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
+            return_or_report_warnings_or_errors(Res1, Warns, Opts2,
+                                                get_output_format(Opts2));
+        {error, OptError} ->
+            return_or_report_warnings_or_errors({error, OptError}, [], Opts2,
+                                                get_output_format(Opts2))
+    end.
 
 do_msg_defs(Defs, Mod, AnRes, Opts) ->
     case get_output_format(Opts) of
@@ -314,7 +332,7 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
             compile_to_binary(Mod, Defs, ErlTxt, NifTxt, Opts);
         file ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
-            HrlTxt = format_hrl(Mod, Defs, Opts),
+            HrlTxt = possibly_format_hrl(Mod, Defs, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             ErlOutDir = get_erl_outdir(Opts),
             HrlOutDir = get_hrl_outdir(Opts),
@@ -323,13 +341,21 @@ do_msg_defs(Defs, Mod, AnRes, Opts) ->
             Hrl   = filename:join(HrlOutDir, atom_to_list(Mod) ++ ".hrl"),
             NifCc = filename:join(NifCcOutDir, atom_to_list(Mod) ++ ".nif.cc"),
             case {file_write_file(Erl, ErlTxt, Opts),
-                  file_write_file(Hrl, HrlTxt, Opts),
+                  possibly_write_file(Hrl, HrlTxt, Opts),
                   possibly_write_file(NifCc, NifTxt, Opts)} of
                 {ok, ok, ok}       -> ok;
                 {{error, R}, _, _} -> {error, {write_failed, Erl, R}};
                 {_, {error, R}, _} -> {error, {write_failed, Erl, R}};
                 {_, _, {error, R}} -> {error, {write_failed, NifCc,  R}}
             end
+    end.
+
+verify_opts(Opts) ->
+    case {get_records_or_maps_by_opts(Opts), proplists:get_bool(nif, Opts)} of
+        {maps, true} ->
+            {error, {option_error, {not_supported, maps_and_nif}}};
+        _ ->
+            ok
     end.
 
 return_or_report_warnings_or_errors(Res, ExtraWarns, Opts, OutFormat) ->
@@ -420,6 +446,8 @@ format_error({error, Reason})         -> fmt_err(Reason);
 format_error(Reason)                  -> fmt_err(Reason).
 
 %% Note: do NOT include trailing newline (\n or ~n)
+fmt_err({option_error, {not_supported, maps_and_nif}}) ->
+    ?f("Options maps and nif are mutually exclusive");
 fmt_err({parse_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
 fmt_err({scan_error, FileName, {Line, Module, ErrInfo}}) ->
@@ -517,6 +545,10 @@ c() ->
 %%   <dd>Enables `::Type()' annotations in the generated .hrl file.</dd>
 %%   <dt>`-descr'</dt>
 %%   <dd>Generate self-description information.</dd>
+%%   <dt>`-maps'</dt>
+%%   <dd>Generate code that will accept and produce maps instead of
+%%       records. No .hrl file will be generated. See the `maps' option
+%%       for the function {@link file/2} for more info.</dd>
 %%   <dt>`--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
 %%   <dt>`--version' or `-V'</dt>
@@ -623,6 +655,9 @@ show_help() ->
       "          Enables `::Type()' annotations in the generated .hrl file.~n"
       "    -descr~n"
       "          Generate self-description information.~n"
+      "    -maps~n"
+      "          Generate code that will accept and produce maps instead of~n"
+      "          records.~n"
       "    --help  -h~n"
       "          Show help~n"
       "    --version  -V~n"
@@ -660,6 +695,7 @@ parse_opt({"modprefix", [P]})    -> {true, {module_name_prefix, P}};
 parse_opt({"il", []})            -> {true, include_as_lib};
 parse_opt({"type", []})          -> {true, type_specs};
 parse_opt({"descr", []})         -> {true, {descriptor,true}};
+parse_opt({"maps", []})          -> {true, maps};
 parse_opt({"h", _})              -> {true, help};
 parse_opt({"-help", _})          -> {true, help};
 parse_opt({"V", _})              -> {true, version};
@@ -1047,10 +1083,19 @@ format_erl(Mod, Defs, AnRes, Opts) ->
           [?MODULE, gpb:version_as_string(), calendar:local_time()]),
        ?f("-module(~w).~n", [Mod]),
        "\n",
-       ?f("-export([encode_msg/1, encode_msg/2]).~n"),
+       case get_records_or_maps_by_opts(Opts) of
+           records -> ?f("-export([encode_msg/1, encode_msg/2]).~n");
+           maps    -> ?f("-export([encode_msg/2, encode_msg/3]).~n")
+       end,
        ?f("-export([decode_msg/2]).~n"),
-       ?f("-export([merge_msgs/2]).~n"),
-       ?f("-export([verify_msg/1]).~n"),
+       case get_records_or_maps_by_opts(Opts) of
+           records -> ?f("-export([merge_msgs/2]).~n");
+           maps    -> ?f("-export([merge_msgs/3]).~n")
+       end,
+       case get_records_or_maps_by_opts(Opts) of
+           records -> ?f("-export([verify_msg/1]).~n");
+           maps    -> ?f("-export([verify_msg/2]).~n")
+       end,
        ?f("-export([get_msg_defs/0]).~n"),
        ?f("-export([get_msg_names/0]).~n"),
        ?f("-export([get_enum_names/0]).~n"),
@@ -1065,15 +1110,20 @@ format_erl(Mod, Defs, AnRes, Opts) ->
          "-export([load_nif/0]). %% for debugging of nif loading\n",
          "\n"]
         || DoNif],
-       ?f("-include(\"~s.hrl\").~n", [Mod]),
-       case get_field_format_by_opts(Opts) of
-           fields_as_records ->
-               if AsLib ->
-                       ?f("-include_lib(\"gpb/include/gpb.hrl\").~n");
-                  not AsLib ->
-                       ?f("-include(\"gpb.hrl\").~n")
-               end;
-           fields_as_proplists ->
+       case get_records_or_maps_by_opts(Opts) of
+           records ->
+               [?f("-include(\"~s.hrl\").~n", [Mod]),
+                case get_field_format_by_opts(Opts) of
+                    fields_as_records ->
+                        if AsLib ->
+                                ?f("-include_lib(\"gpb/include/gpb.hrl\").~n");
+                           not AsLib ->
+                                ?f("-include(\"gpb.hrl\").~n")
+                        end;
+                    fields_as_proplists ->
+                        ""
+                end];
+           maps ->
                ""
        end,
        "\n",
@@ -1098,9 +1148,9 @@ format_erl(Mod, Defs, AnRes, Opts) ->
                ?f("~s~n", [format_decoders(Defs, AnRes, Opts)])
        end,
        "\n",
-       ?f("~s~n", [format_msg_merge_code(Defs, AnRes)]),
+       ?f("~s~n", [format_msg_merge_code(Defs, AnRes, Opts)]),
        "\n",
-       format_verifiers_top_function(Defs),
+       format_verifiers_top_function(Defs, Opts),
        "\n",
        ?f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
        "\n",
@@ -1140,13 +1190,21 @@ r_strs("", _M, [])            -> "".
 
 format_encoders_top_function(Defs, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
-    [gpb_codegen:format_fn(encode_msg, fun(Msg) -> encode_msg(Msg, []) end),
+    Mapping = get_records_or_maps_by_opts(Opts),
+    MsgNameVars = case Mapping of
+                      records -> [];
+                      maps    -> [?expr(MsgName)]
+                  end,
+    [gpb_codegen:format_fn(
+       encode_msg,
+       fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
+       [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
      gpb_codegen:format_fn(
        encode_msg,
-       fun(Msg, '<Opts>') ->
+       fun(Msg, '<MsgName>', '<Opts>') ->
                '<possibly-verify-msg>',
-               case Msg of
+               case '<MsgOrMsgName>' of
                    '<msg-match>' -> 'encode'(Msg)
                end
        end,
@@ -1159,22 +1217,31 @@ format_encoders_top_function(Defs, Opts) ->
                      case Verify of
                          optionally ->
                              [?expr(case proplists:get_bool(verify, Opts) of
-                                       true  -> verify_msg(Msg);
-                                       false -> ok
-                                   end)];
+                                        true  -> verify_msg(Msg, '<MsgName>');
+                                        false -> ok
+                                    end)];
                          always ->
-                             [?expr(verify_msg(Msg))];
+                             [?expr(verify_msg(Msg, '<MsgName>'))];
                          never ->
                              []
                      end),
         repeat_clauses('<msg-match>',
-                       [[replace_tree('<msg-match>', record_match(MsgName, [])),
+                       [[replace_tree('<msg-match>',
+                                      case Mapping of
+                                          records -> record_match(MsgName, []);
+                                          maps    -> erl_syntax:atom(MsgName)
+                                      end),
                          replace_term('encode', mk_fn(e_msg_, MsgName))]
-                        || {{msg,MsgName}, _Fields} <- Defs])])].
+                        || {{msg,MsgName}, _Fields} <- Defs]),
+        replace_tree('<MsgOrMsgName>', case Mapping of
+                                           records -> ?expr(Msg);
+                                           maps    -> ?expr(MsgName)
+                                       end),
+        splice_trees('<MsgName>', MsgNameVars)])].
 
-format_encoders(Defs, AnRes, _Opts) ->
+format_encoders(Defs, AnRes, Opts) ->
     [format_enum_encoders(Defs, AnRes),
-     format_msg_encoders(Defs),
+     format_msg_encoders(Defs, Opts),
      format_special_field_encoders(Defs, AnRes),
      format_type_encoders(AnRes)
     ].
@@ -1193,16 +1260,17 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
-format_msg_encoders(Defs) ->
-    [format_msg_encoder(MsgName, MsgDef) || {{msg, MsgName}, MsgDef} <- Defs].
+format_msg_encoders(Defs, Opts) ->
+    [format_msg_encoder(MsgName, MsgDef, Opts)
+     || {{msg, MsgName}, MsgDef} <- Defs].
 
-format_msg_encoder(MsgName, []) ->
+format_msg_encoder(MsgName, [], _Opts) ->
     gpb_codegen:format_fn(
       mk_fn(e_msg_, MsgName),
       fun(_Msg) ->
               <<>>
       end);
-format_msg_encoder(MsgName, MsgDef) ->
+format_msg_encoder(MsgName, MsgDef, Opts) ->
     FNames = [FName || #field{name=FName} <- MsgDef],
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
     BVars = [var_b_n(I) || I <- lists:seq(1, length(FNames)-1)] ++ [last],
@@ -1233,7 +1301,7 @@ format_msg_encoder(MsgName, MsgDef) ->
                '<encode-param-exprs>'
        end,
        [replace_tree('<msg-matching>',
-                     record_match(MsgName, lists:zip(FNames, FVars))),
+                     mapping_match(MsgName, lists:zip(FNames, FVars), Opts)),
         splice_trees('<encode-param-exprs>', EncodeExprs)])].
 
 field_encode_expr(MsgName, Field, FVar, PrevBVar) ->
@@ -1588,30 +1656,30 @@ format_msg_decoders(Defs, AnRes, Opts) ->
      || {{msg, MsgName}, MsgDef} <- Defs].
 
 format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
-    [format_msg_decoder_read_field(MsgName, MsgDef, AnRes),
+    [format_msg_decoder_read_field(MsgName, MsgDef, AnRes, Opts),
      format_field_decoders(MsgName, MsgDef, AnRes, Opts),
      format_field_skippers(MsgName, AnRes)].
 
-format_msg_decoder_read_field(MsgName, MsgDef, AnRes) ->
+format_msg_decoder_read_field(MsgName, MsgDef, AnRes, Opts) ->
     Key = ?expr(Key),
     Rest = ?expr(Rest),
     Params = decoder_params(MsgName, AnRes),
     Bindings = new_bindings([{'<Params>', Params},
                              {'<Key>', Key},
                              {'<Rest>', Rest}]),
-    [format_msg_init_decoder(MsgName, MsgDef, AnRes),
-     format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes),
-     format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes)].
+    [format_msg_init_decoder(MsgName, MsgDef, AnRes, Opts),
+     format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts),
+     format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts)].
 
-format_msg_init_decoder(MsgName, MsgDef, AnRes) ->
+format_msg_init_decoder(MsgName, MsgDef, AnRes, Opts) ->
     gpb_codegen:format_fn(
       mk_fn(d_msg_, MsgName),
       fun(Bin) -> '<decode-field-fp>'(Bin, 0, 0, '<initial-params>') end,
       [replace_term('<decode-field-fp>', mk_fn(dfp_read_field_def_, MsgName)),
        splice_trees('<initial-params>',
-                    msg_decoder_initial_params(MsgName, MsgDef, AnRes))]).
+                    msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts))]).
 
-format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
+format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The fast-path decoder directly matches the minimal varint form
     %% of the field-number combined with the wiretype.
     %% Unrecognized fields fall back to the more generic decoder-loop
@@ -1632,10 +1700,11 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
            replace_tree('<calls-to-field-decoding>', FnCall)]
           || {BinMatch, FnCall} <- decoder_fp(Bindings, MsgName, MsgDef)]),
        replace_tree('<finalize-result>',
-                    decoder_finalize_result(Params, MsgName, MsgDef, AnRes)),
+                    decoder_finalize_result(Params, MsgName, MsgDef, AnRes,
+                                            Opts)),
        replace_term('<decode-general>', mk_fn(dg_read_field_def_, MsgName))]).
 
-format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
+format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The more general field selecting decoder
     %% Stuff that ends up here: non-minimal varint forms and field to skip
     Key = fetch_binding('<Key>', Bindings),
@@ -1657,9 +1726,10 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
        replace_tree('<calls-to-field-decoding-or-skip>',
                     decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
        replace_tree('<finalize-result>',
-                    decoder_finalize_result(Params, MsgName, MsgDef, AnRes))]).
+                    decoder_finalize_result(Params, MsgName, MsgDef, AnRes,
+                                            Opts))]).
 
-msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
+msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
     FNVExprs = [case Occurrence of
                     repeated -> {FName, [],        ?expr([])};
                     required -> {FName, undefined, ?expr(undefined)};
@@ -1670,9 +1740,16 @@ msg_decoder_initial_params(MsgName, MsgDef, AnRes) ->
         pass_as_params ->
             [Expr || {_FName, _Value, Expr} <- FNVExprs];
         pass_as_record ->
-            [record_create(MsgName,
-                           [{FName, Expr} || {FName, Value, Expr} <- FNVExprs,
-                                             Value /= undefined])]
+            case get_records_or_maps_by_opts(Opts) of
+                records ->
+                    [record_create(
+                       MsgName,
+                       [{FName, Expr} || {FName, Value, Expr} <- FNVExprs,
+                                         Value /= undefined])];
+                maps ->
+                    [map_create(
+                       [{FName, Expr} || {FName, _Value, Expr} <- FNVExprs])]
+            end
     end.
 
 decoder_params(MsgName, AnRes) ->
@@ -1753,10 +1830,10 @@ decoder_field_selectors(MsgName, MsgDef) ->
      end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
-decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
+decoder_finalize_result(Params, MsgName, MsgDef, AnRes, Opts) ->
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
-            record_create(
+            mapping_create(
               MsgName,
               [begin
                    #field{name=FName, occurrence=Occurrence}=Field,
@@ -1769,10 +1846,11 @@ decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
                        end,
                    {FName, FValueExpr}
                end
-               || {Field, Param} <- lists:zip(MsgDef, Params)]);
+               || {Field, Param} <- lists:zip(MsgDef, Params)],
+              Opts);
         pass_as_record ->
             MsgVar = hd(Params),
-            record_update(
+            mapping_update(
               MsgVar,
               MsgName,
               [begin
@@ -1781,7 +1859,8 @@ decoder_finalize_result(Params, MsgName, MsgDef, AnRes) ->
                                       [replace_tree('<Param>', FieldAccess)]),
                    {FName, FValueExpr}
                end
-               || #field{name=FName, occurrence=repeated} <- MsgDef])
+               || #field{name=FName, occurrence=repeated} <- MsgDef],
+             Opts)
     end.
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
@@ -1804,12 +1883,12 @@ format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
         uint64   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         bool     -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         {enum,_} -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
-        fixed32  -> format_fixlen_field_decoder(MsgName, Field, AnRes);
-        sfixed32 -> format_fixlen_field_decoder(MsgName, Field, AnRes);
-        float    -> format_fixlen_field_decoder(MsgName, Field, AnRes);
-        fixed64  -> format_fixlen_field_decoder(MsgName, Field, AnRes);
-        sfixed64 -> format_fixlen_field_decoder(MsgName, Field, AnRes);
-        double   -> format_fixlen_field_decoder(MsgName, Field, AnRes);
+        fixed32  -> format_fixlen_field_decoder(MsgName, Field, AnRes, Opts);
+        sfixed32 -> format_fixlen_field_decoder(MsgName, Field, AnRes, Opts);
+        float    -> format_fixlen_field_decoder(MsgName, Field, AnRes, Opts);
+        fixed64  -> format_fixlen_field_decoder(MsgName, Field, AnRes, Opts);
+        sfixed64 -> format_fixlen_field_decoder(MsgName, Field, AnRes, Opts);
+        double   -> format_fixlen_field_decoder(MsgName, Field, AnRes, Opts);
         string   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         bytes    -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         {msg,_}  -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts)
@@ -1823,14 +1902,15 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
                     lists:nth(RNum - 1, Params);
                 pass_as_record ->
                     MsgVar = hd(Params),
-                    record_access(MsgVar, MsgName, FName)
+                    mapping_access(MsgVar, MsgName, FName, Opts)
             end,
     OutParams = case get_field_pass(MsgName, AnRes) of
                     pass_as_params ->
                         lists_setelement(RNum - 1, Params, ?expr(NewSeq));
                     pass_as_record ->
-                        [record_update(hd(Params), MsgName,
-                                       [{FName, ?expr(NewSeq)}])]
+                        [mapping_update(hd(Params), MsgName,
+                                           [{FName, ?expr(NewSeq)}],
+                                           Opts)]
                 end,
     [gpb_codegen:format_fn(
        mk_fn(d_field_, MsgName, FName),
@@ -1911,7 +1991,7 @@ format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
         fun(DecodeExprs, Rest2Var) ->
                 ReadFieldDefFn = mk_fn(dfp_read_field_def_, MsgName),
                 Params2 = updated_merged_params(MsgName, FieldDef, AnRes,
-                                                FVar, Params),
+                                                FVar, Params, Opts),
                 C = ?exprs('<call-read-field>'('<Rest2>', 0, 0, '<Params2>'),
                            [replace_term('<call-read-field>', ReadFieldDefFn),
                             replace_tree('<Rest2>', Rest2Var),
@@ -2027,7 +2107,7 @@ unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
                    Transforms)
     end.
 
-updated_merged_params(MsgName, FieldDef, AnRes, NewValue, Params) ->
+updated_merged_params(MsgName, FieldDef, AnRes, NewValue, Params, Opts) ->
     #field{name=FName, rnum=RNum} = FieldDef,
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
@@ -2036,9 +2116,9 @@ updated_merged_params(MsgName, FieldDef, AnRes, NewValue, Params) ->
             lists_setelement(RNum - 1, Params, MergedValue);
         pass_as_record ->
             MsgVar = hd(Params),
-            PrevValue = record_access(MsgVar, MsgName, FName),
+            PrevValue = mapping_access(MsgVar, MsgName, FName, Opts),
             MergedValue = merge_field_expr(FieldDef, PrevValue, NewValue),
-            [record_update(MsgVar, MsgName, [{FName, MergedValue}])]
+            [mapping_update(MsgVar, MsgName, [{FName, MergedValue}], Opts)]
     end.
 
 merge_field_expr(FieldDef, PrevValue, NewValue) ->
@@ -2072,7 +2152,7 @@ decoder_in_params(Params, MsgName, FieldDef, AnRes) ->
             Params
     end.
 
-format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
+format_fixlen_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     #field{name=FName, type=Type}=FieldDef,
     {BitLen, BitTypes} = case Type of
                              fixed32  -> {32, [little]};
@@ -2085,7 +2165,8 @@ format_fixlen_field_decoder(MsgName, FieldDef, AnRes) ->
     Params = decoder_params(MsgName, AnRes),
     InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
     Value = ?expr(Value),
-    Params2 = updated_merged_params(MsgName, FieldDef, AnRes, Value, Params),
+    Params2 = updated_merged_params(MsgName, FieldDef, AnRes, Value, Params,
+                                    Opts),
     ReadFieldDefFnName = mk_fn(dfp_read_field_def_, MsgName),
     gpb_codegen:format_fn(
       mk_fn(d_field_, MsgName, FName),
@@ -2127,42 +2208,56 @@ classify_field_merge_action(FieldDef) ->
         #field{occurrence=repeated}                -> seqadd
     end.
 
-format_msg_merge_code(Defs, AnRes) ->
+format_msg_merge_code(Defs, AnRes, Opts) ->
     MsgNames = [MsgName || {{msg, MsgName}, _MsgDef} <- Defs],
-    [format_merge_msgs_top_level(MsgNames),
-     [format_msg_merger(MsgName, MsgDef, AnRes)
+    [format_merge_msgs_top_level(MsgNames, Opts),
+     [format_msg_merger(MsgName, MsgDef, AnRes, Opts)
       || {{msg, MsgName}, MsgDef} <- Defs]].
 
-format_merge_msgs_top_level([]) ->
+format_merge_msgs_top_level([], _Opts) ->
     gpb_codegen:format_fn(
       merge_msgs,
-      fun(_Prev, New) -> New end);
-format_merge_msgs_top_level(MsgNames) ->
-    gpb_codegen:format_fn(
-      merge_msgs,
-      fun(Prev, New) when element(1, Prev) =:= element(1, New) ->
-              case Prev of
-                  '<msg-type>' -> '<merge-call>'
-              end
-      end,
-      [splice_clauses('<msg-type>', merger_top_level_cases(MsgNames))]).
+      fun(_Prev, New, _MsgName) -> New end);
+format_merge_msgs_top_level(MsgNames, Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records ->
+            gpb_codegen:format_fn(
+              merge_msgs,
+              fun(Prev, New) when element(1, Prev) =:= element(1, New) ->
+                      case Prev of
+                          '<msg-type>' -> '<merge-msg>'(Prev, New)
+                      end
+              end,
+              [repeat_clauses(
+                 '<msg-type>',
+                 [[replace_tree('<msg-type>', record_match(MsgName, [])),
+                   replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))]
+                  || MsgName <- MsgNames])]);
+        maps ->
+            gpb_codegen:format_fn(
+              merge_msgs,
+              fun(Prev, New, MsgName) ->
+                      case MsgName of
+                          '<msg-type>' -> '<merge-msg>'(Prev, New)
+                      end
+              end,
+              [repeat_clauses(
+                 '<msg-type>',
+                 [[replace_tree('<msg-type>', erl_syntax:atom(MsgName)),
+                   replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))]
+                  || MsgName <- MsgNames])])
+    end.
 
-merger_top_level_cases(MsgNames) ->
-    [gpb_codegen:case_clause(
-       case dummy of '#Msg{}' -> '<merge-msg>'(Prev, New) end,
-       [replace_tree('#Msg{}', record_match(MsgName, [])),
-        replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))])
-     || MsgName <- MsgNames].
-
-format_msg_merger(MsgName, [], _AnRes) ->
+format_msg_merger(MsgName, [], _AnRes, _Opts) ->
     gpb_codegen:format_fn(
       mk_fn(merge_msg_, MsgName),
       fun(_Prev, New) -> New end);
-format_msg_merger(MsgName, MsgDef, AnRes) ->
+format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
     {PFields, NFields, Mergings} = compute_msg_field_merge_exprs(MsgDef),
-    Transforms = [replace_tree('<Prev>', record_match(MsgName, PFields)),
-                  replace_tree('<New>', record_match(MsgName, NFields)),
-                  replace_tree('<merge>', record_create(MsgName, Mergings))],
+    Transforms = [replace_tree('<Prev>', mapping_match(MsgName, PFields, Opts)),
+                  replace_tree('<New>', mapping_match(MsgName, NFields, Opts)),
+                  replace_tree('<merge>',
+                               mapping_create(MsgName, Mergings, Opts))],
     MsgUndefFnClauses =
         case occurs_as_optional_submsg(MsgName, AnRes) of
             true ->
@@ -2275,36 +2370,54 @@ format_msg_nif_error_wrapper(MsgName) ->
 
 %% -- verifiers -----------------------------------------------------
 
-format_verifiers_top_function(Defs) ->
+format_verifiers_top_function(Defs, Opts) ->
+    Mapping = get_records_or_maps_by_opts(Opts),
+    MsgNameVars = case Mapping of
+                      records -> [];
+                      maps    -> [?expr(MsgName)]
+                  end,
     gpb_codegen:format_fn(
       verify_msg,
-      fun(Msg) ->
-              case Msg of
+      fun(Msg, '<MsgName>') ->
+              case '<MsgOrMsgName>' of
                   '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>']);
                   _ -> mk_type_error(not_a_known_message, Msg, [])
               end
       end,
       [repeat_clauses(
          '<msg-match>',
-         [[replace_tree('<msg-match>', record_match(MsgName, [])),
+         [[replace_tree('<msg-match>',
+                        case Mapping of
+                            records -> record_match(MsgName, []);
+                            maps    -> erl_syntax:atom(MsgName)
+                        end),
            replace_term('<verify-msg>', mk_fn(v_msg_, MsgName)),
            replace_term('<MsgName>', MsgName)]
-          || {{msg, MsgName}, _MsgDef} <- Defs])]).
+          || {{msg, MsgName}, _MsgDef} <- Defs]),
+       replace_tree('<MsgOrMsgName>', case Mapping of
+                                          records -> ?expr(Msg);
+                                          maps    -> ?expr(MsgName)
+                                      end),
+       splice_trees('<MsgName>', MsgNameVars)]).
 
-format_verifiers(Defs, AnRes, _Opts) ->
-    [format_msg_verifiers(Defs, AnRes),
+format_verifiers(Defs, AnRes, Opts) ->
+    [format_msg_verifiers(Defs, AnRes, Opts),
      format_enum_verifiers(Defs, AnRes),
      format_type_verifiers(AnRes),
      format_verifier_auxiliaries()
     ].
 
-format_msg_verifiers(Defs, AnRes) ->
-    [format_msg_verifier(MsgName, MsgDef, AnRes)
+format_msg_verifiers(Defs, AnRes, Opts) ->
+    [format_msg_verifier(MsgName, MsgDef, AnRes, Opts)
      || {{msg,MsgName}, MsgDef} <- Defs].
 
-format_msg_verifier(MsgName, MsgDef, AnRes) ->
+format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
     FVars = [{var_f_n(I), Field} || {I, Field} <- index_seq(MsgDef)],
     RFields = [{FName, Var} || {Var, #field{name=FName}} <- FVars],
+    NeedsMatchOther = case get_records_or_maps_by_opts(Opts) of
+                          records -> can_occur_as_sub_msg(MsgName, AnRes);
+                          maps    -> true
+                      end,
     gpb_codegen:format_fn(
       mk_fn(v_msg_, MsgName),
       fun('<msg-match>', '<Path>') ->
@@ -2313,12 +2426,12 @@ format_msg_verifier(MsgName, MsgDef, AnRes) ->
          ('<X>', Path) ->
               mk_type_error({expected_msg,'<MsgName>'}, X, Path)
       end,
-      [replace_tree('<msg-match>', record_match(MsgName, RFields)),
+      [replace_tree('<msg-match>', mapping_match(MsgName, RFields, Opts)),
        replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
                                  MsgDef /= [] -> ?expr(Path)
                               end),
        splice_trees('<verify-fields>', field_verifiers(FVars)),
-       repeat_clauses('<X>', case can_occur_as_sub_msg(MsgName, AnRes) of
+       repeat_clauses('<X>', case NeedsMatchOther of
                                  true  -> [[replace_tree('<X>', ?expr(X))]];
                                  false -> [] %% omit the else clause
                              end),
@@ -2529,7 +2642,7 @@ msg_def_tree({{msg, MsgName}, Fields}, Opts) ->
 fields_tree(Fields, Opts) ->
     case get_field_format_by_opts(Opts) of
         fields_as_records   ->
-            erl_syntax:list([field_tree(Field) || Field <- Fields]);
+            erl_syntax:list([field_tree(Field, Opts) || Field <- Fields]);
         fields_as_proplists ->
             erl_parse:abstract(gpb:field_records_to_proplists(Fields))
     end.
@@ -2540,12 +2653,14 @@ get_field_format_by_opts(Opts) ->
         true  -> fields_as_proplists
     end.
 
-field_tree(#field{}=F) ->
+field_tree(#field{}=F, Opts) ->
     [field | FValues] = tuple_to_list(F),
     FNames = record_info(fields, field),
-    record_create(field,
-                  lists:zip(FNames,
-                            [erl_parse:abstract(FValue) || FValue <- FValues])).
+    mapping_create(
+      field,
+      lists:zip(FNames,
+                [erl_parse:abstract(FValue) || FValue <- FValues]),
+      Opts).
 
 format_fetch_msg_defs([]) ->
     gpb_codegen:format_fn(
@@ -2695,6 +2810,12 @@ get_gen_descriptor_by_opts(Opts) ->
     proplists:get_bool(descriptor, Opts).
 
 %% -- hrl -----------------------------------------------------
+
+possibly_format_hrl(Mod, Defs, Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records -> format_hrl(Mod, Defs, Opts);
+        maps    -> '$not_generated'
+    end.
 
 format_hrl(Mod, Defs, Opts) ->
     ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
@@ -3464,7 +3585,42 @@ add_binding({Key, Value}, Bindings) ->
 fetch_binding(Key, Bindings) ->
     dict:fetch(Key, Bindings).
 
-%% Aliases to improve readability
+%% a mapping is either a record or a map
+%%
+%%
+mapping_match(RName, Fields, Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records -> record_match(RName, Fields);
+        maps    -> map_match(Fields)
+    end.
+
+mapping_create(RName, Fields, Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records -> record_create(RName, Fields);
+        maps    -> map_create(Fields)
+    end.
+
+mapping_update(Var, RName, FieldsValues, Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records -> record_update(Var, RName, FieldsValues);
+        maps    -> map_update(Var, FieldsValues)
+    end.
+
+mapping_access(Var, RName, FieldName, Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records -> record_access(Var, RName, FieldName);
+        maps    -> map_access(Var, FieldName)
+    end.
+
+get_records_or_maps_by_opts(Opts) ->
+    Default = false,
+    case proplists:get_value(maps, Opts, Default) of
+        false -> records;
+        true  -> maps
+    end.
+
+
+%% records
 record_match(RName, Fields) -> record_create_or_match(RName, Fields).
 record_create(RName, Fields) -> record_create_or_match(RName, Fields).
 
@@ -3485,6 +3641,50 @@ record_access(Var, RecordName, FieldName) ->
     erl_syntax:record_access(Var,
                              erl_syntax:atom(RecordName),
                              erl_syntax:atom(FieldName)).
+
+%% maps
+map_match(Fields) ->
+    erl_syntax:text(
+      ?ff("#{~s}", [string:join([?ff("~p => ~s", [FName, Var])
+                                 || {FName, Var} <- map_kvars(Fields)],
+                                ", ")])).
+
+map_create(Fields) ->
+    erl_syntax:text(
+      ?ff("#{~s}", [string:join([?ff("~p => ~s", [FName, Val])
+                                 || {FName, Val} <- map_kvalues(Fields)],
+                                ", ")])).
+
+map_update(Var, []) when Var /= none ->
+    %% No updates to be made, maybe no fields
+    Var;
+map_update(Var, FieldsValueTrees) ->
+    erl_syntax:text(
+      ?ff("~s#{~s}",
+          [var_literal(Var),
+           string:join([?ff("~p := ~s", [FName, Val])
+                        || {FName, Val} <- map_kvalues(FieldsValueTrees)],
+                       ", ")])).
+
+map_access(Var, FieldName) ->
+    erl_syntax:text(?ff("~s#{~p}", [var_literal(Var), FieldName])).
+
+%% -> [{atom(), string()}]
+map_kvars(KVars) ->
+    [{Key, var_literal(Var)} || {Key, Var} <- KVars].
+
+var_literal(Var) ->
+    variable = erl_syntax:type(Var),
+    erl_syntax:variable_literal(Var).
+
+%% -> [{atom(), string()}]
+map_kvalues(KVars) ->
+    [begin
+         ExprAsStr = erl_prettypr:format(Expr),
+         {Key, ExprAsStr}
+     end
+     || {Key, Expr} <- KVars].
+
 
 var_f_n(N) -> var_n("F", N).
 var_b_n(N) -> var_n("B", N).
