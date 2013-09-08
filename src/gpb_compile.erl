@@ -515,6 +515,8 @@ c() ->
 %%       instad of `-include', which is the default.</dd>
 %%   <dt>`-type'</dt>
 %%   <dd>Enables `::Type()' annotations in the generated .hrl file.</dd>
+%%   <dt>`-descr'</dt>
+%%   <dd>Generate self-description information.</dd>
 %%   <dt>`--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
 %%   <dt>`--version' or `-V'</dt>
