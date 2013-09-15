@@ -1,6 +1,6 @@
 -*- coding: utf-8 -*-
 Version 3.1
-2013-09-15
+2013-09-05
 
 	* Bugfix compilation of several files (only the first file
 	was actually compiled, even if several files were specified)
