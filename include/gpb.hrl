@@ -19,7 +19,9 @@
          fnum               :: integer(),
          rnum               :: pos_integer(), %% field number in the record
          type               :: gpb_field_type() |
-                               {'ref', term()}, %% intermediary, during parsing
+                               {ref,  term()} | %% intermediary, during parsing
+                               {msg,  list()} | %% intermediary, during parsing
+                               {enum, list()},  %% intermediary, during parsing
          occurrence         :: 'required' | 'optional' | 'repeated',
          opts      = []     :: [term()]
         }).

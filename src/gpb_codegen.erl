@@ -183,43 +183,62 @@ parse_transform(Forms, Opts) ->
       end).
 
 %%@hidden
+-spec mk_fn(atom(), fun((...) -> term())) -> no_return().
 mk_fn(Name, Fun) -> error_invalid_call(mk_fn, [Name, Fun]).
 %%@hidden
+-spec mk_fn(atom(), fun((...) -> term()), list()) -> no_return().
 mk_fn(Name, Fun, Ts) -> error_invalid_call(mk_fn, [Name, Fun, Ts]).
 %%@hidden
+-spec format_fn(atom(), fun((...) -> term())) -> no_return().
 format_fn(Name, Fun) -> error_invalid_call(format_fn, [Name, Fun]).
 %%@hidden
+-spec format_fn(atom(), fun((...) -> term()), list()) -> no_return().
 format_fn(Name, Fun, Ts) -> error_invalid_call(format_fn, [Name, Fun, Ts]).
 %%@hidden
+-spec expr(term()) -> no_return().
 expr(E) -> error_invalid_call(expr, [E]).
 %%@hidden
+-spec expr(term(), list()) -> no_return().
 expr(E, Ts) -> error_invalid_call(expr, [E, Ts]).
 %%@hidden
+-spec exprs(term(), list()) -> no_return().
 exprs(E1, Ts) -> error_invalid_call(exprs, [E1, Ts]).
 %%@hidden
+-spec exprs(term(), term(), list()) -> no_return().
 exprs(E1, E2, Ts) -> error_invalid_call(exprs, [E1, E2, Ts]).
 %%@hidden
+-spec exprs(term(), term(), term(), list()) -> no_return().
 exprs(E1, E2, E3, Ts) -> error_invalid_call(exprs, [E1, E2, E3, Ts]).
 %%@hidden
+-spec exprs(term(), term(), term(), term(), list()) -> no_return().
 exprs(E1, E2, E3, E4, Ts) -> error_invalid_call(exprs, [E1, E2, E3, E4, Ts]).
 %%@hidden
+-spec exprs(term(), term(), term(), term(), term(), list()) -> no_return().
 exprs(E1, E2, E3, E4, E5, Ts) -> error_invalid_call(exprs,
                                                     [E1, E2, E3, E4, E5, Ts]).
 %%@hidden
+-spec case_clause(term()) -> no_return().
 case_clause(CC) -> error_invalid_call(case_clause, [CC]).
 %%@hidden
+-spec case_clause(term(), list()) -> no_return().
 case_clause(CC, Ts) -> error_invalid_call(case_clause, [CC, Ts]).
 %%@hidden
+-spec fn_clause(term()) -> no_return().
 fn_clause(FC) -> error_invalid_call(fn_clause, [FC]).
 %%@hidden
+-spec fn_clause(term(), list()) -> no_return().
 fn_clause(FC, Ts) -> error_invalid_call(fn_clause, [FC, Ts]).
 %%@hidden
+-spec if_clause(term()) -> no_return().
 if_clause(FC) -> error_invalid_call(if_clause, [FC]).
 %%@hidden
+-spec if_clause(term(), list()) -> no_return().
 if_clause(FC, Ts) -> error_invalid_call(if_clause, [FC, Ts]).
 %%@hidden
+-spec receive_clause(term()) -> no_return().
 receive_clause(FC) -> error_invalid_call(receive_clause, [FC]).
 %%@hidden
+-spec receive_clause(term(), list()) -> no_return().
 receive_clause(FC, Ts) -> error_invalid_call(receive_clause, [FC, Ts]).
 
 error_invalid_call(Fn, Args) ->

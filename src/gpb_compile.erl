@@ -2963,7 +2963,6 @@ mk_c_fn(Prefix, Suffix) ->
 mk_c_var(Prefix, Suffix) ->
     dot_to_underscore(lists:concat([Prefix, Suffix])).
 
-dot_to_underscore(X) when is_atom(X) -> dot_to_underscore(atom_to_list(X));
 dot_to_underscore(X) when is_list(X) -> dot_replace_s(X, "_").
 
 dot_replace_s(S, New) when is_list(S) -> d_r(S, New);
