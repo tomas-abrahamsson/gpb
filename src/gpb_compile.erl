@@ -3645,7 +3645,7 @@ record_access(Var, RecordName, FieldName) ->
 %% maps
 map_match(Fields) ->
     erl_syntax:text(
-      ?ff("#{~s}", [string:join([?ff("~p => ~s", [FName, Var])
+      ?ff("#{~s}", [string:join([?ff("~p := ~s", [FName, Var])
                                  || {FName, Var} <- map_kvars(Fields)],
                                 ", ")])).
 
