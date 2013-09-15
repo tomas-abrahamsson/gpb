@@ -76,6 +76,22 @@ Features of gpb
    compiler will generate for the same proto, but should be roughly
    equivalent.
 
+*  Maps (NB: currently experimental!)
+
+   Gpb can generate encoders/decoders for maps, in accordance with EEP 43.
+   NB: This is still at an experimental stage, and details may change.
+   The general plan here is to wait until maps gets supported in
+   Erlang/OTP (as of this writing, it appears to be still some months
+   away), then experiment and benchmark a bit before settling for a
+   design.
+
+   Open questions in this area: (a) should non-present optional fields
+   be represented as `#{key => undefined}` or should the binding be
+   omitted altogether? Also (b), should there be some `id` binding,
+   representing the name of the message? Further: (c) decode: pass
+   maps, or pass records around and convert to maps as a final step?
+   Need to evaluate performance.
+
 *  Reporting of errors in .proto files
 
    Gpb is not very good at error reporting, especially referencing
