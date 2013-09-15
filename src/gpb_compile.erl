@@ -2521,7 +2521,7 @@ format_int_verifier(IntType, Signedness, NumBits) ->
       mk_fn(v_type_, IntType),
       fun(N, _Path) when '<Min>' =< N, N =< '<Max>' ->
               ok;
-         (N, Path) when is_integer(Path) ->
+         (N, Path) when is_integer(N) ->
               mk_type_error({value_out_of_range, '<details>'}, N, Path);
          (X, Path) ->
               mk_type_error({bad_integer, '<details>'}, X, Path)
