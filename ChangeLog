@@ -1,4 +1,14 @@
 -*- coding: utf-8 -*-
+Version 3.2
+2013-09-16
+
+	* Add preliminary support for maps, for generating code that
+	encodes from and decodes to maps, as well as merges and verifies
+	maps. The maps support is experimental.
+	* Bugfix verification of integers: the wrong error reason could be
+	generated for integers out of range.
+	* Bugfix various dialyzer issues.
+
 Version 3.1
 2013-09-05
 
