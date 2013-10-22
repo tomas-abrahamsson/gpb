@@ -46,8 +46,10 @@ Features of gpb
      the name of the package to every contained message type (if defined),
      which is useful to avoid name clashes of message types across packages.
    - The generated encode/decoder has no run-time dependency to gpb,
-     but there is a compile-time dependency for the generated code:
-     to the #field{} record in gpb.hrl the for the get_msg_defs function.
+     but there is normally a compile-time dependency for the generated
+     code: to the #field{} record in gpb.hrl the for the get_msg_defs
+     function, but it is possible to avoid this dependency by using
+     the also the `defs_as_proplists` or `-pldefs` option.
    - Gpb can generate code both to files and to binaries.
 
 *  Introspection
