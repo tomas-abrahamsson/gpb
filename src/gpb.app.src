@@ -21,7 +21,7 @@
 {application, gpb,
  [{description, "Google protocol buffer compiler and runtime support"},
   {vsn, {cmd, "git describe --always --tags --match '[0-9]*.[0-9]*'"}},
-  {modules, [gpb, gpb_compile, gpb_scan, gpb_parse]},
+  {modules, [gpb, gpb_compile, gpb_scan, gpb_parse, gpb_codegen]},
   {applications, [kernel, stdlib]},
   {registered, []},
   {env, []}]}.
