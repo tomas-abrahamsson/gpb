@@ -22,7 +22,7 @@
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
 -export([verify_msg/2, check_scalar/2]).
--export([encode_varint/1, decode_varint/1]).
+-export([encode_varint/1, decode_varint/1, decode_varint/2]).
 -export([encode_wiretype/1, decode_wiretype/1]).
 -export([version_as_string/0, version_as_list/0]).
 -export([field_records_to_proplists/1, proplists_to_field_records/1]).
@@ -150,7 +150,7 @@ new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
                 MsgDef).
 
 decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
-    {Key, Rest} = decode_varint(Bin),
+    {Key, Rest} = decode_varint(Bin, 32),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
     case lists:keysearch(FieldNum, #field.fnum, MsgDef) of
@@ -202,13 +202,13 @@ decode_wiretype(5) -> bits32.
 skip_field(Bin, WireType) ->
     case decode_wiretype(WireType) of
         varint ->
-            {_N, Rest} = decode_varint(Bin),
+            {_N, Rest} = decode_varint(Bin, 64),
             Rest;
         bits64 ->
             <<_:64, Rest/binary>> = Bin,
             Rest;
         length_delimited ->
-            {Len, Rest} = decode_varint(Bin),
+            {Len, Rest} = decode_varint(Bin, 64),
             <<_:Len/binary, Rest2/binary>> = Rest,
             Rest2;
         bits32 ->
@@ -217,7 +217,7 @@ skip_field(Bin, WireType) ->
     end.
 
 decode_packed(FieldType, Bin, MsgDefs, Seq0) ->
-    {Len, Rest} = decode_varint(Bin),
+    {Len, Rest} = decode_varint(Bin, 64),
     <<Bytes:Len/binary, Rest2/binary>> = Rest,
     {decode_packed_aux(Bytes, FieldType, MsgDefs, Seq0), Rest2}.
 
@@ -230,25 +230,25 @@ decode_packed_aux(<<>>, _FieldType, _MsgDefs, Acc) ->
 decode_type(FieldType, Bin, MsgDefs) ->
     case FieldType of
         sint32 ->
-            {NV, T} = decode_varint(Bin),
+            {NV, T} = decode_varint(Bin, 32),
             {decode_zigzag(NV), T};
         sint64 ->
-            {NV, T} = decode_varint(Bin),
+            {NV, T} = decode_varint(Bin, 64),
             {decode_zigzag(NV), T};
         int32 ->
-            {NV, T} = decode_varint(Bin),
+            {NV, T} = decode_varint(Bin, 32),
             <<N:32/signed>> = <<NV:32>>,
             {N, T};
         int64 ->
-            {NV, T} = decode_varint(Bin),
+            {NV, T} = decode_varint(Bin, 64),
             <<N:64/signed>> = <<NV:64>>,
             {N, T};
         uint32 ->
-            {_N, _Rest} = decode_varint(Bin);
+            {_N, _Rest} = decode_varint(Bin, 32);
         uint64 ->
-            {_N, _Rest} = decode_varint(Bin);
+            {_N, _Rest} = decode_varint(Bin, 64);
         bool ->
-            {N, Rest} = decode_varint(Bin),
+            {N, Rest} = decode_varint(Bin, 64),
             {N =/= 0, Rest};
         {enum, _EnumName}=Key ->
             {N, Rest} = decode_type(int32, Bin, MsgDefs),
@@ -265,15 +265,15 @@ decode_type(FieldType, Bin, MsgDefs) ->
             <<N:64/little-float, Rest/binary>> = Bin,
             {N, Rest};
         string ->
-            {Len, Rest} = decode_varint(Bin),
+            {Len, Rest} = decode_varint(Bin, 64),
             <<Utf8Str:Len/binary, Rest2/binary>> = Rest,
             {unicode:characters_to_list(Utf8Str, unicode), Rest2};
         bytes ->
-            {Len, Rest} = decode_varint(Bin),
+            {Len, Rest} = decode_varint(Bin, 64),
             <<Bytes:Len/binary, Rest2/binary>> = Rest,
             {Bytes, Rest2};
         {msg,MsgName} ->
-            {Len, Rest} = decode_varint(Bin),
+            {Len, Rest} = decode_varint(Bin, 64),
             <<MsgBytes:Len/binary, Rest2/binary>> = Rest,
             {decode_msg(MsgBytes, MsgName, MsgDefs), Rest2};
         fixed32 ->
@@ -485,11 +485,14 @@ encode_wiretype(sfixed32)          -> 5;
 encode_wiretype(float)             -> 5.
 
 
-decode_varint(Bin) -> de_vi(Bin, 0, 0).
+decode_varint(Bin) -> decode_varint(Bin, 64).
+decode_varint(Bin, MaxNumBits) -> de_vi(Bin, 0, 0, MaxNumBits).
 
-de_vi(<<1:1, X:7, Rest/binary>>, N, Acc) -> de_vi(Rest, N+1, X bsl (N*7) + Acc);
-de_vi(<<0:1, X:7, Rest/binary>>, N, Acc) -> {X bsl (N*7) + Acc, Rest}.
-
+de_vi(<<1:1, X:7, Rest/binary>>, N, Acc, MaxNumBits) when N < (64-7) ->
+    de_vi(Rest, N+7, X bsl N + Acc, MaxNumBits);
+de_vi(<<0:1, X:7, Rest/binary>>, N, Acc, MaxNumBits) ->
+    Mask = (1 bsl MaxNumBits) - 1,
+    {(X bsl N + Acc) band Mask, Rest}.
 
 encode_varint(N) -> en_vi(N).
 
@@ -742,3 +745,12 @@ decode_zigzag_test() ->
     -2 = decode_zigzag(3),
     2147483647  = decode_zigzag(4294967294),
     -2147483648 = decode_zigzag(4294967295).
+
+decode_invalid_varint_fails_test() ->
+    %% This varint is invalid because it is too long.
+    %% approx 2.3e105, which is much longer than 32 or 64 bits
+    %% The limit is not set too narrowly above 64 bits; the purpose
+    %% is more to catch malicious input causing the decoder to
+    %% eat memory until the vm dies (denial of service).
+    InvalidVarint = iolist_to_binary([lists:duplicate(50, 255), 0]),
+    ?assertError(_, decode_varint(InvalidVarint)).

@@ -44,6 +44,12 @@
 -define(f(Fmt, Args),  io_lib:format(Fmt, Args)).
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
+%% Varints are processed 7 bits at a time.
+%% We can expect that we have processed this number of bits before
+%% we expect to see the last varint byte, which must have msb==0.
+%% 64 - 7 = 57.
+-define(NB, 57).
+
 %% @spec file(File) -> ok | {error, Reason}
 %% @equiv file(File, [])
 file(File) ->
@@ -1712,7 +1718,7 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     Params = fetch_binding('<Params>', Bindings),
     gpb_codegen:format_fn(
       mk_fn(dg_read_field_def_, MsgName),
-      fun(<<1:1, X:7, '<Rest>'/binary>>, N, Acc, '<Params>') ->
+      fun(<<1:1, X:7, '<Rest>'/binary>>, N, Acc, '<Params>') when N < (32-7) ->
               call_self('<Rest>', N+7, X bsl N + Acc, '<Params>');
          (<<0:1, X:7, '<Rest>'/binary>>, N, Acc, '<Params>') ->
               '<Key>' = X bsl N + Acc,
@@ -1914,7 +1920,7 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
                 end,
     [gpb_codegen:format_fn(
        mk_fn(d_field_, MsgName, FName),
-       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') when N < ?NB ->
                call_self(Rest, N + 7, X bsl N + Acc, '<Params>');
           (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
                Len = X bsl N + Acc,
@@ -1969,7 +1975,7 @@ format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
     Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
     gpb_codegen:format_fn(
       mk_fn(d_packed_field_, MsgName, FName),
-      fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
+      fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) when N < ?NB ->
               call_self(Rest, N + 7, X bsl N + Acc, AccSeq);
          (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq) ->
               '<body>';
@@ -2001,7 +2007,7 @@ format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
     gpb_codegen:format_fn(
       mk_fn(d_field_, MsgName, FName),
-      fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+      fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') when N < ?NB ->
               call_self(Rest, N + 7, X bsl N + Acc, '<Params>');
          (<<0:1, X:7, Rest/binary>>, N, Acc, '<InParams>') ->
               '<body>'
@@ -2332,7 +2338,7 @@ format_field_skippers(MsgName, AnRes) ->
      %% skip_length_delimited_<MsgName>/4
      gpb_codegen:format_fn(
        SkipLenDelimFnName,
-       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') when N < ?NB ->
                '<call-recursively>'(Rest, N+7, X bsl N + Acc, '<Params>');
           (<<0:1, X:7, Rest/binary>>, N, Acc, '<Params>') ->
                Length = X bsl N + Acc,

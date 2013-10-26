@@ -47,6 +47,11 @@ decode_overly_long_noncanonical_varints_test() ->
     {1, <<255>>}   = gpb:decode_varint(<<129, 128, 128, 128, 0, 255>>),
     {20394, <<255>>} = gpb:decode_varint(<<170,159,(128+1), 128, 128, 0, 255>>).
 
+decode_fails_for_varints_of_too_many_bytes_test() ->
+    ViMax64 = gpb:encode_varint(16#ffffFFFFffffFFFF),
+    ?assertError(_, gpb:decode_varint(<<255, ViMax64/binary>>, 64)),
+    ok.
+
 encode_varint_test() ->
     <<0>>      = gpb:encode_varint(0),
     <<127>>    = gpb:encode_varint(127),
@@ -132,6 +137,14 @@ decode_msg_with_enum_field_test() ->
 decode_msg_with_negative_enum_value_test() ->
     #m1{a = v2} =
         decode_msg(<<8, 254,255,255,255,15>>,
+                   m1,
+                   [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
+                                       type={enum,e},
+                                       occurrence=required, opts=[]}]},
+                    {{enum,e}, [{v1, 100},
+                                {v2, -2}]}]),
+    #m1{a = v2} =
+        decode_msg(<<8, 254,255,255,255,255,255,255,255,255,1>>,
                    m1,
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
                                        type={enum,e},
@@ -254,6 +267,63 @@ decode_skips_packed_fields_if_wiretype_mismatches_test() ->
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a, type=bool,
                                        occurrence=repeated, opts=[packed]}]}]).
 
+decode_of_field_fails_for_invalid_varints_test() ->
+    ViMax64 = gpb:encode_varint(16#ffffFFFFffffFFFF),
+    FDef = #field{name=a, fnum=1, rnum=#m1.a, type=bool,
+                  occurrence=required, opts=[]},
+    %% Verify fail on invalid field number + type
+    ?assertError(_, decode_msg(<<255, ViMax64/binary, 1>>,
+                               m1,
+                               [{{msg,m1}, [FDef]}])),
+    %% Verify fail on invalid field bools
+    ?assertError(_, decode_msg(<<8, %% field num = 1, wire type = varint
+                                 255, ViMax64/binary %% too many bits
+                               >>,
+                               m1,
+                               [{{msg,m1}, [FDef]}])),
+    %% Verify fail on invalid field enums (enums are 32 bits signed,
+    %% but might be sent over the wire as 64 bits signed, but are
+    %% to be truncated to 32 bits before interpretation.
+    ?assertError(_, decode_msg(<<8, %% field num = 1, wire type = varint
+                                 255, ViMax64/binary %% too many bits
+                               >>,
+                               m1,
+                               [{{msg,m1}, [FDef#field{type={enum,e}}]},
+                                {{enum,e}, [{a,1}]}])),
+    %% Verify fail on invalid length, for length delimited field types
+    [?assertError(_, decode_msg(<<10, %% field num = 1, wire type = len-delim
+                                  255, ViMax64/binary, %% too many length bits
+                                  1,2,3
+                                >>,
+                                m1,
+                                [{{msg,m1}, [FDef#field{type=T}]},
+                                 {{msg,m2}, [FDef]}]))
+     || T <- [string, bytes, {msg,m2}]],
+    %% Verify fail on invalid 32-bit varint field types
+    [?assertError(_, decode_msg(<<8, %% field num = 1, wire type = varint
+                                  255, ViMax64/binary %% too many bits
+                                >>,
+                                m1,
+                                [{{msg,m1}, [FDef#field{type=T}]}]))
+     || T <- [sint32, int32, uint32]],
+    %% Verify fail on invalid 64-bit varint field types
+    [?assertError(_, decode_msg(<<8, %% field num = 1, wire type = varint
+                                  255, ViMax64/binary %% too many bits
+                                >>,
+                                m1,
+                                [{{msg,m1}, [FDef#field{type=T}]}]))
+     || T <- [sint64, int64, uint64]],
+    %% Verify fail on invalid length for packed repeated field
+    ?assertError(_, decode_msg(<<8, %% field num = 1, wire type = varint
+                                 255, ViMax64/binary, %% too many length bits
+                                 1,1,1
+                               >>,
+                               m1,
+                               [{{msg,m1}, [FDef#field{occurrence=repeated,
+                                                       opts=[packed]}]}])),
+    ok.
+
+
 %% -------------------------------------------------------------
 
 encode_required_varint_field_test() ->
@@ -307,13 +377,17 @@ encode_msg_with_enum_field_test() ->
                                 {v2, 150}]}]).
 
 encode_msg_with_negative_enum_value_test() ->
-    <<8, 254,255,255,255,15>> =
+    <<8, Rest/binary>> =
         encode_msg(#m1{a = v2},
                    [{{msg,m1}, [#field{name=a, fnum=1, rnum=#m1.a,
                                        type={enum,e},
                                        occurrence=required, opts=[]}]},
                     {{enum,e}, [{v1, 100},
-                                {v2, -2}]}]).
+                                {v2, -2}]}]),
+    case Rest of
+        <<254,255,255,255,15>>                    -> ok; %% encoded as 32 bits
+        <<254,255,255,255,255,255,255,255,255,1>> -> ok  %% encoded as 64 bits
+    end.
 
 encode_msg_with_bool_field_test() ->
     <<8,1>> =
