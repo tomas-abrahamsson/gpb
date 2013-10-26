@@ -1854,7 +1854,7 @@ decoder_finalize_result(Params, MsgName, MsgDef, AnRes, Opts) ->
               MsgVar,
               MsgName,
               [begin
-                   FieldAccess = record_access(MsgVar, MsgName, FName),
+                   FieldAccess = mapping_access(MsgVar, MsgName, FName, Opts),
                    FValueExpr = ?expr(lists:reverse('<Param>'),
                                       [replace_tree('<Param>', FieldAccess)]),
                    {FName, FValueExpr}
