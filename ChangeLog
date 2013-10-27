@@ -1,4 +1,10 @@
 -*- coding: utf-8 -*-
+Version 3.4
+2013-10-27
+
+	* Licence modification/clarification: clarify that the licence (in
+	the file COPYING.LIB) does not cover code generated with gpb.
+
 Version 3.3
 2013-10-27
 
