@@ -78,6 +78,12 @@ Features of gpb
    compiler will generate for the same proto, but should be roughly
    equivalent.
 
+*  Erroneously encoded protobuf messages and fields will generally
+   cause the decoder to crash.  Examples of such erroneous encodings are:
+   - varints with too many bits
+   - strings, bytes, sub messages or packed repeated fields,
+     where the encoded length is longer than the remaining binary
+
 *  Maps (NB: currently experimental!)
 
    Gpb can generate encoders/decoders for maps, in accordance with EEP 43.
@@ -107,6 +113,9 @@ Features of gpb
    protoc does), but not as names for messages. To correct this, one
    would have to either rewrite the grammar, or stop using yecc.
    (maybe rewrite it all as a protoc plugin?)
+
+   The gpb will fail to decode floats that are NaN, +Inf and -Inf,
+   and there is no possibility to encode such floats.
 
 Performance
 -----------
