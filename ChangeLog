@@ -1,4 +1,21 @@
 -*- coding: utf-8 -*-
+Version 3.3
+2013-10-27
+
+	* Fix several errors in the gpb.app.src so that it works with
+	Elixir and Relex, thanks to Paulo Almeida.
+	* When decoding, reject messages with invalid varints.
+	Invaid varints are encoded with too many bits. Previously,
+	decoding a varint with very many bits (ie: with very many leading
+	bytes > 128) would cause the Erlang VM to construct a very large
+	number when decoding the varint. This would cause the Erlang VM to
+	use excessive cpu resources and could eventually cause the Erlang
+	VM to run out of memory. Now parsing fails immediately reading too
+	many varint bits.
+	* Fix a bug when generating code for maps.
+	* Teach the benchmarks to do maps, and also improve
+	various other benchmark related things.
+
 Version 3.2
 2013-09-16
 
