@@ -2022,7 +2022,7 @@ format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
 decode_int_value(ResVar, Bindings, #field{type=Type}, Opts, TailFn) ->
     Value = fetch_binding('<Value>', Bindings),
     Rest = fetch_binding('<Rest>', Bindings),
-    StringsAsBinaries = proplists:get_bool(strings_as_binaries, Opts),
+    StringsAsBinaries = get_strings_as_binaries_by_opts(Opts),
     case Type of
         sint32 ->
             TailFn(decode_zigzag_to_var(ResVar, Value), Rest);
@@ -3052,9 +3052,9 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
       "}\n",
       "\n"]].
 
-format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, _Opts) ->
+format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, Opts) ->
     case is_any_field_of_type_string(AnRes) of
-        true  -> format_nif_cc_utf8_conversion_code();
+        true  -> format_nif_cc_utf8_conversion_code(Opts);
         false -> ""
     end.
 
@@ -3064,7 +3064,7 @@ is_any_field_of_type_string(#anres{used_types=UsedTypes}) ->
 is_any_field_of_type_bool(#anres{used_types=UsedTypes}) ->
     sets:is_element(bool, UsedTypes).
 
-format_nif_cc_utf8_conversion_code() ->
+format_nif_cc_utf8_conversion_code(Opts) ->
     ["/* Source for https://www.ietf.org/rfc/rfc2279.txt */\n",
      "\n",
      "static int\n",
@@ -3160,16 +3160,28 @@ format_nif_cc_utf8_conversion_code() ->
      "                                ERL_NIF_LATIN1);\n",
      "    }\n",
      "    else\n",
-     "    {\n",
-     "        unsigned int  cp[numcp];\n",
-     "        ERL_NIF_TERM  es[numcp];\n",
-     "        int i;\n",
-     "\n",
-     "        utf8_to_uint32(cp, utf8data, numcp);\n",
-     "        for (i = 0; i < numcp; i++)\n",
-     "            es[i] = enif_make_uint(env, cp[i]);\n",
-     "        return enif_make_list_from_array(env, es, numcp);\n",
-     "    }\n",
+     case get_strings_as_binaries_by_opts(Opts) of
+         true ->
+             ["    {\n",
+              "        ERL_NIF_TERM   b;\n",
+              "        unsigned char *data;\n",
+              "\n",
+              "        data = enif_make_new_binary(env, numOctets, &b);\n",
+              "        memmove(data, utf8data, numOctets);\n",
+              "        return b;\n",
+              "    }\n"];
+         false ->
+             ["    {\n",
+              "        unsigned int  cp[numcp];\n",
+              "        ERL_NIF_TERM  es[numcp];\n",
+              "        int i;\n",
+              "\n",
+              "        utf8_to_uint32(cp, utf8data, numcp);\n",
+              "        for (i = 0; i < numcp; i++)\n",
+              "            es[i] = enif_make_uint(env, cp[i]);\n",
+              "        return enif_make_list_from_array(env, es, numcp);\n"
+              "    }\n"]
+     end,
      "}\n",
      "\n"].
 
@@ -3752,6 +3764,9 @@ splice_clauses(Marker, Clauses) when is_atom(Marker) ->
 
 repeat_clauses(Marker, RepetitionReplacements) ->
     {repeat_clauses, Marker, RepetitionReplacements}.
+
+get_strings_as_binaries_by_opts(Opts) ->
+    proplists:get_bool(strings_as_binaries, Opts).
 
 flatten_iolist(IoList) ->
     binary_to_list(iolist_to_binary(IoList)).
