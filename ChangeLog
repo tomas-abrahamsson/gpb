@@ -1,4 +1,12 @@
 -*- coding: utf-8 -*-
+Version 3.6
+2013-11-13
+
+	* Add nif support for the strings_as_binaries (-strbin) option,
+	thanks to Louis-Philippe Gauthier for reporting this.
+	* Add an is_binary guard to the top-level generated decode_msg/2
+	function. Thanks to Klas Johansson for suggesting this.
+
 Version 3.5
 2013-10-27
 
