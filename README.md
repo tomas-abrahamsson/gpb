@@ -255,3 +255,5 @@ or git fetch requests.  Here are some guide lines:
   rebar clean compile eunit doc xref
 * If you add a feature, test cases are most welcome,
   so that the feature won't get lost in any future refactorization
+* Use a git branch for your feature. This way, the git history will
+  look better in case there is need to refetch.
