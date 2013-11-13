@@ -310,6 +310,20 @@ repeat_clauses_test() ->
     ?assertError(function_clause, M:FnName(4,5)),
     ok.
 
+can_insert_program_fragments_as_text_test() ->
+    %% This can be useful for program constructs that erl_syntax
+    %% does not yet support. At the time of this writing (pre-R17),
+    %% this includes map, but I still want to be able to generate
+    %% code for supporting maps.
+    FnName = p,
+    XTimes2Text = erl_syntax:text("X * 2"),
+    IoList = gpb_codegen:format_fn(FnName, fun(X) -> marker end,
+                                   [{replace_tree, marker, XTimes2Text}]),
+    true = io_lib:deep_char_list(IoList),
+    M = ?dummy_mod,
+    {module, M} = ls(M, IoList),
+    128 = M:FnName(64).
+
 %% -- helpers ---------------------------
 
 mk_test_fn_name() ->
