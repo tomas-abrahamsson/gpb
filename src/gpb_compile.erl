@@ -1630,7 +1630,7 @@ format_varint_encoder() ->
 format_decoders_top_function(Defs) ->
     gpb_codegen:format_fn(
       decode_msg,
-      fun(Bin, MsgName) ->
+      fun(Bin, MsgName) when is_binary(Bin) ->
               case MsgName of
                   '<MsgName>' -> '<decode-call>'(Bin)
               end
