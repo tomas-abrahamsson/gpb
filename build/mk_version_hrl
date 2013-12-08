@@ -1,0 +1,8 @@
+#! /bin/sh
+
+sed \
+    -e "s/@vsn@/`git describe --always --tags --match '[0-9]*.[0-9]*'`/g" \
+    -e "s/is expected to be/was/g" \
+    -e '/^%% The version below/ i \
+%% DO NOT EDIT -- generated from gpb_version.hrl.in' \
+    -e "/^%% NB: The build.mk_version_hrl depends/ d"

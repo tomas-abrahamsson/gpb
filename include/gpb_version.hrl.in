@@ -3,7 +3,7 @@
 
 %% The version below is expected to be substituted
 %% at build-time, see rebar.config
-%% NB: rebar.config depends on the exact wording
+%% NB: The build/mk_version_hrl depends on the exact wording
 
 -define(gpb_version, "@vsn@").
 
