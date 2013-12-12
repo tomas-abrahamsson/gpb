@@ -121,7 +121,10 @@ TARGETS = \
 	$(ebin)/gpb.app
 
 
-all:	$(TARGETS)
+all:	$(TARGETS) | $(ebin)
+
+$(ebin):
+	mkdir -pv $(ebin)
 
 clean:
 	$(RM) $(TARGETS)
