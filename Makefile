@@ -121,10 +121,7 @@ TARGETS = \
 	$(ebin)/gpb.app
 
 
-all:	$(TARGETS) | $(ebin)
-
-$(ebin):
-	mkdir -pv $(ebin)
+all:	$(TARGETS)
 
 clean:
 	$(RM) $(TARGETS)
@@ -166,13 +163,13 @@ FORCE:
 ##
 ## General default rules for how to compile some files
 ##
-$(ebin)/%.beam: $(src)/%.erl
+$(ebin)/%.beam: $(src)/%.erl | $(ebin)
 	$(ERLC) $(ERLC_FLAGS) -pa $(ebin) -o $(ebin) $<
 
-$(ebin)/%.beam: $(descr_src)/%.erl
+$(ebin)/%.beam: $(descr_src)/%.erl | $(ebin)
 	$(ERLC) $(ERLC_FLAGS) -pa $(ebin) -o $(ebin) $<
 
-$(test)/%.beam: $(test)/%.erl
+$(test)/%.beam: $(test)/%.erl | $(ebin)
 	$(ERLC) $(ERLC_FLAGS) -pa $(ebin) -o $(test) $<
 
 $(src)/%.erl: $(src)/%.yrl
@@ -180,6 +177,9 @@ $(src)/%.erl: $(src)/%.yrl
 
 $(src)/%.erl: $(src)/%.xrl
 	$(ERLC) -o $(src) $<
+
+$(ebin):
+	mkdir -pv $(ebin)
 
 ##
 ## Some extra dependencies, not covered by default rules above
@@ -209,7 +209,7 @@ $(descr_encoder): $(DESCR_PROTO) $(BEAMS)
 		-s gpb_compile c $(abspath $(descr_src))/gpb_descriptor.proto
 
 # To generate the ebin/gpb.app file, process the src/gpb.app.src file
-$(ebin)/gpb.app: $(src)/gpb.app.src
+$(ebin)/gpb.app: $(src)/gpb.app.src | $(ebin)
 	@echo Generating $@...
 	$(silencer)$(ERL) +B -noshell -noinput -eval " \
 	    try \
