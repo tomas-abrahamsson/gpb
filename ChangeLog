@@ -1,6 +1,18 @@
 -*- coding: utf-8 -*-
+Version 3.7
+2013-dec-13
+
+	* Add a (GNU) Makefile, for projects that prefer to build this
+	way. Thanks to Graham Crowe for suggestions and ideas.
+	* Rework/fix the substitution in gpb_version.hrl.
+	* Add support for Erlang/OTP R16B03, by working around a
+	bug in syntax_tools (reversion of local implicit funs).
+	* Change the months in this file, from numeric to 3-letters, to
+	avoid ambiguities with different ways of writing dates in various
+	parts of the world.
+
 Version 3.6
-2013-11-13
+2013-nov-13
 
 	* Add nif support for the strings_as_binaries (-strbin) option,
 	thanks to Louis-Philippe Gauthier for reporting this.
@@ -8,18 +20,18 @@ Version 3.6
 	function. Thanks to Klas Johansson for suggesting this.
 
 Version 3.5
-2013-10-27
+2013-oct-27
 
 	* Licence change: from LGPL 2 to LGPL 2.1
 
 Version 3.4
-2013-10-27
+2013-oct-27
 
 	* Licence modification/clarification: clarify that the licence (in
 	the file COPYING.LIB) does not cover code generated with gpb.
 
 Version 3.3
-2013-10-27
+2013-oct-27
 
 	* Fix several errors in the gpb.app.src so that it works with
 	Elixir and Relex, thanks to Paulo Almeida.
@@ -36,7 +48,7 @@ Version 3.3
 	various other benchmark related things.
 
 Version 3.2
-2013-09-16
+2013-sep-16
 
 	* Add preliminary support for maps, for generating code that
 	encodes from and decodes to maps, as well as merges and verifies
@@ -46,7 +58,7 @@ Version 3.2
 	* Bugfix various dialyzer issues.
 
 Version 3.1
-2013-09-05
+2013-sep-05
 
 	* Bugfix compilation of several files (only the first file
 	was actually compiled, even if several files were specified)
@@ -62,14 +74,14 @@ Version 3.1
 	Gauthier. Previously it existed only as an Erlang API option.
 
 Version 3.0
-2013-08-24
+2013-aug-24
 	* Improve decoding performance by roughly 8--19%
 	* Completely rewrite the code generator. Use a parse-transform
 	  instead of formatting and assembling strings.
 	* Minor improvement in the generated code for version_as_list.
 
 Version 2.3
-2013-08-18
+2013-aug-18
 	* Fix Rebar compile on non-GNU systems, such as Mac OS X, thanks
 	to Everton Ribeiro
 	* Bugfix (mostly) rare compilation breakage: depending on the
@@ -78,7 +90,7 @@ Version 2.3
 	* Ignore non-version-like tags
 
 Version 2.2
-2013-07-13
+2013-jul-13
 
 	* Wrap generated skip-functions with quotes. Thanks to jesse-ad.
 	* Experimental support for calling protoc code via a NIF
@@ -114,12 +126,12 @@ Version 2.2
 	git tag as the source of information.
 
 Version 2.1
-2011-10-31  Tomas Abrahamsson  <tomas.abrahamsson@gmail.com>
+2011-oct-31  Tomas Abrahamsson  <tomas.abrahamsson@gmail.com>
 
 	* Package names are dotted rather than with underscores
 	* New generated introspection function: M:get_package_name/0.
 
 Version 2.0
-2011-07-10  Tomas Abrahamsson  <tab@lysator.liu.se>
+2011-jul-10  Tomas Abrahamsson  <tab@lysator.liu.se>
 
 	* First public version
