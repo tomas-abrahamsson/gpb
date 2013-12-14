@@ -382,7 +382,6 @@ merge_warns(error, Warns, binary) ->
     erlang:error({internal_error, ?MODULE,
                   generated_code_failed_to_compile, Warns}).
 
--define('fun report_warning/1', fun(X) -> report_warning(X) end).
 possibly_report_warnings(Result, Opts) ->
     Warns = case Result of
                 {error, _Reason, Ws} -> Ws;
@@ -391,7 +390,7 @@ possibly_report_warnings(Result, Opts) ->
                 {ok, Ws}             -> Ws
             end,
     case proplists:get_bool(report_warnings, Opts) of
-        true  -> lists:foreach(?'fun report_warning/1', Warns);
+        true  -> lists:foreach(fun report_warning/1, Warns);
         false -> ok
     end.
 
@@ -675,10 +674,8 @@ show_help() ->
 show_version() ->
     io:format("gpb version ~s~n", [gpb:version_as_string()]).
 
--define('fun parse_opt/1', fun(X) -> parse_opt(X) end).
 parse_opts(Args, PlainArgs) ->
-    arg_zf(?'fun parse_opt/1', Args) ++
-        plain_arg_zf(?'fun parse_opt/1', PlainArgs).
+    arg_zf(fun parse_opt/1, Args) ++ plain_arg_zf(fun parse_opt/1, PlainArgs).
 
 parse_opt({"I", [Dir]})          -> {true, {i,Dir}};
 parse_opt({"I"++Dir, []})        -> {true, {i,Dir}};
@@ -2587,7 +2584,6 @@ format_bytes_verifier() ->
               mk_type_error(bad_binary_value, X, Path)
       end).
 
--define('fun atom_to_list/1', fun(X) -> atom_to_list(X) end).
 format_verifier_auxiliaries() ->
     [gpb_codegen:format_fn(
        mk_type_error,
@@ -2604,7 +2600,7 @@ format_verifier_auxiliaries() ->
           (PathR) ->
                list_to_atom(
                  string:join(
-                   lists:map(?'fun atom_to_list/1', lists:reverse(PathR)),
+                   lists:map(fun atom_to_list/1, lists:reverse(PathR)),
                    "."))
        end)].
 
@@ -3538,9 +3534,8 @@ rmm_aux(<<C, Rest/binary>>, ModAsStr, Acc) ->
 rmm_aux(<<>>, _ModAsStr, Acc) ->
     lists:reverse(Acc).
 
--define('fun is_no_dot/1', fun(X) -> is_no_dot(X) end).
 split_toks_at_dot(AllToks) ->
-    case lists:splitwith(?'fun is_no_dot/1', AllToks) of
+    case lists:splitwith(fun is_no_dot/1, AllToks) of
         {Toks, [{dot,_}=Dot]}      -> [Toks ++ [Dot]];
         {Toks, [{dot,_}=Dot | Tl]} -> [Toks ++ [Dot] | split_toks_at_dot(Tl)]
     end.
@@ -3558,11 +3553,8 @@ split_forms_at_first_code_2([{function, _, _Name, _, _Clauses}|_]=Code, Acc) ->
 field_record_to_attr_form() ->
     record_to_attr(field, record_info(fields, field)).
 
--define('fun gpb_field_to_record_field/1',
-        fun(X) -> gpb_field_to_record_field(X) end).
 msgdefs_to_record_attrs(Defs) ->
-    [record_to_attr(MsgName, lists:map(?'fun gpb_field_to_record_field/1',
-                                       Fields))
+    [record_to_attr(MsgName, lists:map(fun gpb_field_to_record_field/1, Fields))
      || {{msg, MsgName}, Fields} <- Defs].
 
 record_to_attr(RecordName, Fields) ->
@@ -3599,9 +3591,8 @@ combine_erlcode_with_niftxt(ErlCode, NifTxt) ->
 
 %% -- internal utilities -----------------------------------------------------
 
--define('fun add_binding/2', fun(X,Y) -> add_binding(X,Y) end).
 new_bindings(Tuples) ->
-    lists:foldl(?'fun add_binding/2', new_bindings(), Tuples).
+    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
 
 new_bindings() ->
     dict:new().
@@ -3794,9 +3785,8 @@ possibly_write_file(FileName, Bin, Opts) when is_binary(Bin) ->
 possibly_write_file(_FileName, '$not_generated', _Opts) ->
     ok.
 
--define('fun use_the_file_module/2', fun(X,Y) -> use_the_file_module(X,Y) end).
 file_op(Fn, Args, Opts) ->
-    FileOp = proplists:get_value(file_op, Opts, ?'fun use_the_file_module/2'),
+    FileOp = proplists:get_value(file_op, Opts, fun use_the_file_module/2),
     FileOp(Fn, Args).
 
 use_the_file_module(Fn, Args) ->

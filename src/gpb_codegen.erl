@@ -248,7 +248,7 @@ error_invalid_call(Fn, Args) ->
                              "not called directly"]}}).
 
 transform_forms(Forms, Opts) ->
-    Mapper = mk_transform_fn(Forms),
+    Mapper = mk_transform_fn(Forms, Opts),
     [debug_form(erl_syntax:revert(transform_form(Mapper, Form)), Opts)
      || Form <- Forms].
 
@@ -266,16 +266,17 @@ debug_form(NewForm, Opts) ->
 debug_form_generation_p(Opts) ->
     proplists:get_bool(debug_pt, proplists:unfold(Opts)).
 
-mk_transform_fn(Forms) ->
+mk_transform_fn(Forms, Opts) ->
+    TOpts = maybe_opts_for_reversion_of_local_implicit_funs_bug() ++ Opts,
     fun(Node) ->
             Type = erl_syntax:type(Node),
-            transform_node(Type, Node, Forms)
+            transform_node(Type, Node, Forms, TOpts)
     end.
 
 transform_form(Mapper, Form) ->
     erl_syntax_lib:map(Mapper, Form).
 
-transform_node(application, Node, AllForms) ->
+transform_node(application, Node, AllForms, _Opts) ->
     %% General idea here: transform a "call" to
     %%
     %%    gpb_codegen:mk_fn(Name, Def, RtTransforms)
@@ -352,7 +353,28 @@ transform_node(application, Node, AllForms) ->
         _X ->
             Node
     end;
-transform_node(_Type, Node, _Forms) ->
+transform_node(implicit_fun, Node, _Forms, Opts) ->
+    %% In R16B03, there's an unfortunate bug in erl_syntax for reverting
+    %% exprs on the form "fun some_function/17", aka local implicit funs.
+    %% I've found that a work around for the bug is to have something
+    %% that's already on erl_parse format, so create local implicit funs
+    %% on the erl_parse format.
+    case proplists:get_bool(implicit_fun_revert_bug_r16b03, Opts) of
+        true ->
+            %% Create something that's already in erl_parse format
+            case analyze_implicit_fun_name(Node) of
+                {FnName, Arity} when is_atom(FnName), is_integer(Arity) ->
+                    Pos = erl_syntax:get_pos(Node),
+                    {'fun', Pos, {function, FnName, Arity}};
+                _ ->
+                    %% No bug for other type of implicit funs, e.g. "fun m:f/2"
+                    Node
+            end;
+        false ->
+            %% No bug workaround needed
+            Node
+    end;
+transform_node(_Type, Node, _Forms, _Opts) ->
     Node.
 
 split_out_last(List) ->
@@ -735,3 +757,26 @@ with_increased_backtrace_depth(Fun) ->
     catch error:badarg -> %% Not available
             Fun()
     end.
+
+maybe_opts_for_reversion_of_local_implicit_funs_bug() ->
+    {ok, Tokens, _End} = erl_scan:string("fun x/17."),
+    {ok, [ImplicitFunExpr1]} = erl_parse:parse_exprs(Tokens),
+    ImplicitFunExpr2 =
+        erl_syntax:revert(
+          erl_syntax:copy_pos(
+            ImplicitFunExpr1,
+            erl_syntax:implicit_fun(
+              erl_syntax:copy_pos(ImplicitFunExpr1, erl_syntax:atom(x)),
+              erl_syntax:copy_pos(ImplicitFunExpr1, erl_syntax:integer(17))))),
+    case {ImplicitFunExpr1, ImplicitFunExpr2} of
+        {Same, Same} ->
+            %% No bug if the erl_parse format is the same
+            %% as that from erl_syntax:revert, no bug-workaround options needed
+            [];
+        {{'fun', _, {function, x, 17}},
+         {'fun', _, {function, {atom, _, x}, {integer, _, 17}}}} ->
+            %% The erl_parse format and the erl_syntax format are not the same!
+            %% Found the bug when reverting local implicit funs in r16b03
+            [implicit_fun_revert_bug_r16b03]
+    end.
+
