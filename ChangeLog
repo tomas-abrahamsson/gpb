@@ -1,4 +1,14 @@
 -*- coding: utf-8 -*-
+
+Version 3.7.1
+2013-dec-14
+
+	* Bugfix a race condition in the Makefile. Thanks to Graham Crowe
+	for fruitful discussions.
+	* Rework the workaround for the bug in the syntax_tools in R16B03,
+	so that the code that uses the parse transform need not change.
+	Handle the odd case entirely in the parse transform.
+
 Version 3.7
 2013-dec-13
 
