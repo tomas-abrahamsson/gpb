@@ -499,6 +499,21 @@ accepts_both_strings_and_binaries_as_input_test() ->
     unload_code(M).
 
 
+%% --- misc ----------
+
+only_enums_no_msgs_test() ->
+    M = compile_iolist(["enum e {"
+                        "  a = 1;",
+                        "}"]),
+    ?assertError({gpb_error, no_messages}, M:encode_msg({x})),
+    ?assertError({gpb_error, no_messages}, M:encode_msg({x}, [])),
+    ?assertError({gpb_error, no_messages}, M:decode_msg(<<>>, x)),
+    ?assertError({gpb_error, no_messages}, M:merge_msgs({x}, {x})),
+    ?assertError({gpb_type_error, {not_a_known_message, _}}, M:verify_msg({x})),
+    [] = M:get_msg_names(),
+    [e] = M:get_enum_names(),
+    unload_code(M).
+
 %% --- Returning/reporting warnings/errors tests ----------
 %% ... when compiling to file/binary
 %% ... when there are/aren't warnings/errors
