@@ -75,7 +75,9 @@ file(File) ->
 %%                   binary | to_msg_defs |
 %%                   return | return_warnings | return_errors |
 %%                   report | report_warnings | report_errors |
-%%                   include_as_lib | use_packages
+%%                   include_as_lib | use_packages |
+%%                   {msg_name_prefix, string() | atom()} |
+%%                   {module_name_prefix, string() | atom()}
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
@@ -243,6 +245,14 @@ file(File) ->
 %% prepended. This enables the reference of messages in other packages which
 %% would otherwise not be possible. However, for reasons of backward
 %% compatibility, this option is disabled by default.
+%%
+%% The `{msg_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
+%% to each message. This might be useful for resolving colliding names,
+%% when incorporating several protocol buffer definitions into the same
+%% project.
+%%
+%% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
+%% to the generated code and defintion files.
 file(File, Opts1) ->
     Opts2 = normalize_return_report_opts(Opts1),
     case parse_file(File, Opts2) of
