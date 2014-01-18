@@ -77,7 +77,9 @@ file(File) ->
 %%                   report | report_warnings | report_errors |
 %%                   include_as_lib | use_packages |
 %%                   {msg_name_prefix, string() | atom()} |
-%%                   {module_name_prefix, string() | atom()}
+%%                   {msg_name_suffix, string() | atom()} |
+%%                   {module_name_prefix, string() | atom()} |
+%%                   {module_name_suffix, string() | atom()}
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
@@ -249,17 +251,20 @@ file(File) ->
 %% The `{msg_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to each message. This might be useful for resolving colliding names,
 %% when incorporating several protocol buffer definitions into the same
-%% project.
+%% project. The `{msg_name_suffix,Suffix}' works correspondingly.
 %%
 %% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
-%% to the generated code and defintion files.
+%% to the generated code and defintion files. The `{module_name_suffix,Suffix}'
+%% works correspondingly.
 file(File, Opts1) ->
     Opts2 = normalize_return_report_opts(Opts1),
     case parse_file(File, Opts2) of
         {ok, Defs} ->
             Ext = filename:extension(File),
-            Mod = list_to_atom(possibly_prefix_mod(filename:basename(File, Ext),
-                                                   Opts2)),
+            Mod = list_to_atom(
+                    possibly_suffix_mod(
+                      possibly_prefix_mod(filename:basename(File, Ext), Opts2),
+                      Opts2)),
             DefaultOutDir = filename:dirname(File),
             Opts3 = Opts2 ++ [{o,DefaultOutDir}],
             msg_defs(Mod, Defs, Opts3);
@@ -301,6 +306,14 @@ possibly_prefix_mod(BaseNameNoExt, Opts) ->
             BaseNameNoExt;
         Prefix ->
             lists:concat([Prefix, BaseNameNoExt])
+    end.
+
+possibly_suffix_mod(BaseNameNoExt, Opts) ->
+    case proplists:get_value(module_name_suffix, Opts) of
+        undefined ->
+            BaseNameNoExt;
+        Suffix ->
+            lists:concat([BaseNameNoExt, Suffix])
     end.
 
 
@@ -555,6 +568,10 @@ c() ->
 %%       This option prepends a prefix to the module name, which can be
 %%       useful when including different sub-projects that have
 %%       colliding proto file names.</dd>
+%%   <dt>`-msgsuffix Suffix'</dt>
+%%   <dd>Sufffix each message name with `Suffix'.</dd>
+%%   <dt>`-modsuffix Suffix'</dt>
+%%   <dd>Suffix each module name with `Suffix'.</dd>
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instad of `-include', which is the default.</dd>
@@ -665,6 +682,10 @@ show_help() ->
       "          Prefix each message with Prefix.~n"
       "    -modprefix Prefix~n"
       "          Prefix the module name with Prefix.~n"
+      "    -msgsuffix Suffix~n"
+      "          Suffix each message with Suffix.~n"
+      "    -modsuffix Suffix~n"
+      "          Suffix the module name with Suffix.~n"
       "    -il~n"
       "          Generate code that includes gpb.hrl using -include_lib~n"
       "          instad of -include, which is the default.~n"
@@ -709,6 +730,8 @@ parse_opt({"strbin", []})        -> {true, strings_as_binaries};
 parse_opt({"pldefs", []})        -> {true, defs_as_proplists};
 parse_opt({"msgprefix", [P]})    -> {true, {msg_name_prefix, P}};
 parse_opt({"modprefix", [P]})    -> {true, {module_name_prefix, P}};
+parse_opt({"msgsuffix", [S]})    -> {true, {msg_name_suffix, S}};
+parse_opt({"modsuffix", [S]})    -> {true, {module_name_suffix, S}};
 parse_opt({"il", []})            -> {true, include_as_lib};
 parse_opt({"type", []})          -> {true, type_specs};
 parse_opt({"descr", []})         -> {true, {descriptor,true}};

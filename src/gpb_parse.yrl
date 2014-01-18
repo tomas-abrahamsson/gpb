@@ -272,7 +272,7 @@ literal_value({_TokenType, _Line, Value}) -> Value.
 post_process(Defs, Opts) ->
     case resolve_names(Defs, Opts) of
         {ok, Defs2} ->
-            {ok, possibly_prefix_msgs(
+            {ok, possibly_prefix_suffix_msgs(
                    normalize_msg_field_options( %% Sort it?
                      enumerate_msg_fields(
                        reformat_names(
@@ -766,44 +766,46 @@ opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
         true  -> [Opt | lists:keydelete(Opt, 1, Opts)]
     end.
 
-possibly_prefix_msgs(Defs, Opts) ->
-    case proplists:get_value(msg_name_prefix, Opts) of
-        undefined ->
+possibly_prefix_suffix_msgs(Defs, Opts) ->
+    Prefix = proplists:get_value(msg_name_prefix, Opts, ""),
+    Suffix = proplists:get_value(msg_name_suffix, Opts, ""),
+    if Prefix == "", Suffix == "" ->
             Defs;
-        Prefix ->
-            prefix_msgs(Prefix, Defs)
+       true ->
+            prefix_suffix_msgs(Prefix, Suffix, Defs)
     end.
 
 
-prefix_msgs(Prefix, Defs) ->
+prefix_suffix_msgs(Prefix, Suffix, Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
-                      {{msg,prefix_name(Prefix, Name)},
-                       prefix_fields(Prefix, Fields)};
+                      {{msg,prefix_suffix_name(Prefix, Suffix, Name)},
+                       prefix_suffix_fields(Prefix, Suffix, Fields)};
                  ({{extensions,Name}, Exts}) ->
-                      {{extensions,prefix_name(Prefix, Name)}, Exts};
+                      {{extensions,prefix_suffix_name(Prefix, Suffix, Name)},
+                       Exts};
                  ({{service,Name}, RPCs}) ->
-                      {{service,Name}, prefix_rpcs(Prefix, RPCs)};
+                      {{service,Name}, prefix_suffix_rpcs(Prefix, Suffix, RPCs)};
                  (OtherElem) ->
                       OtherElem
               end,
               Defs).
 
-prefix_fields(Prefix, Fields) ->
+prefix_suffix_fields(Prefix, Suffix, Fields) ->
     lists:map(
       fun(#field{type={msg,MsgName}}=F) ->
-              F#field{type={msg,prefix_name(Prefix, MsgName)}};
+              F#field{type={msg,prefix_suffix_name(Prefix, Suffix, MsgName)}};
          (#field{}=F) ->
               F
       end,
       Fields).
 
-prefix_name(Prefix, Name) ->
-    list_to_atom(lists:concat([Prefix, Name])).
+prefix_suffix_name(Prefix, Suffix, Name) ->
+    list_to_atom(lists:concat([Prefix, Name, Suffix])).
 
-prefix_rpcs(Prefix, RPCs) ->
+prefix_suffix_rpcs(Prefix, Suffix, RPCs) ->
     lists:map(fun({RpcName, Arg, Return}) ->
-                      NewArg = prefix_name(Prefix, Arg),
-                      NewReturn = prefix_name(Prefix, Return),
+                      NewArg = prefix_suffix_name(Prefix, Suffix, Arg),
+                      NewReturn = prefix_suffix_name(Prefix, Suffix, Return),
                       {RpcName, NewArg, NewReturn}
               end,
               RPCs).

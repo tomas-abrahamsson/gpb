@@ -319,7 +319,7 @@ dotted_names_gives_no_compilation_error_test() ->
     M1Msg = M:decode_msg(Data, m1),
     unload_code(M).
 
-%% --- module/msg name prefix ---------------
+%% --- module/msg name prefix/suffix ---------------
 module_msg_name_prefix_test() ->
     Proto = <<"message msg1 { required uint32 f1=1; }\n">>,
     Master = self(),
@@ -333,32 +333,35 @@ module_msg_name_prefix_test() ->
                                {write_file, ReportOutput}]),
     ModPrefix = "mp_",
     MsgPrefix = "mm_",
+    ModSuffix = "_xp",
+    MsgSuffix = "_xm",
     ok = gpb_compile:file("m.proto",
                           [FileOpOpt, {i,"."},
                            {module_name_prefix, ModPrefix},
-                           {msg_name_prefix, MsgPrefix}]),
+                           {msg_name_prefix, MsgPrefix},
+                           {module_name_suffix, ModSuffix},
+                           {msg_name_suffix, MsgSuffix}]),
     receive
         {read, "m.proto"} -> ok;
-        {read, "mp_m.proto"} -> erlang:error("proto prefixed!");
         {read, X} -> erlang:error("reading from odd file", X)
     end,
     receive
-        {write, {hrl, "mp_m.hrl", Hrl}} ->
-            assert_contains_regexp(Hrl, "mm_msg1"),
+        {write, {hrl, "mp_m_xp.hrl", Hrl}} ->
+            assert_contains_regexp(Hrl, "mm_msg1_xm"),
             ok;
         {write, {hrl, "m.hrl", _}} ->
-            erlang:error("hrl file not prefixed!");
+            erlang:error("hrl file not prefixed or suffixed!");
         {write, {hrl, X2, C2}} ->
             erlang:error({"writing odd hrl file!", X2, C2})
     end,
     receive
-        {write, {erl, "mp_m.erl", Erl}} ->
-            assert_contains_regexp(Erl, "-include.*\"mp_m.hrl\""),
-            assert_contains_regexp(Erl, "-module.*mp_m"),
-            assert_contains_regexp(Erl, "mm_msg1"),
+        {write, {erl, "mp_m_xp.erl", Erl}} ->
+            assert_contains_regexp(Erl, "-include.*\"mp_m_xp.hrl\""),
+            assert_contains_regexp(Erl, "-module.*mp_m_xp"),
+            assert_contains_regexp(Erl, "mm_msg1_xm"),
             ok;
         {write, {erl, "m.erl", _}} ->
-            erlang:error("erl file not prefixed!");
+            erlang:error("erl file not prefixed or suffixed!");
         {write, {erl, X3, C3}} ->
             erlang:error({"writing odd erl file!", X3, C3})
     end,
@@ -959,7 +962,7 @@ generates_nif_as_binary_and_file_test() ->
 nif_code_test_() ->
     {Descr, Tests} =
         case {want_nif_tests(), find_protoc(), find_cplusplus_compiler()} of
-            {false,_,_} -> {"Protoc tests not wanted", []};
+            {false,_,_} -> {"NIF tests not wanted", []};
             {_,false,_} -> {"Protoc not found, not trying to compile", []};
             {_,_,false} -> {"No C++ compiler found, not trying to compile", []};
             {_,_,_}     -> {"nif tests",
