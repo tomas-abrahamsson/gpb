@@ -1238,7 +1238,7 @@ format_encoders_top_function_no_msgs(Opts) ->
     Mapping = get_records_or_maps_by_opts(Opts),
     MsgNameVars = case Mapping of
                       records -> [];
-                      maps    -> [?expr(MsgName)]
+                      maps    -> [?expr(_MsgName)]
                   end,
     [gpb_codegen:format_fn(
        encode_msg,
@@ -2288,15 +2288,24 @@ classify_field_merge_action(FieldDef) ->
 format_msg_merge_code(Defs, AnRes, Opts) ->
     case contains_messages(Defs) of
         true  -> format_msg_merge_code_msgs(Defs, AnRes, Opts);
-        false -> format_msg_merge_code_no_msgs()
+        false -> format_msg_merge_code_no_msgs(Opts)
     end.
 
-format_msg_merge_code_no_msgs() ->
-    gpb_codegen:format_fn(
-      merge_msgs,
-      fun(_Prev, _New) ->
-              erlang:error({gpb_error, no_messages})
-      end).
+format_msg_merge_code_no_msgs(Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records ->
+            gpb_codegen:format_fn(
+              merge_msgs,
+              fun(_Prev, _New) ->
+                      erlang:error({gpb_error, no_messages})
+              end);
+        maps ->
+            gpb_codegen:format_fn(
+              merge_msgs,
+              fun(_Prev, _New, _MsgName) ->
+                      erlang:error({gpb_error, no_messages})
+              end)
+    end.
 
 format_msg_merge_code_msgs(Defs, AnRes, Opts) ->
     MsgNames = [MsgName || {{msg, MsgName}, _MsgDef} <- Defs],
@@ -2304,10 +2313,6 @@ format_msg_merge_code_msgs(Defs, AnRes, Opts) ->
      [format_msg_merger(MsgName, MsgDef, AnRes, Opts)
       || {{msg, MsgName}, MsgDef} <- Defs]].
 
-format_merge_msgs_top_level([], _Opts) ->
-    gpb_codegen:format_fn(
-      merge_msgs,
-      fun(_Prev, New, _MsgName) -> New end);
 format_merge_msgs_top_level(MsgNames, Opts) ->
     case get_records_or_maps_by_opts(Opts) of
         records ->
