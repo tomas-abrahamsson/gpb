@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.8
+2014-feb-01
+
+	* Bugfix generated code when there are no messages defined.
+	Thanks to Graham Crowe for reporting.
+	* Add possibility to suffix message/record and names and module
+	names.
+
 Version 3.7.1
 2013-dec-14
 
