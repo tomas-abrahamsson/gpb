@@ -1740,8 +1740,11 @@ format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
 format_msg_decoder_read_field(MsgName, MsgDef, AnRes, Opts) ->
     Key = ?expr(Key),
     Rest = ?expr(Rest),
-    Params = decoder_params(MsgName, AnRes),
+    {Params, FParams, FParamBinds} =
+        decoder_read_field_params(MsgName, MsgDef, AnRes, Opts),
     Bindings = new_bindings([{'<Params>', Params},
+                             {'<FParams>', FParams},
+                             {'<FFields>', FParamBinds},
                              {'<Key>', Key},
                              {'<Rest>', Rest}]),
     [format_msg_init_decoder(MsgName, MsgDef, AnRes, Opts),
@@ -1761,24 +1764,27 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% of the field-number combined with the wiretype.
     %% Unrecognized fields fall back to the more generic decoder-loop
     Params = fetch_binding('<Params>', Bindings),
+    FParams = fetch_binding('<FParams>', Bindings),
+    FFields = fetch_binding('<FFields>', Bindings),
     gpb_codegen:format_fn(
       mk_fn(dfp_read_field_def_, MsgName),
       fun('<precomputed-binary-match>', Z1, Z2, '<Params>') ->
               '<calls-to-field-decoding>';
-         (<<>>, 0, 0, '<Params>') ->
+         (<<>>, 0, 0, '<FParams>') ->
               '<finalize-result>';
          (Other, Z1, Z2, '<Params>') ->
               '<decode-general>'(Other, Z1, Z2, '<Params>')
       end,
       [splice_trees('<Params>', Params),
+       splice_trees('<FParams>', FParams),
        repeat_clauses(
          '<precomputed-binary-match>',
          [[replace_tree('<precomputed-binary-match>', BinMatch),
            replace_tree('<calls-to-field-decoding>', FnCall)]
           || {BinMatch, FnCall} <- decoder_fp(Bindings, MsgName, MsgDef)]),
        replace_tree('<finalize-result>',
-                    decoder_finalize_result(Params, MsgName, MsgDef, AnRes,
-                                            Opts)),
+                    decoder_finalize_result(Params, FFields,
+                                            MsgName, MsgDef, AnRes, Opts)),
        replace_term('<decode-general>', mk_fn(dg_read_field_def_, MsgName))]).
 
 format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
@@ -1787,6 +1793,8 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     Key = fetch_binding('<Key>', Bindings),
     Rest = fetch_binding('<Rest>', Bindings),
     Params = fetch_binding('<Params>', Bindings),
+    FParams = fetch_binding('<FParams>', Bindings),
+    FFields = fetch_binding('<FFields>', Bindings),
     gpb_codegen:format_fn(
       mk_fn(dg_read_field_def_, MsgName),
       fun(<<1:1, X:7, '<Rest>'/binary>>, N, Acc, '<Params>') when N < (32-7) ->
@@ -1794,17 +1802,18 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
          (<<0:1, X:7, '<Rest>'/binary>>, N, Acc, '<Params>') ->
               '<Key>' = X bsl N + Acc,
               '<calls-to-field-decoding-or-skip>';
-         (<<>>, 0, 0, '<Params>') ->
+         (<<>>, 0, 0, '<FParams>') ->
               '<finalize-result>'
       end,
       [replace_tree('<Key>', Key),
        replace_tree('<Rest>', Rest),
        splice_trees('<Params>', Params),
+       splice_trees('<FParams>', FParams),
        replace_tree('<calls-to-field-decoding-or-skip>',
                     decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
        replace_tree('<finalize-result>',
-                    decoder_finalize_result(Params, MsgName, MsgDef, AnRes,
-                                            Opts))]).
+                    decoder_finalize_result(Params, FFields,
+                                            MsgName, MsgDef, AnRes, Opts))]).
 
 msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
     FNVExprs = [case Occurrence of
@@ -1828,6 +1837,45 @@ msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
                        [{FName, Expr} || {FName, _Value, Expr} <- FNVExprs])]
             end
     end.
+
+decoder_read_field_params(MsgName, MsgDef, AnRes, Opts) ->
+    case get_field_pass(MsgName, AnRes) of
+        pass_as_params ->
+            Params = decoder_params(MsgName, AnRes),
+            {Params, Params, []};
+        pass_as_record ->
+            %% Maps currently don't support single value access, ie: M#{f},
+            %% so when passing as records/maps, in the end, we must reverse
+            %% repeated fields to get a linear amortized cost of
+            %% reading/adding elements)
+            %%
+            %% So instead of generating code that looks
+            %% like below for the maps case (similar for records):
+            %%
+            %%    d_read_field_m_f(<<>>, _, _, M) ->
+            %%      M#{f1 = lists:reverse(M#{f1})
+            %%
+            %% we generate code like this:
+            %%
+            %%    d_read_field_m_f(<<>>, _, _, #{f1 := F1}=M) ->
+            %%      M#{f1 := lists:reverse(F1)
+            %%
+            %% Here we must provide enough info to generate
+            %% the finalizing code (ei: the function body in the example above)
+            %%
+            Params = decoder_params(MsgName, AnRes),
+            MappingVar = hd(Params),
+            FFields = [{FName, var_n("R", I)}
+                       || {I,FName} <- index_seq(repeated_field_names(MsgDef))],
+            FMatch = mapping_match(MsgName, FFields, Opts),
+            FParam = ?expr(matching = '<Var>',
+                           [replace_tree(matching, FMatch),
+                            replace_tree('<Var>', MappingVar)]),
+            {Params, [FParam], FFields}
+    end.
+
+repeated_field_names(MsgDef) ->
+    [FName || #field{name=FName, occurrence=repeated} <- MsgDef].
 
 decoder_params(MsgName, AnRes) ->
     NumFields = get_num_fields(MsgName, AnRes),
@@ -1907,7 +1955,7 @@ decoder_field_selectors(MsgName, MsgDef) ->
      end
      || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
-decoder_finalize_result(Params, MsgName, MsgDef, AnRes, Opts) ->
+decoder_finalize_result(Params, FFields, MsgName, MsgDef, AnRes, Opts) ->
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
             mapping_create(
@@ -1931,13 +1979,12 @@ decoder_finalize_result(Params, MsgName, MsgDef, AnRes, Opts) ->
               MsgVar,
               MsgName,
               [begin
-                   FieldAccess = mapping_access(MsgVar, MsgName, FName, Opts),
-                   FValueExpr = ?expr(lists:reverse('<Param>'),
-                                      [replace_tree('<Param>', FieldAccess)]),
+                   FValueExpr = ?expr(lists:reverse('<FVar>'),
+                                      [replace_tree('<FVar>', FVar)]),
                    {FName, FValueExpr}
                end
-               || #field{name=FName, occurrence=repeated} <- MsgDef],
-             Opts)
+               || {FName, FVar} <- FFields],
+              Opts)
     end.
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
@@ -1974,12 +2021,21 @@ format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
 format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     #field{name=FName, rnum=RNum} = FieldDef,
     Params = decoder_params(MsgName, AnRes),
+    InParams = case get_field_pass(MsgName, AnRes) of
+                   pass_as_params ->
+                       Params;
+                   pass_as_record ->
+                       MMatch = mapping_match(MsgName, [{FName, ?expr(E)}],
+                                              Opts),
+                       [?expr(matching = '<Var>',
+                              [replace_tree(matching, MMatch),
+                               replace_tree('<Var>', hd(Params))])]
+               end,
     Param = case get_field_pass(MsgName, AnRes) of
                 pass_as_params ->
                     lists:nth(RNum - 1, Params);
                 pass_as_record ->
-                    MsgVar = hd(Params),
-                    mapping_access(MsgVar, MsgName, FName, Opts)
+                    ?expr(E)
             end,
     OutParams = case get_field_pass(MsgName, AnRes) of
                     pass_as_params ->
@@ -2000,7 +2056,7 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
                '<call-read-field>'(Rest2, 0, 0, '<OutParams>')
        end,
        [splice_trees('<Params>', Params),
-        splice_trees('<InParams>', Params),
+        splice_trees('<InParams>', InParams),
         replace_term(decode_packed, mk_fn(d_packed_field_, MsgName, FName)),
         replace_tree('<Param>', Param),
         replace_term('<call-read-field>', mk_fn(dfp_read_field_def_, MsgName)),
@@ -2063,12 +2119,13 @@ format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
     Bindings = new_bindings([{'<Value>', ExtValue},
                              {'<Rest>', Rest}]),
     Params = decoder_params(MsgName, AnRes),
-    InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
+    {InParams, PrevValue} = decoder_in_params(Params, MsgName, FieldDef, AnRes,
+                                              Opts),
     BodyTailFn =
         fun(DecodeExprs, Rest2Var) ->
                 ReadFieldDefFn = mk_fn(dfp_read_field_def_, MsgName),
                 Params2 = updated_merged_params(MsgName, FieldDef, AnRes,
-                                                FVar, Params, Opts),
+                                                FVar, PrevValue, Params, Opts),
                 C = ?exprs('<call-read-field>'('<Rest2>', 0, 0, '<Params2>'),
                            [replace_term('<call-read-field>', ReadFieldDefFn),
                             replace_tree('<Rest2>', Rest2Var),
@@ -2184,16 +2241,15 @@ unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
                    Transforms)
     end.
 
-updated_merged_params(MsgName, FieldDef, AnRes, NewValue, Params, Opts) ->
+updated_merged_params(MsgName, FieldDef, AnRes, NewValue, PrevValue,
+                      Params, Opts) ->
     #field{name=FName, rnum=RNum} = FieldDef,
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
-            PrevValue = lists:nth(RNum - 1, Params),
             MergedValue = merge_field_expr(FieldDef, PrevValue, NewValue),
             lists_setelement(RNum - 1, Params, MergedValue);
         pass_as_record ->
             MsgVar = hd(Params),
-            PrevValue = mapping_access(MsgVar, MsgName, FName, Opts),
             MergedValue = merge_field_expr(FieldDef, PrevValue, NewValue),
             [mapping_update(MsgVar, MsgName, [{FName, MergedValue}], Opts)]
     end.
@@ -2216,17 +2272,29 @@ merge_field_expr(FieldDef, PrevValue, NewValue) ->
                    replace_tree('<New>', NewValue)])
     end.
 
-decoder_in_params(Params, MsgName, FieldDef, AnRes) ->
+decoder_in_params(Params, MsgName, FieldDef, AnRes, Opts) ->
+    #field{name=FName} = FieldDef,
+    Any = ?expr(_),
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
             #field{rnum=RNum} = FieldDef,
+            Prev = lists:nth(RNum-1, Params),
             case classify_field_merge_action(FieldDef) of
-                overwrite -> lists_setelement(RNum-1, Params, ?expr(_));
-                seqadd    -> Params;
-                msgmerge  -> Params
+                overwrite -> {lists_setelement(RNum-1, Params, Any), Any};
+                seqadd    -> {Params, Prev};
+                msgmerge  -> {Params, Prev}
             end;
         pass_as_record ->
-            Params
+            Prev = ?expr(Prev),
+            MMatch = mapping_match(MsgName, [{FName, Prev}], Opts),
+            InParams = [?expr(mmatch = '<Msg>',
+                              [replace_tree(mmatch, MMatch),
+                               replace_tree('<Msg>', hd(Params))])],
+            case classify_field_merge_action(FieldDef) of
+                overwrite -> {Params, Any};
+                seqadd    -> {InParams, Prev};
+                msgmerge  -> {InParams, Prev}
+            end
     end.
 
 format_fixlen_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
@@ -2240,9 +2308,11 @@ format_fixlen_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
                              double   -> {64, [little,float]}
                          end,
     Params = decoder_params(MsgName, AnRes),
-    InParams = decoder_in_params(Params, MsgName, FieldDef, AnRes),
+    {InParams, PrevValue} = decoder_in_params(Params, MsgName, FieldDef, AnRes,
+                                              Opts),
     Value = ?expr(Value),
-    Params2 = updated_merged_params(MsgName, FieldDef, AnRes, Value, Params,
+    Params2 = updated_merged_params(MsgName, FieldDef, AnRes,
+                                    Value, PrevValue, Params,
                                     Opts),
     ReadFieldDefFnName = mk_fn(dfp_read_field_def_, MsgName),
     gpb_codegen:format_fn(
@@ -3712,12 +3782,6 @@ mapping_update(Var, RName, FieldsValues, Opts) ->
         maps    -> map_update(Var, FieldsValues)
     end.
 
-mapping_access(Var, RName, FieldName, Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
-        records -> record_access(Var, RName, FieldName);
-        maps    -> map_access(Var, FieldName)
-    end.
-
 get_records_or_maps_by_opts(Opts) ->
     Default = false,
     case proplists:get_value(maps, Opts, Default) of
@@ -3743,11 +3807,6 @@ record_update(Var, RecordName, FieldsValueTrees) ->
       [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
        || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
 
-record_access(Var, RecordName, FieldName) ->
-    erl_syntax:record_access(Var,
-                             erl_syntax:atom(RecordName),
-                             erl_syntax:atom(FieldName)).
-
 %% maps
 map_match(Fields) ->
     erl_syntax:text(
@@ -3771,9 +3830,6 @@ map_update(Var, FieldsValueTrees) ->
            string:join([?ff("~p := ~s", [FName, Val])
                         || {FName, Val} <- map_kvalues(FieldsValueTrees)],
                        ", ")])).
-
-map_access(Var, FieldName) ->
-    erl_syntax:text(?ff("~s#{~p}", [var_literal(Var), FieldName])).
 
 %% -> [{atom(), string()}]
 map_kvars(KVars) ->
