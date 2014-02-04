@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.9
+2014-feb-04
+
+	* Avoid single field map access---ie expressions on the form
+	X#{key}---since neither the maps pre-release, nor the rc1 of R17
+	supports it. Use matching to access such fields instead. This
+	applies to records as well as maps. Performance is unaltered.
+
 Version 3.8
 2014-feb-01
 
