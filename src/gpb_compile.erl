@@ -2631,7 +2631,7 @@ field_verifiers(FVars) ->
                        Replacements);
              optional ->
                  ?expr(if '<F>' == undefined -> ok;
-                          true -> '<verify-fn>'('<F>', ['<FName>', Path])
+                          true -> '<verify-fn>'('<F>', ['<FName>' | Path])
                        end,
                        Replacements)
          end
