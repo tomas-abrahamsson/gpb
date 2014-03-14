@@ -701,6 +701,18 @@ verify_invalid_submsg_fails_test() ->
     ?verify_gpb_err(verify_msg(#m1{a = {}},   MsgDefs)),
     ?verify_gpb_err(verify_msg(#m1{a = {m2}}, MsgDefs)).
 
+verify_invalid_optional_submsg_fails_test() ->
+    MsgDefs = [{{msg,m4}, [#field{name=x,fnum=1,rnum=#m4.x, occurrence=required,
+                                  type={msg,m1}},
+                           #field{name=y,fnum=2,rnum=#m4.y, occurrence=optional,
+                                  type={msg,m1}}]},
+               {{msg,m1}, [#field{name=a,fnum=1,rnum=#m1.a,
+                                  type=uint32,
+                                  occurrence=required}]}],
+    ?verify_gpb_err(verify_msg(#m4{x = #m1{a=1}, y = 1},        MsgDefs)),
+    ?verify_gpb_err(verify_msg(#m4{x = 1,        y = #m1{a=1}}, MsgDefs)),
+    ok = verify_msg(#m4{x = #m1{a=1}, y = undefined}, MsgDefs).
+
 verify_path_when_failure_test() ->
     MsgDefs = [{{msg,m1}, [#field{name=a,fnum=1,rnum=#m1.a,
                                   type={msg,m2},

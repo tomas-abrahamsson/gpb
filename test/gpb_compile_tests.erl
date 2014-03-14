@@ -517,25 +517,6 @@ only_enums_no_msgs_test() ->
     [e] = M:get_enum_names(),
     unload_code(M).
 
-%% --- message type errors ----------
-message_type_errors_test() ->
-    M = compile_iolist(["message m1 {"
-                        "  required m2 f1 = 1;",
-                        "  optional m2 f2 = 2;",
-                        "}",
-                        "message m2 {"
-                        "  required uint32 f1 = 1;",
-                        "}",
-                        "message m3 {"
-                        "  required uint32 f1 = 1;",
-                        "}"]),
-    ?assertError({gpb_type_error, {{expected_msg, m2}, _}},
-                 M:verify_msg({m1,{m3,1},{m2,1}})),
-    ?assertError({gpb_type_error, {{expected_msg, m2}, _}},
-                 M:verify_msg({m1,{m2,1},{m3,1}})),
-    ?assertError({gpb_type_error, {not_a_known_message, _}}, M:verify_msg({x})),
-    unload_code(M).
-
 %% --- Returning/reporting warnings/errors tests ----------
 %% ... when compiling to file/binary
 %% ... when there are/aren't warnings/errors
