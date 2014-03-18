@@ -95,9 +95,6 @@ file(File) ->
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
 %%
-%% The generated .erl file will use the `gpb' module for runtime
-%% support for encoding and decoding.
-%%
 %% The File must not include path to the .proto file. Example:
 %% "SomeDefinitions.proto" is ok, while "/path/to/SomeDefinitions.proto"
 %% is not ok.
