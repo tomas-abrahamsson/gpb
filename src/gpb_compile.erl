@@ -101,7 +101,7 @@ file(File) ->
 %%
 %% The .proto file is expected to be found in a directories specified by an
 %% `{i,directory()}' option. It is possible to specify `{i,directory()}'
-%% several times, they will be search in the order specified.
+%% several times, they will be searched in the order specified.
 %%
 %% The `{type_specs,boolean()}' option enables or disables `::Type()'
 %% annotations in the generated .hrl file. Default is currently
@@ -109,9 +109,9 @@ file(File) ->
 %% messages referencing other messages, when compiling the generated
 %% files. The `type_specs' option is equivalent to `{type_specs,true}'.
 %%
-%% The `verify' option whether or not to generate code for verifying
-%% that, during encoding, values are of correct type and within range.
-%% The `verify' option can have the following values:
+%% The `verify' option specifies whether or not to generate code
+%% that verifies, during encoding, that values are of correct type and
+%% within range.  The `verify' option can have the following values:
 %% <dl>
 %%    <dt>`always'</dt><dd>Generate code that unconditionally
 %%        verifies values.</dd>
@@ -137,7 +137,7 @@ file(File) ->
 %% input message binary. This may tie up the memory in the input
 %% message binary longer than necessary after it has been
 %% decoded. Copying the decoded bytes will avoid creating sub
-%% binaries, which will in make it possible to free the input message
+%% binaries, which will in turn make it possible to free the input message
 %% binary earlier. The `copy_bytes' option can have the following values:
 %% <dl>
 %%   <dt>`false'</dt><dd>Never copy bytes/(sub-)binaries.</dd>
@@ -178,7 +178,7 @@ file(File) ->
 %% directory as for the proto `File'.
 %%
 %% The `{o_erl,directory()}', `{o_hrl,directory()}', `{o_nif_cc,directory()}',
-%% options specify output directory for where to generate the `.erl'
+%% options specify output directories for where to generate the `.erl'
 %% and `.hrl' files respectively, and for the NIF C++ file,
 %% if the `nif' option is specified. The `{o_erl,directory()}' option
 %% overrides any `{o,directory()}' option, and similarly for the
@@ -193,13 +193,13 @@ file(File) ->
 %% in which case they will be proplists instead. This option is not
 %% compatible with the `nif' option.
 %%
-%% The `nif' option will cause the compiler to generate code which
-%% decoding code is nif C++ code. The generated can be linked with the
+%% The `nif' option will cause the compiler to generate the decoder as
+%% nif C++ code. The generated nif C++ code can be linked with the
 %% Google protobuf C++ library.  Read the file `README.nif-cc' for
 %% more info. This option is not compatible with the `maps' option;
 %% the generated C++ decoding code would still create records.
 %%
-%% The `binary' option will cause the generated and compiled code be
+%% The `binary' option will cause the generated and compiled code to be
 %% returned as a binary. No files will be written. The return value
 %% will be on the form `{ok,Mod,Code}' or `{ok,Mod,Code,Warnings}'
 %% if the compilation is succesful. This option may be useful
