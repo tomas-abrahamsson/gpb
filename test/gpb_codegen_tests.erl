@@ -270,7 +270,7 @@ splice_receive_clause_test() ->
     RClause1 = ?receive_clause(a -> x, [{replace_term, x, 1}]),
     RClause2 = ?receive_clause(b -> y, [{replace_term, y, 2}]),
     FnName = p,
-    FT = gpb_codegen:mk_fn(FnName, fun(X) ->
+    FT = gpb_codegen:mk_fn(FnName, fun(_) ->
                                            receive mm -> dummy end
                                    end,
                            [{splice_clauses, mm, [RClause1, RClause2]}]),
