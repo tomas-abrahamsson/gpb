@@ -1113,13 +1113,15 @@ find_protoc() ->
     end.
 
 get_cflags() ->
+    Root = code:root_dir(), %% e.g. /usr/lib/erlang
+    CIncDir = filename:join([Root, "usr", "include"]),
     case os:getenv("CFLAGS") of
         false  -> "";
         CFlags -> CFlags
     end ++ case os:getenv("CXXFLAGS") of
                false    -> "";
                CxxFlags -> CxxFlags
-           end.
+           end ++ " " ++ f("-I'~s'", [CIncDir]).
 
 get_ldflags() ->
     case os:getenv("LDFLAGS") of
