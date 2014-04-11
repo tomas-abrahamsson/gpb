@@ -31,14 +31,14 @@
 -record(ft, {type, occurrence, is_packed}).
 -record(anres, %% result of analysis
         {
-          used_types          :: set(),  %% gpb_field_type()
-          known_msg_size      :: dict(), %% MsgName -> Size | undefined
-          msg_occurrences     :: dict(), %% MsgName -> [occurrence()]
-          fixlen_types        :: set(),  %% #ft{}
-          num_packed_fields   :: integer(),
-          num_fields          :: dict(), %% MsgName -> integer()
-          d_field_pass_method :: dict()  %% MsgName -> pass_as_record |
-                                         %%            pass_as_params
+          used_types,         % :: sets:set(gpb_field_type()),
+          known_msg_size,     % :: dict:dict(), %% MsgName -> Size | undefined
+          msg_occurrences,    % :: dict:dict(), %% MsgName -> [occurrence()]
+          fixlen_types,       % :: sets:set(#ft{}),
+          num_packed_fields,  % :: integer(),
+          num_fields,         % :: dict:dict(), %% MsgName -> integer()
+          d_field_pass_method % :: dict:dict()  %% MsgName -> pass_as_record |
+                              %                 %%            pass_as_params
         }).
 
 -define(f(Fmt),        io_lib:format(Fmt, [])).
