@@ -30,8 +30,7 @@
 -export([field_record_to_proplist/1,   proplist_to_field_record/1]).
 -export([defs_records_to_proplists/1,  proplists_to_defs_records/1]).
 -include_lib("eunit/include/eunit.hrl").
--include("../include/gpb.hrl").
--include("../include/gpb_version.hrl").
+-include("gpb.hrl").
 
 %% TODO
 %%
@@ -54,14 +53,14 @@
 
 %% Valid version format is:
 %%      <n>.<m>            % e.g. 2.1, 2.1.1, etc (any number of dots and ints)
-%%      <n>.<m>-<o>-<text> % e.g. 2.1-53-gb996fbe means: a commit after 2.1
 %%
 %% The format is what `git describe --always --tags' produces,
 %% given that all tags are always on the format <n>.<m>.
 version_as_string() ->
-    S = ?gpb_version,
-    assert_version_format(S),
-    S.
+    application:load(gpb),
+    {ok, Vsn} = application:get_key(gpb, vsn),
+    assert_version_format(Vsn),
+    Vsn.
 
 %% The version_as_list is better if you want to be able to compare
 %% versions, for instance to see if one version is larger/later than
@@ -76,7 +75,6 @@ version_as_string() ->
 %%
 %% This will return for example:
 %%    "2.1"             -> [2,1]
-%%    "2.1-53-gb996fbe" -> [2,1,0,0,53,"gb996fbe"]
 %%    "2.1.1"           -> [2,1,1]
 %%    "2.2"             -> [2,2]
 %%
@@ -700,8 +698,6 @@ version_format_test() ->
     ok = assert_version_format("2.1"),
     ok = assert_version_format("2.1.1"),
     ok = assert_version_format("2.1.1.1"),
-    %% a development version after 2.1, but before any 2.2
-    ok = assert_version_format("2.1-53-gb996fbe"),
     %% non-digit version components
     ?assertError(_, assert_version_format("2.2x")),
     ?assertError(_, assert_version_format("2.x")),
@@ -728,7 +724,6 @@ version_format_test() ->
 version_as_list_test() ->
     [2,1] = version_as_list("2.1"),
     [2,1,1] = version_as_list("2.1.1"),
-    [2,1,0,0,53,"gb996fbe"] = version_as_list("2.1-53-gb996fbe"),
     [2,2] = version_as_list("2.2").
 
 encode_zigzag_test() ->

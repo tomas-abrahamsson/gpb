@@ -27,8 +27,7 @@
 #                    NB: must end with a slash!
 # VERBOSE         -- set (to any value) to make the following steps verbose:
 #                    * eunit testing
-#                    * generation of the include/gpb_version.hrl and 
-#                      ebin/gpb.app files
+#                    * generation of ebin/gpb.app file
 #                    * edoc generation command
 #                    * xref checking command
 # ERL             -- path to erl
@@ -115,10 +114,9 @@ DESCR_BEAMS := $(patsubst %,$(ebin)/%.beam,$(DESCR_MODULES))
 TEST_BEAMS  := $(patsubst %,$(test)/%.beam,$(TEST_MODULES))
 
 TARGETS = \
-	$(incdir)/gpb_version.hrl \
+	$(ebin)/gpb.app \
 	$(BEAMS) \
-	$(DESCR_BEAMS) \
-	$(ebin)/gpb.app
+	$(DESCR_BEAMS)
 
 
 all:	$(TARGETS)
@@ -192,7 +190,7 @@ $(ebin)/gpb_compile.beam: $(ebin)/gpb_codegen.beam
 $(test)/gpb_codegen_tests.beam: $(ebin)/gpb_codegen.beam
 
 # To compile gpb.erl, we need gpb_include.hrl
-$(ebin)/gpb.beam: $(src)/gpb.erl $(incdir)/gpb_version.hrl
+$(ebin)/gpb.beam: $(src)/gpb.erl
 
 # To compile the description generator, we
 # must first have compiled the proto file for the gpb_description.proto
@@ -233,9 +231,3 @@ $(ebin)/gpb.app: $(src)/gpb.app.src | $(ebin)
 			  \"        ~p}~n\", [Class,Reason,ST]), \
 		halt(1) \
 	    end."
-
-$(incdir)/gpb_version.hrl: $(incdir)/gpb_version.hrl.in
-	@echo Generating $@...
-	$(silencer)$(build)/mk_version_hrl \
-	    < include/gpb_version.hrl.in \
-	    > include/gpb_version.hrl

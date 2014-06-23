@@ -67,7 +67,6 @@ Features of gpb
 
    - `gpb:version_as_string()` and `gpb:version_as_list()`
    - `GeneratedCode:version_as_string()` and `GeneratedCode:version_as_list()`
-   - `?gpb_version`  (in gpb_version.hrl)
    - `?'GeneratedCode_gpb_version'  (in GeneratedCode.hrl)
 
    The gpb can also generate a self-description of the proto file.
@@ -227,10 +226,9 @@ Version numbering
 
 The gpb version number is fetched from the git latest git tag
 matching N.M where N and M are integers.  This version is
-inserted into the gpb.app file as well as into the
-include/gpb_version.hrl.  The version is the result of the command
+inserted into the gpb.app file. The version is the result of the command
 
-  git describe --always --tags --match '[0-9]*.[0-9]*'
+  git describe --always --tags --match '[0-9]*.[0-9]*' --abbrev=0
 
 Thus, so create a new version of gpb, the single source from where
 this version is fetched, is the git tag.   (If you are importing
