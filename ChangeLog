@@ -1,5 +1,15 @@
 -*- coding: utf-8 -*-
 
+Version 3.10
+2014-jun-26
+
+	* Bugfix verification of optional sub message fields, thanks to
+	Klas Johansson.
+	* Fix compilation warnings with Erlang/OTP 17.0
+	* Improve/bugfix eunit tests in gpb_codegen_tests and
+	gpb_compile_tests (compilation warning and nif include path issue,
+	respectively)
+
 Version 3.9
 2014-feb-04
 
