@@ -1,0 +1,37 @@
+#! /bin/bash
+
+curr_tag=$(git describe --always --tags --match '[0-9]*.[0-9]*' --abbrev=0)
+
+increase_last_vsn_part ()
+{
+    echo "$@" | \
+	awk -F. '{
+            for (i=1; i<NF; i++) printf("%s.", $(i));
+            print $NF + 1;
+        }'
+}
+
+case "$curr_tag" in
+    [0-9]*.[0-9]*)
+	new_vsn=$(increase_last_vsn_part "$curr_tag")
+	echo "Version change: $curr_tag -> $new_vsn"
+	echo "Tagging with:   $new_vsn"
+	git tag "$new_vsn"
+	;;
+    [0-9]*.[0-9]*.[0-9]*)
+	new_vsn=$(increase_last_vsn_part "$curr_tag")
+	echo "Version change: $curr_tag -> $new_vsn"
+	echo "Tagging with:   $new_vsn"
+	echo git tag "$new_vsn"
+	;;
+    *)
+	## What should a version number bump of x.y.z.w mean?
+	## Perhaps x.y.z.w+1 or x.y.z.w+1.0?
+	## If we're not on the form x.y or x.y.z, then we might be
+	## versioning on a side branch, or some totally different format?
+	## Better to leave it to a human to take care of.
+	echo "ERROR: Current tag, $curr_tag, not on form n.m or n.m.x." >&2
+	echo "ERROR: I am only a very simple script." >&2
+	echo "ERROR: Please set the tag manually!" >&2
+	;;
+esac

@@ -1,0 +1,48 @@
+#! /bin/bash
+
+scriptdir=`dirname "$0"`
+
+force=false
+
+while getopts "f" opt
+do
+    case "$opt" in
+	f) force=true;;
+    esac
+done
+shift $OPTIND
+
+cd "$scriptdir"
+src_dir="$scriptdir/git-hooks"
+
+git_dir=`git rev-parse --git-dir`
+dest_dir="$git_dir/hooks"
+if ! [ -d "$dest_dir" ]
+then
+    echo "Error: no git hooks dir?!" >&2
+    exit 1
+fi
+
+if [ -x "$dest_dir"/pre-push -a $force = false ]
+then
+    if ( cmp "$dest_dir"/pre-push "$src_dir"/pre-push >/dev/null )
+    then
+	echo "Identical pre-push git hook already installed."
+	echo "Run with -f if you want to force an installation."
+	exit 0
+    else
+	echo "ERROR: Executable pre-push git hook already exists!" >&2
+	echo "Not overwriting. Aborting." >&2
+	echo >&2
+	echo "If you want to install the git hook manually, then" >&2
+	echo "either run this script with the -f option, or run" >&2
+	echo >&2
+	echo "   cp "$src_dir"/pre-push" "$dest_dir/" >&2
+	echo >&2
+	exit 1
+    fi
+fi
+
+/bin/cp "$src_dir"/pre-push "$dest_dir"/
+
+exit 0
