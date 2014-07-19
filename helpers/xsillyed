@@ -1,0 +1,67 @@
+#! /usr/bin/env escript
+%%! -*- erlang -*-
+%%! -noinput +B -sasl errlog_type error
+-mode(compile).
+
+main([File, Trigger, Action]) ->
+    {{ok, B},_} = {file:read_file(File),File},
+    Lines = binary:split(B, [<<"\r\n">>, <<"\n">>], [global,trim]),
+    NewLines = execute(Trigger, Action, Lines),
+    ok = file:write_file(File, iolist_to_binary(nl_end_lines(NewLines))),
+    halt(0).
+
+execute(Trigger, Action, Lines) ->
+    execute_lines(Lines, compile_trigger(Trigger), compile_action(Action)).
+
+execute_lines([Line | Rest]=Lines, Trigger, Action) ->
+    case Trigger(Line) of
+        true  -> Action(Lines, mk_continuation(Trigger, Action));
+        false -> [Line | execute_lines(Rest, Trigger, Action)]
+    end;
+execute_lines([], _, _) ->
+    [].
+
+mk_continuation(Trigger, Action) ->
+    fun(Rest) -> execute_lines(Rest, Trigger, Action) end.
+
+compile_trigger("key:"++Key) ->
+    fun(Line) ->
+            %% Check for a tulpe with first element being the Key,
+            %% ie: if the line begins with "{Key," after whitespace
+            %% has been removed
+            case string:strip(binary_to_list(Line), left, $\s) of
+                "{"++Rest ->
+                    case lists:prefix(Key, Rest) of
+                        true ->
+                            case string:substr(Rest, length(Key)+1) of
+                                "," ++ _ -> true;
+                                _        -> false
+                            end;
+                        false ->
+                            false
+                    end;
+                _ ->
+                    false
+            end
+    end.
+
+compile_action("change-to:"++Replacement) ->
+    fun([_ | Rest], Continue) -> [Replacement | Continue(Rest)] end;
+compile_action("delete-paragraph") ->
+    fun(Lines, Continue) -> Continue(delete_until_empty_line(Lines)) end.
+
+delete_until_empty_line([Line | Rest]) ->
+    case is_empty_line(binary_to_list(Line)) of
+        true  -> Rest;
+        false -> delete_until_empty_line(Rest)
+    end;
+delete_until_empty_line([]) ->
+    [].
+
+is_empty_line(" "++Tl)  -> is_empty_line(Tl);
+is_empty_line("\t"++Tl) -> is_empty_line(Tl);
+is_empty_line("")       -> true;
+is_empty_line([_|_])    -> false.
+
+nl_end_lines(Lines) ->
+    [[Line, $\n] || Line <- Lines].

@@ -1,0 +1,24 @@
+#! /usr/bin/env escript
+%%! -*- erlang -*-
+%%! +B -sasl errlog_type error
+-mode(compile).
+
+main(["--indent-but-first-to="++N]) -> doit(list_to_integer(N));
+main(_) -> doit(0).
+
+doit(IndentLevel) ->
+    Indentation = lists:duplicate(IndentLevel, $\s),
+    io:format(
+      "~s", [unindent_first_line(
+               io_lib:format("~s~p", [Indentation, read_lines()]))]),
+    halt(0).
+
+read_lines() ->
+    case io:get_line('') of
+        "" -> [];
+        eof -> [];
+        Line -> [string:strip(Line,right,$\n) | read_lines()]
+    end.
+
+unindent_first_line(IoList) ->
+    string:strip(binary_to_list(iolist_to_binary(IoList)), left, $\s).
