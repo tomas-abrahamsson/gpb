@@ -119,7 +119,7 @@ Version 3.0
 Version 2.3
 2013-aug-18
 	* Fix Rebar compile on non-GNU systems, such as Mac OS X, thanks
-	to Everton Ribeiro
+	to Everton Ribeiro.
 	* Bugfix (mostly) rare compilation breakage: depending on the
 	date/time of generation, a new-line was inserted, causing a
 	compilation error.
