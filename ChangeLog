@@ -1,5 +1,15 @@
 -*- coding: utf-8 -*-
 
+Version 3.11.0
+2014-jul-20
+
+	* Add helpers for packaging to hex.pm. Thanks to Dylan Lukes and
+	Paul Schoenfelder for prompting this.
+	* Version numbers revisited, the version on github is now intended
+	to always be reltools compliant, ie: to always consist of only
+	integers and dots. Thanks to Volodymyr Kyrychenko
+	for taking the initiative to this.
+
 Version 3.10
 2014-jun-26
 
