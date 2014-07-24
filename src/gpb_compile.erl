@@ -20,7 +20,7 @@
 -module(gpb_compile).
 %-compile(export_all).
 -export([file/1, file/2]).
--export([msg_defs/2, msg_defs/3]).
+-export([proto_defs/2, proto_defs/3]).
 -export([format_error/1, format_warning/1]).
 -export([c/0, c/1]). % Command line interface, halts vm---don't use from shell!
 -include_lib("kernel/include/file.hrl").
@@ -72,7 +72,7 @@ file(File) ->
 %%                   {o, directory()} |
 %%                   {o_erl, directory()} | {o_hrl, directory()} |
 %%                   {o_nif_cc, directory()} |
-%%                   binary | to_msg_defs |
+%%                   binary | to_proto_defs |
 %%                   return | return_warnings | return_errors |
 %%                   report | report_warnings | report_errors |
 %%                   include_as_lib | use_packages |
@@ -209,10 +209,10 @@ file(File) ->
 %% contains the C++ code. You will have to compile the C++ code with a
 %% C++ compiler, before you can use the erlang code.
 %%
-%% The `to_msg_defs' option will result in `{ok,MsgDefs}' or
-%% `{ok,MsgDefs,Warns}' being returned if the compilation is succesful.
+%% The `to_proto_defs' option will result in `{ok,Defs}' or
+%% `{ok,Defs,Warns}' being returned if the compilation is succesful.
 %% The returned message definitions can be used with the
-%% {@link msg_defs/2} or {@link msg_defs/3} functions.
+%% {@link proto_defs/2} or {@link proto_defs/3} functions.
 %%
 %% <dl>
 %%   <dt>`report_errors'/`report_warnings'</dt>
@@ -264,7 +264,7 @@ file(File, Opts1) ->
                       Opts2)),
             DefaultOutDir = filename:dirname(File),
             Opts3 = Opts2 ++ [{o,DefaultOutDir}],
-            msg_defs(Mod, Defs, Opts3);
+            proto_defs(Mod, Defs, Opts3);
         {error, Reason} = Error ->
             possibly_report_error(Error, Opts2),
             case proplists:get_bool(return_warnings, Opts2) of
@@ -314,12 +314,12 @@ possibly_suffix_mod(BaseNameNoExt, Opts) ->
     end.
 
 
-%% @spec msg_defs(Mod, Defs) -> CompRet
-%% @equiv msg_defs(Mod, Defs, [])
-msg_defs(Mod, Defs) ->
-    msg_defs(Mod, Defs, []).
+%% @spec proto_defs(Mod, Defs) -> CompRet
+%% @equiv proto_defs(Mod, Defs, [])
+proto_defs(Mod, Defs) ->
+    proto_defs(Mod, Defs, []).
 
-%% @spec msg_defs(Mod, Defs, Opts) -> CompRet
+%% @spec proto_defs(Mod, Defs, Opts) -> CompRet
 %%            Mod  = atom()
 %%            Defs = [Def]
 %%            Def = {{enum, EnumName}, Enums} |
@@ -333,7 +333,7 @@ msg_defs(Mod, Defs) ->
 %% @doc
 %% Compile a list of pre-parsed definitions to file or to a binary.
 %% See {@link file/2} for information on options and return values.
-msg_defs(Mod, Defs0, Opts0) ->
+proto_defs(Mod, Defs0, Opts0) ->
     {IsAcyclic, Defs} = try_topsort_defs(Defs0),
     possibly_probe_defs(Defs, Opts0),
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
@@ -341,7 +341,7 @@ msg_defs(Mod, Defs0, Opts0) ->
     AnRes = analyze_defs(Defs, Opts2),
     case verify_opts(Opts2) of
         ok ->
-            Res1 = do_msg_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
+            Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
             return_or_report_warnings_or_errors(Res1, Warns, Opts2,
                                                 get_output_format(Opts2));
         {error, OptError} ->
@@ -349,9 +349,9 @@ msg_defs(Mod, Defs0, Opts0) ->
                                                 get_output_format(Opts2))
     end.
 
-do_msg_defs(Defs, Mod, AnRes, Opts) ->
+do_proto_defs(Defs, Mod, AnRes, Opts) ->
     case get_output_format(Opts) of
-        msg_defs ->
+        proto_defs ->
             {ok, Defs};
         binary ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
@@ -393,7 +393,7 @@ return_or_report_warnings_or_errors(Res, ExtraWarns, Opts, OutFormat) ->
 
 merge_warns(ok, Warns, _OutFmt)                  -> {ok, Warns};
 merge_warns({ok, Warns1}, Warns2, file)          -> {ok, Warns2++Warns1};
-merge_warns({ok, MsgDefs}, Warns, msg_defs)      -> {ok, MsgDefs, Warns};
+merge_warns({ok, Defs}, Warns, proto_defs)       -> {ok, Defs, Warns};
 merge_warns({ok, M, B}, Warns, binary)           -> {ok, M, B, Warns};
 merge_warns({ok, M, B, Warns1}, Warns2, binary)  -> {ok, M, B, Warns2++Warns1};
 merge_warns({error, R}, Warns, _OutFmt)          -> {error, R, Warns};
@@ -440,12 +440,12 @@ return_warnings_or_errors(Res, Opts) ->
             end
     end.
 
-get_output_format([binary | _])              -> binary;
-get_output_format([{binary, true} | _])      -> binary;
-get_output_format([to_msg_defs | _])         -> msg_defs;
-get_output_format([{to_msg_defs, true} | _]) -> msg_defs;
-get_output_format([_ | Rest])                -> get_output_format(Rest);
-get_output_format([])                        -> file.
+get_output_format([binary | _])                -> binary;
+get_output_format([{binary, true} | _])        -> binary;
+get_output_format([to_proto_defs | _])         -> proto_defs;
+get_output_format([{to_proto_defs, true} | _]) -> proto_defs;
+get_output_format([_ | Rest])                  -> get_output_format(Rest);
+get_output_format([])                          -> file.
 
 get_erl_outdir(Opts) ->
     proplists:get_value(o_erl, Opts, get_outdir(Opts)).
@@ -467,7 +467,7 @@ clean_module_name(Mod) ->
 %%           Reason = term()
 %%
 %% @doc Produce a plain-text error message from a reason returned by
-%% for instance {@link file/2} or {@link msg_defs/2}.
+%% for instance {@link file/2} or {@link proto_defs/2}.
 format_error({error, Reason, _Warns}) -> fmt_err(Reason);
 format_error({error, Reason})         -> fmt_err(Reason);
 format_error(Reason)                  -> fmt_err(Reason).
@@ -494,7 +494,7 @@ fmt_err(X) ->
 %%           Reason = term()
 %%
 %% @doc Produce a plain-text error message from a reason returned by
-%% for instance {@link file/2} or {@link msg_defs/2}.
+%% for instance {@link file/2} or {@link proto_defs/2}.
 %% @end
 %% Note: do NOT include trailing newline (\n or ~n)
 format_warning(cyclic_message_dependencies) ->
