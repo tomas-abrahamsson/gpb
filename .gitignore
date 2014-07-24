@@ -18,3 +18,5 @@
 /descr_src/gpb_compile_descr.beam
 /descr_src/gpb_descriptor.erl
 /descr_src/gpb_descriptor.hrl
+x.erl
+x.hrl
