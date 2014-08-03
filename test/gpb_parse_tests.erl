@@ -321,7 +321,7 @@ parses_service_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
-     {{service,s1},[{req,m1,m2}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[{rpc,req,m1,m2}]}] = do_process_sort_defs(Defs).
 
 parses_service_ignores_empty_method_option_braces_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
@@ -331,7 +331,7 @@ parses_service_ignores_empty_method_option_braces_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
-     {{service,s1},[{req,m1,m2}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[{rpc,req,m1,m2}]}] = do_process_sort_defs(Defs).
 
 
 parses_empty_toplevel_statement_test() ->
@@ -350,13 +350,13 @@ parses_empty_service_statement_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
                              "service s1 { ; ; rpc r1(m1) returns (m1);;; }"]),
     [{{msg,m1}, _},
-     {{service,s1},[{r1,m1,m1}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[{rpc,r1,m1,m1}]}] = do_process_sort_defs(Defs).
 
 parses_empty_service_statement_method_options_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
                              "service s1 { rpc r1(m1) returns (m1){;;;}; }"]),
     [{{msg,m1}, _},
-     {{service,s1},[{r1,m1,m1}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[{rpc,r1,m1,m1}]}] = do_process_sort_defs(Defs).
 
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
@@ -378,7 +378,7 @@ can_prefix_record_names_test() ->
      {{msg,p_m1}, [#field{name=f1, type={enum,e1}}, #field{name=fm2}]},
      {{msg,p_m2}, [#field{type={msg,p_m1}}]}, %% type is a msg: to be prefixed
      {{service,s1}, %% not prefixed
-      [{req,p_m1,p_m2}]} %% both argument and result msgs to be prefixed
+      [{rpc,req,p_m1,p_m2}]} %% both argument and result msgs to be prefixed
     ] =
         do_process_sort_defs(Defs, [{msg_name_prefix, "p_"}]).
 
@@ -394,7 +394,7 @@ can_suffix_record_names_test() ->
      {{msg,m1_s}, [#field{name=f1, type={enum,e1}}, #field{name=fm2}]},
      {{msg,m2_s}, [#field{type={msg,m1_s}}]}, %% type is a msg: to be prefixed
      {{service,s1}, %% not prefixed
-      [{req,m1_s,m2_s}]} %% both argument and result msgs to be prefixed
+      [{rpc,req,m1_s,m2_s}]} %% both argument and result msgs to be prefixed
     ] =
         do_process_sort_defs(Defs, [{msg_name_suffix, "_s"}]).
 

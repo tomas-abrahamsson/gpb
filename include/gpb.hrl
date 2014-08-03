@@ -26,4 +26,10 @@
          opts      = []     :: [term()]
         }).
 
+-record(rpc,
+        {name               :: atom(),
+         input,
+         output
+        }).
+
 -endif.
