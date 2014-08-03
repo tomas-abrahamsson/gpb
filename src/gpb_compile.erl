@@ -1164,6 +1164,9 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        ?f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
        format_enum_value_symbol_converter_exports(Defs),
        ?f("-export([get_package_name/0]).~n"),
+       ?f("-export([get_service_def/0]).~n"),
+       ?f("-export([get_rpc_names/0]).~n"),
+       ?f("-export([find_rpc_def/1, fetch_rpc_def/1]).~n"),
        [?f("-export([descriptor/0]).~n") || get_gen_descriptor_by_opts(Opts)],
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
@@ -2788,9 +2791,15 @@ format_verifier_auxiliaries() ->
 format_introspection(Defs, Opts) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
+    {ServiceDef, RpcDefs} = case [{Item, Rpcs} || {{service, _}, Rpcs}=Item <- Defs] of
+        [{Service, Rpcs}] ->
+            {Service, Rpcs};
+        _ -> 
+            {undefined, []}
+    end,
     [gpb_codegen:format_fn(
        get_msg_defs, fun() -> '<Defs>' end,
-       [replace_tree('<Defs>', def_trees(EnumDefs, MsgDefs, Opts))]),
+       [replace_tree('<Defs>', msg_def_trees(EnumDefs, MsgDefs, Opts))]),
      "\n",
      gpb_codegen:format_fn(
        get_msg_names, fun() -> '<Names>' end,
@@ -2810,12 +2819,24 @@ format_introspection(Defs, Opts) ->
      ?f("~n"),
      format_enum_value_symbol_converters(EnumDefs),
      ?f("~n"),
+     gpb_codegen:format_fn(
+       get_service_def, fun() -> '<Defs>' end,
+       [replace_tree('<Defs>', service_def_tree(ServiceDef, Opts))]),
+     "\n",
+     gpb_codegen:format_fn(
+       get_rpc_names, fun() -> '<Names>' end,
+       [replace_term('<Names>', [RpcName || {rpc,RpcName, _, _} <- RpcDefs])]),
+     "\n",
+     format_fetch_rpc_defs(RpcDefs),
+     ?f("~n"),
+     format_find_rpc_defs(RpcDefs, Opts),
+     ?f("~n"),
      format_get_package_name(Defs),
      ?f("~n"),
      format_descriptor(Defs, Opts)
     ].
 
-def_trees(EnumDefs, MsgDefs, Opts) ->
+msg_def_trees(EnumDefs, MsgDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
     MsgDefTrees = [msg_def_tree(MsgDef, Opts) || MsgDef <- MsgDefs],
     erl_syntax:list(EnumDefTrees ++ MsgDefTrees).
@@ -2994,6 +3015,61 @@ format_descriptor(Defs, Opts) ->
 
 get_gen_descriptor_by_opts(Opts) ->
     proplists:get_bool(descriptor, Opts).
+
+service_def_tree({{service, ServiceName}, Rpcs}, Opts) ->
+    erl_syntax:tuple(
+      [erl_syntax:tuple([erl_syntax:atom(service), erl_syntax:atom(ServiceName)]),
+       rpcs_def_tree(Rpcs, Opts)]);
+service_def_tree(undefined, _) ->
+    erl_syntax:list([]).
+
+rpcs_def_tree(Rpcs, Opts) ->
+    case get_rpc_format_by_opts(Opts) of
+        rpcs_as_records   ->
+            erl_syntax:list([rpc_def_tree(Rpc, Opts) || Rpc <- Rpcs]);
+        rpcs_as_proplists ->
+            erl_parse:abstract(gpb:rpcs_records_to_proplists(Rpcs))
+    end.
+
+get_rpc_format_by_opts(Opts) ->
+    case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
+        false -> rpcs_as_records; %% default
+        true  -> rpcs_as_proplists
+    end.
+
+rpc_def_tree(#rpc{}=R, Opts) ->
+    [rpc | RValues] = tuple_to_list(R),
+    RNames = record_info(fields, rpc),
+    mapping_create(
+      rpc,
+      lists:zip(RNames,
+                [erl_parse:abstract(RValue) || RValue <- RValues]),
+      Opts).
+
+format_fetch_rpc_defs([]) ->
+    gpb_codegen:format_fn(
+      fetch_rpc_def,
+      fun(RpcName) -> erlang:error({no_such_rpc, RpcName}) end);
+format_fetch_rpc_defs(_RpcDefs) ->
+    gpb_codegen:format_fn(
+      fetch_rpc_def,
+      fun(RpcName) ->
+              case find_rpc_def(RpcName) of
+                  Def when is_tuple(Def) -> Def;
+                  error               -> erlang:error({no_such_rpc, RpcName})
+              end
+      end).
+
+format_find_rpc_defs(Rpcs, Opts) ->
+    gpb_codegen:format_fn(
+      find_rpc_def,
+      fun('<RpcName>') -> '<Fields>';
+         (_) -> error
+      end,
+      [repeat_clauses('<RpcName>',
+                      [[replace_term('<RpcName>', RpcName),
+                        replace_tree('<Fields>', rpc_def_tree(Rpc, Opts))]
+                       || {rpc, RpcName, _, _} = Rpc <- Rpcs])]).
 
 %% -- hrl -----------------------------------------------------
 
