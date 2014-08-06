@@ -3750,8 +3750,9 @@ compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
              || Ts <- FormToks],
     {AttrForms, CodeForms} = split_forms_at_first_code(Forms),
     FieldDef = field_record_to_attr_form(),
+    RpcDef = rpc_record_to_attr_form(),
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
-    AllForms = AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms,
+    AllForms = AttrForms ++ [FieldDef] ++ [RpcDef] ++ MsgRecordForms ++ CodeForms,
     combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
                                  PossibleNifCode).
 
@@ -3783,6 +3784,9 @@ split_forms_at_first_code_2([{function, _, _Name, _, _Clauses}|_]=Code, Acc) ->
 
 field_record_to_attr_form() ->
     record_to_attr(field, record_info(fields, field)).
+
+rpc_record_to_attr_form() ->
+    record_to_attr(rpc, record_info(fields, rpc)).
 
 msgdefs_to_record_attrs(Defs) ->
     [record_to_attr(MsgName, lists:map(fun gpb_field_to_record_field/1, Fields))

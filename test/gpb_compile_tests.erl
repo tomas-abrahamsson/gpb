@@ -289,6 +289,26 @@ introspection_defs_as_proplists_test() ->
     receive {".hrl", Hrl2} -> nomatch = re:run(Hrl2, "\"gpb.hrl\"") end,
     receive {".erl", Erl2} -> nomatch = re:run(Erl2, "\"gpb.hrl\"") end.
 
+introspection_rpcs_test() ->
+    Proto = ["message m1 { required uint32 f1=1; }",
+             "message m2 { required uint32 f2=1; }",
+             "service s1 {",
+             "  rpc req1(m1) returns (m2);",
+             "  rpc req2(m2) returns (m1);",
+             "}"],
+    M = compile_iolist(Proto),
+    {{service, s1},
+     [#rpc{name = req1, input = 'm1', output = 'm2'},
+      #rpc{name = req2, input = 'm2', output = 'm1'}]} = M:get_service_def(),
+    [req1, req2] = M:get_rpc_names(),
+    #rpc{name = req1, input = 'm1', output = 'm2'} = M:find_rpc_def(req1),
+    #rpc{name = req1, input = 'm1', output = 'm2'} = M:fetch_rpc_def(req1),
+    #rpc{name = req2, input = 'm2', output = 'm1'} = M:fetch_rpc_def(req2),
+    #rpc{name = req2, input = 'm2', output = 'm1'} = M:find_rpc_def(req2),
+    error = M:find_rpc_def(req_ee),
+    ?assertError(_, M:fetch_rpc_def(req_ee)),
+    unload_code(M).
+
 %% --- decoder tests ---------------
 
 decodes_overly_long_varints_test() ->
