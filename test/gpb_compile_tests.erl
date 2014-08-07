@@ -251,7 +251,10 @@ introspection_enums_test() ->
     unload_code(M).
 
 introspection_defs_as_proplists_test() ->
-    Proto = ["message msg1 { required uint32 f1=1; }"],
+    Proto = ["message msg1 { required uint32 f1=1; }",
+             "service s1 {",
+             "  rpc req1(msg1) returns (msg1);",
+             "}"],
     %% With the defs_as_proplists option
     M = compile_iolist(Proto, [defs_as_proplists]),
     [[{name,       f1},
@@ -261,6 +264,8 @@ introspection_defs_as_proplists_test() ->
       {occurrence, required},
       {opts,       []}]] = PL = M:find_msg_def(msg1),
     [{{msg, msg1}, PL}] = M:get_msg_defs(),
+    {{service, s1}, [[{name, req1}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(),
+    [{name, req1}, {input, 'msg1'}, {output, 'msg1'}] = M:find_rpc_def(req1),
     unload_code(M),
 
     %% No defs_as_proplists option
@@ -272,6 +277,9 @@ introspection_defs_as_proplists_test() ->
             occurrence = required,
             opts       = []}] = Fs = M:find_msg_def(msg1),
     [{{msg, msg1}, Fs}] = Defs = M:get_msg_defs(),
+    {{service, s1},
+     [#rpc{name = req1, input = 'msg1', output = 'msg1'}]} = M:get_service_def(),
+    #rpc{name = req1, input = 'msg1', output = 'msg1'} = M:find_rpc_def(req1),
     unload_code(M),
 
     %% make sure the generated erl file does not -include[_lib] "gpb.hrl"

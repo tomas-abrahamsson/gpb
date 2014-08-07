@@ -2999,28 +2999,36 @@ service_def_tree({{service, ServiceName}, Rpcs}, Opts) ->
 service_def_tree(undefined, _) ->
     erl_syntax:list([]).
 
-rpcs_def_tree(Rpcs, Opts) ->
-    case get_rpc_format_by_opts(Opts) of
-        rpcs_as_records   ->
-            erl_syntax:list([rpc_def_tree(Rpc, Opts) || Rpc <- Rpcs]);
-        rpcs_as_proplists ->
-            erl_parse:abstract(gpb:rpcs_records_to_proplists(Rpcs))
-    end.
-
 get_rpc_format_by_opts(Opts) ->
     case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
         false -> rpcs_as_records; %% default
         true  -> rpcs_as_proplists
     end.
 
-rpc_def_tree(#rpc{}=R, Opts) ->
-    [rpc | RValues] = tuple_to_list(R),
+rpc_record_def_tree(#rpc{}=Rpc, Opts) ->
+    [rpc | RValues] = tuple_to_list(Rpc),
     RNames = record_info(fields, rpc),
     mapping_create(
       rpc,
       lists:zip(RNames,
                 [erl_parse:abstract(RValue) || RValue <- RValues]),
       Opts).
+
+rpcs_def_tree(Rpcs, Opts) ->
+    case get_rpc_format_by_opts(Opts) of
+        rpcs_as_records   ->
+            erl_syntax:list([rpc_record_def_tree(Rpc, Opts) || Rpc <- Rpcs]);
+        rpcs_as_proplists ->
+            erl_parse:abstract(gpb:rpc_records_to_proplists(Rpcs))
+    end.
+
+rpc_def_tree(#rpc{}=Rpc, Opts) ->
+    case get_rpc_format_by_opts(Opts) of
+        rpcs_as_records   ->
+            rpc_record_def_tree(Rpc, Opts);
+        rpcs_as_proplists ->
+            erl_parse:abstract(gpb:rpc_record_to_proplist(Rpc))
+    end.    
 
 format_fetch_rpc_defs([]) ->
     gpb_codegen:format_fn(

@@ -29,6 +29,7 @@
 -export([field_records_to_proplists/1, proplists_to_field_records/1]).
 -export([field_record_to_proplist/1,   proplist_to_field_record/1]).
 -export([defs_records_to_proplists/1,  proplists_to_defs_records/1]).
+-export([rpc_records_to_proplists/1, rpc_record_to_proplist/1, proplists_to_rpc_records/1]).
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 -include("../include/gpb_version.hrl").
@@ -681,6 +682,20 @@ proplists_to_field_records(PLs) ->
 proplist_to_field_record(PL) when is_list(PL) ->
     Names = record_info(fields, field),
     list_to_tuple([field | [proplists:get_value(Name, PL) || Name <- Names]]).
+
+rpc_records_to_proplists(Rpcs) when is_list(Rpcs) ->
+    [rpc_record_to_proplist(R) || R <- Rpcs].
+
+rpc_record_to_proplist(#rpc{}=R) ->
+    Names = record_info(fields, rpc),
+    lists:zip(Names, tl(tuple_to_list(R))).
+
+proplists_to_rpc_records(PLs) ->
+    [proplist_to_rpc_record(PL) || PL <- PLs].
+
+proplist_to_rpc_record(PL) when is_list(PL) ->
+    Names = record_info(fields, rpc),
+    list_to_tuple([rpc | [proplists:get_value(Name, PL) || Name <- Names]]).
 
 %% --
 
