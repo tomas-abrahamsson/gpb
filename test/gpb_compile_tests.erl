@@ -254,6 +254,10 @@ introspection_defs_as_proplists_test() ->
     Proto = ["message msg1 { required uint32 f1=1; }",
              "service s1 {",
              "  rpc req1(msg1) returns (msg1);",
+             "  rpc req2(msg1) returns (msg1);",
+             "}",
+             "service s2 {",
+             "  rpc req2(msg1) returns (msg1);",
              "}"],
     %% With the defs_as_proplists option
     M = compile_iolist(Proto, [defs_as_proplists]),
@@ -264,8 +268,12 @@ introspection_defs_as_proplists_test() ->
       {occurrence, required},
       {opts,       []}]] = PL = M:find_msg_def(msg1),
     [{{msg, msg1}, PL}] = M:get_msg_defs(),
-    {{service, s1}, [[{name, req1}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s1),
+    [s1, s2] = M:get_service_names(),
+    {{service, s1}, [[{name, req1}, {input, 'msg1'}, {output, 'msg1'}], 
+                     [{name, req2}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s1),
+    {{service, s2}, [[{name, req2}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s2),
     [{name, req1}, {input, 'msg1'}, {output, 'msg1'}] = M:find_rpc_def(s1, req1),
+    [{name, req2}, {input, 'msg1'}, {output, 'msg1'}] = M:find_rpc_def(s2, req2),
     unload_code(M),
 
     %% No defs_as_proplists option
@@ -278,8 +286,12 @@ introspection_defs_as_proplists_test() ->
             opts       = []}] = Fs = M:find_msg_def(msg1),
     [{{msg, msg1}, Fs}] = Defs = M:get_msg_defs(),
     {{service, s1},
-     [#rpc{name = req1, input = 'msg1', output = 'msg1'}]} = M:get_service_def(s1),
+        [#rpc{name = req1, input = 'msg1', output = 'msg1'},
+         #rpc{name = req2, input = 'msg1', output = 'msg1'}]} = M:get_service_def(s1),
+    {{service, s2},
+        [#rpc{name = req2, input = 'msg1', output = 'msg1'}]} = M:get_service_def(s2),
     #rpc{name = req1, input = 'msg1', output = 'msg1'} = M:find_rpc_def(s1, req1),
+    #rpc{name = req2, input = 'msg1', output = 'msg1'} = M:find_rpc_def(s2, req2),
     unload_code(M),
 
     %% make sure the generated erl file does not -include[_lib] "gpb.hrl"
