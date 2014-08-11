@@ -323,6 +323,20 @@ parses_service_test() ->
      {{msg,m2}, _},
      {{service,s1},[{rpc,req,m1,m2}]}] = do_process_sort_defs(Defs).
 
+parses_multiple_services_test() ->
+    {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
+                             "message m2 {required uint32 f2=1;}",
+                             "service s1 {",
+                             "  rpc req(m1) returns (m2);",
+                             "}",
+                             "service s2 {",
+                             "  rpc req2(m2) returns (m1);",
+                             "}"]),
+    [{{msg,m1}, _},
+     {{msg,m2}, _},
+     {{service,s1},[{rpc,req,m1,m2}]},
+     {{service,s2},[{rpc,req2,m2,m1}]}] = do_process_sort_defs(Defs).
+
 parses_service_ignores_empty_method_option_braces_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
                              "message m2 {required uint32 f2=1;}",
