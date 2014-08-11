@@ -20,7 +20,7 @@
 -module(gpb_compile).
 %-compile(export_all).
 -export([file/1, file/2]).
--export([msg_defs/2, msg_defs/3]).
+-export([proto_defs/2, proto_defs/3]).
 -export([format_error/1, format_warning/1]).
 -export([c/0, c/1]). % Command line interface, halts vm---don't use from shell!
 -include_lib("kernel/include/file.hrl").
@@ -72,7 +72,7 @@ file(File) ->
 %%                   {o, directory()} |
 %%                   {o_erl, directory()} | {o_hrl, directory()} |
 %%                   {o_nif_cc, directory()} |
-%%                   binary | to_msg_defs |
+%%                   binary | to_proto_defs |
 %%                   return | return_warnings | return_errors |
 %%                   report | report_warnings | report_errors |
 %%                   include_as_lib | use_packages |
@@ -209,10 +209,10 @@ file(File) ->
 %% contains the C++ code. You will have to compile the C++ code with a
 %% C++ compiler, before you can use the erlang code.
 %%
-%% The `to_msg_defs' option will result in `{ok,MsgDefs}' or
-%% `{ok,MsgDefs,Warns}' being returned if the compilation is succesful.
+%% The `to_proto_defs' option will result in `{ok,Defs}' or
+%% `{ok,Defs,Warns}' being returned if the compilation is succesful.
 %% The returned message definitions can be used with the
-%% {@link msg_defs/2} or {@link msg_defs/3} functions.
+%% {@link proto_defs/2} or {@link proto_defs/3} functions.
 %%
 %% <dl>
 %%   <dt>`report_errors'/`report_warnings'</dt>
@@ -264,7 +264,7 @@ file(File, Opts1) ->
                       Opts2)),
             DefaultOutDir = filename:dirname(File),
             Opts3 = Opts2 ++ [{o,DefaultOutDir}],
-            msg_defs(Mod, Defs, Opts3);
+            proto_defs(Mod, Defs, Opts3);
         {error, Reason} = Error ->
             possibly_report_error(Error, Opts2),
             case proplists:get_bool(return_warnings, Opts2) of
@@ -314,12 +314,12 @@ possibly_suffix_mod(BaseNameNoExt, Opts) ->
     end.
 
 
-%% @spec msg_defs(Mod, Defs) -> CompRet
-%% @equiv msg_defs(Mod, Defs, [])
-msg_defs(Mod, Defs) ->
-    msg_defs(Mod, Defs, []).
+%% @spec proto_defs(Mod, Defs) -> CompRet
+%% @equiv proto_defs(Mod, Defs, [])
+proto_defs(Mod, Defs) ->
+    proto_defs(Mod, Defs, []).
 
-%% @spec msg_defs(Mod, Defs, Opts) -> CompRet
+%% @spec proto_defs(Mod, Defs, Opts) -> CompRet
 %%            Mod  = atom()
 %%            Defs = [Def]
 %%            Def = {{enum, EnumName}, Enums} |
@@ -333,7 +333,7 @@ msg_defs(Mod, Defs) ->
 %% @doc
 %% Compile a list of pre-parsed definitions to file or to a binary.
 %% See {@link file/2} for information on options and return values.
-msg_defs(Mod, Defs0, Opts0) ->
+proto_defs(Mod, Defs0, Opts0) ->
     {IsAcyclic, Defs} = try_topsort_defs(Defs0),
     possibly_probe_defs(Defs, Opts0),
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
@@ -341,7 +341,7 @@ msg_defs(Mod, Defs0, Opts0) ->
     AnRes = analyze_defs(Defs, Opts2),
     case verify_opts(Opts2) of
         ok ->
-            Res1 = do_msg_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
+            Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
             return_or_report_warnings_or_errors(Res1, Warns, Opts2,
                                                 get_output_format(Opts2));
         {error, OptError} ->
@@ -349,9 +349,9 @@ msg_defs(Mod, Defs0, Opts0) ->
                                                 get_output_format(Opts2))
     end.
 
-do_msg_defs(Defs, Mod, AnRes, Opts) ->
+do_proto_defs(Defs, Mod, AnRes, Opts) ->
     case get_output_format(Opts) of
-        msg_defs ->
+        proto_defs ->
             {ok, Defs};
         binary ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
@@ -393,7 +393,7 @@ return_or_report_warnings_or_errors(Res, ExtraWarns, Opts, OutFormat) ->
 
 merge_warns(ok, Warns, _OutFmt)                  -> {ok, Warns};
 merge_warns({ok, Warns1}, Warns2, file)          -> {ok, Warns2++Warns1};
-merge_warns({ok, MsgDefs}, Warns, msg_defs)      -> {ok, MsgDefs, Warns};
+merge_warns({ok, Defs}, Warns, proto_defs)       -> {ok, Defs, Warns};
 merge_warns({ok, M, B}, Warns, binary)           -> {ok, M, B, Warns};
 merge_warns({ok, M, B, Warns1}, Warns2, binary)  -> {ok, M, B, Warns2++Warns1};
 merge_warns({error, R}, Warns, _OutFmt)          -> {error, R, Warns};
@@ -440,12 +440,12 @@ return_warnings_or_errors(Res, Opts) ->
             end
     end.
 
-get_output_format([binary | _])              -> binary;
-get_output_format([{binary, true} | _])      -> binary;
-get_output_format([to_msg_defs | _])         -> msg_defs;
-get_output_format([{to_msg_defs, true} | _]) -> msg_defs;
-get_output_format([_ | Rest])                -> get_output_format(Rest);
-get_output_format([])                        -> file.
+get_output_format([binary | _])                -> binary;
+get_output_format([{binary, true} | _])        -> binary;
+get_output_format([to_proto_defs | _])         -> proto_defs;
+get_output_format([{to_proto_defs, true} | _]) -> proto_defs;
+get_output_format([_ | Rest])                  -> get_output_format(Rest);
+get_output_format([])                          -> file.
 
 get_erl_outdir(Opts) ->
     proplists:get_value(o_erl, Opts, get_outdir(Opts)).
@@ -467,7 +467,7 @@ clean_module_name(Mod) ->
 %%           Reason = term()
 %%
 %% @doc Produce a plain-text error message from a reason returned by
-%% for instance {@link file/2} or {@link msg_defs/2}.
+%% for instance {@link file/2} or {@link proto_defs/2}.
 format_error({error, Reason, _Warns}) -> fmt_err(Reason);
 format_error({error, Reason})         -> fmt_err(Reason);
 format_error(Reason)                  -> fmt_err(Reason).
@@ -494,7 +494,7 @@ fmt_err(X) ->
 %%           Reason = term()
 %%
 %% @doc Produce a plain-text error message from a reason returned by
-%% for instance {@link file/2} or {@link msg_defs/2}.
+%% for instance {@link file/2} or {@link proto_defs/2}.
 %% @end
 %% Note: do NOT include trailing newline (\n or ~n)
 format_warning(cyclic_message_dependencies) ->
@@ -1139,6 +1139,10 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        ?f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
        ?f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
        format_enum_value_symbol_converter_exports(Defs),
+       ?f("-export([get_service_names/0]).~n"),
+       ?f("-export([get_service_def/1]).~n"),
+       ?f("-export([get_rpc_names/1]).~n"),
+       ?f("-export([find_rpc_def/2, fetch_rpc_def/2]).~n"),
        ?f("-export([get_package_name/0]).~n"),
        [?f("-export([descriptor/0]).~n") || get_gen_descriptor_by_opts(Opts)],
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
@@ -2764,9 +2768,10 @@ format_verifier_auxiliaries() ->
 format_introspection(Defs, Opts) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
+    ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
     [gpb_codegen:format_fn(
        get_msg_defs, fun() -> '<Defs>' end,
-       [replace_tree('<Defs>', def_trees(EnumDefs, MsgDefs, Opts))]),
+       [replace_tree('<Defs>', msg_def_trees(EnumDefs, MsgDefs, Opts))]),
      "\n",
      gpb_codegen:format_fn(
        get_msg_names, fun() -> '<Names>' end,
@@ -2786,12 +2791,24 @@ format_introspection(Defs, Opts) ->
      ?f("~n"),
      format_enum_value_symbol_converters(EnumDefs),
      ?f("~n"),
+     format_get_service_names(ServiceDefs),
+     ?f("~n"),
+     format_get_service_defs(ServiceDefs, Opts),
+     ?f("~n"),
+     format_get_rpc_names(ServiceDefs),
+     ?f("~n"),
+     format_find_rpc_defs(ServiceDefs),
+     ?f("~n"),
+     [format_find_service_rpc_defs(ServiceName, Rpcs, Opts) || {{service, ServiceName}, Rpcs} <- ServiceDefs],
+     ?f("~n"),
+     format_fetch_rpc_defs(ServiceDefs),
+     ?f("~n"),
      format_get_package_name(Defs),
      ?f("~n"),
      format_descriptor(Defs, Opts)
     ].
 
-def_trees(EnumDefs, MsgDefs, Opts) ->
+msg_def_trees(EnumDefs, MsgDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
     MsgDefTrees = [msg_def_tree(MsgDef, Opts) || MsgDef <- MsgDefs],
     erl_syntax:list(EnumDefTrees ++ MsgDefTrees).
@@ -2970,6 +2987,112 @@ format_descriptor(Defs, Opts) ->
 
 get_gen_descriptor_by_opts(Opts) ->
     proplists:get_bool(descriptor, Opts).
+
+% --- service introspection methods
+
+format_get_service_names(ServiceDefs) ->
+    gpb_codegen:format_fn(
+       get_service_names, 
+       fun() -> '<ServiceNames>' end,
+       [replace_term('<ServiceNames>', [ServiceName || {{service, ServiceName}, _Rpcs} <- ServiceDefs])]).
+
+format_get_service_defs(ServiceDefs, Opts) ->
+    gpb_codegen:format_fn(
+      get_service_def,
+      fun('<ServiceName>') -> '<ServiceDef>';
+         (_) -> error
+      end,
+      [repeat_clauses('<ServiceName>',
+                      [[replace_term('<ServiceName>', ServiceName),
+                        replace_tree('<ServiceDef>', service_def_tree(ServiceDef, Opts))]
+                       || {{service, ServiceName}, _Rpcs} = ServiceDef <- ServiceDefs])]).
+
+format_get_rpc_names(ServiceDefs) ->
+    gpb_codegen:format_fn(
+      get_rpc_names,
+      fun('<ServiceName>') -> '<ServiceRpcNames>';
+         (_) -> error
+      end,
+      [repeat_clauses('<ServiceName>',
+                      [[replace_term('<ServiceName>', ServiceName),
+                        replace_term('<ServiceRpcNames>', [RpcName || {rpc, RpcName, _, _} <- Rpcs])]
+                       || {{service, ServiceName}, Rpcs} <- ServiceDefs])]).
+
+format_find_rpc_defs(ServiceDefs) ->
+    gpb_codegen:format_fn(
+      find_rpc_def,
+      fun('<ServiceName>', RpcName) -> '<ServiceFindRpcDef>'(RpcName);
+         (_, _) -> error
+      end,
+      [repeat_clauses('<ServiceName>',
+                       [[replace_term('<ServiceName>', ServiceName),
+                         replace_term('<ServiceFindRpcDef>', mk_fn(find_rpc_def_, ServiceName))
+                        ] || {{service, ServiceName}, _} <- ServiceDefs]
+                     )]).
+
+format_find_service_rpc_defs(ServiceName, Rpcs, Opts) ->
+    gpb_codegen:format_fn(
+      mk_fn(find_rpc_def_, ServiceName),
+      fun('<RpcName>') -> '<RpcDef>';
+         (_) -> error
+      end,
+      [repeat_clauses('<RpcName>',
+                       [[replace_term('<RpcName>', RpcName),
+                         replace_tree('<RpcDef>', rpc_def_tree(Rpc, Opts))
+                        ]
+                       || {rpc, RpcName, _, _} = Rpc <- Rpcs])]).
+
+format_fetch_rpc_defs([]) ->
+    gpb_codegen:format_fn(
+      fetch_rpc_def,
+      fun(ServiceName, RpcName) -> erlang:error({no_such_rpc, ServiceName, RpcName}) end);
+format_fetch_rpc_defs(_ServiceDefs) ->
+    gpb_codegen:format_fn(
+      fetch_rpc_def,
+      fun(ServiceName, RpcName) ->
+              case find_rpc_def(ServiceName, RpcName) of
+                  Def when is_tuple(Def) -> Def;
+                  error -> erlang:error({no_such_rpc, ServiceName, RpcName})
+              end
+      end).
+
+service_def_tree({{service, ServiceName}, Rpcs}, Opts) ->
+    erl_syntax:tuple(
+      [erl_syntax:tuple([erl_syntax:atom(service), erl_syntax:atom(ServiceName)]),
+       rpcs_def_tree(Rpcs, Opts)]);
+service_def_tree(undefined, _) ->
+    erl_syntax:list([]).
+
+get_rpc_format_by_opts(Opts) ->
+    case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
+        false -> rpcs_as_records; %% default
+        true  -> rpcs_as_proplists
+    end.
+
+rpc_record_def_tree(#rpc{}=Rpc, Opts) ->
+    [rpc | RValues] = tuple_to_list(Rpc),
+    RNames = record_info(fields, rpc),
+    mapping_create(
+      rpc,
+      lists:zip(RNames,
+                [erl_parse:abstract(RValue) || RValue <- RValues]),
+      Opts).
+
+rpcs_def_tree(Rpcs, Opts) ->
+    case get_rpc_format_by_opts(Opts) of
+        rpcs_as_records   ->
+            erl_syntax:list([rpc_record_def_tree(Rpc, Opts) || Rpc <- Rpcs]);
+        rpcs_as_proplists ->
+            erl_parse:abstract(gpb:rpc_records_to_proplists(Rpcs))
+    end.
+
+rpc_def_tree(#rpc{}=Rpc, Opts) ->
+    case get_rpc_format_by_opts(Opts) of
+        rpcs_as_records   ->
+            rpc_record_def_tree(Rpc, Opts);
+        rpcs_as_proplists ->
+            erl_parse:abstract(gpb:rpc_record_to_proplist(Rpc))
+    end.    
 
 %% -- hrl -----------------------------------------------------
 
@@ -3674,8 +3797,9 @@ compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
              || Ts <- FormToks],
     {AttrForms, CodeForms} = split_forms_at_first_code(Forms),
     FieldDef = field_record_to_attr_form(),
+    RpcDef = rpc_record_to_attr_form(),
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
-    AllForms = AttrForms ++ [FieldDef] ++ MsgRecordForms ++ CodeForms,
+    AllForms = AttrForms ++ [FieldDef] ++ [RpcDef] ++ MsgRecordForms ++ CodeForms,
     combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
                                  PossibleNifCode).
 
@@ -3707,6 +3831,9 @@ split_forms_at_first_code_2([{function, _, _Name, _, _Clauses}|_]=Code, Acc) ->
 
 field_record_to_attr_form() ->
     record_to_attr(field, record_info(fields, field)).
+
+rpc_record_to_attr_form() ->
+    record_to_attr(rpc, record_info(fields, rpc)).
 
 msgdefs_to_record_attrs(Defs) ->
     [record_to_attr(MsgName, lists:map(fun gpb_field_to_record_field/1, Fields))
