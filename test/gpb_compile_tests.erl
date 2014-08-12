@@ -83,7 +83,7 @@ parses_file_to_msg_defs_test() ->
           "X.proto",
           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
            {i,"."},
-           to_msg_defs, report_warnings]),
+           to_proto_defs, report_warnings]),
     %% Check that the returned msgdefs are usable
     M = compile_defs(MsgDefs),
     ?assertMatch(<<_/binary>>, M:encode_msg({'Msg',33})),
@@ -94,7 +94,7 @@ parses_msgdefs_to_binary_test() ->
              [#field{name=field1, rnum=2, fnum=1, type=uint32,
                      occurrence=required, opts=[]}]}],
     M = find_unused_module(),
-    {ok, M, Code} = gpb_compile:msg_defs(M, Defs, [binary]),
+    {ok, M, Code} = gpb_compile:proto_defs(M, Defs, [binary]),
     true = is_binary(Code).
 
 parses_and_generates_good_code_also_for_reserved_keywords_test() ->
@@ -251,7 +251,14 @@ introspection_enums_test() ->
     unload_code(M).
 
 introspection_defs_as_proplists_test() ->
-    Proto = ["message msg1 { required uint32 f1=1; }"],
+    Proto = ["message msg1 { required uint32 f1=1; }",
+             "service s1 {",
+             "  rpc req1(msg1) returns (msg1);",
+             "  rpc req2(msg1) returns (msg1);",
+             "}",
+             "service s2 {",
+             "  rpc req2(msg1) returns (msg1);",
+             "}"],
     %% With the defs_as_proplists option
     M = compile_iolist(Proto, [defs_as_proplists]),
     [[{name,       f1},
@@ -261,6 +268,12 @@ introspection_defs_as_proplists_test() ->
       {occurrence, required},
       {opts,       []}]] = PL = M:find_msg_def(msg1),
     [{{msg, msg1}, PL}] = M:get_msg_defs(),
+    [s1, s2] = M:get_service_names(),
+    {{service, s1}, [[{name, req1}, {input, 'msg1'}, {output, 'msg1'}], 
+                     [{name, req2}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s1),
+    {{service, s2}, [[{name, req2}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s2),
+    [{name, req1}, {input, 'msg1'}, {output, 'msg1'}] = M:find_rpc_def(s1, req1),
+    [{name, req2}, {input, 'msg1'}, {output, 'msg1'}] = M:find_rpc_def(s2, req2),
     unload_code(M),
 
     %% No defs_as_proplists option
@@ -272,6 +285,13 @@ introspection_defs_as_proplists_test() ->
             occurrence = required,
             opts       = []}] = Fs = M:find_msg_def(msg1),
     [{{msg, msg1}, Fs}] = Defs = M:get_msg_defs(),
+    {{service, s1},
+        [#rpc{name = req1, input = 'msg1', output = 'msg1'},
+         #rpc{name = req2, input = 'msg1', output = 'msg1'}]} = M:get_service_def(s1),
+    {{service, s2},
+        [#rpc{name = req2, input = 'msg1', output = 'msg1'}]} = M:get_service_def(s2),
+    #rpc{name = req1, input = 'msg1', output = 'msg1'} = M:find_rpc_def(s1, req1),
+    #rpc{name = req2, input = 'msg1', output = 'msg1'} = M:find_rpc_def(s2, req2),
     unload_code(M),
 
     %% make sure the generated erl file does not -include[_lib] "gpb.hrl"
@@ -281,13 +301,62 @@ introspection_defs_as_proplists_test() ->
                            ok
                    end,
     FileOpOpt = mk_fileop_opt([{write_file, ReportOutput}]),
-    ok = gpb_compile:msg_defs(M, Defs, [FileOpOpt, defs_as_proplists]),
+    ok = gpb_compile:proto_defs(M, Defs, [FileOpOpt, defs_as_proplists]),
     receive {".hrl", Hrl1} -> nomatch = re:run(Hrl1, "\"gpb.hrl\"") end,
     receive {".erl", Erl1} -> nomatch = re:run(Erl1, "\"gpb.hrl\"") end,
-    ok = gpb_compile:msg_defs(M, Defs, [FileOpOpt, defs_as_proplists,
+    ok = gpb_compile:proto_defs(M, Defs, [FileOpOpt, defs_as_proplists,
                                         include_as_lib]),
     receive {".hrl", Hrl2} -> nomatch = re:run(Hrl2, "\"gpb.hrl\"") end,
     receive {".erl", Erl2} -> nomatch = re:run(Erl2, "\"gpb.hrl\"") end.
+
+introspection_rpcs_test() ->
+    Proto = ["message m1 { required uint32 f1=1; }",
+             "message m2 { required uint32 f2=1; }",
+             "service s1 {",
+             "  rpc req1(m1) returns (m2);",
+             "  rpc req2(m2) returns (m1);",
+             "}"],
+    M = compile_iolist(Proto),
+    {{service, s1},
+     [#rpc{name = req1, input = 'm1', output = 'm2'},
+      #rpc{name = req2, input = 'm2', output = 'm1'}]} = M:get_service_def(s1),
+    [req1, req2] = M:get_rpc_names(s1),
+    #rpc{name = req1, input = 'm1', output = 'm2'} = M:find_rpc_def(s1, req1),
+    #rpc{name = req1, input = 'm1', output = 'm2'} = M:fetch_rpc_def(s1, req1),
+    #rpc{name = req2, input = 'm2', output = 'm1'} = M:fetch_rpc_def(s1, req2),
+    #rpc{name = req2, input = 'm2', output = 'm1'} = M:find_rpc_def(s1, req2),
+    error = M:find_rpc_def(s1, req_ee),
+    ?assertError(_, M:fetch_rpc_def(s2, req_ee)),
+    unload_code(M).
+
+introspection_multiple_rpcs_test() ->
+    Proto = ["message m1 { required uint32 f1=1; }",
+             "message m2 { required uint32 f2=1; }",
+             "service s1 {",
+             "  rpc req1(m1) returns (m2);",
+             "  rpc req2(m2) returns (m1);",
+             "}",
+             "service s2 {",
+             "  rpc req21(m2) returns (m1);",
+             "  rpc req22(m1) returns (m2);",
+             "}"],
+    M = compile_iolist(Proto),
+    [s1, s2] = M:get_service_names(),
+    {{service, s1},
+     [#rpc{name = req1, input = 'm1', output = 'm2'},
+      #rpc{name = req2, input = 'm2', output = 'm1'}]} = M:get_service_def(s1),
+    {{service, s2},
+     [#rpc{name = req21, input = 'm2', output = 'm1'},
+      #rpc{name = req22, input = 'm1', output = 'm2'}]} = M:get_service_def(s2),
+    #rpc{name = req21,  input = 'm2', output = 'm1'} = M:find_rpc_def(s2, req21),
+    #rpc{name = req1, input = 'm1', output = 'm2'} = M:fetch_rpc_def(s1, req1),
+    #rpc{name = req2,  input = 'm2', output = 'm1'} = M:fetch_rpc_def(s1, req2),
+    #rpc{name = req22, input = 'm1', output = 'm2'} = M:find_rpc_def(s2, req22),
+    error = M:find_rpc_def(s1, req_ee),
+    error = M:find_rpc_def(s2, req_aa),
+    ?assertError(_, M:fetch_rpc_def(s2, req_ee)),
+    ?assertError(_, M:fetch_rpc_def(s1, req_aa)),
+    unload_code(M).
 
 %% --- decoder tests ---------------
 
@@ -538,14 +607,14 @@ report_or_return_warnings_or_errors_test_aux() ->
                        [return_warnings, report_errors],
                        []
                       ],
-        CompileTo  <- [to_binary, to_file, to_msg_defs],
+        CompileTo  <- [to_binary, to_file, to_proto_defs],
         SrcType    <- [from_file, from_defs],
         SrcQuality <- [clean_code, warningful_code, erroneous_code,
                        write_fails],
         %% Exclude a few combos
         not (SrcQuality == erroneous_code andalso SrcType == from_defs),
         not (SrcQuality == write_fails andalso CompileTo == to_binary),
-        not (SrcQuality == write_fails andalso CompileTo == to_msg_defs)].
+        not (SrcQuality == write_fails andalso CompileTo == to_proto_defs)].
 
 rwre_go(Options, CompileTo, SrcType, SrcQuality) ->
     ExpectedReturn = compute_expected_return(Options, CompileTo, SrcQuality),
@@ -595,7 +664,7 @@ compute_expected_return(Options, to_binary, SrcQuality) ->
         {return, report, warningful_code} -> {ok, mod, binary, non_empty_list};
         {return, report, erroneous_code}  -> {error, '_', []}
     end;
-compute_expected_return(Options, to_msg_defs, SrcQuality) ->
+compute_expected_return(Options, to_proto_defs, SrcQuality) ->
     WarnOpt = get_warning_opt(Options),
     ErrOpt = get_error_opt(Options),
     case {WarnOpt, ErrOpt, SrcQuality} of
@@ -691,7 +760,7 @@ compute_compile_opts(Options, CompileTo, _SrcQuality) ->
     compute_compile_opts_2(Options, CompileTo).
 
 compute_compile_opts_2(Opts, to_binary)   -> [binary, type_specs | Opts];
-compute_compile_opts_2(Opts, to_msg_defs) -> [to_msg_defs, type_specs | Opts];
+compute_compile_opts_2(Opts, to_proto_defs) -> [to_proto_defs, type_specs | Opts];
 compute_compile_opts_2(Opts, to_file)     -> [type_specs | Opts].
 
 mk_failing_write_option() ->
@@ -707,7 +776,7 @@ compile_msg_defs_get_output(MsgDefs, Opts) ->
                                                       end}]),
                     [FOpt | RestOpts]
             end,
-    capture_stdout(fun() -> gpb_compile:msg_defs('x', MsgDefs, Opts2) end).
+    capture_stdout(fun() -> gpb_compile:proto_defs('x', MsgDefs, Opts2) end).
 
 compile_file_get_output(Txt, Opts) ->
     Contents = iolist_to_binary(Txt),
@@ -945,7 +1014,7 @@ generates_nif_as_binary_and_file_test() ->
     M = gpb_nif_test,
     LoadNif = "load_nif() -> erlang:load_nif({{nifbase}}, {{loadinfo}}).\n",
     LoadNifOpt = {load_nif, LoadNif},
-    {ok, M, Codes} = gpb_compile:msg_defs(M, Defs, [binary, nif, LoadNifOpt]),
+    {ok, M, Codes} = gpb_compile:proto_defs(M, Defs, [binary, nif, LoadNifOpt]),
     Nif1 = proplists:get_value(nif, Codes),
     Master = self(),
     ReportWriteCc = fun(FName, Contents) ->
@@ -955,7 +1024,7 @@ generates_nif_as_binary_and_file_test() ->
                             end
                     end,
     FileOpOpt = mk_fileop_opt([{write_file, ReportWriteCc}]),
-    ok = gpb_compile:msg_defs(M, Defs, [nif, FileOpOpt, LoadNifOpt]),
+    ok = gpb_compile:proto_defs(M, Defs, [nif, FileOpOpt, LoadNifOpt]),
     Nif2 = receive {cc, Cc} -> Cc end,
     ?assertMatch(Nif1, Nif2).
 
@@ -1017,7 +1086,7 @@ compile_msg_defs(M, MsgDefs, TmpDir) ->
                 [filename:join(TmpDir, lists:concat([M,".nif"]))]),
     LoadNifOpt = {load_nif, LoadNif},
     Opts = [binary, nif, LoadNifOpt],
-    {ok, M, Codes} = gpb_compile:msg_defs(M, MsgDefs, Opts),
+    {ok, M, Codes} = gpb_compile:proto_defs(M, MsgDefs, Opts),
     Code = proplists:get_value(erl, Codes),
     NifTxt = proplists:get_value(nif, Codes),
     ProtoTxt = msg_defs_to_proto(MsgDefs),
@@ -1294,7 +1363,7 @@ compile_defs(MsgDefs) ->
 compile_defs(MsgDefs, ExtraOpts) ->
     Mod = find_unused_module(),
     Opts = [binary | ExtraOpts],
-    {ok, Mod, Code} = gpb_compile:msg_defs(Mod, MsgDefs, Opts),
+    {ok, Mod, Code} = gpb_compile:proto_defs(Mod, MsgDefs, Opts),
     load_code(Mod, Code),
     Mod.
 

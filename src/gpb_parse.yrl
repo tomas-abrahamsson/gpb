@@ -436,7 +436,7 @@ resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
                   {found, {msg, MArg}} ->
                       case resolve_ref(Defs, Return, Root, FullName) of
                           {found, {msg, MReturn}} ->
-                              {{RpcName, MArg, MReturn}, Acc};
+                              {{rpc, RpcName, MArg, MReturn}, Acc};
                           {found, {BadType, MReturn}} ->
                               Reason = {rpc_return_ref_to_non_msg,
                                         {{FullName, RpcName, Return},
@@ -701,8 +701,8 @@ reformat_name(Name) ->
                              ".")).
 
 reformat_rpcs(RPCs) ->
-    lists:map(fun({RpcName, Arg, Return}) ->
-                      {RpcName, reformat_name(Arg), reformat_name(Return)}
+    lists:map(fun({rpc, RpcName, Arg, Return}) ->
+                      {rpc, RpcName, reformat_name(Arg), reformat_name(Return)}
               end,
               RPCs).
 
@@ -803,10 +803,10 @@ prefix_suffix_name(Prefix, Suffix, Name) ->
     list_to_atom(lists:concat([Prefix, Name, Suffix])).
 
 prefix_suffix_rpcs(Prefix, Suffix, RPCs) ->
-    lists:map(fun({RpcName, Arg, Return}) ->
+    lists:map(fun({rpc, RpcName, Arg, Return}) ->
                       NewArg = prefix_suffix_name(Prefix, Suffix, Arg),
                       NewReturn = prefix_suffix_name(Prefix, Suffix, Return),
-                      {RpcName, NewArg, NewReturn}
+                      {rpc, RpcName, NewArg, NewReturn}
               end,
               RPCs).
 
