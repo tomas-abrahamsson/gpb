@@ -25,7 +25,6 @@ Features of gpb
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'
    - custom options
-   - services
 
    gpb does not support:
    - groups
@@ -54,7 +53,7 @@ Features of gpb
 
 *  Introspection
 
-   gpb generates some functions for examining the messages and enums:
+   gpb generates some functions for examining messages, enums and services:
    - `get_msg_defs()`, `get_msg_names()`, `get_enum_names()`
    - `find_msg_def(MsgName)` and `fetch_msg_def(MsgName)`
    - `find_enum_def(MsgName)` and `fetch_enum_def(MsgName)`
@@ -62,6 +61,8 @@ Features of gpb
    - `enum_symbol_by_value_<EnumName>(Value)`,
      `enum_value_by_symbol(EnumName, Enum)` and
      `enum_value_by_symbol_<EnumName>(Enum)`
+   - `get_service_names()`, `get_service_def(ServiceName)`, `get_rpc_names(ServiceName)`
+   - `find_rpc_def(ServiceName, RpcName)`, `fetch_rpc_def(ServiceName, RpcName)`
 
    There are also some version information functions:
 
