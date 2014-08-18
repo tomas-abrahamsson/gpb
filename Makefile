@@ -141,7 +141,7 @@ test:	all $(TEST_BEAMS) FORCE
 		_  -> halt(1) \
 	    end."
 
-doc:
+doc:	| $(src)/gpb_parse.erl $(src)/gpb_scan.erl
 	@echo Generating documentation...
 	$(silencer)$(ERL) $(ERL_BATCH_FLAGS) -pa $(ebin) -eval " \
 	    case edoc:application(gpb,\"$(EDOC_DEST_DIR)\",[$(EDOC_OPTS)]) of \
