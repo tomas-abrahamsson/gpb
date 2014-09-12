@@ -24,7 +24,7 @@
 -export([msg_defs/2, msg_defs/3]).
 -export([format_error/1, format_warning/1]).
 -export([c/0, c/1]). % Command line interface, halts vm---don't use from shell!
--export([parse_opts/2]).
+-export([parse_opts/2, opt_specs/0, find_opt_spec/1, show_args/0]).
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
@@ -645,6 +645,90 @@ c([F | _]=Files) when is_atom(F); is_list(F) -> %% invoked with -s or -run
     end,
     timer:sleep(infinity). %% give init:stop time to do its work
 
+opt_specs() ->
+    [
+        {"I", string_maybe_appended, i, "\n"
+            "          Specify include directory.\n"
+            "          Option may be specified more than once to specify\n"
+            "          several include directories.\n"},
+        {"o", string, o, "Dir\n"
+            "          Specify output directory for where to generate\n"
+            "          the <ProtoFile>.erl and <ProtoFile>.hrl\n"},
+        {"o-erl", string, o_erl, "Dir\n"
+            "          Specify output directory for where to generate\n"
+            "          the <ProtoFile>.erl.\n"
+            "          The -o-erl Dir option overrides any -o Dir option, and\n"
+            "          similarly for the other file-type specific output options.\n"},
+        {"o-hrl", string, o_hrl, "Dir\n"
+            "          Specify output directory for where to generate\n"
+            "          the <ProtoFile>.hrl\n"},
+        {"o-nif-cc", string, o_nif_cc, "Dir\n"
+            "          Specify output directory for where to generate\n"
+            "          the NIF C++ file, if the -nif option is specified\n"},
+        {"nif", undefined, nif, "\n"
+            "          Generate nifs for linking with the protobuf C(++) library.\n"},
+        {"load_nif", string, load_nif, "FunctionDefinition\n"
+            "          Specify FunctionDefinition as the text that defines the\n"
+            "          function load_nif/0.  This is called as the -on_load.\n"
+            "          hook for loading the NIF.\n"},
+        {"v", {optionally, always, never}, verify, " optionally | always | never\n"
+            "          Specify how the generated encoder should\n"
+            "          verify the message to be encoded.\n"},
+        {"c", {true, false, auto, integer, float}, copy_bytes, "true | false | auto | integer() | float()\n"
+            "          Specify how or when the generated decoder should\n"
+            "          copy fields of type bytes.\n"},
+        {"strbin", undefined, strings_as_binaries, "\n"
+            "          Specify that decoded strings should be returend as binaries,\n"
+            "          instead of as strings (lists).\n"},
+        {"pldefs", undefined, defs_as_proplists, "\n"
+            "          Specify that introspection functions shall return proplists\n"
+            "          instead of #field{} records, to make the generated code\n"
+            "          completely free of even compile-time dependencies to gpb.\n"},
+        {"msgprefix", string, msg_name_prefix, "Prefix\n"
+            "          Prefix each message with Prefix.\n"},
+        {"modprefix", string, module_name_prefix, "Prefix\n"
+            "          Prefix the module name with Prefix.\n"},
+        {"msgsuffix", string, msg_name_suffix, "Suffix\n"
+            "          Suffix each message with Suffix.\n"},
+        {"modsuffix", string, module_name_suffix, "Suffix\n"
+            "          Suffix the module name with Suffix.\n"},
+        {"il", undefined, include_as_lib, "\n"
+            "          Generate code that includes gpb.hrl using -include_lib\n"
+            "          instad of -include, which is the default.\n"},
+        {"type", undefined, type_specs, "\n"
+            "          Enables `::Type()' annotations in the generated .hrl file.\n"},
+        {"descr", undefined, descriptor, "\n"
+            "          Generate self-description information.\n"},
+        {"maps", undefined, maps, "\n"
+            "          Generate code that will accept and produce maps instead of\n"
+            "          records.\n"},
+        {"h", undefined, help, "\n"
+            "          Show help\n"},
+        {"-help", undefined, help, "\n"
+            "          Show help\n"},
+        {"V", undefined, version, "\n"
+            "          Show version\n"},
+        {"-version", undefined, version, "\n"
+            "          Show version\n"}
+    ].
+
+find_opt_spec(Opt) ->
+  lists:filter(fun({OptDef, OptType, _, _}) -> 
+                  % the type of comparison depends on the opt spec type
+                  case OptType of
+                    % if the opt arg may be appended to the option (ie. -Iinclude1)
+                    string_maybe_appended ->
+                      case re:run(Opt, "^"++OptDef) of
+                        {match, _} -> 
+                          true;
+                        nomatch -> false
+                      end;
+                    % for the other cases an exact match is required
+                    _ ->
+                      Opt == OptDef
+                  end
+               end, opt_specs()).
+               
 determine_cmdline_op(Opts, FileName) ->
     Help = lists:member(help, Opts) orelse
         FileName == "-h" orelse
@@ -666,104 +750,61 @@ show_help() ->
       "Usage: erl <erlargs> [gpb-opts] -s ~p c <ProtoFile>.proto~n"
       "   or: erl <erlargs> -s ~p c <ProtoFile>.proto -extra [gpb-opts]~n"
       "Typical erlargs = -noshell -noinput +B -boot start_clean -pa SomeDir~n"
-      "~n"
-      "Recognized gpb-opts: (see the edoc for ~p for further details)~n"
-      "    -IDir   -I Dir~n"
-      "          Specify include directory.~n"
-      "          Option may be specified more than once to specify~n"
-      "          several include directories.~n"
-      "    -o Dir~n"
-      "          Specify output directory for where to generate~n"
-      "          the <ProtoFile>.erl and <ProtoFile>.hrl~n"
-      "    -o-erl Dir | -o-hrl Dir | -o-nif-cc Dir~n"
-      "          Specify output directory for where to generate~n"
-      "          the <ProtoFile>.erl and <ProtoFile>.hrl respectively,~n"
-      "          and for the NIF C++ file, if the -nif option is specified~n"
-      "          The -o-erl Dir option overrides any -o Dir option, and~n"
-      "          similarly for the other file-type specific output options.~n"
-      "    -nif~n"
-      "          Generate nifs for linking with the protobuf C(++) library.~n"
-      "    -load_nif FunctionDefinition~n"
-      "          Specify FunctionDefinition as the text that defines the~n"
-      "          function load_nif/0.  This is called as the -on_load.~n"
-      "          hook for loading the NIF.~n"
-      "    -v optionally | always | never~n"
-      "          Specify how the generated encoder should~n"
-      "          verify the message to be encoded.~n"
-      "    -c true | false | auto | integer() | float()~n"
-      "          Specify how or when the generated decoder should~n"
-      "          copy fields of type bytes.~n"
-      "    -strbin~n"
-      "          Specify that decoded strings should be returend as binaries,~n"
-      "          instead of as strings (lists).~n"
-      "    -pldefs~n"
-      "          Specify that introspection functions shall return proplists~n"
-      "          instead of #field{} records, to make the generated code~n"
-      "          completely free of even compile-time dependencies to gpb.~n"
-      "    -msgprefix Prefix~n"
-      "          Prefix each message with Prefix.~n"
-      "    -modprefix Prefix~n"
-      "          Prefix the module name with Prefix.~n"
-      "    -msgsuffix Suffix~n"
-      "          Suffix each message with Suffix.~n"
-      "    -modsuffix Suffix~n"
-      "          Suffix the module name with Suffix.~n"
-      "    -il~n"
-      "          Generate code that includes gpb.hrl using -include_lib~n"
-      "          instad of -include, which is the default.~n"
-      "    -type~n"
-      "          Enables `::Type()' annotations in the generated .hrl file.~n"
-      "    -descr~n"
-      "          Generate self-description information.~n"
-      "    -maps~n"
-      "          Generate code that will accept and produce maps instead of~n"
-      "          records.~n"
-      "    --help  -h~n"
-      "          Show help~n"
-      "    --version  -V~n"
-      "          Show version~n"
-      , [gpb:version_as_string(), ?MODULE, ?MODULE, ?MODULE]).
+      "~n",
+      [gpb:version_as_string(), ?MODULE, ?MODULE]),
+    show_args().
 
+show_arg({OptDef, string_maybe_appended, _, OptDoc}) ->
+  io:format("   -~s   -~sOption ~s", [OptDef, OptDef, OptDoc]);
+show_arg({OptDef, _, _, OptDoc}) ->
+  io:format("   -~s ~s", [OptDef, OptDoc]).
+
+show_args() ->
+    io:format(
+      "Recognized gpb-opts: (see the edoc for ~p for further details)~n",
+      [?MODULE]),
+    lists:foreach(fun show_arg/1, opt_specs()).
+      
 show_version() ->
     io:format("gpb version ~s~n", [gpb:version_as_string()]).
 
 parse_opts(Args, PlainArgs) ->
     arg_zf(fun parse_opt/1, Args) ++ plain_arg_zf(fun parse_opt/1, PlainArgs).
 
-parse_opt({"I", [Dir]})          -> {true, {i,Dir}};
-parse_opt({"I"++Dir, []})        -> {true, {i,Dir}};
-parse_opt({"o", [Dir]})          -> {true, {o,Dir}};
-parse_opt({"o-erl", [Dir]})      -> {true, {o_erl,Dir}};
-parse_opt({"o-hrl", [Dir]})      -> {true, {o_hrl,Dir}};
-parse_opt({"o-nif-cc", [Dir]})   -> {true, {o_nif_cc,Dir}};
-parse_opt({"nif",[]})            -> {true, nif};
-parse_opt({"load_nif",[S]})      -> {true, {load_nif,S}};
-parse_opt({"v", ["optionally"]}) -> {true, {verify,optionally}};
-parse_opt({"v", ["always"]})     -> {true, {verify,always}};
-parse_opt({"v", ["never"]})      -> {true, {verify,never}};
-parse_opt({"c", ["true"]})       -> {true, {copy_bytes,true}};
-parse_opt({"c", ["false"]})      -> {true, {copy_bytes,false}};
-parse_opt({"c", ["auto"]})       -> {true, {copy_bytes,auto}};
-parse_opt({"c", [NStr]})         -> case string_to_number(NStr) of
-                                        {ok, Num} -> {true, {copy_bytes,Num}};
-                                        error     -> false
-                                    end;
-parse_opt({"strbin", []})        -> {true, strings_as_binaries};
-parse_opt({"pldefs", []})        -> {true, defs_as_proplists};
-parse_opt({"msgprefix", [P]})    -> {true, {msg_name_prefix, P}};
-parse_opt({"modprefix", [P]})    -> {true, {module_name_prefix, P}};
-parse_opt({"msgsuffix", [S]})    -> {true, {msg_name_suffix, S}};
-parse_opt({"modsuffix", [S]})    -> {true, {module_name_suffix, S}};
-parse_opt({"il", []})            -> {true, include_as_lib};
-parse_opt({"type", []})          -> {true, type_specs};
-parse_opt({"descr", []})         -> {true, {descriptor,true}};
-parse_opt({"maps", []})          -> {true, maps};
-parse_opt({"h", _})              -> {true, help};
-parse_opt({"-help", _})          -> {true, help};
-parse_opt({"V", _})              -> {true, version};
-parse_opt({"-version", _})       -> {true, version};
-parse_opt(_X)                    -> false.
+parse_opt({Opt, OptArg}) ->
+    parse_opt_spec(find_opt_spec(Opt), Opt, OptArg).
 
+parse_opt_spec([{OptDef, string_maybe_appended, OptErl, _}], Opt, OptArg) ->
+    % now check what is the form, <Option> <OptArg> (ie. I include) or <Option><OptArg> (ie. Iinclude)
+    case Opt == OptDef of
+      true ->
+        [OptArg2] = OptArg,
+        {true, {OptErl, OptArg2}};
+      false ->
+        % if of the form <Option><OptArg> (ie. Iinclude), must subtract OptDef from Opt to obtain OptArg
+        {true, {OptErl, Opt -- OptDef}}
+    end;
+% opt spec undefined means that the option has no arg
+parse_opt_spec([{_, undefined, OptErl, _}], _, _) ->
+    {true, OptErl};
+% opt spec with tuples as types means they are restricted to a set of possible values
+parse_opt_spec([{_, OptType, OptErl, _}], _, [OptArg])  when is_tuple(OptType) ->
+    case lists:member(list_to_atom(OptArg), tuple_to_list(OptType)) of
+      true -> {true, {OptErl, list_to_atom(OptArg)}};
+      % opt arg does not belong in the tuple, however it could be a number
+      false -> 
+        case string_to_number(OptArg) of
+          {ok, OptNum} -> {true, {OptErl, OptNum}};
+          error     -> false
+        end
+    end;
+% standard opt spec with arg
+parse_opt_spec([{_, _, OptErl, _}], _, [OptArg]) ->
+    {true, {OptErl, OptArg}};
+% not a valid option
+parse_opt_spec([], _, _) ->
+    false.
+    
 string_to_number(S) ->
     try {ok, list_to_integer(S)}
     catch error:badarg ->
