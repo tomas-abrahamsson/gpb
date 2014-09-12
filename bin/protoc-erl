@@ -1,0 +1,56 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -noshell
+
+parse(Args) ->
+	parse([], [], [], [], Args).
+
+% opts all start with -
+parse([], Acc, OptAcc, ArgAcc, ["-" ++ Opt | Tail]) ->
+  parse(gpb_compile:find_opt_spec(Opt), Acc, [OptAcc | Opt], ArgAcc, Tail);
+% undefined opts have no args
+parse([{OptDef, undefined, _, _}], Acc, OptAcc, ArgAcc, Tail) ->
+  parse([], [{list_to_atom(OptDef), []} | Acc], OptAcc, ArgAcc, Tail);
+% string_maybe_appended opts can have args appended to the opt itself (ie. -I. or -I .)
+parse([{OptDef, string_maybe_appended, _, _}], Acc, [OptAcc | Opt], ArgAcc, Tail) ->
+  % now check what is the form, <Option> <OptArg> (ie. I include) or <Option><OptArg> (ie. Iinclude)
+  case Opt == OptDef of
+    true ->
+      parse([], Acc, [OptAcc | Opt], ArgAcc, Tail);
+    false ->
+      parse([], [{list_to_atom(OptDef), [Opt -- OptDef]} | Acc], OptAcc, ArgAcc, Tail)
+  end;
+% standard opts with args
+parse([{_, _, _, _}], Acc, OptAcc, ArgAcc, Tail) ->
+  parse([], Acc, OptAcc, ArgAcc, Tail);
+% accumulate an option complete with args
+parse([], Acc, [OptAcc | Opt], ArgAcc, [OptArg | Tail]) ->
+  parse([], [{list_to_atom(Opt), [OptArg]} | Acc], OptAcc, ArgAcc, Tail);
+% these are trailing args with no opt (ie. proto files)
+parse([], Acc, [], ArgAcc, [Arg | Tail]) ->
+  parse([], Acc, [], [[Arg] | ArgAcc], Tail);
+% final match, end of args
+parse(_, Acc, _, ArgAcc, []) ->
+  {lists:reverse(Acc), lists:reverse(ArgAcc)}.
+
+main ([]) ->
+  % add the gpb ebin path to we can have access to gpb_compile show help methods
+	true = code:add_pathz(filename:dirname(escript:script_name()) ++ "/../ebin"),
+	io:format ("usage: ~s <options> <.proto files>~n",
+             [filename:basename (escript:script_name())]),
+    gpb_compile:show_args(),
+	halt (1);
+main (Args) ->
+  % add the gpb ebin path to we can have access to gpb_compile methods
+	true = code:add_pathz(filename:dirname(escript:script_name()) ++ "/../ebin"),
+	% parse the command line options and subsequent proto files
+	{Options, Files} = parse(Args),
+	% ask gpb_compile to parse them into tuple format
+	GpbOptions = gpb_compile:parse_opts(Options, []),
+  case [gpb_compile:file(File, GpbOptions) || [File] <- Files] of
+    {error, ErrorMsg} ->
+      io:format("~p~n", [ErrorMsg]),
+      error;
+    _ ->
+      ok
+  end.
