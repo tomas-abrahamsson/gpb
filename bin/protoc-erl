@@ -11,16 +11,16 @@ parse([], Acc, OptAcc, ArgAcc, ["-" ++ Opt | Tail]) ->
 % undefined opts have no args
 parse([{OptDef, undefined, _, _}], Acc, OptAcc, ArgAcc, Tail) ->
     parse([], [{list_to_atom(OptDef), []} | Acc], OptAcc, ArgAcc, Tail);
-% string_maybe_appended opts can have args appended to the opt 
+% string_maybe_appended opts can have args appended to the opt
 % itself (ie. -I. or -I .)
 parse([{OptDef, string_maybe_appended, _, _}], Acc, [OptAcc | Opt], ArgAcc, Tail) ->
-    % now check what is the form, <Option> <OptArg> (ie. I include) 
+    % now check what is the form, <Option> <OptArg> (ie. I include)
     % or <Option><OptArg> (ie. Iinclude)
     case Opt == OptDef of
         true ->
             parse([], Acc, [OptAcc | Opt], ArgAcc, Tail);
         false ->
-            parse([], [{list_to_atom(OptDef), [Opt -- OptDef]} | Acc], OptAcc, 
+            parse([], [{list_to_atom(OptDef), [Opt -- OptDef]} | Acc], OptAcc,
                   ArgAcc, Tail)
     end;
 % standard opts with args
@@ -37,7 +37,7 @@ parse(_, Acc, _, ArgAcc, []) ->
     {lists:reverse(Acc), lists:reverse(ArgAcc)}.
 
 main ([]) ->
-    % add the gpb ebin path to we can have access to 
+    % add the gpb ebin path to we can have access to
     % gpb_compile show help methods
     true = code:add_pathz(filename:dirname(escript:script_name()) ++ "/../ebin"),
     io:format ("usage: ~s <options> <.proto files>~n",

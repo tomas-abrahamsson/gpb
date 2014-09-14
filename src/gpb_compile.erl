@@ -673,7 +673,7 @@ opt_specs() ->[
     {"v", {optionally, always, never}, verify, " optionally | always | never\n"
         "       Specify how the generated encoder should\n"
         "       verify the message to be encoded.\n"},
-    {"c", {true, false, auto, integer, float}, copy_bytes, 
+    {"c", {true, false, auto, integer, float}, copy_bytes,
         " true | false | auto | number() \n"
         "       Specify how or when the generated decoder should\n"
         "       copy fields of type bytes.\n"},
@@ -713,14 +713,14 @@ opt_specs() ->[
 ].
 
 find_opt_spec(Opt) ->
-  lists:filter(fun({OptDef, OptType, _, _}) -> 
+  lists:filter(fun({OptDef, OptType, _, _}) ->
                   % the type of comparison depends on the opt spec type
                   case OptType of
-                    % if the opt arg may be appended to the option 
+                    % if the opt arg may be appended to the option
                     % (ie. -Iinclude1)
                     string_maybe_appended ->
                       case re:run(Opt, "^"++OptDef) of
-                        {match, _} -> 
+                        {match, _} ->
                           true;
                         nomatch -> false
                       end;
@@ -729,7 +729,7 @@ find_opt_spec(Opt) ->
                       Opt == OptDef
                   end
                end, opt_specs()).
-               
+
 determine_cmdline_op(Opts, FileName) ->
     Help = lists:member(help, Opts) orelse
         FileName == "-h" orelse
@@ -765,7 +765,7 @@ show_args() ->
       "Recognized gpb-opts: (see the edoc for ~p for further details)~n",
       [?MODULE]),
     lists:foreach(fun show_arg/1, opt_specs()).
-      
+
 show_version() ->
     io:format("gpb version ~s~n", [gpb:version_as_string()]).
 
@@ -776,27 +776,27 @@ parse_opt({Opt, OptArg}) ->
     parse_opt_spec(find_opt_spec(Opt), Opt, OptArg).
 
 parse_opt_spec([{OptDef, string_maybe_appended, OptErl, _}], Opt, OptArg) ->
-    % now check what is the form, <Option> <OptArg> (ie. I include) 
+    % now check what is the form, <Option> <OptArg> (ie. I include)
     % or <Option><OptArg> (ie. Iinclude)
     case Opt == OptDef of
       true ->
         [OptArg2] = OptArg,
         {true, {OptErl, OptArg2}};
       false ->
-        % if of the form <Option><OptArg> (ie. Iinclude), must subtract 
+        % if of the form <Option><OptArg> (ie. Iinclude), must subtract
         % OptDef from Opt to obtain OptArg
         {true, {OptErl, Opt -- OptDef}}
     end;
 % opt spec undefined means that the option has no arg
 parse_opt_spec([{_, undefined, OptErl, _}], _, _) ->
     {true, OptErl};
-% opt spec with tuples as types means they are restricted to a set of 
+% opt spec with tuples as types means they are restricted to a set of
 % possible values
 parse_opt_spec([{_, OptType, OptErl, _}], _, [OptArg]) when is_tuple(OptType) ->
     case lists:member(list_to_atom(OptArg), tuple_to_list(OptType)) of
       true -> {true, {OptErl, list_to_atom(OptArg)}};
       % opt arg does not belong in the tuple, however it could be a number
-      false -> 
+      false ->
         case string_to_number(OptArg) of
           {ok, OptNum} -> {true, {OptErl, OptNum}};
           error     -> false
@@ -808,7 +808,7 @@ parse_opt_spec([{_, _, OptErl, _}], _, [OptArg]) ->
 % not a valid option
 parse_opt_spec([], _, _) ->
     false.
-    
+
 string_to_number(S) ->
     try {ok, list_to_integer(S)}
     catch error:badarg ->

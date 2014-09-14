@@ -1327,13 +1327,13 @@ mk_float(_, _) -> 1.0.
 %% --- command line options tests -----------------
 
 opt_test() ->
-            
+
     [{"I",string_maybe_appended,i, _}] = gpb_compile:find_opt_spec("Iinclude1"),
     [{"I",string_maybe_appended,i, _}] = gpb_compile:find_opt_spec("I"),
     [{"o-erl",string,o_erl, _}] = gpb_compile:find_opt_spec("o-erl"),
     [{"o", string, o, _}] = gpb_compile:find_opt_spec("o"),
     [{"o-hrl", string, o_hrl, _}] = gpb_compile:find_opt_spec("o-hrl"),
-              
+
     [{i,"include1"},
      {i,"include2"},
      {o,"out-dir"},
