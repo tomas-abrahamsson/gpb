@@ -37,16 +37,20 @@ parse(_, Acc, _, ArgAcc, []) ->
     {lists:reverse(Acc), lists:reverse(ArgAcc)}.
 
 main ([]) ->
+    BinDir = filename:dirname(escript:script_name()),
+    EBinDir = filename:join([BinDir, "..", "ebin"]),
     % add the gpb ebin path to we can have access to
     % gpb_compile show help methods
-    true = code:add_pathz(filename:dirname(escript:script_name()) ++ "/../ebin"),
+    true = code:add_pathz(EBinDir),
     io:format ("usage: ~s <options> <.proto files>~n",
-                [filename:basename (escript:script_name())]),
+                [filename:basename(escript:script_name())]),
     gpb_compile:show_args(),
     halt (1);
 main (Args) ->
+    BinDir = filename:dirname(escript:script_name()),
+    EBinDir = filename:join([BinDir, "..", "ebin"]),
     % add the gpb ebin path to we can have access to gpb_compile methods
-    true = code:add_pathz(filename:dirname(escript:script_name()) ++ "/../ebin"),
+    true = code:add_pathz(EBinDir),
     % parse the command line options and subsequent proto files
     {Options, Files} = parse(Args),
     % ask gpb_compile to parse them into tuple format
