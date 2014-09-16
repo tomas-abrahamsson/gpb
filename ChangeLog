@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.12.2
+2014-sep-16
+
+	* Fix a race condition in the Makefile between all and doc
+	* Elide falsely failing nif tests with 17 on 32 bits with an
+	erlang vm compiled with gcc 4.9.0 or newer.
+
 Version 3.12.1
 2014-aug-12
 
