@@ -59,7 +59,7 @@ main (Args) ->
     % parse the command line options and subsequent proto files
     % {Options, Files} = check_args(parse(Args)),
     {Options, Files} = case parse(Args) of
-                            {[], _} ->
+                            {[], []} ->
                                 show_help(),
                                 halt(1);
                             Result ->
@@ -77,8 +77,7 @@ main (Args) ->
             gpb_compile:show_version();
         _ ->
             [case gpb_compile:file(File, GpbOptions) of
-                {error, ErrorMsg} ->
-                    io:format("~p~n", [ErrorMsg]),
+                {error, _} ->
                     halt(1);
                 ok ->
                     ok
