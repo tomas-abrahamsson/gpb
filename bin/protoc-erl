@@ -37,7 +37,7 @@ parse(_, Acc, _, ArgAcc, []) ->
     {lists:reverse(Acc), lists:reverse(ArgAcc)}.
 
 show_help() ->
-    io:format ("usage: ~s <options> <.proto files>~n",
+    io:format("usage: ~s <options> <.proto files>~n",
                 [filename:basename(escript:script_name())]),
     gpb_compile:show_args().
 
