@@ -1259,13 +1259,45 @@ mk_one_msg_field_of_each_type() ->
     [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3].
 
 mk_fields_of_type(Types, Occurrence) ->
+    Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
     [#field{name=list_to_atom(lists:concat([f,integer_to_list(I)])),
             rnum=I + 1,
             fnum=I,
             type=Type,
             occurrence=Occurrence,
             opts=[]}
-     || {I, Type} <- lists:zip(lists:seq(1,length(Types)), Types)].
+     || {I, Type} <- lists:zip(lists:seq(1,length(Types1)), Types1)].
+
+can_do_nif_type(Type) ->
+    if Type == int64;
+       Type == sint64;
+       Type == sfixed64 ->
+            %% There's an issue with Erlang 17.0+ (will probably be
+            %% fixed in 17.2): if compiled with gcc 4.9.0 (or newer, probably)
+            %% and running on a 32-bit, there is an undefined behaviour
+            %% which will make the test fail for nifs for sint64
+            %% for INT64_MIN (-9223372036854775808). See also:
+            %% http://erlang.org/pipermail/erlang-bugs/2014-July/004513.html
+            case {is_erlvm_compiled_with_gcc490_or_later(), is_32_bit_os()} of
+                {true, true} ->
+                    false;
+                _ ->
+                    true
+            end;
+       true ->
+            true
+    end.
+
+is_erlvm_compiled_with_gcc490_or_later() ->
+    {Compiler, Version} = erlang:system_info(c_compiler_used),
+    if Compiler == gnuc, is_tuple(Version) ->
+            tuple_to_list(Version) >= [4,9,0];
+       true ->
+            undefined
+    end.
+
+is_32_bit_os() ->
+    erlang:system_info({wordsize,external}) == 4. %% Erlang R14+
 
 mk_msg(MsgName, Defs, Variant) ->
     {{msg, MsgName}, Fields} = lists:keyfind({msg, MsgName}, 1, Defs),
