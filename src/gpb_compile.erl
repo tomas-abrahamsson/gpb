@@ -24,7 +24,8 @@
 -export([msg_defs/2, msg_defs/3]).
 -export([format_error/1, format_warning/1]).
 -export([c/0, c/1]). % Command line interface, halts vm---don't use from shell!
--export([parse_opts/2, opt_specs/0, find_opt_spec/1, show_args/0]).
+-export([parse_opts/2, opt_specs/0, find_opt_spec/1, show_args/0,
+         show_version/0]).
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").

@@ -36,28 +36,51 @@ parse([], Acc, [], ArgAcc, [Arg | Tail]) ->
 parse(_, Acc, _, ArgAcc, []) ->
     {lists:reverse(Acc), lists:reverse(ArgAcc)}.
 
+show_help() ->
+    io:format ("usage: ~s <options> <.proto files>~n",
+                [filename:basename(escript:script_name())]),
+    gpb_compile:show_args().
+
 main ([]) ->
     BinDir = filename:dirname(escript:script_name()),
     EBinDir = filename:join([BinDir, "..", "ebin"]),
     % add the gpb ebin path to we can have access to
     % gpb_compile show help methods
     true = code:add_pathz(EBinDir),
-    io:format ("usage: ~s <options> <.proto files>~n",
-                [filename:basename(escript:script_name())]),
-    gpb_compile:show_args(),
-    halt (1);
+    show_help(),
+    halt(1);
 main (Args) ->
+    % get the dir where protoc-erl is being run from
     BinDir = filename:dirname(escript:script_name()),
+    % ebin directory should one dir above
     EBinDir = filename:join([BinDir, "..", "ebin"]),
     % add the gpb ebin path to we can have access to gpb_compile methods
     true = code:add_pathz(EBinDir),
     % parse the command line options and subsequent proto files
-    {Options, Files} = parse(Args),
+    % {Options, Files} = check_args(parse(Args)),
+    {Options, Files} = case parse(Args) of
+                            {[], _} ->
+                                show_help(),
+                                halt(1);
+                            Result ->
+                                Result
+                       end,
     % ask gpb_compile to parse them into tuple format
     GpbOptions = gpb_compile:parse_opts(Options, []),
-    [case gpb_compile:file(File, GpbOptions) of
-        {error, ErrorMsg} ->
-            io:format("~p~n", [ErrorMsg]),
-            halt(1);
-         ok -> ok
-     end || [File] <- Files].
+    % check for help or version options
+    Help = lists:member(help, GpbOptions),
+    Version = lists:member(version, GpbOptions),
+    case {Help, Version} of
+        {true, _} ->
+            show_help();
+        {_, true} ->
+            gpb_compile:show_version();
+        _ ->
+            [case gpb_compile:file(File, GpbOptions) of
+                {error, ErrorMsg} ->
+                    io:format("~p~n", [ErrorMsg]),
+                    halt(1);
+                ok ->
+                    ok
+             end || [File] <- Files]
+    end.
