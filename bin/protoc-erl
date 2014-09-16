@@ -9,8 +9,8 @@ parse(Args) ->
 parse([], Acc, OptAcc, ArgAcc, ["-" ++ Opt | Tail]) ->
     parse(gpb_compile:find_opt_spec(Opt), Acc, [OptAcc | Opt], ArgAcc, Tail);
 % undefined opts have no args
-parse([{OptDef, undefined, _, _}], Acc, OptAcc, ArgAcc, Tail) ->
-    parse([], [{list_to_atom(OptDef), []} | Acc], OptAcc, ArgAcc, Tail);
+parse([{OptDef, undefined, _, _}], Acc, _, ArgAcc, Tail) ->
+    parse([], [{list_to_atom(OptDef), []} | Acc], [], ArgAcc, Tail);
 % string_maybe_appended opts can have args appended to the opt
 % itself (ie. -I. or -I .)
 parse([{OptDef, string_maybe_appended, _, _}], Acc, [OptAcc | Opt], ArgAcc, Tail) ->
