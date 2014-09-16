@@ -55,10 +55,9 @@ main (Args) ->
     {Options, Files} = parse(Args),
     % ask gpb_compile to parse them into tuple format
     GpbOptions = gpb_compile:parse_opts(Options, []),
-    case [gpb_compile:file(File, GpbOptions) || [File] <- Files] of
+    [case gpb_compile:file(File, GpbOptions) of
         {error, ErrorMsg} ->
             io:format("~p~n", [ErrorMsg]),
-            error;
-        _ ->
-            ok
-    end.
+            halt(1);
+         ok -> ok
+     end || [File] <- Files].
