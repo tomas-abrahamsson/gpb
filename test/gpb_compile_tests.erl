@@ -1356,6 +1356,72 @@ mk_bytes(_)     -> <<"b">>.
 
 mk_float(_, _) -> 1.0.
 
+%% --- command line options tests -----------------
+
+opt_test() ->
+
+    [{"I",string_maybe_appended,i, _}] = gpb_compile:find_opt_spec("Iinclude1"),
+    [{"I",string_maybe_appended,i, _}] = gpb_compile:find_opt_spec("I"),
+    [{"o-erl",string,o_erl, _}] = gpb_compile:find_opt_spec("o-erl"),
+    [{"o", string, o, _}] = gpb_compile:find_opt_spec("o"),
+    [{"o-hrl", string, o_hrl, _}] = gpb_compile:find_opt_spec("o-hrl"),
+
+    [{i,"include1"},
+     {i,"include2"},
+     {o,"out-dir"},
+     {o_erl,"o-erl-dir"},
+     {o_hrl,"o-hrl-dir"},
+     nif,
+     {load_nif, "load-nif"},
+     {verify,optionally},
+     {verify,always},
+     {verify,never},
+     {copy_bytes,true},
+     {copy_bytes,false},
+     {copy_bytes,auto},
+     {copy_bytes,42},
+     strings_as_binaries,defs_as_proplists,
+     {msg_name_prefix,"_msg_suffix"},
+     {module_name_prefix,"_mod_prefix"},
+     {msg_name_suffix,"_msg_suffix"},
+     {module_name_suffix,"_mod_suffix"},
+     include_as_lib,type_specs,
+     descriptor,
+     maps,help,help,version,version] = gpb_compile:parse_opts([
+            {list_to_atom("Iinclude1"), []},
+            {list_to_atom("I"), ["include2"]},
+            {o, ["out-dir"]},
+            {wrong_arg, ["wrong-arg-str"]},
+            {root, ["root-dir"]},
+            {list_to_atom("o-erl"), ["o-erl-dir"]},
+            {list_to_atom("o-hrl"), ["o-hrl-dir"]},
+            {list_to_atom("o-nic-cc"), ["o-nic-cc-dir"]},
+            {nif, []},
+            {load_nif, ["load-nif"]},
+            {v, ["optionally"]},
+            {v, ["always"]},
+            {v, ["never"]},
+            {c, ["true"]},
+            {c, ["false"]},
+            {c, ["auto"]},
+            {c, ["42"]},
+            {wrong_arg2, []},
+            {strbin, []},
+            {pldefs, []},
+            {msgprefix, ["_msg_suffix"]},
+            {modprefix, ["_mod_prefix"]},
+            {msgsuffix, ["_msg_suffix"]},
+            {modsuffix, ["_mod_suffix"]},
+            {il, []},
+            {type, []},
+            {descr, []},
+            {maps, []},
+            {h, []},
+            {list_to_atom("-help"), []},
+            {list_to_atom("V"), []},
+            {list_to_atom("-version"), []}
+        ], []).
+
 %% --- auxiliaries -----------------
 
 %% vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv

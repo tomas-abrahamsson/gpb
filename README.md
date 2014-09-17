@@ -206,9 +206,8 @@ subdirectory.  Here are some some lines for the `rebar.config` file:
     {pre_hooks,
      [{compile, "mkdir -p include"}, %% ensure the include dir exists
       {compile,
-       "erl +B -noinput -pa /path/to/gpb/ebin "
-       "    -I`pwd`/proto -o-erl src -o-hrl include "
-       "    -s gpb_compile c `pwd`/proto/*.proto"
+       "/path/to/gpb/bin/protoc-erl -I`pwd`/proto"
+       "-o-erl src -o-hrl include `pwd`/proto/*.proto"
       }]}.
 
     {post_hooks,
