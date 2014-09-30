@@ -3363,7 +3363,6 @@ format_nif_cc_includes(Mod, Defs, _Opts) ->
     ["#include <string.h>\n",
      "#include <string>\n",
      "\n",
-     "#include <erl_driver.h>\n",
      "#include <erl_nif.h>\n",
      "\n",
      ?f("#include \"~s.pb.h\"\n", [Mod]),
