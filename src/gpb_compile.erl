@@ -3562,19 +3562,30 @@ format_nif_cc_foot(Mod, Defs, _Opts) ->
      "\n",
      "static ErlNifFunc nif_funcs[] =\n",
      "{\n",
-     [begin
-          FnName = mk_fn(d_msg_, MsgName),
-          CFnName = mk_c_fn(d_msg_, MsgName),
-          IsLast = I == length(Defs),
-          Comma = ["," || not IsLast],
-          ?f("    {\"~s\", 1, ~s}~s\n", [FnName, CFnName, Comma])
-      end
-      || {I, {{msg, MsgName}, _MsgFields}} <- index_seq(Defs)],
-     "\n",
+     "#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT\n",
+     format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND"),
+     "#else /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
+     format_nif_cc_nif_funcs_list(Defs, no_flags),
+     "#endif /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n"
      "};\n",
      "\n",
      ?f("ERL_NIF_INIT(~s, nif_funcs, load, reload, upgrade, unload)\n",
         [Mod])].
+
+format_nif_cc_nif_funcs_list(Defs, Flags) ->
+    MsgNames = [MsgName || {{msg, MsgName}, _MsgFields} <- Defs],
+    FlagStr = if Flags == no_flags -> "";
+                 true -> ", " ++ Flags
+              end,
+    [begin
+         FnName = mk_fn(d_msg_, MsgName),
+         CFnName = mk_c_fn(d_msg_, MsgName),
+         IsLast = I == length(MsgNames),
+         Comma = ["," || not IsLast],
+         ?f("    {\"~s\", 1, ~s~s}~s\n",
+            [FnName, CFnName, FlagStr, Comma])
+     end
+     || {I, MsgName} <- index_seq(MsgNames)].
 
 format_nif_cc_decoders(Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
