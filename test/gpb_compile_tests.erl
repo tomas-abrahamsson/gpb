@@ -1226,11 +1226,11 @@ ccompile(F, A) ->
     [LastLine | _Rest] = lists:reverse(string:tokens(Output, "\r\n")),
     try list_to_integer(string:strip(LastLine)) of
         0 -> ok;
-        _ -> ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~s~n~n",
+        _ -> ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~ts~n~n",
                        [Cmd, Output]),
              {error, Output}
     catch error:badarg ->
-            ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~s~n~n",
+            ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~ts~n~n",
                       [Cmd, Output]),
             {error, Output}
     end.
