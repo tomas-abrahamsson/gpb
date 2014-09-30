@@ -1222,7 +1222,7 @@ format_field(#field{name=FName, fnum=FNum, type=Type, occurrence=Occurrence}) ->
 
 ccompile(F, A) ->
     Cmd = f(F, A),
-    Output = os:cmd(Cmd ++ "; echo $?\n"),
+    Output = os:cmd("LC_ALL=C; export LC_ALL; " ++ Cmd ++ "; echo $?\n"),
     [LastLine | _Rest] = lists:reverse(string:tokens(Output, "\r\n")),
     try list_to_integer(string:strip(LastLine)) of
         0 -> ok;
