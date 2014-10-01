@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.14.0
+2014-oct-01
+
+	* In the Makefile, allow ERL and ERLC to be overridden via
+	environment variables, thanks to Graham Crowe.
+	* Avoid, and attempt to handle, unicode output in compilation
+	errors in eunit tests.
+
 Version 3.13.0
 2014-sep-17
 
