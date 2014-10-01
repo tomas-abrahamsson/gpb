@@ -44,8 +44,8 @@
 
 SHELL = /bin/sh
 
-ERL  = erl
-ERLC = erlc
+ERL  ?= erl
+ERLC ?= erlc
 
 GPB_PREFIX =
 
