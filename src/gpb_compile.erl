@@ -3363,7 +3363,6 @@ format_nif_cc_includes(Mod, Defs, _Opts) ->
     ["#include <string.h>\n",
      "#include <string>\n",
      "\n",
-     "#include <erl_driver.h>\n",
      "#include <erl_nif.h>\n",
      "\n",
      ?f("#include \"~s.pb.h\"\n", [Mod]),
@@ -3563,19 +3562,42 @@ format_nif_cc_foot(Mod, Defs, _Opts) ->
      "\n",
      "static ErlNifFunc nif_funcs[] =\n",
      "{\n",
-     [begin
-          FnName = mk_fn(d_msg_, MsgName),
-          CFnName = mk_c_fn(d_msg_, MsgName),
-          IsLast = I == length(Defs),
-          Comma = ["," || not IsLast],
-          ?f("    {\"~s\", 1, ~s}~s\n", [FnName, CFnName, Comma])
-      end
-      || {I, {{msg, MsgName}, _MsgFields}} <- index_seq(Defs)],
-     "\n",
+     %% Dirty schedulers flags appeared in Erlang 17.3 = enif 2.7
+     %% but only if Erlang was configured with --enable-dirty-schedulers
+     "#if ", format_nif_check_version_or_later(2, 7), "\n"
+     "#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT\n",
+     format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND, "),
+     "#else /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
+     format_nif_cc_nif_funcs_list(Defs, ""),
+     "#endif /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
+     "#else /* before 2.7 or 17.3 */\n",
+     format_nif_cc_nif_funcs_list(Defs, no_flags),
+     "#endif /* before 2.7 or 17.3 */\n"
      "};\n",
      "\n",
      ?f("ERL_NIF_INIT(~s, nif_funcs, load, reload, upgrade, unload)\n",
         [Mod])].
+
+format_nif_check_version_or_later(Major, Minor) ->
+    ?f("ERL_NIF_MAJOR_VERSION > ~w"
+       " || "
+       "(ERL_NIF_MAJOR_VERSION == ~w && ERL_NIF_MINOR_VERSION >= ~w)",
+       [Major, Major, Minor]).
+
+format_nif_cc_nif_funcs_list(Defs, Flags) ->
+    MsgNames = [MsgName || {{msg, MsgName}, _MsgFields} <- Defs],
+    FlagStr = if Flags == no_flags -> "";
+                 true -> ", " ++ Flags
+              end,
+    [begin
+         FnName = mk_fn(d_msg_, MsgName),
+         CFnName = mk_c_fn(d_msg_, MsgName),
+         IsLast = I == length(MsgNames),
+         Comma = ["," || not IsLast],
+         ?f("    {\"~s\", 1, ~s~s}~s\n",
+            [FnName, CFnName, FlagStr, Comma])
+     end
+     || {I, MsgName} <- index_seq(MsgNames)].
 
 format_nif_cc_decoders(Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
