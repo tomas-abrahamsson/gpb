@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.15.0
+2014-oct-13
+
+	* Specify that the NIF should run in a cpu-bound dirty scheduler
+	when supported. This currently requires Erlang 17.3 built with
+	--enable-dirty-schedulers. Thanks to Louis-Philippe Gauthier for
+	asking the question, prompting me get it done.
+
 Version 3.14.0
 2014-oct-01
 
