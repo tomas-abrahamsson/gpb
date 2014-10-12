@@ -1,16 +1,21 @@
 The `nif' option will cause the compiler to generate nif C++ code
-for that can be linked with the Google protobuf C++ library.
+that can be linked with the Google protobuf C++ library.
 
 The purpose for this is speed: the Google protobuf C++ is faster than
-the interpreted Erlang code, but will also lock up an Erlang
-scheduler for as long as it takes for the Google protobuf library
-to complete. This is normally a small amount of time, but can be a
-longer time for huge messages.  The generated nif code can be
-compiled with Erlang R14B or later. The `gpb_compile' will only
-generate C++ code, it will _not_ compile the generated C++
-code for you. Below is an example of how to generate and compile
-the C++ nif code under Linux. Details may differ from system to
-system.
+the interpreted Erlang code. Gpb will try to avoid locking up an
+Erlang scheduler for doing the encoding and decoding work, if
+supported by the Erlang VM, which currently means at least 17.3
+configured with --enable-dirty-schedulers.  If gpb cannot run on a
+dirty scheduler, it will lock up an Erlang scheduler for as long as it
+takes for the Google protobuf library to complete the encoding or
+decoding of a message. This is normally a small amount of time, but
+can be a longer time for huge messages.
+
+The generated nif code can be compiled with Erlang R14B or later. The
+`gpb_compile' will only generate C++ code, it will _not_ compile the
+generated C++ code for you. Below is an example of how to generate and
+compile the C++ nif code under Linux. Details may differ from system
+to system.
 
      # Use protoc to generate C++ code, and compile it.
      # This will generate x.pb.cc and x.pb.h from x.proto.
