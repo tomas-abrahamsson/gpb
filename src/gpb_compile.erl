@@ -3422,7 +3422,7 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
                      false -> MiscAtoms0
                  end,
     Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ MiscAtoms1),
-    AtomVars = [{mk_c_var(aa_, A), A} || A <- Atoms],
+    AtomVars = [{mk_c_var(gpb_aa_, A), A} || A <- Atoms],
 
     [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
      "\n",
@@ -3826,7 +3826,7 @@ format_nif_cc_field_packer(SrcVar, MsgVar, Field, Defs, Opts) ->
     end.
 
 format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs, Opts) ->
-    [?f("    if (!enif_is_identical(~s, aa_undefined))\n", [SrcVar]),
+    [?f("    if (!enif_is_identical(~s, gpb_aa_undefined))\n", [SrcVar]),
      format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, set)].
 
 format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
@@ -3895,7 +3895,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                   [SrcVar, MsgVar, SetterFnName]);
            bool ->
                ?f("{\n"
-                  "    if (enif_is_identical(~s, aa_true))\n"
+                  "    if (enif_is_identical(~s, gpb_aa_true))\n"
                   "        ~s->~s(1);\n"
                   "    else\n"
                   "        ~s->~s(0);\n"
@@ -3910,7 +3910,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                     [if I == 1 -> "";
                         I >  1 -> "else "
                      end,
-                     SrcVar, mk_c_var(aa_, Sym),
+                     SrcVar, mk_c_var(gpb_aa_, Sym),
                      MsgVar, SetterFnName, Sym])
                  || {I, {Sym, _Val}} <- index_seq(Enumerations)],
                 "    else\n"
@@ -4045,7 +4045,7 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
      UnpackFnName,"(ErlNifEnv *env, const ",CMsgType," *m)\n",
      "{\n",
      "    ERL_NIF_TERM res;\n",
-     ?f("    ERL_NIF_TERM rname = ~s;\n", [mk_c_var(aa_, MsgName)]),
+     ?f("    ERL_NIF_TERM rname = ~s;\n", [mk_c_var(gpb_aa_, MsgName)]),
      [?f("    ERL_NIF_TERM elem~w;\n", [I]) || I <- Is],
      "\n",
      [begin
@@ -4076,7 +4076,7 @@ format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
     #field{name=FName, type=FType} = Field,
     LCFName = to_lower(FName),
     [?f("    if (!~s->has_~s())\n", [MsgVar, LCFName]),
-     ?f("        ~s = aa_undefined;\n", [DestVar]),
+     ?f("        ~s = gpb_aa_undefined;\n", [DestVar]),
      ?f("    else\n"),
      indent_lines(
        8,
@@ -4107,18 +4107,18 @@ format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
                    [DestVar, MsgVar, LCFName])];
            bool ->
                [?f("if (~s->~s())\n", [MsgVar, LCFName]),
-                ?f("    ~s = aa_true;\n", [DestVar]),
+                ?f("    ~s = gpb_aa_true;\n", [DestVar]),
                 ?f("else\n"),
-                ?f("    ~s = aa_false;\n", [DestVar])];
+                ?f("    ~s = gpb_aa_false;\n", [DestVar])];
            {enum, EnumName} ->
                {value, {{enum,EnumName}, Enumerations}} =
                    lists:keysearch({enum,EnumName}, 1, Defs),
                [] ++
                    [?f("switch (~s->~s()) {\n", [MsgVar, LCFName])] ++
-                   [?f("    case ~w: ~s = ~s; break;\n",
-                       [Value, DestVar, mk_c_var(aa_, Sym)])
-                    || {Sym, Value} <- Enumerations] ++
-                   [?f("    default: ~s = aa_undefined;\n", [DestVar])] ++
+                   [?f("    case ~s: ~s = ~s; break;\n",
+                       [Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
+                    || {Sym, _Value} <- Enumerations] ++
+                   [?f("    default: ~s = gpb_aa_undefined;\n", [DestVar])] ++
                    [?f("}\n")];
            string ->
                [?f("{\n"),
@@ -4188,18 +4188,18 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
                    [MsgVar, LCFName])];
            bool ->
                [?f("if (~s->~s(i))\n", [MsgVar, LCFName]),
-                ?f("    relem[i] = aa_true;\n"),
+                ?f("    relem[i] = gpb_aa_true;\n"),
                 ?f("else\n"),
-                ?f("    relem[i] = aa_false;\n")];
+                ?f("    relem[i] = gpb_aa_false;\n")];
            {enum, EnumName} ->
                {value, {{enum,EnumName}, Enumerations}} =
                    lists:keysearch({enum,EnumName}, 1, Defs),
                [] ++
                    [?f("switch (~s->~s(i)) {\n", [MsgVar, LCFName])] ++
-                   [?f("    case ~w: relem[i] = ~s; break;\n",
-                       [Value, mk_c_var(aa_, Sym)])
-                    || {Sym, Value} <- Enumerations] ++
-                   [?f("    default: relem[i] = aa_undefined;\n")] ++
+                   [?f("    case ~s: relem[i] = ~s; break;\n",
+                       [Sym, mk_c_var(gpb_aa_, Sym)])
+                    || {Sym, _Value} <- Enumerations] ++
+                   [?f("    default: relem[i] = gpb_aa_undefined;\n")] ++
                    [?f("}\n")];
            string ->
                [?f("{\n"),
