@@ -3616,13 +3616,22 @@ format_nif_cc_decoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
      "    ",CMsgType," *m = new ",CMsgType,"();\n",
      "\n"
      "    if (argc != 1)\n",
+     "    {\n",
+     "        delete m;\n",
      "        return enif_make_badarg(env);\n",
+     "    }\n",
      "\n",
      "    if (m == NULL)\n",
+     "    {\n",
+     "        delete m;\n",
      "        return enif_make_badarg(env);\n", %% FIXME: enomem?
+     "    }\n",
      "\n",
      "    if (!enif_inspect_binary(env, argv[0], &data))\n"
+     "    {\n",
+     "        delete m;\n",
      "        return enif_make_badarg(env);\n",
+     "    }\n",
      "\n",
      "    if (!m->ParseFromArray(data.data, data.size))\n",
      "    {\n",
