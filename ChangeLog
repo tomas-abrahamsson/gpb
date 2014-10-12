@@ -1,5 +1,15 @@
 -*- coding: utf-8 -*-
 
+Version 3.16.0
+2014-oct-13
+
+	* When generating NIF code, also do the encoding in the
+	NIF. Previously, the encoding was still done using plain Erlang,
+	only decoding was in the NIF. Now the NIF does both encoding and
+	decoding.
+	* Fix potential memory leak when decoding, for odd/unusual error
+	cases.
+
 Version 3.15.0
 2014-oct-13
 
