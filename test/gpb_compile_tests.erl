@@ -1109,10 +1109,17 @@ compile_msg_defs(M, MsgDefs, TmpDir) ->
                   [CC, LdFlags, NifSoPath, NifOPath, PbOPath]),
     {ok, Code}.
 
+%% Option to run with `save' for debugging nifs
 with_tmpdir(Fun) ->
+    with_tmpdir(dont_save, Fun).
+with_tmpdir(Save, Fun) ->
     {ok, TmpDir} = get_tmpdir(),
     try Fun(TmpDir)
-    after clean_tmpdir(TmpDir)
+    after
+        case Save of
+            dont_save -> clean_tmpdir(TmpDir);
+            save -> io:format(user, "~nSaved dir ~p~n", [TmpDir])
+        end
     end.
 
 get_tmpdir() ->
