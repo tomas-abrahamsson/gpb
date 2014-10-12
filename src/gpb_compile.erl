@@ -1250,7 +1250,12 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        %%
        format_encoders_top_function(Defs, Opts),
        "\n",
-       ?f("~s~n", [format_encoders(Defs, AnRes, Opts)]),
+       if DoNif ->
+               ?f("~s~n", [format_nif_encoder_error_wrappers(
+                             Defs, AnRes, Opts)]);
+          not DoNif ->
+               ?f("~s~n", [format_encoders(Defs, AnRes, Opts)])
+       end,
        "\n",
        format_decoders_top_function(Defs),
        "\n\n",
@@ -1754,6 +1759,18 @@ format_varint_encoder() ->
               Bin2 = <<Bin/binary, (N band 127 bor 128)>>,
               call_self(N bsr 7, Bin2)
       end).
+
+format_nif_encoder_error_wrappers(Defs, _AnRes, _Opts) ->
+    [format_msg_nif_encode_error_wrapper(MsgName)
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+format_msg_nif_encode_error_wrapper(MsgName) ->
+    gpb_codegen:format_fn(
+      mk_fn(e_msg_, MsgName),
+      fun(Msg) ->
+              erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Msg])
+      end,
+      [replace_term('<msg-name>', MsgName)]).
 
 %% -- decoders -----------------------------------------------------
 
@@ -2595,10 +2612,10 @@ format_field_skippers(MsgName, AnRes) ->
       || NumBits <- [32, 64]]].
 
 format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
-    [format_msg_nif_error_wrapper(MsgName)
+    [format_msg_nif_decode_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
 
-format_msg_nif_error_wrapper(MsgName) ->
+format_msg_nif_decode_error_wrapper(MsgName) ->
     gpb_codegen:format_fn(
       mk_fn(d_msg_, MsgName),
       fun(Bin) ->
@@ -3302,6 +3319,15 @@ indent(Indent, Str) ->
 indent_lines(Indent, Lines) ->
     [indent(Indent, Line) || Line <- Lines].
 
+split_indent_iolist(Indent, IoList) ->
+    [if Line == <<>> -> "\n"; %% don't indent empty lines
+        true -> [indent(Indent, Line), "\n"]
+     end
+     || Line <- linesplit_iolist(IoList)].
+
+linesplit_iolist(Iolist) ->
+    re:split(Iolist, ["\n"], [trim, {return,binary}]).
+
 outdent_first(IoList) ->
     lists:dropwhile(fun(C) -> C == $\s end,
                     binary_to_list(iolist_to_binary(IoList))).
@@ -3343,6 +3369,8 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
        format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
+       format_nif_cc_encoders(Mod, Defs, Opts),
+       format_nif_cc_packers(Mod, Defs, Opts),
        format_nif_cc_decoders(Mod, Defs, Opts),
        format_nif_cc_unpackers(Mod, Defs, Opts),
        format_nif_cc_foot(Mod, Defs, Opts)]).
@@ -3372,10 +3400,14 @@ format_nif_cc_includes(Mod, Defs, _Opts) ->
 format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
     CPkg = get_cc_pkg(Defs),
     [[begin
+          PackFnName = mk_c_fn(p_msg_, MsgName),
           UnpackFnName = mk_c_fn(u_msg_, MsgName),
           CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
-          ["static ERL_NIF_TERM ",UnpackFnName,["(ErlNifEnv *env, ",
-                                                "const ",CMsgType," *m);\n"]]
+          [["static int ",PackFnName,["(ErlNifEnv *env, ",
+                                      "const ERL_NIF_TERM r,",
+                                      CMsgType," *m);\n"]],
+           ["static ERL_NIF_TERM ",UnpackFnName,["(ErlNifEnv *env, ",
+                                                 "const ",CMsgType," *m);\n"]]]
       end
       || {{msg, MsgName}, _Fields} <- Defs],
      "\n"].
@@ -3414,7 +3446,7 @@ is_any_field_of_type_bool(#anres{used_types=UsedTypes}) ->
     sets:is_element(bool, UsedTypes).
 
 format_nif_cc_utf8_conversion_code(Opts) ->
-    ["/* Source for https://www.ietf.org/rfc/rfc2279.txt */\n",
+    ["/* Source for info is https://www.ietf.org/rfc/rfc2279.txt */\n",
      "\n",
      "static int\n",
      "utf8_count_codepoints(const char *sinit, int len)\n",
@@ -3532,6 +3564,99 @@ format_nif_cc_utf8_conversion_code(Opts) ->
               "    }\n"]
      end,
      "}\n",
+     "\n",
+     case get_strings_as_binaries_by_opts(Opts) of
+         true ->
+             "";
+         false ->
+              "static int\n"
+              "utf8_count_octets(ErlNifEnv *env, ERL_NIF_TERM str)\n"
+              "{\n"
+              "    int n = 0;\n"
+              "\n"
+              "    while (!enif_is_empty_list(env, str))\n"
+              "    {\n"
+              "        ERL_NIF_TERM head, tail;\n"
+              "        unsigned int c;\n"
+              "\n"
+              "        if (!enif_get_list_cell(env, str, &head, &tail))\n"
+              "            return -1;\n"
+              "        if (!enif_get_uint(env, head, &c))\n"
+              "            return -1;\n"
+              "\n"
+              "        if (c <= 0x7f) n += 1;\n"
+              "        else if (c <= 0x7ff) n += 2;\n"
+              "        else if (c <= 0xffff) n += 3;\n"
+              "        else if (c <= 0x1Fffff) n += 4;\n"
+              "        else if (c <= 0x3FFffff) n += 5;\n"
+              "        else if (c <= 0x7FFFffff) n += 6;\n"
+              "        else return -1;\n"
+              "\n"
+              "        str = tail;\n"
+              "    }\n"
+              "    return n;\n"
+              "}\n"
+              "\n"
+              "static int\n"
+              "utf8_to_octets(ErlNifEnv *env, ERL_NIF_TERM str, char *dest)\n"
+              "{\n"
+              "    unsigned char *s = (unsigned char *)dest;\n"
+              "\n"
+              "    while (!enif_is_empty_list(env, str))\n"
+              "    {\n"
+              "        ERL_NIF_TERM head, tail;\n"
+              "        unsigned int c;\n"
+              "\n"
+              "        if (!enif_get_list_cell(env, str, &head, &tail))\n"
+              "            return -1;\n"
+              "        if (!enif_get_uint(env, head, &c))\n"
+              "            return -1;\n"
+              "\n"
+              "        if (c <= 0x7f)\n"
+              "            *s++ = c;\n"
+              "        else if (c <= 0x7ff)\n"
+              "        {\n"
+              "            *s++ = 0xc0 | (c >> 6);\n"
+              "            *s++ = 0x80 | (c & 0x3f);\n"
+              "        }\n"
+              "        else if (c <= 0xffff)\n"
+              "        {\n"
+              "            *s++ = 0xe0 | (c >> 12);\n"
+              "            *s++ = 0x80 | ((c >> 6) & 0x3f);\n"
+              "            *s++ = 0x80 | (c        & 0x3f);\n"
+              "        }\n"
+              "        else if (c <= 0x1Fffff)\n"
+              "        {\n"
+              "            *s++ = 0xf0 | (c >> 18);\n"
+              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n"
+              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n"
+              "            *s++ = 0x80 | (c         & 0x3f);\n"
+              "        }\n"
+              "        else if (c <= 0x3FFffff)\n"
+              "        {\n"
+              "            *s++ = 0xf0 | (c >> 24);\n"
+              "            *s++ = 0x80 | ((c >> 18) & 0x3f);\n"
+              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n"
+              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n"
+              "            *s++ = 0x80 | (c         & 0x3f);\n"
+              "        }\n"
+              "        else if (c <= 0x7FFFffff)\n"
+              "        {\n"
+              "            *s++ = 0xf0 | (c >> 30);\n"
+              "            *s++ = 0x80 | ((c >> 24) & 0x3f);\n"
+              "            *s++ = 0x80 | ((c >> 18) & 0x3f);\n"
+              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n"
+              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n"
+              "            *s++ = 0x80 | (c         & 0x3f);\n"
+              "        }\n"
+              "        else\n"
+              "            return 0;\n"
+              "\n"
+              "        str = tail;\n"
+              "    }\n"
+              "    return 1;\n"
+              "}\n"
+     end,
      "\n"].
 
 format_nif_cc_foot(Mod, Defs, _Opts) ->
@@ -3590,14 +3715,276 @@ format_nif_cc_nif_funcs_list(Defs, Flags) ->
                  true -> ", " ++ Flags
               end,
     [begin
-         FnName = mk_fn(d_msg_, MsgName),
-         CFnName = mk_c_fn(d_msg_, MsgName),
+         EncodeFnName = mk_fn(e_msg_, MsgName),
+         EncodeCFnName = mk_c_fn(e_msg_, MsgName),
+         DecodeFnName = mk_fn(d_msg_, MsgName),
+         DecodeCFnName = mk_c_fn(d_msg_, MsgName),
          IsLast = I == length(MsgNames),
          Comma = ["," || not IsLast],
-         ?f("    {\"~s\", 1, ~s~s}~s\n",
-            [FnName, CFnName, FlagStr, Comma])
+         [?f("    {\"~s\", 1, ~s~s},\n",
+             [EncodeFnName, EncodeCFnName, FlagStr]),
+          ?f("    {\"~s\", 1, ~s~s}~s\n",
+             [DecodeFnName, DecodeCFnName, FlagStr, Comma])]
      end
      || {I, MsgName} <- index_seq(MsgNames)].
+
+format_nif_cc_encoders(Mod, Defs, Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [format_nif_cc_encoder(Mod, CPkg, MsgName, Fields, Opts)
+     || {{msg, MsgName}, Fields} <- Defs].
+
+format_nif_cc_encoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
+    FnName = mk_c_fn(e_msg_, MsgName),
+    PackFnName = mk_c_fn(p_msg_, MsgName),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    ["static ERL_NIF_TERM\n",
+     FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
+     "{\n",
+     "    ErlNifBinary data;\n",
+     "    int byteSize;\n",
+     "    ",CMsgType," *m = new ",CMsgType,"();\n",
+     "\n"
+     "    if (argc != 1)\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n"
+     "\n"
+     "    if (m == NULL)\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n"
+     "\n"
+     "    if (!",PackFnName,"(env, argv[0], m))\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n"
+     "\n"
+     "    byteSize = m->ByteSize();\n"
+     "    if (!enif_alloc_binary(byteSize, &data))\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n"
+     "\n"
+     "    if (!m->SerializeToArray(data.data, byteSize))\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n"
+     "\n"
+     "    delete m;\n"
+     "    return enif_make_binary(env, &data);\n"
+     "}\n"
+     "\n"].
+
+format_nif_cc_packers(_Mod, Defs, Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts)
+     || {{msg, MsgName}, Fields} <- Defs].
+
+format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
+    PackFnName = mk_c_fn(p_msg_, MsgName),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    ["static int\n",
+     PackFnName,"(ErlNifEnv *env, const ERL_NIF_TERM r, ",CMsgType," *m)\n",
+     "{\n",
+     "    int arity;\n"
+     "    const ERL_NIF_TERM *elem;\n"
+     "\n"
+     "    if (!enif_get_tuple(env, r, &arity, &elem))\n"
+     "        return 0;\n"
+     "\n",
+     ?f("    if (arity != ~w)\n"
+        "        return 0;\n",
+        [length(Fields) + 1]),
+     "\n",
+     [begin
+          SrcVar = ?f("elem[~w]",[I]),
+          format_nif_cc_field_packer(SrcVar, "m", Field, Defs, Opts)
+      end
+      || {I, Field} <- index_seq(Fields)],
+     "\n"
+     "    return 1;\n"
+     "}\n",
+     "\n"].
+
+format_nif_cc_field_packer(SrcVar, MsgVar, Field, Defs, Opts) ->
+    #field{occurrence=Occurrence}=Field,
+    case Occurrence of
+        required ->
+            format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs,
+                                              Opts, set);
+        optional ->
+            format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs,
+                                                Opts);
+        repeated ->
+            format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs,
+                                                Opts)
+    end.
+
+format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs, Opts) ->
+    [?f("    if (!enif_is_identical(~s, aa_undefined))\n", [SrcVar]),
+     format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, set)].
+
+format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
+    #field{name=FName, type=FType} = Field,
+    LCFName = to_lower(FName),
+    SetterFnName = case Setter of
+                       set -> ?f("set_~s", [LCFName]);
+                       add -> ?f("add_~s", [LCFName])
+                   end,
+    [split_indent_iolist(
+       4,
+       case FType of
+           float ->
+               ?f("{\n"
+                  "    double v;\n"
+                  "    if (!enif_get_double(env, ~s, &v))\n"
+                  "        return 0;\n"
+                  "    ~s->~s((float)v);\n"
+                  "}\n",
+                  [SrcVar, MsgVar, SetterFnName]);
+           double ->
+               ?f("{\n"
+                  "    double v;\n"
+                  "    if (!enif_get_double(env, ~s, &v))\n"
+                  "        return 0;\n"
+                  "    ~s->~s(v);\n"
+                  "}\n",
+                  [SrcVar, MsgVar, SetterFnName]);
+           _S32 when FType == sint32;
+                     FType == int32;
+                     FType == sfixed32 ->
+               ?f("{\n"
+                  "    int v;\n"
+                  "    if (!enif_get_int(env, ~s, &v))\n"
+                  "        return 0;\n"
+                  "    ~s->~s(v);\n"
+                  "}\n",
+                  [SrcVar, MsgVar, SetterFnName]);
+           _S64 when FType == sint64;
+                     FType == int64;
+                     FType == sfixed64 ->
+               ?f("{\n"
+                  "    ErlNifSInt64 v;\n"
+                  "    if (!enif_get_int64(env, ~s, &v))\n"
+                  "        return 0;\n"
+                  "    ~s->~s(v);\n"
+                  "}\n",
+                  [SrcVar, MsgVar, SetterFnName]);
+           _U32 when FType == uint32;
+                     FType == fixed32 ->
+               ?f("{\n"
+                  "    unsigned int v;\n"
+                  "    if (!enif_get_uint(env, ~s, &v))\n"
+                  "        return 0;\n"
+                  "    ~s->~s(v);\n"
+                  "}\n",
+                  [SrcVar, MsgVar, SetterFnName]);
+           _U64 when FType == uint64;
+                     FType == fixed64 ->
+               ?f("{\n"
+                  "    ErlNifUInt64 v;\n"
+                  "    if (!enif_get_uint64(env, ~s, &v))\n"
+                  "        return 0;\n"
+                  "    ~s->~s(v);\n"
+                  "}\n",
+                  [SrcVar, MsgVar, SetterFnName]);
+           bool ->
+               ?f("{\n"
+                  "    if (enif_is_identical(~s, aa_true))\n"
+                  "        ~s->~s(1);\n"
+                  "    else\n"
+                  "        ~s->~s(0);\n"
+                  "}\n",
+                  [SrcVar, MsgVar, SetterFnName, MsgVar, SetterFnName]);
+           {enum, EnumName} ->
+               {value, {{enum,EnumName}, Enumerations}} =
+                   lists:keysearch({enum,EnumName}, 1, Defs),
+               ["{\n",
+                [?f("    ~sif (enif_is_identical(~s, ~s))\n"
+                    "        ~s->~s(~s);\n",
+                    [if I == 1 -> "";
+                        I >  1 -> "else "
+                     end,
+                     SrcVar, mk_c_var(aa_, Sym),
+                     MsgVar, SetterFnName, Sym])
+                 || {I, {Sym, _Val}} <- index_seq(Enumerations)],
+                "    else\n"
+                "        return 0;\n"
+                "}\n"];
+           string ->
+               case get_strings_as_binaries_by_opts(Opts) of
+                   true ->
+                       ?f("{\n"
+                          "    ErlNifBinary b;\n"
+                          "    if (!enif_inspect_binary(env, ~s, &b))\n"
+                          "        return 0;\n"
+                          "    ~s->~s(b.data, b.size);\n"
+                          "}\n",
+                          [SrcVar, MsgVar, SetterFnName]);
+                   false ->
+                       ?f("{\n"
+                          "    int num_octs = utf8_count_octets(env, ~s);\n"
+                          "\n"
+                          "    if (num_octs < 0)\n"
+                          "        return 0;\n"
+                          "    else\n"
+                          "    {\n"
+                          "         char s[num_octs];\n"
+                          "         utf8_to_octets(env, ~s, s);\n"
+                          "         ~s->~s(s, num_octs);\n"
+                          "    }\n"
+                          "}\n",
+                          [SrcVar, SrcVar, MsgVar, SetterFnName])
+               end;
+           bytes ->
+               ?f("{\n"
+                  "    ErlNifBinary b;\n"
+                  "    if (!enif_inspect_binary(env, ~s, &b))\n"
+                  "        return 0;\n"
+                  "    ~s->~s(b.data, b.size);\n"
+                  "}\n",
+                  [SrcVar, MsgVar, SetterFnName]);
+           {msg, Msg2Name} ->
+               PackFnName = mk_c_fn(p_msg_, Msg2Name),
+               CPkg = get_cc_pkg(Defs),
+               CMsg2Type = CPkg ++ "::" ++ dot_replace_s(Msg2Name, "::"),
+               NewFnName = case Setter of
+                               set -> ?f("mutable_~s", [LCFName]);
+                               add -> ?f("add_~s", [LCFName])
+                           end,
+               ?f("{\n"
+                  "    ~s *m2 = ~s->~s();\n"
+                  "    if (!~s(env, ~s, m2))\n"
+                  "        return 0;\n"
+                  "}\n",
+                  [CMsg2Type, MsgVar, NewFnName, PackFnName, SrcVar])
+       end),
+     "\n"].
+
+format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs, Opts) ->
+    split_indent_iolist(
+      4, [?f("{\n"
+             "    ERL_NIF_TERM l = ~s;\n"
+             "\n"
+             "    while (!enif_is_empty_list(env, l))\n"
+             "    {\n"
+             "        ERL_NIF_TERM head, tail;\n"
+             "\n"
+             "        if (!enif_get_list_cell(env, l, &head, &tail))\n"
+             "            return -1;\n",
+             [SrcVar]),
+          "\n",
+          split_indent_iolist(4, format_nif_cc_field_packer_single(
+                                   "head", MsgVar, Field, Defs, Opts, add)),
+          ?f("        l = tail;\n"
+             "    }\n"
+             "}\n",
+             [])]).
 
 format_nif_cc_decoders(Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),

@@ -1070,9 +1070,17 @@ nif_encode_decode_test_it(NEDM, Defs) ->
     Variants = [small, big, short, long],
     lists:foreach(fun({MsgName, Variant}) ->
                           OrigMsg = mk_msg(MsgName, Defs, Variant),
-                          Encoded = NEDM:encode_msg(OrigMsg),
-                          Decoded = NEDM:decode_msg(Encoded, MsgName),
-                          ?assertEqual(Decoded, OrigMsg)
+                          %% to avoid errors in nif encode/decode
+                          %% cancelling out each other and nif bugs go
+                          %% undetected, cross-check with gpb:encode/decode_msg
+                          MEncoded  = NEDM:encode_msg(OrigMsg),
+                          GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                          MMDecoded = NEDM:decode_msg(MEncoded, MsgName),
+                          GMDecoded = gpb:decode_msg(MEncoded, MsgName, Defs),
+                          MGDecoded = NEDM:decode_msg(GEncoded, MsgName),
+                          ?assertEqual(OrigMsg, MMDecoded),
+                          ?assertEqual(OrigMsg, GMDecoded),
+                          ?assertEqual(OrigMsg, MGDecoded)
                   end,
                   [{MsgName,Variant} || MsgName <- MsgNames,
                                         Variant <- Variants]).
