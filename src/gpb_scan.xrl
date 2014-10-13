@@ -30,6 +30,7 @@ Rules.
 required        : {token, {required,TokenLine}}.
 optional        : {token, {optional,TokenLine}}.
 repeated        : {token, {repeated,TokenLine}}.
+oneof           : {token, {oneof,TokenLine}}.
 
 double          : {token, {double,TokenLine}}.
 float           : {token, {float,TokenLine}}.

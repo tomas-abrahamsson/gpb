@@ -30,6 +30,29 @@ parses_simple_msg_test() ->
            "  optional uint32 x = 1;",
            "}"]).
 
+parses_simple_oneof_test() ->
+    {ok, [{{msg,'Msg'},
+           [#gpb_oneof{
+               name=x,
+               fields=[#field{name=a1, fnum=1, type=uint32, occurrence=optional},
+                       #field{name=a2, fnum=2, type=string, occurrence=optional}
+                      ]}]}]=Defs} =
+        parse_lines(
+          ["message Msg {",
+           "  oneof x {",
+           "     uint32 a1 = 1;",
+           "     string a2 = 2;",
+           "  };",
+           "}"]),
+    %% Verify oneof fields are enumerated to get the same rnum
+    %% (since they occupy the same record position)
+    [{{msg,'Msg'}, [#gpb_oneof{
+                       name=x,
+                       rnum=2,
+                       fields=[#field{name=a1, rnum=2},
+                               #field{name=a2, rnum=2}]}]}] =
+        do_process_sort_defs(Defs).
+
 parses_default_value_test() ->
     {ok, [{{msg,'Msg'}, [#?gpb_field{name=x, type=uint32, fnum=1,
                                      occurrence=optional,
@@ -86,6 +109,30 @@ parses_relative_nested_messages_test() ->
                          #?gpb_field{name=f6, type={msg,'m1.m2.m5'}}]},
      {{msg,'m1.m2.m5'}, [#?gpb_field{name=fy}]},
      {{msg,'m1.m5'},    [#?gpb_field{name=fx}]}] =
+        do_process_sort_defs(Elems).
+
+parses_relative_nested_messages_with_oneof_test() ->
+    {ok, Elems} = parse_lines(["message t1 {",
+                               "  message t2 {",
+                               "    required uint32 bb = 18;",
+                               "  }",
+                               "}",
+                               "message m1 {",
+                               "  message m2 {",
+                               "    required uint32 aa = 17;",
+                               "  }",
+                               "  oneof x {",
+                               "    .t1.t2 xa1 = 2;",
+                               "    m2     xa2 = 3;",
+                               "  }",
+                               "}"]),
+    [{{msg,m1},      [#gpb_oneof{
+                         name=x,
+                         fields=[#?gpb_field{name=xa1, type={msg,'t1.t2'}},
+                                 #?gpb_field{name=xa2, type={msg,'m1.m2'}}]}]},
+     {{msg,'m1.m2'}, [#?gpb_field{}]},
+     {{msg,'t1'},    []},
+     {{msg,'t1.t2'}, [#?gpb_field{}]}] =
         do_process_sort_defs(Elems).
 
 parses_circular_messages_test() ->
