@@ -89,11 +89,11 @@ field_defs_to_mgstype_fields(Fields) ->
         type_name     = type_to_descr_type_name(Type),
         default_value = field_default_value(Field),
         options       = field_options(Opts)}
-     || #field{name=FName,
-               fnum=FNum,
-               type=Type,
-               occurrence=Occurrence,
-               opts=Opts}=Field <- Fields].
+     || #?gpb_field{name=FName,
+                    fnum=FNum,
+                    type=Type,
+                    occurrence=Occurrence,
+                    opts=Opts}=Field <- Fields].
 
 occurrence_def_to_descr_label(optional) -> 'LABEL_OPTIONAL';
 occurrence_def_to_descr_label(required) -> 'LABEL_REQUIRED';
@@ -121,7 +121,7 @@ type_to_descr_type_name({msg,MsgName})   -> atom_to_ustring(MsgName);
 type_to_descr_type_name({enum,EnumName}) -> atom_to_ustring(EnumName);
 type_to_descr_type_name(_)               -> undefined.
 
-field_default_value(#field{type=Type, opts=Opts}) ->
+field_default_value(#?gpb_field{type=Type, opts=Opts}) ->
     case {Type, proplists:get_value(default, Opts)} of
         {_, undefined}     -> undefined;
         {sint32, I}        -> integer_to_list(I);

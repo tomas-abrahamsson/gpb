@@ -78,7 +78,7 @@ parses_file_to_binary_test() ->
 
 parses_file_to_msg_defs_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
-    {ok, [{{msg,'Msg'},[#field{}]}]=MsgDefs} =
+    {ok, [{{msg,'Msg'},[#?gpb_field{}]}]=MsgDefs} =
         gpb_compile:file(
           "X.proto",
           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
@@ -91,8 +91,8 @@ parses_file_to_msg_defs_test() ->
 
 parses_msgdefs_to_binary_test() ->
     Defs = [{{msg,'Msg'},
-             [#field{name=field1, rnum=2, fnum=1, type=uint32,
-                     occurrence=required, opts=[]}]}],
+             [#?gpb_field{name=field1, rnum=2, fnum=1, type=uint32,
+                          occurrence=required, opts=[]}]}],
     M = find_unused_module(),
     {ok, M, Code} = gpb_compile:proto_defs(M, Defs, [binary]),
     true = is_binary(Code).
@@ -174,29 +174,29 @@ receive_filter_sort_msgs_defs() ->
 
 code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     KnownSizeM9 =
-        [{{msg,m9}, [#field{name=aa, type={enum,e}, occurrence=required,
-                            fnum=1, rnum=#m9.aa, opts=[]},
-                     #field{name=bb, type=fixed32, occurrence=required,
-                            fnum=2, rnum=#m9.bb, opts=[]},
-                     #field{name=cc, type=fixed64, occurrence=required,
-                            fnum=3, rnum=#m9.cc, opts=[]},
-                     #field{name=dd, type={msg,m10}, occurrence=required,
-                            fnum=4, rnum=#m9.dd, opts=[]}]}],
+        [{{msg,m9}, [#?gpb_field{name=aa, type={enum,e}, occurrence=required,
+                                 fnum=1, rnum=#m9.aa, opts=[]},
+                     #?gpb_field{name=bb, type=fixed32, occurrence=required,
+                                 fnum=2, rnum=#m9.bb, opts=[]},
+                     #?gpb_field{name=cc, type=fixed64, occurrence=required,
+                                 fnum=3, rnum=#m9.cc, opts=[]},
+                     #?gpb_field{name=dd, type={msg,m10}, occurrence=required,
+                                 fnum=4, rnum=#m9.dd, opts=[]}]}],
     UnknownSizeM9 =
-        [{{msg,m9}, [#field{name=aa, type={enum,e}, occurrence=optional,
-                            fnum=1, rnum=#m9.aa, opts=[]},
-                     #field{name=bb, type=fixed32, occurrence=optional,
-                            fnum=2, rnum=#m9.bb, opts=[]},
-                     #field{name=cc, type=fixed64, occurrence=optional,
-                            fnum=3, rnum=#m9.cc, opts=[]},
-                     #field{name=dd, type={msg,m10}, occurrence=required,
-                            fnum=4, rnum=#m9.dd, opts=[]}]}],
+        [{{msg,m9}, [#?gpb_field{name=aa, type={enum,e}, occurrence=optional,
+                                 fnum=1, rnum=#m9.aa, opts=[]},
+                     #?gpb_field{name=bb, type=fixed32, occurrence=optional,
+                                 fnum=2, rnum=#m9.bb, opts=[]},
+                     #?gpb_field{name=cc, type=fixed64, occurrence=optional,
+                                 fnum=3, rnum=#m9.cc, opts=[]},
+                     #?gpb_field{name=dd, type={msg,m10}, occurrence=required,
+                                 fnum=4, rnum=#m9.dd, opts=[]}]}],
 
     CommonDefs =
-        [{{msg,m1}, [#field{name=a, type={msg,m9}, occurrence=required,
-                            fnum=1, rnum=2, opts=[]}]},
-         {{msg,m10},[#field{name=aaa, type=bool, occurrence=required,
-                            fnum=1, rnum=#m10.aaa, opts=[]}]},
+        [{{msg,m1}, [#?gpb_field{name=a, type={msg,m9}, occurrence=required,
+                                 fnum=1, rnum=2, opts=[]}]},
+         {{msg,m10},[#?gpb_field{name=aaa, type=bool, occurrence=required,
+                                 fnum=1, rnum=#m10.aaa, opts=[]}]},
          {{enum,e}, [{x1, 1}, {x2, 2}]} %% all enum values same encode size
         ],
 
@@ -223,8 +223,8 @@ introspection_package_name_test() ->
 introspection_msgs_test() ->
     M = compile_iolist(["message msg1 { required uint32 f1=1; }"]),
     [msg1] = M:get_msg_names(),
-    [#field{name=f1, type=uint32, fnum=1}] = M:find_msg_def(msg1),
-    [#field{name=f1, type=uint32, fnum=1}] = M:fetch_msg_def(msg1),
+    [#?gpb_field{name=f1, type=uint32, fnum=1}] = M:find_msg_def(msg1),
+    [#?gpb_field{name=f1, type=uint32, fnum=1}] = M:fetch_msg_def(msg1),
     error = M:find_msg_def(msg_ee),
     ?assertError(_, M:fetch_msg_def(msg_ee)),
     unload_code(M).
@@ -278,20 +278,22 @@ introspection_defs_as_proplists_test() ->
 
     %% No defs_as_proplists option
     M = compile_iolist(Proto, [{defs_as_proplists, false}]),
-    [#field{name       = f1,
-            fnum       = 1,
-            rnum       = 2,
-            type       = uint32,
-            occurrence = required,
-            opts       = []}] = Fs = M:find_msg_def(msg1),
+    [#?gpb_field{name       = f1,
+                 fnum       = 1,
+                 rnum       = 2,
+                 type       = uint32,
+                 occurrence = required,
+                 opts       = []}] = Fs = M:find_msg_def(msg1),
     [{{msg, msg1}, Fs}] = Defs = M:get_msg_defs(),
     {{service, s1},
-        [#rpc{name = req1, input = 'msg1', output = 'msg1'},
-         #rpc{name = req2, input = 'msg1', output = 'msg1'}]} = M:get_service_def(s1),
+     [#?gpb_rpc{name=req1, input='msg1', output='msg1'},
+      #?gpb_rpc{name=req2, input='msg1', output='msg1'}]} =
+        M:get_service_def(s1),
     {{service, s2},
-        [#rpc{name = req2, input = 'msg1', output = 'msg1'}]} = M:get_service_def(s2),
-    #rpc{name = req1, input = 'msg1', output = 'msg1'} = M:find_rpc_def(s1, req1),
-    #rpc{name = req2, input = 'msg1', output = 'msg1'} = M:find_rpc_def(s2, req2),
+     [#?gpb_rpc{name=req2, input='msg1', output='msg1'}]} =
+        M:get_service_def(s2),
+    #?gpb_rpc{name=req1, input='msg1', output='msg1'} = M:find_rpc_def(s1, req1),
+    #?gpb_rpc{name=req2, input='msg1', output='msg1'} = M:find_rpc_def(s2, req2),
     unload_code(M),
 
     %% make sure the generated erl file does not -include[_lib] "gpb.hrl"
@@ -305,7 +307,7 @@ introspection_defs_as_proplists_test() ->
     receive {".hrl", Hrl1} -> nomatch = re:run(Hrl1, "\"gpb.hrl\"") end,
     receive {".erl", Erl1} -> nomatch = re:run(Erl1, "\"gpb.hrl\"") end,
     ok = gpb_compile:proto_defs(M, Defs, [FileOpOpt, defs_as_proplists,
-                                        include_as_lib]),
+                                          include_as_lib]),
     receive {".hrl", Hrl2} -> nomatch = re:run(Hrl2, "\"gpb.hrl\"") end,
     receive {".erl", Erl2} -> nomatch = re:run(Erl2, "\"gpb.hrl\"") end.
 
@@ -318,13 +320,13 @@ introspection_rpcs_test() ->
              "}"],
     M = compile_iolist(Proto),
     {{service, s1},
-     [#rpc{name = req1, input = 'm1', output = 'm2'},
-      #rpc{name = req2, input = 'm2', output = 'm1'}]} = M:get_service_def(s1),
+     [#?gpb_rpc{name=req1, input='m1', output='m2'},
+      #?gpb_rpc{name=req2, input='m2', output='m1'}]} = M:get_service_def(s1),
     [req1, req2] = M:get_rpc_names(s1),
-    #rpc{name = req1, input = 'm1', output = 'm2'} = M:find_rpc_def(s1, req1),
-    #rpc{name = req1, input = 'm1', output = 'm2'} = M:fetch_rpc_def(s1, req1),
-    #rpc{name = req2, input = 'm2', output = 'm1'} = M:fetch_rpc_def(s1, req2),
-    #rpc{name = req2, input = 'm2', output = 'm1'} = M:find_rpc_def(s1, req2),
+    #?gpb_rpc{name=req1, input='m1', output='m2'} = M:find_rpc_def(s1, req1),
+    #?gpb_rpc{name=req1, input='m1', output='m2'} = M:fetch_rpc_def(s1, req1),
+    #?gpb_rpc{name=req2, input='m2', output='m1'} = M:fetch_rpc_def(s1, req2),
+    #?gpb_rpc{name=req2, input='m2', output='m1'} = M:find_rpc_def(s1, req2),
     error = M:find_rpc_def(s1, req_ee),
     ?assertError(_, M:fetch_rpc_def(s2, req_ee)),
     unload_code(M).
@@ -343,15 +345,15 @@ introspection_multiple_rpcs_test() ->
     M = compile_iolist(Proto),
     [s1, s2] = M:get_service_names(),
     {{service, s1},
-     [#rpc{name = req1, input = 'm1', output = 'm2'},
-      #rpc{name = req2, input = 'm2', output = 'm1'}]} = M:get_service_def(s1),
+     [#?gpb_rpc{name=req1, input='m1', output='m2'},
+      #?gpb_rpc{name=req2, input='m2', output='m1'}]} = M:get_service_def(s1),
     {{service, s2},
-     [#rpc{name = req21, input = 'm2', output = 'm1'},
-      #rpc{name = req22, input = 'm1', output = 'm2'}]} = M:get_service_def(s2),
-    #rpc{name = req21,  input = 'm2', output = 'm1'} = M:find_rpc_def(s2, req21),
-    #rpc{name = req1, input = 'm1', output = 'm2'} = M:fetch_rpc_def(s1, req1),
-    #rpc{name = req2,  input = 'm2', output = 'm1'} = M:fetch_rpc_def(s1, req2),
-    #rpc{name = req22, input = 'm1', output = 'm2'} = M:find_rpc_def(s2, req22),
+     [#?gpb_rpc{name=req21, input='m2', output='m1'},
+      #?gpb_rpc{name=req22, input='m1', output='m2'}]} = M:get_service_def(s2),
+    #?gpb_rpc{name=req21,  input='m2', output='m1'} = M:find_rpc_def(s2, req21),
+    #?gpb_rpc{name=req1, input='m1', output='m2'} = M:fetch_rpc_def(s1, req1),
+    #?gpb_rpc{name=req2,  input='m2', output='m1'} = M:fetch_rpc_def(s1, req2),
+    #?gpb_rpc{name=req22, input='m1', output='m2'} = M:find_rpc_def(s2, req22),
     error = M:find_rpc_def(s1, req_ee),
     error = M:find_rpc_def(s2, req_aa),
     ?assertError(_, M:fetch_rpc_def(s2, req_ee)),
@@ -361,8 +363,9 @@ introspection_multiple_rpcs_test() ->
 %% --- decoder tests ---------------
 
 decodes_overly_long_varints_test() ->
-    M = compile_defs([{{msg,m1}, [#field{name=a, type=int32, fnum=1, rnum=#m1.a,
-                                         occurrence=required, opts=[]}]}]),
+    M = compile_defs([{{msg,m1}, [#?gpb_field{name=a, type=int32,
+                                              fnum=1, rnum=#m1.a,
+                                              occurrence=required, opts=[]}]}]),
     #m1{a=54} = M:decode_msg(<<8, 54>>, m1), %% canonically encoded
     #m1{a=54} = M:decode_msg(<<8, (128+54), 128, 128, 0>>, m1),
     unload_code(M).
@@ -732,14 +735,14 @@ compile_the_code(Options, CompileTo, from_file, SrcQuality) ->
                                                  SrcQuality)).
 
 get_proto_defs(clean_code) ->
-    [{{msg,m1}, [#field{name=field11, type=uint32, occurrence=optional,
-                        fnum=1, rnum=2, opts=[]}]}];
+    [{{msg,m1}, [#?gpb_field{name=field11, type=uint32, occurrence=optional,
+                             fnum=1, rnum=2, opts=[]}]}];
 get_proto_defs(warningful_code) ->
     %% circular msg definitions ==> warning about omitting type specs
-    [{{msg,m1}, [#field{name=field11, type={msg,m2}, occurrence=optional,
-                        fnum=1, rnum=2, opts=[]}]},
-     {{msg,m2}, [#field{name=field22, type={msg,m1}, occurrence=optional,
-                        fnum=2, rnum=2, opts=[]}]}];
+    [{{msg,m1}, [#?gpb_field{name=field11, type={msg,m2}, occurrence=optional,
+                             fnum=1, rnum=2, opts=[]}]},
+     {{msg,m2}, [#?gpb_field{name=field22, type={msg,m1}, occurrence=optional,
+                             fnum=2, rnum=2, opts=[]}]}];
 get_proto_defs(write_fails) ->
     get_proto_defs(clean_code).
 
@@ -1259,7 +1262,8 @@ msg_def_to_proto({{msg, Name}, Fields}) ->
 format_enumerator({N,V}) ->
     f("  ~s = ~w;~n", [N, V]).
 
-format_field(#field{name=FName, fnum=FNum, type=Type, occurrence=Occurrence}) ->
+format_field(#?gpb_field{name=FName, fnum=FNum, type=Type,
+                         occurrence=Occurrence}) ->
     TypeStr = case Type of
                   {msg,Name2}  -> Name2;
                   {enum,Name2} -> Name2;
@@ -1309,12 +1313,12 @@ mk_one_msg_field_of_each_type() ->
 
 mk_fields_of_type(Types, Occurrence) ->
     Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
-    [#field{name=list_to_atom(lists:concat([f,integer_to_list(I)])),
-            rnum=I + 1,
-            fnum=I,
-            type=Type,
-            occurrence=Occurrence,
-            opts=[]}
+    [#?gpb_field{name=list_to_atom(lists:concat([f,integer_to_list(I)])),
+                 rnum=I + 1,
+                 fnum=I,
+                 type=Type,
+                 occurrence=Occurrence,
+                 opts=[]}
      || {I, Type} <- lists:zip(lists:seq(1,length(Types1)), Types1)].
 
 can_do_nif_type(Type) ->
@@ -1351,36 +1355,36 @@ is_32_bit_os() ->
 mk_msg(MsgName, Defs, Variant) ->
     {{msg, MsgName}, Fields} = lists:keyfind({msg, MsgName}, 1, Defs),
     R0 = erlang:make_tuple(length(Fields) + 1, undefined, [{1, MsgName}]),
-    lists:foldl(fun(#field{rnum=RNum}=Field, R) ->
+    lists:foldl(fun(#?gpb_field{rnum=RNum}=Field, R) ->
                         Value = mk_field_value(Field, Defs, Variant),
                         setelement(RNum, R, Value)
                 end,
                 R0,
                 Fields).
 
-mk_field_value(#field{occurrence=repeated}, _Defs, short) ->
+mk_field_value(#?gpb_field{occurrence=repeated}, _Defs, short) ->
     [];
-mk_field_value(#field{occurrence=repeated}=F, Defs, Variant) ->
-    [mk_field_value(F#field{occurrence=required}, Defs, Variant)];
-mk_field_value(#field{type=sint32}, _Defs, Vnt)   -> mk_sint(32, Vnt);
-mk_field_value(#field{type=sint64}, _Defs, Vnt)   -> mk_sint(64, Vnt);
-mk_field_value(#field{type=int32}, _Defs, Vnt)    -> mk_sint(32, Vnt);
-mk_field_value(#field{type=int64}, _Defs, Vnt)    -> mk_sint(64, Vnt);
-mk_field_value(#field{type=uint32}, _Defs, Vnt)   -> mk_uint(32, Vnt);
-mk_field_value(#field{type=uint64}, _Defs, Vnt)   -> mk_uint(64, Vnt);
-mk_field_value(#field{type=bool}, _Defs, Vnt)     -> mk_bool(Vnt);
-mk_field_value(#field{type=fixed64}, _Defs, Vnt)  -> mk_uint(64, Vnt);
-mk_field_value(#field{type=sfixed64}, _Defs, Vnt) -> mk_sint(64, Vnt);
-mk_field_value(#field{type=double}, _Defs, Vnt)   -> mk_float(64, Vnt);
-mk_field_value(#field{type=string}, _Defs, Vnt)   -> mk_string(Vnt);
-mk_field_value(#field{type=bytes}, _Defs, Vnt)    -> mk_bytes(Vnt);
-mk_field_value(#field{type=fixed32}, _Defs, Vnt)  -> mk_uint(32, Vnt);
-mk_field_value(#field{type=sfixed32}, _Defs, Vnt) -> mk_sint(32, Vnt);
-mk_field_value(#field{type=float}, _Defs, Vnt)    -> mk_float(32, Vnt);
-mk_field_value(#field{type={enum, E}}, Defs, _Vnt) ->
+mk_field_value(#?gpb_field{occurrence=repeated}=F, Defs, Variant) ->
+    [mk_field_value(F#?gpb_field{occurrence=required}, Defs, Variant)];
+mk_field_value(#?gpb_field{type=sint32}, _Defs, Vnt)   -> mk_sint(32, Vnt);
+mk_field_value(#?gpb_field{type=sint64}, _Defs, Vnt)   -> mk_sint(64, Vnt);
+mk_field_value(#?gpb_field{type=int32}, _Defs, Vnt)    -> mk_sint(32, Vnt);
+mk_field_value(#?gpb_field{type=int64}, _Defs, Vnt)    -> mk_sint(64, Vnt);
+mk_field_value(#?gpb_field{type=uint32}, _Defs, Vnt)   -> mk_uint(32, Vnt);
+mk_field_value(#?gpb_field{type=uint64}, _Defs, Vnt)   -> mk_uint(64, Vnt);
+mk_field_value(#?gpb_field{type=bool}, _Defs, Vnt)     -> mk_bool(Vnt);
+mk_field_value(#?gpb_field{type=fixed64}, _Defs, Vnt)  -> mk_uint(64, Vnt);
+mk_field_value(#?gpb_field{type=sfixed64}, _Defs, Vnt) -> mk_sint(64, Vnt);
+mk_field_value(#?gpb_field{type=double}, _Defs, Vnt)   -> mk_float(64, Vnt);
+mk_field_value(#?gpb_field{type=string}, _Defs, Vnt)   -> mk_string(Vnt);
+mk_field_value(#?gpb_field{type=bytes}, _Defs, Vnt)    -> mk_bytes(Vnt);
+mk_field_value(#?gpb_field{type=fixed32}, _Defs, Vnt)  -> mk_uint(32, Vnt);
+mk_field_value(#?gpb_field{type=sfixed32}, _Defs, Vnt) -> mk_sint(32, Vnt);
+mk_field_value(#?gpb_field{type=float}, _Defs, Vnt)    -> mk_float(32, Vnt);
+mk_field_value(#?gpb_field{type={enum, E}}, Defs, _Vnt) ->
     {{enum, E}, [{E1 , _V1} | _Rest]} = lists:keyfind({enum, E}, 1, Defs),
     E1;
-mk_field_value(#field{type={msg, SubMsgName}}, Defs, Vnt) ->
+mk_field_value(#?gpb_field{type={msg, SubMsgName}}, Defs, Vnt) ->
     mk_msg(SubMsgName, Defs, Vnt).
 
 mk_sint(32, small) -> - (1 bsl 31);

@@ -941,7 +941,7 @@ locate_import_aux([], Import, _Opts) ->
 try_topsort_defs(Defs) ->
     G = digraph:new(),
     [digraph:add_vertex(G, M) || {{msg,M}, _Fields} <- Defs],
-    [[digraph:add_edge(G, From, To) || #field{type={msg,To}} <- Fields]
+    [[digraph:add_edge(G, From, To) || #?gpb_field{type={msg,To}} <- Fields]
      || {{msg,From},Fields} <- Defs],
     case digraph_utils:topsort(G) of
         false ->
@@ -978,14 +978,14 @@ analyze_defs(Defs, Opts) ->
            d_field_pass_method = compute_decode_field_pass_methods(Defs, Opts)}.
 
 find_used_types(Defs) ->
-    fold_msg_fields(fun(_MsgName, #field{type=Type}, Acc) ->
+    fold_msg_fields(fun(_MsgName, #?gpb_field{type=Type}, Acc) ->
                             sets:add_element(Type, Acc)
                     end,
                     sets:new(),
                     Defs).
 
 find_msg_occurrences(Defs) ->
-    fold_msg_fields(fun(_MsgName, #field{type=Type, occurrence=Occ}, Acc) ->
+    fold_msg_fields(fun(_MsgName, #?gpb_field{type=Type, occurrence=Occ}, Acc) ->
                             case Type of
                                 {msg,SubMsgName} ->
                                     add_occurrence(SubMsgName, Occ, Acc);
@@ -1006,7 +1006,7 @@ add_occurrence(MsgName, Occurrence, D) ->
 
 find_fixlen_types(Defs) ->
     fold_msg_fields(
-      fun(_, #field{type=Type, occurrence=Occ}=FieldDef, Acc) ->
+      fun(_, #?gpb_field{type=Type, occurrence=Occ}=FieldDef, Acc) ->
               IsPacked = is_packed(FieldDef),
               FixlenTypeInfo = #ft{type       = Type,
                                    occurrence = Occ,
@@ -1072,11 +1072,11 @@ find_msgsize(MsgName, Defs, T) ->
             Result
     end.
 
-find_msgsize_2([#field{occurrence=repeated} | _Rest], _AccSize, _Defs, _T) ->
+find_msgsize_2([#?gpb_field{occurrence=repeated} | _], _AccSize, _Defs, _T) ->
     undefined;
-find_msgsize_2([#field{occurrence=optional} | _Rest], _AccSize, _Defs, _T) ->
+find_msgsize_2([#?gpb_field{occurrence=optional} | _], _AccSize, _Defs, _T) ->
     undefined;
-find_msgsize_2([#field{type=Type, fnum=FNum} | Rest], AccSize, Defs, T) ->
+find_msgsize_2([#?gpb_field{type=Type, fnum=FNum} | Rest], AccSize, Defs, T) ->
     FKey = gpb:encode_varint((FNum bsl 3) bor gpb:encode_wiretype(Type)),
     FKeySize = byte_size(FKey),
     case Type of
@@ -1172,7 +1172,7 @@ d_field_pass_method(MsgDef) ->
        NF == 0 ->
             pass_as_params;
        true ->
-            NumSubMsgFields = length([x || #field{type={msg,_}} <- MsgDef]),
+            NumSubMsgFields = length([x || #?gpb_field{type={msg,_}} <- MsgDef]),
             IsMsgDominatedBySubMsgs = NumSubMsgFields / NF > 0.5,
             if IsMsgDominatedBySubMsgs, NF >= 100 ->
                     pass_as_record;
@@ -1414,7 +1414,7 @@ format_msg_encoder(MsgName, [], _Opts) ->
               <<>>
       end);
 format_msg_encoder(MsgName, MsgDef, Opts) ->
-    FNames = [FName || #field{name=FName} <- MsgDef],
+    FNames = [FName || #?gpb_field{name=FName} <- MsgDef],
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
     BVars = [var_b_n(I) || I <- lists:seq(1, length(FNames)-1)] ++ [last],
     {EncodeExprs, _} =
@@ -1449,7 +1449,7 @@ format_msg_encoder(MsgName, MsgDef, Opts) ->
 
 field_encode_expr(MsgName, Field, FVar, PrevBVar) ->
     FEncoder = mk_field_encode_fn_name(MsgName, Field),
-    #field{occurrence=Occurrence, type=Type, fnum=FNum}=Field,
+    #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum}=Field,
     Transforms = [replace_tree('<F>', FVar),
                   replace_term('<enc>', FEncoder),
                   replace_tree('<Bin>', PrevBVar),
@@ -1473,35 +1473,36 @@ field_encode_expr(MsgName, Field, FVar, PrevBVar) ->
                Transforms)
     end.
 
-mk_field_encode_fn_name(MsgName, #field{occurrence=repeated, name=FName}) ->
+mk_field_encode_fn_name(MsgName, #?gpb_field{occurrence=repeated, name=FName}) ->
     mk_fn(e_field_, MsgName, FName);
-mk_field_encode_fn_name(MsgName, #field{type={msg,_Msg}, name=FName}) ->
+mk_field_encode_fn_name(MsgName, #?gpb_field{type={msg,_Msg}, name=FName}) ->
     mk_fn(e_mfield_, MsgName, FName);
-mk_field_encode_fn_name(_MsgName, #field{type={enum,EnumName}}) ->
+mk_field_encode_fn_name(_MsgName, #?gpb_field{type={enum,EnumName}}) ->
     mk_fn(e_enum_, EnumName);
-mk_field_encode_fn_name(_MsgName, #field{type=sint32}) ->
+mk_field_encode_fn_name(_MsgName, #?gpb_field{type=sint32}) ->
     mk_fn(e_type_, sint);
-mk_field_encode_fn_name(_MsgName, #field{type=sint64}) ->
+mk_field_encode_fn_name(_MsgName, #?gpb_field{type=sint64}) ->
     mk_fn(e_type_, sint);
-mk_field_encode_fn_name(_MsgName, #field{type=uint32}) ->
+mk_field_encode_fn_name(_MsgName, #?gpb_field{type=uint32}) ->
     e_varint;
-mk_field_encode_fn_name(_MsgName, #field{type=uint64}) ->
+mk_field_encode_fn_name(_MsgName, #?gpb_field{type=uint64}) ->
     e_varint;
-mk_field_encode_fn_name(_MsgName, #field{type=Type}) ->
+mk_field_encode_fn_name(_MsgName, #?gpb_field{type=Type}) ->
     mk_fn(e_type_, Type).
 
 format_special_field_encoders(Defs, AnRes) ->
     [[format_field_encoder(MsgName, FieldDef, AnRes)
-      || #field{occurrence=Occ, type=Type}=FieldDef <- MsgDef,
+      || #?gpb_field{occurrence=Occ, type=Type}=FieldDef <- MsgDef,
          Occ == repeated orelse is_msg_type(Type)]
      || {{msg,MsgName}, MsgDef} <- Defs].
 
 is_msg_type({msg,_}) -> true;
 is_msg_type(_)       -> false.
 
-format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef, AnRes) ->
+format_field_encoder(MsgName, FieldDef, AnRes) ->
+    #?gpb_field{occurrence=Occurrence} = FieldDef,
     [possibly_format_mfield_encoder(MsgName,
-                                    FieldDef#field{occurrence=required},
+                                    FieldDef#?gpb_field{occurrence=required},
                                     AnRes),
      case {Occurrence, is_packed(FieldDef)} of
          {repeated, false} -> format_repeated_field_encoder2(MsgName, FieldDef);
@@ -1510,7 +1511,7 @@ format_field_encoder(MsgName, #field{occurrence=Occurrence}=FieldDef, AnRes) ->
          {required, false} -> []
      end].
 
-possibly_format_mfield_encoder(MsgName, #field{type={msg,SubMsg}}=FieldDef,
+possibly_format_mfield_encoder(MsgName, #?gpb_field{type={msg,SubMsg}}=FieldDef,
                                AnRes) ->
     FnName = mk_field_encode_fn_name(MsgName, FieldDef),
     case is_msgsize_known_at_generationtime(SubMsg, AnRes) of
@@ -1551,10 +1552,11 @@ is_msgsize_known_at_generationtime(MsgName, #anres{known_msg_size=MsgSizes}) ->
             no
     end.
 
-format_repeated_field_encoder2(MsgName, #field{fnum=FNum, type=Type}=FDef) ->
+format_repeated_field_encoder2(MsgName, FDef) ->
+    #?gpb_field{fnum=FNum, type=Type} = FDef,
     FnName = mk_field_encode_fn_name(MsgName, FDef),
-    ElemEncoderFn = mk_field_encode_fn_name(MsgName,
-                                            FDef#field{occurrence=required}),
+    ElemEncoderFn = mk_field_encode_fn_name(
+                      MsgName, FDef#?gpb_field{occurrence=required}),
     KeyBytes = key_to_binary_fields(FNum, Type),
     gpb_codegen:format_fn(
       FnName,
@@ -1568,7 +1570,7 @@ format_repeated_field_encoder2(MsgName, #field{fnum=FNum, type=Type}=FDef) ->
       [splice_trees('<KeyBytes>', KeyBytes),
        replace_term('<encode-elem>', ElemEncoderFn)]).
 
-format_packed_field_encoder2(MsgName, #field{type=Type}=FDef) ->
+format_packed_field_encoder2(MsgName, #?gpb_field{type=Type}=FDef) ->
     case packed_byte_size_can_be_computed(Type) of
         {yes, BitLen, BitType} ->
             format_knownsize_packed_field_encoder2(MsgName, FDef,
@@ -1585,9 +1587,9 @@ packed_byte_size_can_be_computed(sfixed64) -> {yes, 64, [little,signed]};
 packed_byte_size_can_be_computed(double)   -> {yes, 64, [little,float]};
 packed_byte_size_can_be_computed(_)        -> no.
 
-format_knownsize_packed_field_encoder2(MsgName, #field{name=FName,
-                                                       fnum=FNum}=FDef,
-                                      BitLen, BitType) ->
+format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
+                                                            fnum=FNum}=FDef,
+                                       BitLen, BitType) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
@@ -1614,11 +1616,11 @@ format_knownsize_packed_field_encoder2(MsgName, #field{name=FName,
        [replace_term('<Size>', BitLen),
         splice_trees('<BitType>', [erl_syntax:atom(T) || T <- BitType])])].
 
-format_unknownsize_packed_field_encoder2(MsgName, #field{name=FName,
-                                                         fnum=FNum}=FDef) ->
+format_unknownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
+                                                              fnum=FNum}=FDef) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
-    ElemEncoderFn = mk_field_encode_fn_name(MsgName,
-                                            FDef#field{occurrence=required}),
+    ElemEncoderFn = mk_field_encode_fn_name(
+                      MsgName, FDef#?gpb_field{occurrence=required}),
     KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
     [gpb_codegen:format_fn(
@@ -1912,7 +1914,7 @@ msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
                     required -> {FName, undefined, ?expr(undefined)};
                     optional -> {FName, undefined, ?expr(undefined)}
                 end
-                || #field{name=FName, occurrence=Occurrence} <- MsgDef],
+                || #?gpb_field{name=FName, occurrence=Occurrence} <- MsgDef],
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
             [Expr || {_FName, _Value, Expr} <- FNVExprs];
@@ -1966,7 +1968,7 @@ decoder_read_field_params(MsgName, MsgDef, AnRes, Opts) ->
     end.
 
 repeated_field_names(MsgDef) ->
-    [FName || #field{name=FName, occurrence=repeated} <- MsgDef].
+    [FName || #?gpb_field{name=FName, occurrence=repeated} <- MsgDef].
 
 decoder_params(MsgName, AnRes) ->
     NumFields = get_num_fields(MsgName, AnRes),
@@ -2044,7 +2046,7 @@ decoder_field_selectors(MsgName, MsgDef) ->
          DecodeFn = mk_fn(d_field_, MsgName, FName),
          {Selector, DecodeFn}
      end
-     || #field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
+     || #?gpb_field{fnum=FNum, type=Type, name=FName}=FieldDef <- MsgDef].
 
 decoder_finalize_result(Params, FFields, MsgName, MsgDef, AnRes, Opts) ->
     case get_field_pass(MsgName, AnRes) of
@@ -2052,7 +2054,7 @@ decoder_finalize_result(Params, FFields, MsgName, MsgDef, AnRes, Opts) ->
             mapping_create(
               MsgName,
               [begin
-                   #field{name=FName, occurrence=Occurrence}=Field,
+                   #?gpb_field{name=FName, occurrence=Occurrence}=Field,
                    FValueExpr =
                        case Occurrence of
                            required -> Param;
@@ -2088,7 +2090,8 @@ format_field_decoder(MsgName, Field, AnRes, Opts) ->
         true  -> format_packed_field_decoder(MsgName, Field, AnRes, Opts)
     end.
 
-format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
+format_non_packed_field_decoder(MsgName, Field, AnRes, Opts) ->
+    #?gpb_field{type=Type} = Field,
     case Type of
         sint32   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
         sint64   -> format_vi_based_field_decoder(MsgName, Field, AnRes, Opts);
@@ -2110,7 +2113,7 @@ format_non_packed_field_decoder(MsgName, #field{type=Type}=Field, AnRes, Opts)->
     end.
 
 format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
-    #field{name=FName, rnum=RNum} = FieldDef,
+    #?gpb_field{name=FName, rnum=RNum} = FieldDef,
     Params = decoder_params(MsgName, AnRes),
     InParams = case get_field_pass(MsgName, AnRes) of
                    pass_as_params ->
@@ -2155,7 +2158,7 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
      "\n",
      format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
 
-format_packed_field_seq_decoder(MsgName, #field{type=Type}=Field, Opts) ->
+format_packed_field_seq_decoder(MsgName, #?gpb_field{type=Type}=Field, Opts) ->
     case Type of
         fixed32  -> format_dpacked_nonvi(MsgName, Field, 32, [little]);
         sfixed32 -> format_dpacked_nonvi(MsgName, Field, 32, [little,signed]);
@@ -2166,7 +2169,7 @@ format_packed_field_seq_decoder(MsgName, #field{type=Type}=Field, Opts) ->
         _        -> format_dpacked_vi(MsgName, Field, Opts)
     end.
 
-format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitTypes)     ->
+format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes) ->
     gpb_codegen:format_fn(
       mk_fn(d_packed_field_, MsgName, FName),
       fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq) ->
@@ -2177,7 +2180,7 @@ format_dpacked_nonvi(MsgName, #field{name=FName}, BitLen, BitTypes)     ->
       [replace_term('<N>', BitLen),
        splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes])]).
 
-format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
+format_dpacked_vi(MsgName, #?gpb_field{name=FName}=FieldDef, Opts) ->
     ExtValue = ?expr(X bsl N + Acc),
     FVar = ?expr(NewFValue), %% result is to be put in this variable
     Rest = ?expr(Rest),
@@ -2203,7 +2206,7 @@ format_dpacked_vi(MsgName, #field{name=FName}=FieldDef, Opts) ->
       [splice_trees('<body>', Body)]).
 
 format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
-    #field{name=FName}=FieldDef,
+    #?gpb_field{name=FName}=FieldDef,
     ExtValue = ?expr(X bsl N + Acc),
     FVar = ?expr(NewFValue), %% result is to be put in this variable
     Rest = ?expr(Rest),
@@ -2237,7 +2240,7 @@ format_vi_based_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
 
 %% -> {[Expr], Rest2VarExpr}
 %% where [Expr] is a list of exprs to calculate the resulting decoded value
-decode_int_value(ResVar, Bindings, #field{type=Type}, Opts, TailFn) ->
+decode_int_value(ResVar, Bindings, #?gpb_field{type=Type}, Opts, TailFn) ->
     Value = fetch_binding('<Value>', Bindings),
     Rest = fetch_binding('<Rest>', Bindings),
     StringsAsBinaries = get_strings_as_binaries_by_opts(Opts),
@@ -2334,7 +2337,7 @@ unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
 
 updated_merged_params(MsgName, FieldDef, AnRes, NewValue, PrevValue,
                       Params, Opts) ->
-    #field{name=FName, rnum=RNum} = FieldDef,
+    #?gpb_field{name=FName, rnum=RNum} = FieldDef,
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
             MergedValue = merge_field_expr(FieldDef, PrevValue, NewValue),
@@ -2354,7 +2357,7 @@ merge_field_expr(FieldDef, PrevValue, NewValue) ->
                   [replace_tree('<New>', NewValue),
                    replace_tree('<Acc>', PrevValue)]);
         msgmerge ->
-            #field{type={msg,FMsgName}} = FieldDef,
+            #?gpb_field{type={msg,FMsgName}} = FieldDef,
             ?expr(if '<Prev>' == undefined -> '<New>';
                      true -> '<merge-msgs>'('<Prev>', '<New>')
                   end,
@@ -2364,11 +2367,11 @@ merge_field_expr(FieldDef, PrevValue, NewValue) ->
     end.
 
 decoder_in_params(Params, MsgName, FieldDef, AnRes, Opts) ->
-    #field{name=FName} = FieldDef,
+    #?gpb_field{name=FName} = FieldDef,
     Any = ?expr(_),
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
-            #field{rnum=RNum} = FieldDef,
+            #?gpb_field{rnum=RNum} = FieldDef,
             Prev = lists:nth(RNum-1, Params),
             case classify_field_merge_action(FieldDef) of
                 overwrite -> {lists_setelement(RNum-1, Params, Any), Any};
@@ -2389,7 +2392,7 @@ decoder_in_params(Params, MsgName, FieldDef, AnRes, Opts) ->
     end.
 
 format_fixlen_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
-    #field{name=FName, type=Type}=FieldDef,
+    #?gpb_field{name=FName, type=Type}=FieldDef,
     {BitLen, BitTypes} = case Type of
                              fixed32  -> {32, [little]};
                              sfixed32 -> {32, [little,signed]};
@@ -2439,11 +2442,11 @@ uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
 
 classify_field_merge_action(FieldDef) ->
     case FieldDef of
-        #field{occurrence=required, type={msg, _}} -> msgmerge;
-        #field{occurrence=optional, type={msg, _}} -> msgmerge;
-        #field{occurrence=required}                -> overwrite;
-        #field{occurrence=optional}                -> overwrite;
-        #field{occurrence=repeated}                -> seqadd
+        #?gpb_field{occurrence=required, type={msg, _}} -> msgmerge;
+        #?gpb_field{occurrence=optional, type={msg, _}} -> msgmerge;
+        #?gpb_field{occurrence=required}                -> overwrite;
+        #?gpb_field{occurrence=optional}                -> overwrite;
+        #?gpb_field{occurrence=repeated}                -> seqadd
     end.
 
 format_msg_merge_code(Defs, AnRes, Opts) ->
@@ -2533,9 +2536,9 @@ format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
 
 compute_msg_field_merge_exprs(MsgDef) ->
     PFields = [{FName, erl_syntax:variable(?ff("PF~s", [FName]))}
-               || #field{name=FName} <- MsgDef],
+               || #?gpb_field{name=FName} <- MsgDef],
     NFields = [{FName, erl_syntax:variable(?ff("NF~s", [FName]))}
-               || #field{name=FName} <- MsgDef],
+               || #?gpb_field{name=FName} <- MsgDef],
     Mergings =
     [begin
          {value, {FName, PF}} = lists:keysearch(FName, 1, PFields),
@@ -2551,7 +2554,7 @@ compute_msg_field_merge_exprs(MsgDef) ->
                     seqadd ->
                         ?expr('<PF>' ++ '<NF>', Transforms);
                     msgmerge ->
-                        #field{type={msg,SubMsgName}}=Field,
+                        #?gpb_field{type={msg,SubMsgName}}=Field,
                         MergeFn = mk_fn(merge_msg_, SubMsgName),
                         NewTranform = replace_term('<merge>', MergeFn),
                         MTransforms = [NewTranform | Transforms],
@@ -2559,7 +2562,7 @@ compute_msg_field_merge_exprs(MsgDef) ->
                 end,
          {FName, Expr}
      end
-     || #field{name=FName}=Field <- MsgDef],
+     || #?gpb_field{name=FName}=Field <- MsgDef],
     {PFields, NFields, Mergings}.
 
 occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
@@ -2669,7 +2672,7 @@ format_msg_verifiers(Defs, AnRes, Opts) ->
 
 format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
     FVars = [{var_f_n(I), Field} || {I, Field} <- index_seq(MsgDef)],
-    RFields = [{FName, Var} || {Var, #field{name=FName}} <- FVars],
+    RFields = [{FName, Var} || {Var, #?gpb_field{name=FName}} <- FVars],
     NeedsMatchOther = case get_records_or_maps_by_opts(Opts) of
                           records -> can_occur_as_sub_msg(MsgName, AnRes);
                           maps    -> true
@@ -2695,6 +2698,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
 
 field_verifiers(FVars) ->
     [begin
+         #?gpb_field{name=FName, type=Type, occurrence=Occurrence} = Field,
          FVerifierFn = case Type of
                            {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
                            {enum,EnumName} -> mk_fn(v_enum_, EnumName);
@@ -2727,7 +2731,7 @@ field_verifiers(FVars) ->
                        Replacements)
          end
      end
-     || {FVar, #field{name=FName, type=Type, occurrence=Occurrence}} <- FVars].
+     || {FVar, Field} <- FVars].
 
 can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
     sets:is_element({msg,MsgName}, UsedTypes).
@@ -2922,11 +2926,11 @@ get_field_format_by_opts(Opts) ->
         true  -> fields_as_proplists
     end.
 
-field_tree(#field{}=F, Opts) ->
-    [field | FValues] = tuple_to_list(F),
-    FNames = record_info(fields, field),
+field_tree(#?gpb_field{}=F, Opts) ->
+    [?gpb_field | FValues] = tuple_to_list(F),
+    FNames = record_info(fields, ?gpb_field),
     mapping_create(
-      field,
+      ?gpb_field,
       lists:zip(FNames,
                 [erl_parse:abstract(FValue) || FValue <- FValues]),
       Opts).
@@ -3105,7 +3109,9 @@ format_get_rpc_names(ServiceDefs) ->
       end,
       [repeat_clauses('<ServiceName>',
                       [[replace_term('<ServiceName>', ServiceName),
-                        replace_term('<ServiceRpcNames>', [RpcName || {rpc, RpcName, _, _} <- Rpcs])]
+                        replace_term('<ServiceRpcNames>',
+                                     [RpcName
+                                      || #?gpb_rpc{name=RpcName} <- Rpcs])]
                        || {{service, ServiceName}, Rpcs} <- ServiceDefs])]).
 
 format_find_rpc_defs(ServiceDefs) ->
@@ -3130,7 +3136,7 @@ format_find_service_rpc_defs(ServiceName, Rpcs, Opts) ->
                        [[replace_term('<RpcName>', RpcName),
                          replace_tree('<RpcDef>', rpc_def_tree(Rpc, Opts))
                         ]
-                       || {rpc, RpcName, _, _} = Rpc <- Rpcs])]).
+                       || #?gpb_rpc{name=RpcName} = Rpc <- Rpcs])]).
 
 format_fetch_rpc_defs([]) ->
     gpb_codegen:format_fn(
@@ -3159,11 +3165,11 @@ get_rpc_format_by_opts(Opts) ->
         true  -> rpcs_as_proplists
     end.
 
-rpc_record_def_tree(#rpc{}=Rpc, Opts) ->
-    [rpc | RValues] = tuple_to_list(Rpc),
-    RNames = record_info(fields, rpc),
+rpc_record_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
+    [?gpb_rpc | RValues] = tuple_to_list(Rpc),
+    RNames = record_info(fields, ?gpb_rpc),
     mapping_create(
-      rpc,
+      ?gpb_rpc,
       lists:zip(RNames,
                 [erl_parse:abstract(RValue) || RValue <- RValues]),
       Opts).
@@ -3176,7 +3182,7 @@ rpcs_def_tree(Rpcs, Opts) ->
             erl_parse:abstract(gpb:rpc_records_to_proplists(Rpcs))
     end.
 
-rpc_def_tree(#rpc{}=Rpc, Opts) ->
+rpc_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
     case get_rpc_format_by_opts(Opts) of
         rpcs_as_records   ->
             rpc_record_def_tree(Rpc, Opts);
@@ -3221,7 +3227,7 @@ format_hfields(Indent, Fields, CompileOpts, Defs) ->
     TypeSpecs = get_type_specs_by_opts(CompileOpts),
     string:join(
       lists:map(
-        fun({I, #field{name=Name, fnum=FNum, opts=FOpts, occurrence=Occur}=Field}) ->
+        fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, occurrence=Occur}=Field}) ->
                 DefaultStr = case proplists:get_value(default, FOpts, '$no') of
                                  '$no'   -> case Occur of
                                                 repeated -> ?f(" = []");
@@ -3257,7 +3263,7 @@ get_type_specs_by_opts(Opts) ->
     Default = false,
     proplists:get_value(type_specs, Opts, Default).
 
-type_to_typestr(#field{type=Type, occurrence=Occurrence}, Defs) ->
+type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs) ->
     case Occurrence of
         required -> type_to_typestr_2(Type, Defs);
         repeated -> "[" ++ type_to_typestr_2(Type, Defs) ++ "]";
@@ -3287,7 +3293,7 @@ enum_typestr(E, Defs) ->
     string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumerations],
                 " | ").
 
-type_to_comment(#field{type=Type}, true=_TypeSpec) ->
+type_to_comment(#?gpb_field{type=Type}, true=_TypeSpec) ->
     case Type of
         sint32   -> "32 bits";
         sint64   -> "32 bits";
@@ -3302,7 +3308,7 @@ type_to_comment(#field{type=Type}, true=_TypeSpec) ->
         {enum,E} -> "enum "++atom_to_list(E);
         _        -> ""
     end;
-type_to_comment(#field{type=Type, occurrence=Occurrence}, false=_TypeSpec) ->
+type_to_comment(#?gpb_field{type=Type, occurrence=Occurrence}, false=_TypeSpec) ->
     case Occurrence of
         required -> ?f("~w", [Type]);
         repeated -> "[" ++ ?f("~w", [Type]) ++ "]";
@@ -3813,7 +3819,7 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
      "\n"].
 
 format_nif_cc_field_packer(SrcVar, MsgVar, Field, Defs, Opts) ->
-    #field{occurrence=Occurrence}=Field,
+    #?gpb_field{occurrence=Occurrence}=Field,
     case Occurrence of
         required ->
             format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs,
@@ -3831,7 +3837,7 @@ format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs, Opts) ->
      format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, set)].
 
 format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
-    #field{name=FName, type=FType} = Field,
+    #?gpb_field{name=FName, type=FType} = Field,
     LCFName = to_lower(FName),
     SetterFnName = case Setter of
                        set -> ?f("set_~s", [LCFName]);
@@ -4062,7 +4068,7 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
      "\n"].
 
 format_nif_cc_field_unpacker(DestVar, MsgVar, Field, Defs) ->
-    #field{occurrence=Occurrence}=Field,
+    #?gpb_field{occurrence=Occurrence}=Field,
     case Occurrence of
         required ->
             format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs);
@@ -4074,7 +4080,7 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, Field, Defs) ->
 
 
 format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
-    #field{name=FName, type=FType} = Field,
+    #?gpb_field{name=FName, type=FType} = Field,
     LCFName = to_lower(FName),
     [?f("    if (!~s->has_~s())\n", [MsgVar, LCFName]),
      ?f("        ~s = gpb_aa_undefined;\n", [DestVar]),
@@ -4151,7 +4157,7 @@ format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
      "\n"].
 
 format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
-    #field{name=FName, type=FType} = Field,
+    #?gpb_field{name=FName, type=FType} = Field,
     LCFName = to_lower(FName),
     [?f("    {\n"),
      ?f("        unsigned int numElems = ~s->~s_size();\n", [MsgVar, LCFName]),
@@ -4321,10 +4327,10 @@ split_forms_at_first_code_2([{function, _, _Name, _, _Clauses}|_]=Code, Acc) ->
     {lists:reverse(Acc), Code}.
 
 field_record_to_attr_form() ->
-    record_to_attr(field, record_info(fields, field)).
+    record_to_attr(?gpb_field, record_info(fields, ?gpb_field)).
 
 rpc_record_to_attr_form() ->
-    record_to_attr(rpc, record_info(fields, rpc)).
+    record_to_attr(?gpb_rpc, record_info(fields, ?gpb_rpc)).
 
 msgdefs_to_record_attrs(Defs) ->
     [record_to_attr(MsgName, lists:map(fun gpb_field_to_record_field/1, Fields))
@@ -4343,7 +4349,7 @@ record_to_attr(RecordName, Fields) ->
        end
        || F <- Fields]}}.
 
-gpb_field_to_record_field(#field{name=FName, opts=Opts}) ->
+gpb_field_to_record_field(#?gpb_field{name=FName, opts=Opts}) ->
     case proplists:get_value(default, Opts) of
         undefined -> {FName};
         Default   -> {FName, Default}
@@ -4481,7 +4487,7 @@ varint_to_binary_fields(IntValue) ->
     [erl_syntax:binary_field(?expr('<n>', [replace_term('<n>', N)]), [])
      || N <- binary_to_list(gpb:encode_varint(IntValue))].
 
-is_packed(#field{opts=Opts}) ->
+is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
 
 get_field_pass(MsgName, #anres{d_field_pass_method=D}) ->

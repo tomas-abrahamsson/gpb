@@ -124,17 +124,17 @@ msg_elems -> ';' msg_elems:             '$2'.
 msg_elems -> '$empty':                  [].
 
 msg_elem -> cardinality type fidentifier '=' dec_lit ';':
-                                        #field{occurrence='$1',
-                                               type='$2',
-                                               name=identifier_name('$3'),
-                                               fnum=literal_value('$5'),
-                                               opts=[]}.
+                                        #?gpb_field{occurrence='$1',
+                                                    type='$2',
+                                                    name=identifier_name('$3'),
+                                                    fnum=literal_value('$5'),
+                                                    opts=[]}.
 msg_elem -> cardinality type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
-                                        #field{occurrence='$1',
-                                               type='$2',
-                                               name=identifier_name('$3'),
-                                               fnum=literal_value('$5'),
-                                               opts='$7'}.
+                                        #?gpb_field{occurrence='$1',
+                                                    type='$2',
+                                                    name=identifier_name('$3'),
+                                                    fnum=literal_value('$5'),
+                                                    opts='$7'}.
 msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
 msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
@@ -379,7 +379,7 @@ flatten_qualify_defnames(Defs, Root) ->
 
 flatten_fields(FieldsOrDefs, FullName) ->
     {RFields2, Defs2} =
-        lists:foldl(fun(#field{}=F, {Fs,Ds}) ->
+        lists:foldl(fun(#?gpb_field{}=F, {Fs,Ds}) ->
                             {[F | Fs], Ds};
                        (Def, {Fs,Ds}) ->
                             QDefs = flatten_qualify_defnames([Def], FullName),
@@ -414,16 +414,16 @@ resolve_refs(Defs, Root) ->
 
 resolve_field_refs(Fields, Defs, Root, FullName, Reasons) ->
     lists:mapfoldl(
-      fun(#field{name=FName, type={ref,Ref}}=Field, Acc) ->
+      fun(#?gpb_field{name=FName, type={ref,Ref}}=Field, Acc) ->
               case resolve_ref(Defs, Ref, Root, FullName) of
                   {found, TypeName} ->
-                      {Field#field{type=TypeName}, Acc};
+                      {Field#?gpb_field{type=TypeName}, Acc};
                   not_found ->
                       Reason = {ref_to_undefined_msg_or_enum,
                                 {{FullName, FName}, Ref}},
                       {Field, [Reason | Acc]}
               end;
-         (#field{}=Field, Acc) ->
+         (#?gpb_field{}=Field, Acc) ->
               {Field, Acc}
       end,
       Reasons,
@@ -436,7 +436,10 @@ resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
                   {found, {msg, MArg}} ->
                       case resolve_ref(Defs, Return, Root, FullName) of
                           {found, {msg, MReturn}} ->
-                              {{rpc, RpcName, MArg, MReturn}, Acc};
+                              NewRpc = #?gpb_rpc{name=RpcName,
+                                                 input=MArg,
+                                                 output=MReturn},
+                              {NewRpc, Acc};
                           {found, {BadType, MReturn}} ->
                               Reason = {rpc_return_ref_to_non_msg,
                                         {{FullName, RpcName, Return},
@@ -557,7 +560,7 @@ find_verifiers(_Type, [{'_', Verifiers} | _])  -> Verifiers;
 find_verifiers(Type,  [_Other | Rest])         -> find_verifiers(Type, Rest).
 
 verify_field_defaults({{msg,M}, Fields}, AllDefs) ->
-    lists:foldl(fun(#field{name=Name, type=Type, opts=FOpts}, Acc) ->
+    lists:foldl(fun(#?gpb_field{name=Name, type=Type, opts=FOpts}, Acc) ->
                         Res = case lists:keysearch(default, 1, FOpts) of
                                   {value, {default, Default}} ->
                                       verify_scalar_default_if_present(
@@ -690,8 +693,10 @@ reformat_names(Defs) ->
 
 reformat_fields(Fields) ->
     lists:map(
-      fun(#field{type={T,Nm}}=F) -> F#field{type={T,reformat_name(Nm)}};
-         (#field{}=F)            -> F
+      fun(#?gpb_field{type={T,Nm}}=F) ->
+              F#?gpb_field{type={T,reformat_name(Nm)}};
+         (#?gpb_field{}=F) ->
+              F
       end,
       Fields).
 
@@ -701,8 +706,10 @@ reformat_name(Name) ->
                              ".")).
 
 reformat_rpcs(RPCs) ->
-    lists:map(fun({rpc, RpcName, Arg, Return}) ->
-                      {rpc, RpcName, reformat_name(Arg), reformat_name(Return)}
+    lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}) ->
+                      #?gpb_rpc{name=RpcName,
+                                input=reformat_name(Arg),
+                                output=reformat_name(Return)}
               end,
               RPCs).
 
@@ -734,7 +741,7 @@ enumerate_msg_fields(Defs) ->
               Defs).
 
 enumerate_fields(Fields) ->
-    lists:map(fun({I, #field{}=F}) -> F#field{rnum=I} end,
+    lists:map(fun({I, #?gpb_field{}=F}) -> F#?gpb_field{rnum=I} end,
               index_seq(2, Fields)).
 
 index_seq(_Start, []) -> [];
@@ -750,9 +757,9 @@ normalize_msg_field_options(Defs) ->
               Defs).
 
 normalize_field_options(Fields) ->
-    lists:map(fun(#field{opts=Opts}=F) ->
+    lists:map(fun(#?gpb_field{opts=Opts}=F) ->
                       Opts1    = normalize_field_options_2(Opts),
-                      F#field{opts = Opts1}
+                      F#?gpb_field{opts = Opts1}
               end,
               Fields).
 
@@ -792,9 +799,10 @@ prefix_suffix_msgs(Prefix, Suffix, Defs) ->
 
 prefix_suffix_fields(Prefix, Suffix, Fields) ->
     lists:map(
-      fun(#field{type={msg,MsgName}}=F) ->
-              F#field{type={msg,prefix_suffix_name(Prefix, Suffix, MsgName)}};
-         (#field{}=F) ->
+      fun(#?gpb_field{type={msg,MsgName}}=F) ->
+              NewMsgName = prefix_suffix_name(Prefix, Suffix, MsgName),
+              F#?gpb_field{type={msg,NewMsgName}};
+         (#?gpb_field{}=F) ->
               F
       end,
       Fields).
@@ -803,10 +811,12 @@ prefix_suffix_name(Prefix, Suffix, Name) ->
     list_to_atom(lists:concat([Prefix, Name, Suffix])).
 
 prefix_suffix_rpcs(Prefix, Suffix, RPCs) ->
-    lists:map(fun({rpc, RpcName, Arg, Return}) ->
+    lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}) ->
                       NewArg = prefix_suffix_name(Prefix, Suffix, Arg),
                       NewReturn = prefix_suffix_name(Prefix, Suffix, Return),
-                      {rpc, RpcName, NewArg, NewReturn}
+                      #?gpb_rpc{name=RpcName,
+                                input=NewArg,
+                                output=NewReturn}
               end,
               RPCs).
 

@@ -138,14 +138,14 @@ decode_msg(Bin, MsgName, MsgDefs) ->
 
 new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
     MsgDef = keyfetch(MsgKey, MsgDefs),
-    lists:foldl(fun(#field{rnum=RNum, occurrence=repeated}, Record) ->
+    lists:foldl(fun(#?gpb_field{rnum=RNum, occurrence=repeated}, Record) ->
                         setelement(RNum, Record, []);
-                   (#field{type={msg,_Name}, occurrence=optional}, Record) ->
+                   (#?gpb_field{type={msg,_Name}, occurrence=optional}, Record)->
                         Record;
-                   (#field{rnum=RNum, type={msg,_Name}=FMsgKey}, Record) ->
+                   (#?gpb_field{rnum=RNum, type={msg,_Name}=FMsgKey}, Record) ->
                         SubMsg = new_initial_msg(FMsgKey, MsgDefs),
                         setelement(RNum, Record, SubMsg);
-                   (#field{}, Record) ->
+                   (#?gpb_field{}, Record) ->
                         Record
                 end,
                 erlang:make_tuple(length(MsgDef)+1, undefined, [{1,MsgName}]),
@@ -155,11 +155,11 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
     {Key, Rest} = decode_varint(Bin, 32),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
-    case lists:keysearch(FieldNum, #field.fnum, MsgDef) of
+    case lists:keysearch(FieldNum, #?gpb_field.fnum, MsgDef) of
         false ->
             Rest2 = skip_field(Rest, WireType),
             decode_field(Rest2, MsgDef, MsgDefs, Msg);
-        {value, #field{type = FieldType, rnum=RNum} = FieldDef} ->
+        {value, #?gpb_field{type = FieldType, rnum=RNum} = FieldDef} ->
             case fielddef_matches_wiretype_get_packed(WireType, FieldDef) of
                 {yes,true} ->
                     AccSeq = element(RNum, Msg),
@@ -178,7 +178,7 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
     end;
 decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
     %% Reverse any repeated fields, but only on the top-level, not recursively.
-    RepeatedRNums = [N || #field{rnum=N, occurrence=repeated} <- MsgDef],
+    RepeatedRNums = [N || #?gpb_field{rnum=N, occurrence=repeated} <- MsgDef],
     lists:foldl(fun(RNum, Record) ->
                         OldValue = element(RNum, Record),
                         ReversedField = lists:reverse(OldValue),
@@ -187,7 +187,7 @@ decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
                 Record0,
                 RepeatedRNums).
 
-fielddef_matches_wiretype_get_packed(WireType, #field{type=Type}=FieldDef) ->
+fielddef_matches_wiretype_get_packed(WireType, #?gpb_field{type=Type}=FieldDef)->
     IsPacked = is_packed(FieldDef),
     ExpectedWireType = if IsPacked     -> encode_wiretype(bytes);
                           not IsPacked -> encode_wiretype(Type)
@@ -296,15 +296,15 @@ add_field(Value, FieldDef, MsgDefs, Record) ->
     %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
     %% For now, we assume it works like strings.
     case FieldDef of
-        #field{rnum = RNum, occurrence = required, type = {msg,_FMsgName}} ->
+        #?gpb_field{rnum = RNum, occurrence = required, type = {msg,_FMsgName}}->
             merge_field(RNum, Value, Record, MsgDefs);
-        #field{rnum = RNum, occurrence = optional, type = {msg,_FMsgName}} ->
+        #?gpb_field{rnum = RNum, occurrence = optional, type = {msg,_FMsgName}}->
             merge_field(RNum, Value, Record, MsgDefs);
-        #field{rnum = RNum, occurrence = required}->
+        #?gpb_field{rnum = RNum, occurrence = required}->
             setelement(RNum, Record, Value);
-        #field{rnum = RNum, occurrence = optional}->
+        #?gpb_field{rnum = RNum, occurrence = optional}->
             setelement(RNum, Record, Value);
-        #field{rnum = RNum, occurrence = repeated} ->
+        #?gpb_field{rnum = RNum, occurrence = repeated} ->
             append_to_element(RNum, Value, Record)
     end.
 
@@ -326,11 +326,11 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
     MsgName = element(1, NewMsg),
     MsgDef = keyfetch({msg,MsgName}, MsgDefs),
     lists:foldl(
-      fun(#field{rnum=RNum, occurrence=repeated}, AccRecord) ->
+      fun(#?gpb_field{rnum=RNum, occurrence=repeated}, AccRecord) ->
               PrevSeq = element(RNum, AccRecord),
               NewSeq  = element(RNum, NewMsg),
               setelement(RNum, AccRecord, PrevSeq ++ NewSeq);
-         (#field{rnum=RNum, type={msg,_FieldMsgName}}, AccRecord) ->
+         (#?gpb_field{rnum=RNum, type={msg,_FieldMsgName}}, AccRecord) ->
               case {element(RNum, AccRecord), element(RNum, NewMsg)} of
                   {undefined, undefined} ->
                       AccRecord;
@@ -342,7 +342,7 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
                       MergedSubMsg = merge_msgs(PrevSubMsg, NewSubMsg, MsgDefs),
                       setelement(RNum, AccRecord, MergedSubMsg)
               end;
-         (#field{rnum=RNum}, AccRecord) ->
+         (#?gpb_field{rnum=RNum}, AccRecord) ->
               case element(RNum, NewMsg) of
                   undefined -> AccRecord;
                   NewValue  -> setelement(RNum, AccRecord, NewValue)
@@ -359,7 +359,7 @@ encode_msg(Msg, MsgDefs) ->
 
 encode_2([Field | Rest], Msg, MsgDefs, Acc) ->
     EncodedField =
-        case {Field#field.occurrence, is_packed(Field)} of
+        case {Field#?gpb_field.occurrence, is_packed(Field)} of
             {repeated, true} ->
                 encode_packed(Field, Msg, MsgDefs);
             _ ->
@@ -369,7 +369,7 @@ encode_2([Field | Rest], Msg, MsgDefs, Acc) ->
 encode_2([], _Msg, _MsgDefs, Acc) ->
     Acc.
 
-encode_packed(#field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
+encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
     case element(RNum, Msg) of
         []    ->
             <<>>;
@@ -386,16 +386,16 @@ encode_packed_2([Elem | Rest], Type, MsgDefs, Acc) ->
 encode_packed_2([], _Type, _MsgDefs, Acc) ->
     Acc.
 
-encode_field(#field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
+encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
              Msg, MsgDefs) ->
     encode_field_value(element(RNum, Msg), FNum, Type, MsgDefs);
-encode_field(#field{rnum=RNum, fnum=FNum, type=Type, occurrence=optional},
+encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=optional},
              Msg, MsgDefs) ->
     case element(RNum, Msg) of
         undefined -> <<>>;
         Value     -> encode_field_value(Value, FNum, Type, MsgDefs)
     end;
-encode_field(#field{rnum=RNum, fnum=FNum, type=Type, occurrence=repeated},
+encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=repeated},
              Msg, MsgDefs) ->
     encode_repeated(element(RNum, Msg), FNum, Type, MsgDefs, <<>>).
 
@@ -539,7 +539,7 @@ verify_msg2(V, MsgName, _MsgDefs, Path) ->
 verify_fields(Msg, Fields, Path, MsgDefs) when tuple_size(Msg)
                                                == length(Fields) + 1 ->
     lists:foreach(
-      fun(#field{name=Name, type=Type, rnum=RNum, occurrence=Occurrence}) ->
+      fun(#?gpb_field{name=Name, type=Type, rnum=RNum, occurrence=Occurrence}) ->
               Value = element(RNum, Msg),
               verify_value(Value, Type, Occurrence, Path++[Name], MsgDefs)
       end,
@@ -648,8 +648,8 @@ mk_type_error(Error, ValueSeen, Path) ->
 
 %% --
 
-%% Conversion functions between various forms of #field{} and a proplist
-%% with keys being the #field{} record's field names.
+%% Conversion functions between various forms of #?gpb_field{} and a proplist
+%% with keys being the #?gpb_field{} record's field names.
 
 defs_records_to_proplists(Defs) ->
     [case Def of
@@ -672,34 +672,36 @@ proplists_to_defs_records(Defs) ->
 field_records_to_proplists(Fields) when is_list(Fields) ->
     [field_record_to_proplist(F) || F <- Fields].
 
-field_record_to_proplist(#field{}=F) ->
-    Names = record_info(fields, field),
+field_record_to_proplist(#?gpb_field{}=F) ->
+    Names = record_info(fields, ?gpb_field),
     lists:zip(Names, tl(tuple_to_list(F))).
 
 proplists_to_field_records(PLs) ->
     [proplist_to_field_record(PL) || PL <- PLs].
 
 proplist_to_field_record(PL) when is_list(PL) ->
-    Names = record_info(fields, field),
-    list_to_tuple([field | [proplists:get_value(Name, PL) || Name <- Names]]).
+    Names = record_info(fields, ?gpb_field),
+    RFields = [proplists:get_value(Name, PL) || Name <- Names],
+    list_to_tuple([?gpb_field | RFields]).
 
 rpc_records_to_proplists(Rpcs) when is_list(Rpcs) ->
     [rpc_record_to_proplist(R) || R <- Rpcs].
 
-rpc_record_to_proplist(#rpc{}=R) ->
-    Names = record_info(fields, rpc),
+rpc_record_to_proplist(#?gpb_rpc{}=R) ->
+    Names = record_info(fields, ?gpb_rpc),
     lists:zip(Names, tl(tuple_to_list(R))).
 
 proplists_to_rpc_records(PLs) ->
     [proplist_to_rpc_record(PL) || PL <- PLs].
 
 proplist_to_rpc_record(PL) when is_list(PL) ->
-    Names = record_info(fields, rpc),
-    list_to_tuple([rpc | [proplists:get_value(Name, PL) || Name <- Names]]).
+    Names = record_info(fields, ?gpb_rpc),
+    RFields = [proplists:get_value(Name, PL) || Name <- Names],
+    list_to_tuple([?gpb_rpc | RFields]).
 
 %% --
 
-is_packed(#field{opts=Opts}) ->
+is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
 
 keyfetch(Key, KVPairs) ->

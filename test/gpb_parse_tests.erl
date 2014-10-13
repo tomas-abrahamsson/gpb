@@ -23,33 +23,34 @@
 -include("../include/gpb.hrl").
 
 parses_simple_msg_test() ->
-    {ok, [{{msg,'Msg'}, [#field{name=x, type=uint32, fnum=1,
-                                occurrence=optional, opts=[]}]}]} =
+    {ok, [{{msg,'Msg'}, [#?gpb_field{name=x, type=uint32, fnum=1,
+                                     occurrence=optional, opts=[]}]}]} =
         parse_lines(
           ["message Msg {",
            "  optional uint32 x = 1;",
            "}"]).
 
 parses_default_value_test() ->
-    {ok, [{{msg,'Msg'}, [#field{name=x, type=uint32, fnum=1,
-                                occurrence=optional, opts=[{default,12}]}]}]} =
+    {ok, [{{msg,'Msg'}, [#?gpb_field{name=x, type=uint32, fnum=1,
+                                     occurrence=optional,
+                                     opts=[{default,12}]}]}]} =
         parse_lines(
           ["message Msg {",
            "  optional uint32 x = 1 [default = 12];",
            "}"]).
 
 parses_string_concatenation_test() ->
-    {ok, [{{msg,'Msg'}, [#field{name=x, type=string, fnum=1,
-                                occurrence=optional,
-                                opts=[{default,"abc"}]}]}]} =
+    {ok, [{{msg,'Msg'}, [#?gpb_field{name=x, type=string, fnum=1,
+                                     occurrence=optional,
+                                     opts=[{default,"abc"}]}]}]} =
         parse_lines(
           ["message Msg {",
            "  optional string x=1 [default='a''b' 'c'];", %% = "abc" hopefully
            "}"]).
 
 parses_nested_messages_test() ->
-    {ok, [{{msg,'Msg'}, [{{msg,'Msg2'},[#field{name=x}]},
-                         #field{name=y}]}]} =
+    {ok, [{{msg,'Msg'}, [{{msg,'Msg2'},[#?gpb_field{name=x}]},
+                         #?gpb_field{name=y}]}]} =
         parse_lines(
           ["message Msg {",
            "  message Msg2 { optional uint32 x=1; }",
@@ -79,19 +80,19 @@ parses_relative_nested_messages_test() ->
                                "    required uint32 fx = 1;",
                                "  }",
                                "}"]),
-    [{{msg,m1},         [#field{name=f2, type={msg,'m1.m2'}}]},
+    [{{msg,m1},         [#?gpb_field{name=f2, type={msg,'m1.m2'}}]},
      {{msg,'m1.m2'},    []},
-     {{msg,'m1.m2.m3'}, [#field{name=f5, type={msg,'m1.m2.m5'}},
-                         #field{name=f6, type={msg,'m1.m2.m5'}}]},
-     {{msg,'m1.m2.m5'}, [#field{name=fy}]},
-     {{msg,'m1.m5'},    [#field{name=fx}]}] =
+     {{msg,'m1.m2.m3'}, [#?gpb_field{name=f5, type={msg,'m1.m2.m5'}},
+                         #?gpb_field{name=f6, type={msg,'m1.m2.m5'}}]},
+     {{msg,'m1.m2.m5'}, [#?gpb_field{name=fy}]},
+     {{msg,'m1.m5'},    [#?gpb_field{name=fx}]}] =
         do_process_sort_defs(Elems).
 
 parses_circular_messages_test() ->
     {ok, Elems} = parse_lines(["message m1 {",
                                "  optional m1 f = 1;",
                                "}"]),
-    [{{msg,m1}, [#field{name=f, type={msg,m1}}]}] =
+    [{{msg,m1}, [#?gpb_field{name=f, type={msg,m1}}]}] =
         do_process_sort_defs(Elems).
 
 parses_enum_def_test() ->
@@ -104,7 +105,7 @@ parses_enum_def_test() ->
 
 parses_nested_enum_def_test() ->
     {ok, [{{msg,'Msg'}, [{{enum,e1}, [{ee1,1},{ee2,2}]},
-                         #field{name=ef}]}]} =
+                         #?gpb_field{name=ef}]}]} =
         parse_lines(
           ["message Msg {"
            "  enum e1 {",
@@ -116,7 +117,8 @@ parses_nested_enum_def_test() ->
           ]).
 
 parses_dotted_references_test() ->
-    {ok, [{{msg,'Msg3'}, [#field{name=y, type={ref,['Msg','.','Msg2']}}]}]} =
+    {ok, [{{msg,'Msg3'}, [#?gpb_field{name=y,
+                                      type={ref,['Msg','.','Msg2']}}]}]} =
         parse_lines(
           ["message Msg3 {",
            "  repeated Msg.Msg2 y=1;",
@@ -144,11 +146,11 @@ generates_correct_absolute_names_test() ->
                                "  required m1.m2 b = 1;",
                                "}"]),
     [{{enum,'m1.e1'}, [_]},
-     {{msg,m1},       [#field{name=y, type={msg,'m1.m2'}},
-                       #field{name=z, type={msg,'m1.m2'}},
-                       #field{name=w, type={enum,'m1.e1'}}]},
-     {{msg,'m1.m2'},  [#field{name=x}]},
-     {{msg,m3},       [#field{name=b, type={msg,'m1.m2'}}]}] =
+     {{msg,m1},       [#?gpb_field{name=y, type={msg,'m1.m2'}},
+                       #?gpb_field{name=z, type={msg,'m1.m2'}},
+                       #?gpb_field{name=w, type={enum,'m1.e1'}}]},
+     {{msg,'m1.m2'},  [#?gpb_field{name=x}]},
+     {{msg,m3},       [#?gpb_field{name=b, type={msg,'m1.m2'}}]}] =
         do_process_sort_defs(Elems).
 
 generates_correct_absolute_names_2_test() ->
@@ -163,13 +165,13 @@ generates_correct_absolute_names_2_test() ->
                                "  required m2.m3 f2 = 2;", %% -> .m1.m2.m3
                                "  required m2.m4 f3 = 3;", %% -> .m2.m4
                                "}"]),
-    [{{msg,m1},         [#field{name=f1,type={msg,'m1.m2'}},
-                         #field{name=f2,type={msg,'m1.m2.m3'}},
-                         #field{name=f3,type={msg,'m2.m4'}}]},
+    [{{msg,m1},         [#?gpb_field{name=f1,type={msg,'m1.m2'}},
+                         #?gpb_field{name=f2,type={msg,'m1.m2.m3'}},
+                         #?gpb_field{name=f3,type={msg,'m2.m4'}}]},
      {{msg,'m1.m2'},    []},
-     {{msg,'m1.m2.m3'}, [#field{name=y}]},
+     {{msg,'m1.m2.m3'}, [#?gpb_field{name=y}]},
      {{msg,m2},         []},
-     {{msg,'m2.m4'},    [#field{name=x}]}] =
+     {{msg,'m2.m4'},    [#?gpb_field{name=x}]}] =
         do_process_sort_defs(Elems).
 
 resolve_refs_test() ->
@@ -188,11 +190,11 @@ resolve_refs_test() ->
     [{import, _},
      {package, p1},
      {{enum,'m1.e1'}, _},
-     {{msg,m1},       [#field{name=y, type={msg,'m1.m2'}},
-                       #field{name=z, type={enum,'m1.e1'}},
-                       #field{name=w}]},
-     {{msg,'m1.m2'},  [#field{name=x}]},
-     {{msg,m3},       [#field{name=b, type={msg,'m1.m2'}}]}] =
+     {{msg,m1},       [#?gpb_field{name=y, type={msg,'m1.m2'}},
+                       #?gpb_field{name=z, type={enum,'m1.e1'}},
+                       #?gpb_field{name=w}]},
+     {{msg,'m1.m2'},  [#?gpb_field{name=x}]},
+     {{msg,m3},       [#?gpb_field{name=b, type={msg,'m1.m2'}}]}] =
         do_process_sort_defs(Elems).
 
 resolve_refs_with_packages_test() ->
@@ -211,11 +213,11 @@ resolve_refs_with_packages_test() ->
     [{import, _},
      {package, p1},
      {{enum,'p1.m1.e1'}, _},
-     {{msg,'p1.m1'},    [#field{name=y, type={msg,'p1.m1.m2'}},
-                         #field{name=z, type={enum,'p1.m1.e1'}},
-                         #field{name=w}]},
-     {{msg,'p1.m1.m2'}, [#field{name=x}]},
-     {{msg,'p1.m3'},    [#field{name=b, type={msg,'p1.m1.m2'}}]}] =
+     {{msg,'p1.m1'},    [#?gpb_field{name=y, type={msg,'p1.m1.m2'}},
+                         #?gpb_field{name=z, type={enum,'p1.m1.e1'}},
+                         #?gpb_field{name=w}]},
+     {{msg,'p1.m1.m2'}, [#?gpb_field{name=x}]},
+     {{msg,'p1.m3'},    [#?gpb_field{name=b, type={msg,'p1.m1.m2'}}]}] =
         do_process_sort_defs(Elems, [use_packages]).
 
 package_can_appear_anywhere_toplevelwise_test() ->
@@ -232,8 +234,8 @@ package_can_appear_anywhere_toplevelwise_test() ->
                                 "message m2 { required uint32 y = 2; }",
                                 "package p1;"]),
     [{package, p1},
-     {{msg,'p1.m1'}, [#field{}]},
-     {{msg,'p1.m2'}, [#field{}]}] = Defs =
+     {{msg,'p1.m1'}, [#?gpb_field{}]},
+     {{msg,'p1.m2'}, [#?gpb_field{}]}] = Defs =
         do_process_sort_defs(Elems1, [use_packages]),
     ?assertEqual(Defs, do_process_sort_defs(Elems2, [use_packages])),
     ?assertEqual(Defs, do_process_sort_defs(Elems3, [use_packages])).
@@ -247,9 +249,9 @@ enumerates_msg_fields_test() ->
                                "  required e1     z = 12;",
                                "}"]),
     [{{enum,'m1.e1'}, _},
-     {{msg,m1},       [#field{name=y, fnum=11, rnum=2},
-                       #field{name=z, fnum=12, rnum=3}]},
-     {{msg,'m1.m2'},  [#field{name=x, fnum=1,  rnum=2}]}] =
+     {{msg,m1},       [#?gpb_field{name=y, fnum=11, rnum=2},
+                       #?gpb_field{name=z, fnum=12, rnum=3}]},
+     {{msg,'m1.m2'},  [#?gpb_field{name=x, fnum=1,  rnum=2}]}] =
         do_process_sort_defs(Elems).
 
 field_opt_normalization_test() ->
@@ -262,18 +264,18 @@ field_opt_normalization_test() ->
                              "  required uint32 f6=5 [deprecated];",
                              "  required bool   f7=7 [packed,default=true];",
                              "}"]),
-    [{{msg,m1}, [#field{name=f1, opts=[packed, {default,1}]},
-                 #field{name=f2, opts=[]},
-                 #field{name=f3, opts=[packed, {default,2}]},
-                 #field{name=f4, opts=[deprecated]},
-                 #field{name=f5, opts=[]},
-                 #field{name=f6, opts=[deprecated]},
-                 #field{name=f7, opts=[packed, {default,true}]}]}] =
+    [{{msg,m1}, [#?gpb_field{name=f1, opts=[packed, {default,1}]},
+                 #?gpb_field{name=f2, opts=[]},
+                 #?gpb_field{name=f3, opts=[packed, {default,2}]},
+                 #?gpb_field{name=f4, opts=[deprecated]},
+                 #?gpb_field{name=f5, opts=[]},
+                 #?gpb_field{name=f6, opts=[deprecated]},
+                 #?gpb_field{name=f7, opts=[packed, {default,true}]}]}] =
         do_process_sort_defs(Defs).
 
 parses_empty_msg_field_options_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1 []; }"]),
-    [{{msg,m1}, [#field{name=f1, opts=[]}]}] = do_process_sort_defs(Defs).
+    [{{msg,m1}, [#?gpb_field{name=f1, opts=[]}]}] = do_process_sort_defs(Defs).
 
 parses_and_ignores_enum_field_options_test() ->
     {ok,_Defs} = parse_lines(["enum e1 { a=1 [x=y]; }"]).
@@ -294,8 +296,8 @@ parses_msg_extensions_test() ->
     [{{extensions,m1},[{100,199},{250,250},{300,300},{400,max}]},
      {{extensions,m1},[{251,251},{252,252}]},
      {{extensions,'m1.m2'},[{233,233}]},
-     {{msg,m1},      [#field{name=f1}]},
-     {{msg,'m1.m2'}, [#field{name=f2}]}] =
+     {{msg,m1},      [#?gpb_field{name=f1}]},
+     {{msg,'m1.m2'}, [#?gpb_field{name=f2}]}] =
         do_process_sort_defs(Defs).
 
 parses_extending_msgs_test() ->
@@ -307,10 +309,10 @@ parses_extending_msgs_test() ->
                              "  optional uint32 f2=2;",
                              "}"]),
     [{{extensions,m1},[{200,299}]},
-     {{msg,m1},       [#field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
-                              occurrence=required},
-                       #field{name=f2, fnum=2, rnum=3, opts=[],
-                              occurrence=optional}]}] =
+     {{msg,m1},       [#?gpb_field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
+                                   occurrence=required},
+                       #?gpb_field{name=f2, fnum=2, rnum=3, opts=[],
+                                   occurrence=optional}]}] =
         do_process_sort_defs(Defs).
 
 parses_service_test() ->
@@ -321,7 +323,8 @@ parses_service_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
-     {{service,s1},[{rpc,req,m1,m2}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[#?gpb_rpc{name=req, input=m1, output=m2}]}] =
+        do_process_sort_defs(Defs).
 
 parses_multiple_services_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
@@ -334,8 +337,9 @@ parses_multiple_services_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
-     {{service,s1},[{rpc,req,m1,m2}]},
-     {{service,s2},[{rpc,req2,m2,m1}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[#?gpb_rpc{name=req,  input=m1, output=m2}]},
+     {{service,s2},[#?gpb_rpc{name=req2, input=m2, output=m1}]}] =
+        do_process_sort_defs(Defs).
 
 parses_service_ignores_empty_method_option_braces_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
@@ -345,7 +349,8 @@ parses_service_ignores_empty_method_option_braces_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
-     {{service,s1},[{rpc,req,m1,m2}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[#?gpb_rpc{name=req, input=m1, output=m2}]}] =
+        do_process_sort_defs(Defs).
 
 
 parses_empty_toplevel_statement_test() ->
@@ -354,7 +359,7 @@ parses_empty_toplevel_statement_test() ->
 
 parses_empty_message_statement_test() ->
     {ok,Defs} = parse_lines(["message m1 { ; ; required uint32 f1=1;;; }"]),
-    [{{msg,m1}, [#field{name=f1}]}] = do_process_sort_defs(Defs).
+    [{{msg,m1}, [#?gpb_field{name=f1}]}] = do_process_sort_defs(Defs).
 
 parses_empty_enum_statement_test() ->
     {ok,Defs} = parse_lines(["enum e1 { ; ; ee1=1;;; }"]),
@@ -364,13 +369,15 @@ parses_empty_service_statement_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
                              "service s1 { ; ; rpc r1(m1) returns (m1);;; }"]),
     [{{msg,m1}, _},
-     {{service,s1},[{rpc,r1,m1,m1}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[#?gpb_rpc{name=r1, input=m1, output=m1}]}] =
+        do_process_sort_defs(Defs).
 
 parses_empty_service_statement_method_options_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
                              "service s1 { rpc r1(m1) returns (m1){;;;}; }"]),
     [{{msg,m1}, _},
-     {{service,s1},[{rpc,r1,m1,m1}]}] = do_process_sort_defs(Defs).
+     {{service,s1},[#?gpb_rpc{name=r1, input=m1, output=m1}]}] =
+        do_process_sort_defs(Defs).
 
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
@@ -389,12 +396,13 @@ can_prefix_record_names_test() ->
                               "}",
                               "extend m1 { optional uint32 fm2=2; }"]),
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
-     {{msg,p_m1}, [#field{name=f1, type={enum,e1}}, #field{name=fm2}]},
-     {{msg,p_m2}, [#field{type={msg,p_m1}}]}, %% type is a msg: to be prefixed
+     {{msg,p_m1}, [#?gpb_field{name=f1, type={enum,e1}}, #?gpb_field{name=fm2}]},
+     {{msg,p_m2}, [#?gpb_field{type={msg,p_m1}}]}, %% type is a msg: to be prefixed
      {{service,s1}, %% not prefixed
-      [{rpc,req,p_m1,p_m2}]} %% both argument and result msgs to be prefixed
-    ] =
-        do_process_sort_defs(Defs, [{msg_name_prefix, "p_"}]).
+      [#?gpb_rpc{name=req,
+                 input=p_m1,  %% both argument ...
+                 output=p_m2} %% ... and result msgs to be prefixed
+      ]}] = do_process_sort_defs(Defs, [{msg_name_prefix, "p_"}]).
 
 can_suffix_record_names_test() ->
     {ok, Defs} = parse_lines(["enum    e1 {a=1; b=2;}",
@@ -405,12 +413,13 @@ can_suffix_record_names_test() ->
                               "}",
                               "extend m1 { optional uint32 fm2=2; }"]),
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
-     {{msg,m1_s}, [#field{name=f1, type={enum,e1}}, #field{name=fm2}]},
-     {{msg,m2_s}, [#field{type={msg,m1_s}}]}, %% type is a msg: to be prefixed
+     {{msg,m1_s}, [#?gpb_field{name=f1, type={enum,e1}}, #?gpb_field{name=fm2}]},
+     {{msg,m2_s}, [#?gpb_field{type={msg,m1_s}}]}, %% type is a msg: to be prefixed
      {{service,s1}, %% not prefixed
-      [{rpc,req,m1_s,m2_s}]} %% both argument and result msgs to be prefixed
-    ] =
-        do_process_sort_defs(Defs, [{msg_name_suffix, "_s"}]).
+      [#?gpb_rpc{name=req,
+                 input=m1_s,  %% both argument ...
+                 output=m2_s} %% .. and result msgs to be prefixed
+      ]}] = do_process_sort_defs(Defs, [{msg_name_suffix, "_s"}]).
 
 verify_ingores_import_statements_test() ->
     ok = do_parse_verify_defs(["import \"Y.proto\";",
