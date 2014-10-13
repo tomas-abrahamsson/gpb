@@ -1062,7 +1062,11 @@ nif_encode_decode() ->
               {ok, Code} = compile_msg_defs(NEDM, Defs, TmpDir),
               with_tmpcode(
                 NEDM, Code,
-                fun() -> nif_encode_decode_test_it(NEDM, Defs) end)
+                fun() ->
+                        nif_encode_decode_test_it(NEDM, Defs),
+                        nif_encode_decode_strings(NEDM, Defs),
+                        ok
+                end)
       end).
 
 nif_encode_decode_test_it(NEDM, Defs) ->
@@ -1084,6 +1088,35 @@ nif_encode_decode_test_it(NEDM, Defs) ->
                   end,
                   [{MsgName,Variant} || MsgName <- MsgNames,
                                         Variant <- Variants]).
+
+nif_encode_decode_strings(NEDM, Defs) ->
+    %% Check UTF-8 encoding/decoding
+    CodePoints = [0,                16#7f,  %% this range reqiures 1 octet
+                  16#80,          16#7fff,  %% this range reqiures 2 octets
+                  16#800,         16#FFff,  %% this range reqiures 3 octets
+                  16#10000,     16#10FFff], %% this range reqiures 4 octets
+    %%            16#200000,   16#3ffFFff,  %% would require 5 octets
+    %%            16#4000000, 16#7fffFFff   %% would require 6 octets
+    %% These are outside of unicode, but encodable integers using utf-8:
+    %% Maybe ought to run these through the nif encoder/decoder just
+    %% to test its utf8 handling, but (a) would be able to cross check with
+    %% the gpb encoder/decoder, and (b) might not get it through the protoc
+    %% lib.
+    lists:foreach(fun(CodePoint) ->
+                          OrigMsg = {strmsg, [CodePoint]},
+                          %% to avoid errors in nif encode/decode
+                          %% cancelling out each other and nif bugs go
+                          %% undetected, cross-check with gpb:encode/decode_msg
+                          MEncoded  = NEDM:encode_msg(OrigMsg),
+                          GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                          MMDecoded = NEDM:decode_msg(MEncoded, strmsg),
+                          GMDecoded = gpb:decode_msg(MEncoded, strmsg, Defs),
+                          MGDecoded = NEDM:decode_msg(GEncoded, strmsg),
+                          ?assertEqual(OrigMsg, MMDecoded),
+                          ?assertEqual(OrigMsg, GMDecoded),
+                          ?assertEqual(OrigMsg, MGDecoded)
+                  end,
+                  CodePoints).
 
 compile_msg_defs(M, MsgDefs, TmpDir) ->
     [NifCcPath, PbCcPath, NifOPath, PbOPath, NifSoPath, ProtoPath] =
@@ -1271,7 +1304,8 @@ mk_one_msg_field_of_each_type() ->
                                      double, string, bytes, fixed32, sfixed32,
                                      float, {enum, ee}, {msg, submsg1}],
                                     optional)},
-    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3].
+    StringMsg = {{msg,strmsg}, mk_fields_of_type([string], required)},
+    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3, StringMsg].
 
 mk_fields_of_type(Types, Occurrence) ->
     Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
