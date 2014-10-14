@@ -28,6 +28,7 @@
 %% but actually seems to work. Better than duplicating tests)
 -ifndef(gpb_compile_common_tests). %% non-shared code below vvvvvvvvv
 -module(gpb_tests).
+
 %-compile(export_all).
 -import(gpb, [decode_msg/3, encode_msg/2, merge_msgs/3, verify_msg/2]).
 
@@ -797,3 +798,95 @@ version_test() ->
     {ok, [{application, App, PL}]} = file:consult(AppFile),
     ?assertEqual(S, proplists:get_value(vsn, PL)),
     ok.
+
+-ifndef(gpb_compile_common_tests). %% non-shared code below vvvvvvvvv
+
+skipping_with_oneof_test() ->
+    Defs = [{{msg,m1}, [#gpb_oneof{
+                           name=a, rnum=#m1.a,
+                           fields=[#?gpb_field{name=a1, fnum=1, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]},
+                                   #?gpb_field{name=a2, fnum=2, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]}]}]}],
+    #m1{a = undefined} = decode_msg(<<32,150,1>>, m1, Defs).
+
+encode_oneof_test() ->
+    Defs = [{{msg,m1}, [#gpb_oneof{
+                           name=a, rnum=#m1.a,
+                           fields=[#?gpb_field{name=a1, fnum=1, rnum=#m1.a,
+                                           type=int32, occurrence=optional,
+                                           opts=[]},
+                                   #?gpb_field{name=a2, fnum=2, rnum=#m1.a,
+                                           type=int32, occurrence=optional,
+                                           opts=[]}]}]}],
+    <<>>         = encode_msg(#m1{a=undefined}, Defs),
+    <<8,150,1>>  = encode_msg(#m1{a={a1,150}}, Defs),
+    <<16,150,1>> = encode_msg(#m1{a={a2,150}}, Defs).
+
+decoding_oneof_test() ->
+    Defs = [{{msg,m1}, [#gpb_oneof{
+                           name=a, rnum=#m1.a,
+                           fields=[#?gpb_field{name=a1, fnum=1, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]},
+                                   #?gpb_field{name=a2, fnum=2, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]}]}]}],
+    #m1{a = undefined} = decode_msg(<<>>, m1, Defs),
+    #m1{a = {a1, 150}} = decode_msg(<<8, 150, 1>>, m1, Defs),
+    #m1{a = {a2, 150}} = decode_msg(<<16, 150, 1>>, m1, Defs).
+
+merge_oneof_test() ->
+    Defs = [{{msg,m1}, [#gpb_oneof{
+                           name=a, rnum=#m1.a,
+                           fields=[#?gpb_field{name=a1, fnum=1, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]},
+                                   #?gpb_field{name=a2, fnum=2, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]}]}]}],
+    #m1{a = undefined} = merge_msgs(#m1{a=undefined}, #m1{a=undefined}, Defs),
+    #m1{a = {a1, 150}} = merge_msgs(#m1{a={a1, 150}}, #m1{a=undefined}, Defs),
+    #m1{a = {a1, 150}} = merge_msgs(#m1{a=undefined}, #m1{a={a1, 150}}, Defs),
+    #m1{a = {a1, 151}} = merge_msgs(#m1{a={a1, 150}}, #m1{a={a1, 151}}, Defs),
+    #m1{a = {a2, 150}} = merge_msgs(#m1{a={a1, 150}}, #m1{a={a2, 150}}, Defs).
+
+merge_oneof_msg_test() ->
+    Defs = [{{msg,m1}, [#gpb_oneof{
+                           name=a, rnum=#m1.a,
+                           fields=[#?gpb_field{name=x, fnum=1, rnum=#m1.a,
+                                               type={msg,m2},occurrence=optional,
+                                               opts=[]},
+                                   #?gpb_field{name=y, fnum=2, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]}]}]},
+            {{msg,m2},  [#?gpb_field{name=b, fnum=1, rnum=#m2.b,
+                                     type=fixed32, occurrence=repeated}]}],
+    %% Will get b=[1,2] since messages are merged
+    #m1{a = {x, #m2{b=[1,2]}}} = merge_msgs(#m1{a={x,#m2{b=[1]}}},
+                                            #m1{a={x,#m2{b=[2]}}},
+                                            Defs),
+    %% Different oneof fields ==> no merge
+    #m1{a = {y,150}}           = merge_msgs(#m1{a={x,#m2{b=[1]}}},
+                                            #m1{a={y,150}},
+                                            Defs).
+
+verify_invalid_oneof_test() ->
+    Defs = [{{msg,m1}, [#gpb_oneof{
+                           name=a, rnum=#m1.a,
+                           fields=[#?gpb_field{name=a1, fnum=1, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]},
+                                   #?gpb_field{name=a2, fnum=2, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]}]}]}],
+    ok = verify_msg(#m1{a=undefined}, Defs),
+    ok = verify_msg(#m1{a={a1,150}}, Defs),
+    ?verify_gpb_err(verify_msg(#m1{a=150}, Defs)),
+    ?verify_gpb_err(verify_msg(#m1{a={a1,150,3}}, Defs)),
+    ?verify_gpb_err(verify_msg(#m1{a={a3,150}}, Defs)),
+    ?verify_gpb_err(verify_msg(#m1{a={a1,false}}, Defs)).
+
+-endif.
