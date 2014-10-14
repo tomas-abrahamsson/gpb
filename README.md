@@ -188,6 +188,8 @@ Mapping of protocol buffer datatypes to erlang
     string                unicode string, thus list of integers
     ----------------------------------------------------------------
     bytes                 binary
+    ----------------------------------------------------------------
+    oneof                 {ChosenFieldName, Value}
 
 
 Interaction with rebar
