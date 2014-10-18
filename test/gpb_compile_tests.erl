@@ -119,12 +119,19 @@ field_pass_as_params_test() ->
               "             repeated fixed32 f4 = 4 [packed];",
               "             repeated uint32  f5 = 5;",
               "             repeated uint32  f6 = 5 [packed];",
-              "             optional string  f7 = 7;"
-              "             optional m2      f8 = 8; }"],
+              "             optional string  f7 = 7;",
+              "             optional m2      f8 = 8;",
+              "             oneof o1 { m2     x1 = 15;",
+              "                        uint32 y1 = 16; };",
+              "             oneof o2 { m2     x2 = 25;",
+              "                        uint32 y2 = 26; }",
+              "             oneof o3 { m2     x3 = 35;",
+              "                        uint32 y3 = 36; }",
+              "}"],
     Msg = {m1, 4711, undefined,      %% f1,f2
            [4713,4714], [4715,4716], %% f3,f4
            [4717,4718], [4719,4720], %% f5,f6
-           "abc", {m2,33}},
+           "abc", {m2,33}, {x1,{m2,45}}, {y2,226}, undefined},
     lists:foreach(
       fun(Opts) ->
               ?assertMatch({Msg,_},
