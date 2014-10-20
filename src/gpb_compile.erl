@@ -3618,6 +3618,7 @@ possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
 format_nif_cc(Mod, Defs, AnRes, Opts) ->
     iolist_to_binary(
       [format_nif_cc_includes(Mod, Defs, Opts),
+       format_nif_cc_oneof_version_check_if_present(Defs),
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
        format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
@@ -3649,6 +3650,29 @@ format_nif_cc_includes(Mod, Defs, _Opts) ->
      ["#include <google/protobuf/message_lite.h>\n" || IsLiteRT],
      "\n"].
 
+format_nif_cc_oneof_version_check_if_present(Defs) ->
+    case contains_oneof(Defs) of
+        true ->
+            ["#if GOOGLE_PROTOBUF_VERSION < 2006000\n"
+             "#error The proto definitions contain 'oneof' fields.\n"
+             "#error This feature appeared in protobuf 2.6.0, but\n"
+             "#error it appears your protobuf is older.  Please\n"
+             "#error update protobuf.\n"
+             "#endif\n"];
+        false ->
+            ""
+    end.
+
+contains_oneof([{{msg,_}, Fields} | Rest]) ->
+    case lists:any(fun(F) -> is_record(F, gpb_oneof) end, Fields) of
+        false -> contains_oneof(Rest);
+        true  -> true
+    end;
+contains_oneof([_ | Rest]) ->
+    contains_oneof(Rest);
+contains_oneof([]) ->
+    false.
+
 format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
     CPkg = get_cc_pkg(Defs),
     [[begin
@@ -3668,12 +3692,13 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
     EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
                                || {{enum, _}, EnumDef} <- Defs]),
     RecordAtoms = [MsgName || {{msg, MsgName}, _Fields} <- Defs],
+    OneofNames = collect_oneof_fields(Defs),
     MiscAtoms0 = [undefined],
     MiscAtoms1 = case is_any_field_of_type_bool(AnRes) of
                      true  -> MiscAtoms0 ++ [true, false];
                      false -> MiscAtoms0
                  end,
-    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ MiscAtoms1),
+    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms1),
     AtomVars = [{mk_c_var(gpb_aa_, A), A} || A <- Atoms],
 
     [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
@@ -3684,6 +3709,14 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
        || {AtomVar, Atom} <- AtomVars],
       "}\n",
       "\n"]].
+
+collect_oneof_fields(Defs) ->
+    lists:usort(
+      lists:flatten(
+        [[[FOFName
+           || #?gpb_field{name=FOFName} <- OFields]
+          || #gpb_oneof{fields=OFields} <- Fields]
+         || {{msg,_}, Fields} <- Defs])).
 
 format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, Opts) ->
     case is_any_field_of_type_string(AnRes) of
@@ -4063,7 +4096,7 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
      "}\n",
      "\n"].
 
-format_nif_cc_field_packer(SrcVar, MsgVar, Field, Defs, Opts) ->
+format_nif_cc_field_packer(SrcVar, MsgVar, #?gpb_field{}=Field, Defs, Opts) ->
     #?gpb_field{occurrence=Occurrence}=Field,
     case Occurrence of
         required ->
@@ -4075,7 +4108,42 @@ format_nif_cc_field_packer(SrcVar, MsgVar, Field, Defs, Opts) ->
         repeated ->
             format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs,
                                                 Opts)
-    end.
+    end;
+format_nif_cc_field_packer(SrcVar, MsgVar, #gpb_oneof{}=Field, Defs, Opts) ->
+    #gpb_oneof{fields=OFields} = Field,
+    [split_indent_iolist(
+       4,
+       ?f("if (!enif_is_identical(~s, gpb_aa_undefined))~n"
+          "{~n"
+          "    int oarity;~n"
+          "    const ERL_NIF_TERM *oelem;~n"
+          "    if (!enif_get_tuple(env, ~s, &oarity, &oelem) || oarity != 2)~n"
+          "        return 0;~n"
+          "~n"
+          "    ~s~n"
+          "}~n",
+          [SrcVar, SrcVar,
+           format_nif_cc_oneof_packer("oelem[0]", "oelem[1]",
+                                      MsgVar, OFields, Defs, Opts)])),
+     "\n"].
+
+format_nif_cc_oneof_packer(NameVar, SrcVar, MsgVar, OFields, Defs, Opts) ->
+    split_indent_iolist(
+      4,
+      [[begin
+            Else = if I == 1 -> "";
+                      I >  1 -> "else "
+                   end,
+            AtomVar = mk_c_var(gpb_aa_, Name),
+            [?f("~sif (enif_is_identical(~s, ~s))~n", [Else, NameVar, AtomVar]),
+             split_indent_iolist(
+               4,
+               format_nif_cc_field_packer_single(SrcVar, MsgVar, OField,
+                                                 Defs, Opts, set))]
+        end
+        || {I, #?gpb_field{name=Name}=OField} <- index_seq(OFields)],
+       "else\n"
+       "    return 0;\n"]).
 
 format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs, Opts) ->
     [?f("    if (!enif_is_identical(~s, gpb_aa_undefined))\n", [SrcVar]),
@@ -4302,7 +4370,7 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
      "\n",
      [begin
           DestVar = ?f("elem~w",[I]),
-          format_nif_cc_field_unpacker(DestVar, "m", Field, Defs)
+          format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field, Defs)
       end
       || {I, Field} <- index_seq(Fields)],
      "\n",
@@ -4312,7 +4380,8 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
      "}\n",
      "\n"].
 
-format_nif_cc_field_unpacker(DestVar, MsgVar, Field, Defs) ->
+format_nif_cc_field_unpacker(DestVar, MsgVar, _MsgName, #?gpb_field{}=Field,
+                             Defs) ->
     #?gpb_field{occurrence=Occurrence}=Field,
     case Occurrence of
         required ->
@@ -4321,85 +4390,125 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, Field, Defs) ->
             format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs);
         repeated ->
             format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs)
-    end.
-
+    end;
+format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
+                             Defs) ->
+    #gpb_oneof{name=OFName, fields=OFields} = Field,
+    CPkg = get_cc_pkg(Defs),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    LCOFName = to_lower(OFName),
+    UCOFName = to_upper(OFName),
+    [split_indent_iolist(
+       4,
+       [?f("switch (~s->~s_case())\n", [MsgVar, LCOFName]),
+        ?f("{\n"),
+        [begin
+             CamelCaseFOFName = camel_case(FOFName),
+             AtomVar = mk_c_var(gpb_aa_, FOFName),
+             split_indent_iolist(
+               4,
+               [?f("case ~s::k~s:\n", [CMsgType, CamelCaseFOFName]),
+                ?f("    {\n"),
+                ?f("        ERL_NIF_TERM ores;\n"),
+                split_indent_iolist(
+                  8,
+                  format_nif_cc_field_unpacker_by_type("ores", MsgVar,
+                                                       OField, Defs)),
+                ?f("        ~s = enif_make_tuple2(env, ~s, ores);\n",
+                   [DestVar, AtomVar]),
+                ?f("    }\n"),
+                ?f("    break;\n\n")])
+         end
+         || #?gpb_field{name=FOFName}=OField <- OFields],
+        split_indent_iolist(
+          4,
+          [?f("case ~s::~s_NOT_SET: /* FALL THROUGH */~n", [CMsgType, UCOFName]),
+           ?f("default:~n"),
+           ?f("    ~s = gpb_aa_undefined;\n", [DestVar])]),
+        ?f("}\n")]),
+     "\n"].
 
 format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
-    #?gpb_field{name=FName, type=FType} = Field,
+    #?gpb_field{name=FName} = Field,
     LCFName = to_lower(FName),
     [?f("    if (!~s->has_~s())\n", [MsgVar, LCFName]),
      ?f("        ~s = gpb_aa_undefined;\n", [DestVar]),
      ?f("    else\n"),
      indent_lines(
-       8,
-       case FType of
-           float ->
-               [?f("~s = enif_make_double(env, (double)~s->~s());\n",
-                   [DestVar, MsgVar, LCFName])];
-           double ->
-               [?f("~s = enif_make_double(env, ~s->~s());\n",
-                   [DestVar, MsgVar, LCFName])];
-           _S32 when FType == sint32;
-                     FType == int32;
-                     FType == sfixed32 ->
-               [?f("~s = enif_make_int(env, ~s->~s());\n",
-                   [DestVar, MsgVar, LCFName])];
-           _S64 when FType == sint64;
-                     FType == int64;
-                     FType == sfixed64 ->
-               [?f("~s = enif_make_int64(env, (ErlNifSInt64)~s->~s());\n",
-                   [DestVar, MsgVar, LCFName])];
-           _U32 when FType == uint32;
-                     FType == fixed32 ->
-               [?f("~s = enif_make_uint(env, ~s->~s());\n",
-                   [DestVar, MsgVar, LCFName])];
-           _U64 when FType == uint64;
-                     FType == fixed64 ->
-               [?f("~s = enif_make_uint64(env, (ErlNifUInt64)~s->~s());\n",
-                   [DestVar, MsgVar, LCFName])];
-           bool ->
-               [?f("if (~s->~s())\n", [MsgVar, LCFName]),
-                ?f("    ~s = gpb_aa_true;\n", [DestVar]),
-                ?f("else\n"),
-                ?f("    ~s = gpb_aa_false;\n", [DestVar])];
-           {enum, EnumName} ->
-               {value, {{enum,EnumName}, Enumerations}} =
-                   lists:keysearch({enum,EnumName}, 1, Defs),
-               [] ++
-                   [?f("switch (~s->~s()) {\n", [MsgVar, LCFName])] ++
-                   [?f("    case ~s: ~s = ~s; break;\n",
-                       [Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
-                    || {Sym, _Value} <- Enumerations] ++
-                   [?f("    default: ~s = gpb_aa_undefined;\n", [DestVar])] ++
-                   [?f("}\n")];
-           string ->
-               [?f("{\n"),
-                ?f("    const char    *sData = ~s->~s().data();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    unsigned int   sSize = ~s->~s().size();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    ~s = utf8_to_erl_string(env, sData, sSize);\n",
-                   [    DestVar]),
-                ?f("}\n")];
-           bytes ->
-               [?f("{\n"),
-                ?f("    unsigned char *data;\n"),
-                ?f("    unsigned int   bSize = ~s->~s().size();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    const char    *bData = ~s->~s().data();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    data = enif_make_new_binary(\n"), %% can data be NULL??
-                ?f("               env,\n"),
-                ?f("               bSize,\n"),
-                ?f("               &~s);\n", [DestVar]),
-                ?f("    memmove(data, bData, bSize);\n"),
-                ?f("}\n")];
-           {msg, Msg2Name} ->
-               UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
-               [?f("~s = ~s(env, &~s->~s());\n",
-                   [DestVar, UnpackFnName, MsgVar, LCFName])]
-       end),
+       8, format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs)),
      "\n"].
+
+format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs) ->
+    #?gpb_field{name=FName, type=FType} = Field,
+    LCFName = to_lower(FName),
+    case FType of
+        float ->
+            [?f("~s = enif_make_double(env, (double)~s->~s());\n",
+                [DestVar, MsgVar, LCFName])];
+        double ->
+            [?f("~s = enif_make_double(env, ~s->~s());\n",
+                [DestVar, MsgVar, LCFName])];
+        _S32 when FType == sint32;
+                  FType == int32;
+                  FType == sfixed32 ->
+            [?f("~s = enif_make_int(env, ~s->~s());\n",
+                [DestVar, MsgVar, LCFName])];
+        _S64 when FType == sint64;
+                  FType == int64;
+                  FType == sfixed64 ->
+            [?f("~s = enif_make_int64(env, (ErlNifSInt64)~s->~s());\n",
+                [DestVar, MsgVar, LCFName])];
+        _U32 when FType == uint32;
+                  FType == fixed32 ->
+            [?f("~s = enif_make_uint(env, ~s->~s());\n",
+                [DestVar, MsgVar, LCFName])];
+        _U64 when FType == uint64;
+                  FType == fixed64 ->
+            [?f("~s = enif_make_uint64(env, (ErlNifUInt64)~s->~s());\n",
+                [DestVar, MsgVar, LCFName])];
+        bool ->
+            [?f("if (~s->~s())\n", [MsgVar, LCFName]),
+             ?f("    ~s = gpb_aa_true;\n", [DestVar]),
+             ?f("else\n"),
+             ?f("    ~s = gpb_aa_false;\n", [DestVar])];
+        {enum, EnumName} ->
+            {value, {{enum,EnumName}, Enumerations}} =
+                lists:keysearch({enum,EnumName}, 1, Defs),
+            [] ++
+                [?f("switch (~s->~s()) {\n", [MsgVar, LCFName])] ++
+                [?f("    case ~s: ~s = ~s; break;\n",
+                    [Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
+                 || {Sym, _Value} <- Enumerations] ++
+                [?f("    default: ~s = gpb_aa_undefined;\n", [DestVar])] ++
+                [?f("}\n")];
+        string ->
+            [?f("{\n"),
+             ?f("    const char    *sData = ~s->~s().data();\n",
+                [    MsgVar, LCFName]),
+             ?f("    unsigned int   sSize = ~s->~s().size();\n",
+                [    MsgVar, LCFName]),
+             ?f("    ~s = utf8_to_erl_string(env, sData, sSize);\n",
+                [    DestVar]),
+             ?f("}\n")];
+        bytes ->
+            [?f("{\n"),
+             ?f("    unsigned char *data;\n"),
+             ?f("    unsigned int   bSize = ~s->~s().size();\n",
+                [    MsgVar, LCFName]),
+             ?f("    const char    *bData = ~s->~s().data();\n",
+                [    MsgVar, LCFName]),
+             ?f("    data = enif_make_new_binary(\n"), %% can data be NULL??
+             ?f("               env,\n"),
+             ?f("               bSize,\n"),
+             ?f("               &~s);\n", [DestVar]),
+             ?f("    memmove(data, bData, bSize);\n"),
+             ?f("}\n")];
+        {msg, Msg2Name} ->
+            UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
+            [?f("~s = ~s(env, &~s->~s());\n",
+                [DestVar, UnpackFnName, MsgVar, LCFName])]
+    end.
+
 
 format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
     #?gpb_field{name=FName, type=FType} = Field,
@@ -4520,6 +4629,31 @@ replace_tilde_s(<<>>, _ModBin, _VsnBin) ->
 
 to_lower(A) when is_atom(A) ->
     list_to_atom(string:to_lower(atom_to_list(A))).
+
+to_upper(A) when is_atom(A) ->
+    list_to_atom(string:to_upper(atom_to_list(A))).
+
+camel_case(A) when is_atom(A) ->
+    list_to_atom(camel_case(atom_to_list(A), true)).
+
+-define(is_lower_case(C), $a =< C, C =< $z).
+-define(is_upper_case(C), $A =< C, C =< $Z).
+-define(is_digit(C),      $0 =< C, C =< $9).
+camel_case([LC | Tl], CapNextLetter) when ?is_lower_case(LC) ->
+    if CapNextLetter     -> [capitalize_letter(LC) | camel_case(Tl, false)];
+       not CapNextLetter -> [LC | camel_case(Tl, false)]
+    end;
+camel_case([UC | Tl], _) when ?is_upper_case(UC) ->
+    [UC | camel_case(Tl, false)];
+camel_case([D | Tl], _) when ?is_digit(D) ->
+    [D | camel_case(Tl, true)];
+camel_case([_ | Tl], _) -> %% underscore and possibly more
+    camel_case(Tl, true);
+camel_case([], _) ->
+    [].
+
+capitalize_letter(C) ->
+    C + ($A - $a).
 
 %% -- compile to memory -----------------------------------------------------
 
