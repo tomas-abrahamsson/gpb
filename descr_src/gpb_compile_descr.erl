@@ -46,7 +46,7 @@ defs_to_descr_2(Name, Defs) ->
        dependency       = [],        %% [string()]
        message_type     = defs_to_msgtype(Defs),
        enum_type        = defs_to_enumtype(Defs),
-       service          = [],        %% [#'ServiceDescriptorProto'{}]
+       service          = defs_to_service(Defs),
        extension        = [],        %% [#'FieldDescriptorProto'{}]
        options          = undefined, %% #'FileOptions'{} | undefined
        source_code_info = undefined  %% #'SourceCodeInfo'{} | undefined
@@ -165,6 +165,18 @@ defs_to_enumtype(Defs) ->
                                              number = EValue}
                  || {EName, EValue} <- Enumerators]}
      || {{enum,EnumName}, Enumerators} <- Defs].
+
+defs_to_service(Defs) ->
+    [#'ServiceDescriptorProto'{
+        name   = atom_to_ustring(ServiceName),
+        method = [#'MethodDescriptorProto'{
+                     name        = atom_to_ustring(RpcName),
+                     input_type  = atom_to_ustring(Input),
+                     output_type = atom_to_ustring(Output)}
+                  || #?gpb_rpc{name=RpcName,
+                               input=Input,
+                               output=Output} <- Rpcs]}
+     || {{service, ServiceName}, Rpcs} <- Defs].
 
 atom_to_ustring(A) ->
     Utf8Str = atom_to_list(A),
