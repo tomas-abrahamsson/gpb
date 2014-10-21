@@ -8,7 +8,7 @@ Features of gpb
 ---------------
 
 *  Parses protocol buffer definition files and can generate:
-   - record defintions, one record for each message
+   - record definitions, one record for each message
    - erlang code for encoding/decoding the messages to/from binaries
 
 *  Features of the protocol buffer definition files:
@@ -29,7 +29,6 @@ Features of gpb
    gpb does not support:
    - groups
    - aggregate custom options introduced in protobuf 2.4.0
-   - descriptors
    - rpc
 
 *  Characteristics of gpb:
@@ -69,7 +68,7 @@ Features of gpb
    - `gpb:version_as_string()` and `gpb:version_as_list()`
    - `GeneratedCode:version_as_string()` and `GeneratedCode:version_as_list()`
    - `?gpb_version`  (in gpb_version.hrl)
-   - `?'GeneratedCode_gpb_version'  (in GeneratedCode.hrl)
+   - `?'GeneratedCode_gpb_version'`  (in GeneratedCode.hrl)
 
    The gpb can also generate a self-description of the proto file.
    The self-description is a description of the proto file, encoded to
@@ -85,21 +84,18 @@ Features of gpb
    - strings, bytes, sub messages or packed repeated fields,
      where the encoded length is longer than the remaining binary
 
-*  Maps (NB: currently experimental!)
+*  Maps (NB: this area is settling down)
 
-   Gpb can generate encoders/decoders for maps, in accordance with EEP 43.
-   NB: This is still at an experimental stage, and details may change.
-   The general plan here is to wait until maps gets supported in
-   Erlang/OTP (as of this writing, it appears to be still some months
-   away), then experiment and benchmark a bit before settling for a
-   design.
+   Gpb can generate encoders/decoders for maps. It is not yet very
+   widely used, and there are still some issues not yet fully
+   explored:
 
-   Open questions in this area: (a) should non-present optional fields
-   be represented as `#{key => undefined}` or should the binding be
-   omitted altogether? Also (b), should there be some `id` binding,
-   representing the name of the message? Further: (c) decode: pass
-   maps, or pass records around and convert to maps as a final step?
-   Need to evaluate performance.
+   (a) should non-present optional fields be represented as
+   `#{key => undefined}` or should the binding be omitted altogether?
+   Currently, there is a `key => undefined`.  Also (b), should there
+   be some `id` binding, representing the name of the message?
+   Currently, there is no such binding and for example `encode_msg`
+   takes an additional parameter to specify the type of the map.
 
 *  Reporting of errors in .proto files
 
@@ -255,10 +251,10 @@ Places to update when making a new version:
 Contributing
 ------------
 
-Contributions are welcome, preferrably as pull requests or git patches
+Contributions are welcome, preferably as pull requests or git patches
 or git fetch requests.  Here are some guide lines:
 
-* Use only spaces for indentation, no tabs
+* Use only spaces for indentation, no tabs. Indentation is 4 spaces.
 * The code must fit 80 columns
 * Verify that the code and documentation compiles and that tests are ok:
   rebar clean compile eunit doc xref
