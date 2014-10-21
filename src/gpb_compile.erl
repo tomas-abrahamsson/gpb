@@ -196,11 +196,12 @@ file(File) ->
 %% in which case they will be proplists instead. This option is not
 %% compatible with the `nif' option.
 %%
-%% The `nif' option will cause the compiler to generate the decoder as
-%% nif C++ code. The generated nif C++ code can be linked with the
-%% Google protobuf C++ library.  Read the file `README.nif-cc' for
-%% more info. This option is not compatible with the `maps' option;
-%% the generated C++ decoding code would still create records.
+%% The `nif' option will cause the compiler to generate nif C++ code
+%% for encoding and decoding. The generated nif C++ code can be linked
+%% with the Google protobuf C++ library.  Read the file
+%% `README.nif-cc' for more info. This option is not compatible with
+%% the `maps' option; the generated C++ decoding code would still
+%% create records.
 %%
 %% The `binary' option will cause the generated and compiled code to be
 %% returned as a binary. No files will be written. The return value
