@@ -21,6 +21,7 @@ Features of gpb
    - the 'packed' and 'default' options
    - generating metadata information
    - package namespacing (optional)
+   - oneof
 
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'
