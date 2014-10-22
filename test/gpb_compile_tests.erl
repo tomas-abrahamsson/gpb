@@ -1122,7 +1122,7 @@ nif_encode_decode_strings(NEDM, Defs) ->
                   CodePoints).
 
 compile_msg_defs(M, MsgDefs, TmpDir) ->
-    [NifCcPath, PbCcPath, NifOPath, PbOPath, NifSoPath, ProtoPath] =
+    [NifCcPath, PbCcPath, NifOPath, PbOPath, NifSoPath, ProtoPath] = Files  =
         [filename:join(TmpDir, lists:concat([M, Ext]))
          || Ext <- [".nif.cc", ".pb.cc", ".nif.o", ".pb.o", ".nif.so",
                     ".proto"]],
@@ -1142,15 +1142,32 @@ compile_msg_defs(M, MsgDefs, TmpDir) ->
     Protoc = find_protoc(),
     CFlags = get_cflags(),
     LdFlags = get_ldflags(),
-    ok = ccompile("'~s' --proto_path '~s' --cpp_out='~s' '~s'",
-                  [Protoc, TmpDir, TmpDir, ProtoPath]),
-    ok = ccompile("'~s' -g -fPIC -Wall -O3 '-I~s' ~s -c -o '~s' '~s'",
-                  [CC, TmpDir, CFlags, NifOPath, NifCcPath]),
-    ok = ccompile("'~s' -g -fPIC -Wall -O3 '-I~s' ~s -c -o '~s' '~s'",
+    CompileProto = f("'~s' --proto_path '~s' --cpp_out='~s' '~s'",
+                     [Protoc, TmpDir, TmpDir, ProtoPath]),
+    CompileNif = f("'~s' -g -fPIC -Wall -O3 '-I~s' ~s -c -o '~s' '~s'",
+                   [CC, TmpDir, CFlags, NifOPath, NifCcPath]),
+    CompilePb = f("'~s' -g -fPIC -Wall -O3 '-I~s' ~s -c -o '~s' '~s'",
                   [CC, TmpDir, CFlags, PbOPath, PbCcPath]),
-    ok = ccompile("'~s' -g -fPIC -shared -Wall -O3 ~s"
+    CompileSo = f("'~s' -g -fPIC -shared -Wall -O3 ~s"
                   "    -o '~s' '~s' '~s' -lprotobuf",
                   [CC, LdFlags, NifSoPath, NifOPath, PbOPath]),
+    %% Useful if debugging the nif code, see also with_tmpdir(save, Fun)
+    ToClean = [filename:basename(F) || F <- Files, F /= ProtoPath],
+    file:write_file(filename:join(TmpDir, "Makefile"),
+                    iolist_to_binary(
+                      ["all:\n",
+                       "\t", CompileProto, "\n",
+                       "\t", CompileNif, "\n",
+                       "\t", CompilePb, "\n",
+                       "\t", CompileSo, "\n",
+                       "\n",
+                       "clean:\n",
+                       "\t", "$(RM)", [[" ",F] || F <- ToClean], "\n"])),
+    ok = ccompile("~s", ["set -evx\n"
+                         ++ CompileProto ++ "\n"
+                         ++ CompileNif ++ "\n"
+                         ++ CompilePb ++ "\n"
+                         ++ CompileSo]),
     {ok, Code}.
 
 %% Option to run with `save' for debugging nifs
