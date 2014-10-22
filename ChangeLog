@@ -1,7 +1,7 @@
 -*- coding: utf-8 -*-
 
 Version 3.16.0
-2014-oct-13
+2014-Oct-13
 
 	* When generating NIF code, also do the encoding in the
 	NIF. Previously, the encoding was still done using plain Erlang,
@@ -11,7 +11,7 @@ Version 3.16.0
 	cases.
 
 Version 3.15.0
-2014-oct-13
+2014-Oct-13
 
 	* Specify that the NIF should run in a cpu-bound dirty scheduler
 	when supported. This currently requires Erlang 17.3 built with
@@ -19,7 +19,7 @@ Version 3.15.0
 	asking the question, prompting me get it done.
 
 Version 3.14.0
-2014-oct-01
+2014-Oct-01
 
 	* In the Makefile, allow ERL and ERLC to be overridden via
 	environment variables, thanks to Graham Crowe.
@@ -27,26 +27,26 @@ Version 3.14.0
 	errors in eunit tests.
 
 Version 3.13.0
-2014-sep-17
+2014-Sep-17
 
 	* New way to invoke the compiler: bin/protoc-erl. Thanks to Luis
 	Rascão for the implementation.
 
 Version 3.12.2
-2014-sep-16
+2014-Sep-16
 
 	* Fix a race condition in the Makefile between all and doc
 	* Elide falsely failing nif tests with 17 on 32 bits with an
 	erlang vm compiled with gcc 4.9.0 or newer.
 
 Version 3.12.1
-2014-aug-12
+2014-Aug-12
 
 	* Update the README, with info on meta data for services. Thanks
 	to Luis Rascão.
 
 Version 3.12.0
-2014-aug-12
+2014-Aug-12
 
 	* Add support for retrieving meta data for services. Rename
 	gpb_compile:msg_defs/2,3 into gpb_compile:proto_defs/2,3, but
@@ -54,7 +54,7 @@ Version 3.12.0
 	compatibility. Thanks to Luis Rascão for the implementation.
 
 Version 3.11.0
-2014-jul-20
+2014-Jul-20
 
 	* Add helpers for packaging to hex.pm. Thanks to Dylan Lukes and
 	Paul Schoenfelder for prompting this.
@@ -64,7 +64,7 @@ Version 3.11.0
 	for taking the initiative to this.
 
 Version 3.10
-2014-jun-26
+2014-Jun-26
 
 	* Bugfix verification of optional sub message fields, thanks to
 	Klas Johansson.
@@ -74,7 +74,7 @@ Version 3.10
 	respectively)
 
 Version 3.9
-2014-feb-04
+2014-Feb-04
 
 	* Avoid single field map access---ie expressions on the form
 	X#{key}---since neither the maps pre-release, nor the rc1 of R17
@@ -82,7 +82,7 @@ Version 3.9
 	applies to records as well as maps. Performance is unaltered.
 
 Version 3.8
-2014-feb-01
+2014-Feb-01
 
 	* Bugfix generated code when there are no messages defined.
 	Thanks to Graham Crowe for reporting.
@@ -90,7 +90,7 @@ Version 3.8
 	names.
 
 Version 3.7.1
-2013-dec-14
+2013-Dec-14
 
 	* Bugfix a race condition in the Makefile. Thanks to Graham Crowe
 	for fruitful discussions.
@@ -99,7 +99,7 @@ Version 3.7.1
 	Handle the odd case entirely in the parse transform.
 
 Version 3.7
-2013-dec-13
+2013-Dec-13
 
 	* Add a (GNU) Makefile, for projects that prefer to build this
 	way. Thanks to Graham Crowe for suggestions and ideas.
@@ -111,7 +111,7 @@ Version 3.7
 	parts of the world.
 
 Version 3.6
-2013-nov-13
+2013-Nov-13
 
 	* Add nif support for the strings_as_binaries (-strbin) option,
 	thanks to Louis-Philippe Gauthier for reporting this.
@@ -119,18 +119,18 @@ Version 3.6
 	function. Thanks to Klas Johansson for suggesting this.
 
 Version 3.5
-2013-oct-27
+2013-Oct-27
 
 	* Licence change: from LGPL 2 to LGPL 2.1
 
 Version 3.4
-2013-oct-27
+2013-Oct-27
 
 	* Licence modification/clarification: clarify that the licence (in
 	the file COPYING.LIB) does not cover code generated with gpb.
 
 Version 3.3
-2013-oct-27
+2013-Oct-27
 
 	* Fix several errors in the gpb.app.src so that it works with
 	Elixir and Relex, thanks to Paulo Almeida.
@@ -147,7 +147,7 @@ Version 3.3
 	various other benchmark related things.
 
 Version 3.2
-2013-sep-16
+2013-Sep-16
 
 	* Add preliminary support for maps, for generating code that
 	encodes from and decodes to maps, as well as merges and verifies
@@ -157,7 +157,7 @@ Version 3.2
 	* Bugfix various dialyzer issues.
 
 Version 3.1
-2013-sep-05
+2013-Sep-05
 
 	* Bugfix compilation of several files (only the first file
 	was actually compiled, even if several files were specified)
@@ -169,18 +169,18 @@ Version 3.1
 	including gpb.hrl at compiletime. (There's no run-time dependency)
 	* Add possibility to prefix message/record and names and module
 	names to avoid name collisions.
-	* Add -type to the commad line options, thanks to Louis-Philippe
+	* Add -type to the command line options, thanks to Louis-Philippe
 	Gauthier. Previously it existed only as an Erlang API option.
 
 Version 3.0
-2013-aug-24
+2013-Aug-24
 	* Improve decoding performance by roughly 8--19%
 	* Completely rewrite the code generator. Use a parse-transform
 	  instead of formatting and assembling strings.
 	* Minor improvement in the generated code for version_as_list.
 
 Version 2.3
-2013-aug-18
+2013-Aug-18
 	* Fix Rebar compile on non-GNU systems, such as Mac OS X, thanks
 	to Everton Ribeiro.
 	* Bugfix (mostly) rare compilation breakage: depending on the
@@ -189,7 +189,7 @@ Version 2.3
 	* Ignore non-version-like tags
 
 Version 2.2
-2013-jul-13
+2013-Jul-13
 
 	* Wrap generated skip-functions with quotes. Thanks to jesse-ad.
 	* Experimental support for calling protoc code via a NIF
@@ -225,12 +225,12 @@ Version 2.2
 	git tag as the source of information.
 
 Version 2.1
-2011-oct-31  Tomas Abrahamsson  <tomas.abrahamsson@gmail.com>
+2011-Oct-31  Tomas Abrahamsson  <tomas.abrahamsson@gmail.com>
 
 	* Package names are dotted rather than with underscores
 	* New generated introspection function: M:get_package_name/0.
 
 Version 2.0
-2011-jul-10  Tomas Abrahamsson  <tab@lysator.liu.se>
+2011-Jul-10  Tomas Abrahamsson  <tab@lysator.liu.se>
 
 	* First public version
