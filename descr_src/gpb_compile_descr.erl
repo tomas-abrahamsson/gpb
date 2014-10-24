@@ -52,6 +52,10 @@ defs_to_descr_2(Name, Defs) ->
        source_code_info = undefined  %% #'SourceCodeInfo'{} | undefined
       }.
 
+get_all_oneofs(Defs) ->
+    lists:flatten([[Name || #gpb_oneof{name=Name} <- Fields]
+                   || {{msg,_}, Fields} <- Defs]).
+
 defs_to_package(Defs) ->
     %% There can be at most 1 package definition
     %% The parser will reject any multiple package definitions
@@ -61,6 +65,7 @@ defs_to_package(Defs) ->
     end.
 
 defs_to_msgtype(Defs) ->
+    AllOneofs = get_all_oneofs(Defs),
     %% There is a slight bit of mismatch here: the DescriptorProto
     %% contains fields for `nested_type' and `enum_type', and defines
     %% a name resolution scheme, but the gpb parser already un-nests,
@@ -71,16 +76,26 @@ defs_to_msgtype(Defs) ->
     %% save also the unprocessed parse results.
     [#'DescriptorProto'{
         name            = atom_to_ustring(MsgName),
-        field           = field_defs_to_mgstype_fields(Fields),
+        field           = field_defs_to_mgstype_fields(Fields, AllOneofs),
         extension       = [],
         nested_type     = [],
         enum_type       = [],
         extension_range = [],
-        options         = undefined
+        options         = undefined,
+        oneof_decl      = oneof_decl(AllOneofs)
        }
      || {{msg,MsgName}, Fields} <- Defs].
 
-field_defs_to_mgstype_fields(Fields) ->
+field_defs_to_mgstype_fields(Fields, AllOneofs) ->
+    lists:append([field_def_to_msgtype_field(Field, AllOneofs)
+                  || Field <- Fields]).
+
+field_def_to_msgtype_field(#?gpb_field{name=FName,
+                                       fnum=FNum,
+                                       type=Type,
+                                       occurrence=Occurrence,
+                                       opts=Opts}=Field,
+                           _AllOneofs) ->
     [#'FieldDescriptorProto'{
         name          = atom_to_ustring(FName),
         number        = FNum,
@@ -88,12 +103,22 @@ field_defs_to_mgstype_fields(Fields) ->
         type          = type_to_descr_type(Type),
         type_name     = type_to_descr_type_name(Type),
         default_value = field_default_value(Field),
-        options       = field_options(Opts)}
-     || #?gpb_field{name=FName,
-                    fnum=FNum,
-                    type=Type,
-                    occurrence=Occurrence,
-                    opts=Opts}=Field <- Fields].
+        options       = field_options(Opts)}];
+field_def_to_msgtype_field(#gpb_oneof{name=FName,
+                                      fields=OFields},
+                           AllOneofs) ->
+    OneofIndex = find_oneof_index(FName, AllOneofs),
+    [begin
+         [F] = field_def_to_msgtype_field(OField, AllOneofs),
+         F#'FieldDescriptorProto'{oneof_index = OneofIndex}
+     end
+     || OField <- OFields].
+
+find_oneof_index(Name, Names) ->
+    find_pos(Name, Names, 0).
+
+find_pos(Name, [Name | _], Pos) -> Pos;
+find_pos(Name, [_ | Rest], Pos) -> find_pos(Name, Rest, Pos+1).
 
 occurrence_def_to_descr_label(optional) -> 'LABEL_OPTIONAL';
 occurrence_def_to_descr_label(required) -> 'LABEL_REQUIRED';
@@ -177,6 +202,9 @@ defs_to_service(Defs) ->
                                input=Input,
                                output=Output} <- Rpcs]}
      || {{service, ServiceName}, Rpcs} <- Defs].
+
+oneof_decl(AllOneofs) ->
+    [#'OneofDescriptorProto'{name=atom_to_ustring(Name)} || Name <- AllOneofs].
 
 atom_to_ustring(A) ->
     Utf8Str = atom_to_list(A),

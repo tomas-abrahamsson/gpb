@@ -21,6 +21,7 @@ Features of gpb
    - the 'packed' and 'default' options
    - generating metadata information
    - package namespacing (optional)
+   - oneof
 
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'
@@ -188,6 +189,8 @@ Mapping of protocol buffer datatypes to erlang
     string                unicode string, thus list of integers
     ----------------------------------------------------------------
     bytes                 binary
+    ----------------------------------------------------------------
+    oneof                 {ChosenFieldName, Value}
 
 
 Interaction with rebar

@@ -146,6 +146,8 @@ new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
                         SubMsg = new_initial_msg(FMsgKey, MsgDefs),
                         setelement(RNum, Record, SubMsg);
                    (#?gpb_field{}, Record) ->
+                        Record;
+                   (#gpb_oneof{}, Record) ->
                         Record
                 end,
                 erlang:make_tuple(length(MsgDef)+1, undefined, [{1,MsgName}]),
@@ -155,11 +157,11 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
     {Key, Rest} = decode_varint(Bin, 32),
     FieldNum = Key bsr 3,
     WireType = Key band 7,
-    case lists:keysearch(FieldNum, #?gpb_field.fnum, MsgDef) of
+    case find_field(FieldNum, MsgDef) of
         false ->
             Rest2 = skip_field(Rest, WireType),
             decode_field(Rest2, MsgDef, MsgDefs, Msg);
-        {value, #?gpb_field{type = FieldType, rnum=RNum} = FieldDef} ->
+        {#?gpb_field{name=FName, type=FieldType, rnum=RNum}=FieldDef, IsOneof} ->
             case fielddef_matches_wiretype_get_packed(WireType, FieldDef) of
                 {yes,true} ->
                     AccSeq = element(RNum, Msg),
@@ -169,7 +171,11 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
                     decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
                 {yes,false} ->
                     {NewValue, Rest2} = decode_type(FieldType, Rest, MsgDefs),
-                    NewMsg = add_field(NewValue, FieldDef, MsgDefs, Msg),
+                    NewMsg = if IsOneof ->
+                                     setelement(RNum, Msg, {FName, NewValue});
+                                not IsOneof ->
+                                     add_field(NewValue, FieldDef, MsgDefs, Msg)
+                             end,
                     decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
                 no ->
                     Rest2 = skip_field(Rest, WireType),
@@ -186,6 +192,18 @@ decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
                 end,
                 Record0,
                 RepeatedRNums).
+
+find_field(N, [#?gpb_field{fnum=N}=F | _]) ->
+    {F, false};
+find_field(N, [#?gpb_field{} | Rest]) ->
+    find_field(N, Rest);
+find_field(N, [#gpb_oneof{fields=Fs} | Rest]) ->
+    case lists:keyfind(N, #?gpb_field.fnum, Fs) of
+        #?gpb_field{}=F -> {F, true};
+        false           -> find_field(N, Rest)
+    end;
+find_field(_, []) ->
+    false.
 
 fielddef_matches_wiretype_get_packed(WireType, #?gpb_field{type=Type}=FieldDef)->
     IsPacked = is_packed(FieldDef),
@@ -346,6 +364,35 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
               case element(RNum, NewMsg) of
                   undefined -> AccRecord;
                   NewValue  -> setelement(RNum, AccRecord, NewValue)
+              end;
+         (#gpb_oneof{rnum=RNum, fields=OFields}, AccRecord) ->
+              %% The language guide for oneof says that
+              %%
+              %%   "If the parser encounters multiple members of the
+              %%   same oneof on the wire, only the last member seen
+              %%   is used in the parsed message."
+              %%
+              %% In practice, this seems to mean they are merged,
+              %% at least according to experiments with generated c++ code.
+              %%
+              case {element(RNum, AccRecord), element(RNum, NewMsg)} of
+                  {undefined, undefined} ->
+                      AccRecord;
+                  {undefined, NewElem} ->
+                      setelement(RNum, AccRecord, NewElem);
+                  {_PrevElem, undefined} ->
+                      AccRecord;
+                  {{OFName, PrevValue}, {OFName, NewValue}=NewElem} ->
+                      case lists:keyfind(OFName, #?gpb_field.name, OFields) of
+                          #?gpb_field{type={msg,_}} ->
+                              NewSub = merge_msgs(PrevValue, NewValue, MsgDefs),
+                              setelement(RNum, AccRecord, {OFName,NewSub});
+                          #?gpb_field{} ->
+                              setelement(RNum, AccRecord, NewElem)
+                      end;
+                  {_PrevElem, NewElem} ->
+                      %% oneof fields
+                      setelement(RNum, AccRecord, NewElem)
               end
       end,
       PrevMsg,
@@ -357,15 +404,25 @@ encode_msg(Msg, MsgDefs) ->
     MsgDef = keyfetch({msg, MsgName}, MsgDefs),
     encode_2(MsgDef, Msg, MsgDefs, <<>>).
 
-encode_2([Field | Rest], Msg, MsgDefs, Acc) ->
+encode_2([#?gpb_field{occurrence=Occurrence}=Field | Rest], Msg, MsgDefs, Acc) ->
     EncodedField =
-        case {Field#?gpb_field.occurrence, is_packed(Field)} of
+        case {Occurrence, is_packed(Field)} of
             {repeated, true} ->
                 encode_packed(Field, Msg, MsgDefs);
             _ ->
                 encode_field(Field, Msg, MsgDefs)
         end,
     encode_2(Rest, Msg, MsgDefs, <<Acc/binary, EncodedField/binary>>);
+encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc) ->
+    case element(RNum, Msg) of
+        {Name, Value} ->
+            Field = lists:keyfind(Name, #?gpb_field.name, Fields),
+            NewAcc = encode_2([Field], setelement(RNum, Msg, Value), MsgDefs,
+                              Acc),
+            encode_2(Rest, Msg, MsgDefs, NewAcc);
+        undefined ->
+            encode_2(Rest, Msg, MsgDefs, Acc)
+    end;
 encode_2([], _Msg, _MsgDefs, Acc) ->
     Acc.
 
@@ -541,7 +598,22 @@ verify_fields(Msg, Fields, Path, MsgDefs) when tuple_size(Msg)
     lists:foreach(
       fun(#?gpb_field{name=Name, type=Type, rnum=RNum, occurrence=Occurrence}) ->
               Value = element(RNum, Msg),
-              verify_value(Value, Type, Occurrence, Path++[Name], MsgDefs)
+              verify_value(Value, Type, Occurrence, Path++[Name], MsgDefs);
+         (#gpb_oneof{name=Name, rnum=RNum, fields=OFields}) ->
+              case element(RNum, Msg) of
+                  {FName, Value} ->
+                      case lists:keyfind(FName, #?gpb_field.name, OFields) of
+                          #?gpb_field{type=Type} ->
+                              verify_value(Value, Type, optional, Path++[Name],
+                                           MsgDefs);
+                          false ->
+                              mk_type_error(bad_oneof_indicator, FName, Path)
+                      end;
+                  undefined ->
+                      ok;
+                  Other ->
+                      mk_type_error(bad_oneof_value, Other, Path)
+              end
       end,
       Fields);
 verify_fields(Msg, _Fields, Path, _MsgDefs) ->
@@ -670,19 +742,51 @@ proplists_to_defs_records(Defs) ->
      || Def <- Defs].
 
 field_records_to_proplists(Fields) when is_list(Fields) ->
-    [field_record_to_proplist(F) || F <- Fields].
+    [case F of
+         #?gpb_field{} -> field_record_to_proplist(F);
+         #gpb_oneof{}  -> oneof_record_to_proplist(F)
+     end
+     || F <- Fields].
 
 field_record_to_proplist(#?gpb_field{}=F) ->
     Names = record_info(fields, ?gpb_field),
     lists:zip(Names, tl(tuple_to_list(F))).
 
+oneof_record_to_proplist(#gpb_oneof{}=F) ->
+    Names = record_info(fields, gpb_oneof),
+    [if FName == fields -> {FName, field_records_to_proplists(FValue)};
+        FName /= fields -> {FName, FValue}
+     end
+     || {FName, FValue} <- lists:zip(Names, tl(tuple_to_list(F)))].
+
 proplists_to_field_records(PLs) ->
-    [proplist_to_field_record(PL) || PL <- PLs].
+    [case {is_field_pl(PL), is_oneof_pl(PL)} of
+         {true, false} -> proplist_to_field_record(PL);
+         {false, true} -> proplist_to_oneof_record(PL)
+     end
+     || PL <- PLs].
+
+is_field_pl(PL) -> are_all_fields_present(record_info(fields, ?gpb_field), PL).
+
+is_oneof_pl(PL) -> are_all_fields_present(record_info(fields, gpb_oneof), PL).
+
+are_all_fields_present(FNames, PL) ->
+    lists:all(fun(FName) -> lists:keymember(FName, 1, PL) end,
+              FNames).
 
 proplist_to_field_record(PL) when is_list(PL) ->
     Names = record_info(fields, ?gpb_field),
     RFields = [proplists:get_value(Name, PL) || Name <- Names],
     list_to_tuple([?gpb_field | RFields]).
+
+proplist_to_oneof_record(PL) when is_list(PL) ->
+    Names = record_info(fields, gpb_oneof),
+    RFields = [proplists:get_value(Name, PL) || Name <- Names],
+    list_to_tuple(
+      [gpb_oneof | [if N == fields -> proplists_to_field_records(V);
+                       N /= fields -> V
+                    end
+                    || {N, V} <- lists:zip(Names, RFields)]]).
 
 rpc_records_to_proplists(Rpcs) when is_list(Rpcs) ->
     [rpc_record_to_proplist(R) || R <- Rpcs].

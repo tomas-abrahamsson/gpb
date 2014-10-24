@@ -119,12 +119,19 @@ field_pass_as_params_test() ->
               "             repeated fixed32 f4 = 4 [packed];",
               "             repeated uint32  f5 = 5;",
               "             repeated uint32  f6 = 5 [packed];",
-              "             optional string  f7 = 7;"
-              "             optional m2      f8 = 8; }"],
+              "             optional string  f7 = 7;",
+              "             optional m2      f8 = 8;",
+              "             oneof o1 { m2     x1 = 15;",
+              "                        uint32 y1 = 16; };",
+              "             oneof o2 { m2     x2 = 25;",
+              "                        uint32 y2 = 26; }",
+              "             oneof o3 { m2     x3 = 35;",
+              "                        uint32 y3 = 36; }",
+              "}"],
     Msg = {m1, 4711, undefined,      %% f1,f2
            [4713,4714], [4715,4716], %% f3,f4
            [4717,4718], [4719,4720], %% f5,f6
-           "abc", {m2,33}},
+           "abc", {m2,33}, {x1,{m2,45}}, {y2,226}, undefined},
     lists:foreach(
       fun(Opts) ->
               ?assertMatch({Msg,_},
@@ -1058,6 +1065,7 @@ nif_compiles() ->
       end).
 
 nif_encode_decode() ->
+    ProtocCanOneof = check_protoc_can_do_oneof(),
     with_tmpdir(
       fun(TmpDir) ->
               NEDM = gpb_nif_test_ed1,
@@ -1068,6 +1076,7 @@ nif_encode_decode() ->
                 fun() ->
                         nif_encode_decode_test_it(NEDM, Defs),
                         nif_encode_decode_strings(NEDM, Defs),
+                        [nif_encode_decode_oneof(NEDM, Defs) || ProtocCanOneof],
                         ok
                 end)
       end).
@@ -1120,6 +1129,27 @@ nif_encode_decode_strings(NEDM, Defs) ->
                           ?assertEqual(OrigMsg, MGDecoded)
                   end,
                   CodePoints).
+
+nif_encode_decode_oneof(NEDM, Defs) ->
+    [#gpb_oneof{fields=OFields}] = [O || {{msg, oneof1}, [O]} <- Defs],
+    Alts = [{Name, mk_field_value(OF, Defs, small)}
+            || #?gpb_field{name=Name}=OF <- OFields] ++ [undefined],
+    lists:foreach(fun(Alt) ->
+                          OrigMsg = {oneof1, Alt},
+                          %% to avoid errors in nif encode/decode
+                          %% cancelling out each other and nif bugs go
+                          %% undetected, cross-check with gpb:encode/decode_msg
+                          MEncoded  = NEDM:encode_msg(OrigMsg),
+                          GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                          MMDecoded = NEDM:decode_msg(MEncoded, oneof1),
+                          GMDecoded = gpb:decode_msg(MEncoded, oneof1, Defs),
+                          MGDecoded = NEDM:decode_msg(GEncoded, oneof1),
+                          ?assertEqual(OrigMsg, MMDecoded),
+                          ?assertEqual(OrigMsg, GMDecoded),
+                          ?assertEqual(OrigMsg, MGDecoded)
+                  end,
+                  Alts).
+
 
 compile_msg_defs(M, MsgDefs, TmpDir) ->
     [NifCcPath, PbCcPath, NifOPath, PbOPath, NifSoPath, ProtoPath] = Files  =
@@ -1249,6 +1279,36 @@ find_protoc() ->
         Protoc -> Protoc
     end.
 
+check_protoc_can_do_oneof() ->
+    case get('$cached_check_protoc_can_do_oneof') of
+        undefined ->
+            CanIt =
+                case find_protoc_version() of
+                    {ok, Vsn} ->
+                        Vsn >= [2,6];  %% oneof appeared in 2.6.0
+                    {error, X} ->
+                        ?debugFmt("Trouble finding protoc version in ~s~n", [X]),
+                        false
+                end,
+            put('$cached_check_protoc_can_do_oneof', CanIt),
+            CanIt;
+        CanIt ->
+            CanIt
+    end.
+
+find_protoc_version() ->
+    Output = os:cmd(find_protoc() ++ " --version"),
+    find_protoc_version_aux(string:tokens(Output, " \t\r\n"), Output).
+
+find_protoc_version_aux(["libprotoc", VersionStr | _], All) ->
+    try {ok, [list_to_integer(X) || X <- string:tokens(VersionStr, ".")]}
+    catch error:badarg -> {error, {failed_to_interpret, VersionStr, All}}
+    end;
+find_protoc_version_aux([_ | Rest], All) ->
+    find_protoc_version_aux(Rest, All);
+find_protoc_version_aux([], All) ->
+    {error, {no_version_string_found, All}}.
+
 get_cflags() ->
     Root = code:root_dir(), %% e.g. /usr/lib/erlang
     CIncDir = filename:join([Root, "usr", "include"]),
@@ -1281,13 +1341,18 @@ format_enumerator({N,V}) ->
 
 format_field(#?gpb_field{name=FName, fnum=FNum, type=Type,
                          occurrence=Occurrence}) ->
-    TypeStr = case Type of
-                  {msg,Name2}  -> Name2;
-                  {enum,Name2} -> Name2;
-                  Type         -> Type
-              end,
-    f("  ~s ~s ~s = ~w;~n", [Occurrence, TypeStr, FName, FNum]).
+    f("  ~s ~s ~s = ~w;~n", [Occurrence, format_type(Type), FName, FNum]);
+format_field(#gpb_oneof{name=FName, fields=Fields}) ->
+    f("  oneof ~s {~n"
+      "~s"
+      "  };~n",
+      [FName,
+       [f("    ~s ~s = ~w;~n", [format_type(Type), OFName, FNum])
+        || #?gpb_field{name=OFName, fnum=FNum, type=Type} <- Fields]]).
 
+format_type({msg,Name})  -> Name;
+format_type({enum,Name}) -> Name;
+format_type(Type)        -> Type.
 
 ccompile(F, A) ->
     Cmd = f(F, A),
@@ -1305,38 +1370,44 @@ ccompile(F, A) ->
     end.
 
 mk_one_msg_field_of_each_type() ->
+    EachType   = [sint32, sint64, int32, int64, uint32,
+                  uint64, bool, fixed64, sfixed64,
+                  double, string, bytes, fixed32, sfixed32,
+                  float, {enum, ee}, {msg, submsg1}],
     EnumDef    = {{enum, ee}, [{en1, 1}, {en2, 2}]},
     SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], required)},
-    TopMsgDef1 = {{msg, topmsg1}, mk_fields_of_type(
-                                    [sint32, sint64, int32, int64, uint32,
-                                     uint64, bool, fixed64, sfixed64,
-                                     double, string, bytes, fixed32, sfixed32,
-                                     float, {enum, ee}, {msg, submsg1}],
-                                    required)},
-    TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(
-                                    [sint32, sint64, int32, int64, uint32,
-                                     uint64, bool, fixed64, sfixed64,
-                                     double, string, bytes, fixed32, sfixed32,
-                                     float, {enum, ee}, {msg, submsg1}],
-                                    repeated)},
-    TopMsgDef3 = {{msg, topmsg3}, mk_fields_of_type(
-                                    [sint32, sint64, int32, int64, uint32,
-                                     uint64, bool, fixed64, sfixed64,
-                                     double, string, bytes, fixed32, sfixed32,
-                                     float, {enum, ee}, {msg, submsg1}],
-                                    optional)},
+    TopMsgDef1 = {{msg, topmsg1}, mk_fields_of_type(EachType, required)},
+    TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(EachType, repeated)},
+    TopMsgDef3 = {{msg, topmsg3}, mk_fields_of_type(EachType, optional)},
+    OneofMsg1  = {{msg, oneof1},  mk_oneof_fields_of_type(EachType, 1)},
     StringMsg = {{msg,strmsg}, mk_fields_of_type([string], required)},
-    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3, StringMsg].
+    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3, StringMsg] ++
+     [OneofMsg1 || check_protoc_can_do_oneof()].
 
 mk_fields_of_type(Types, Occurrence) ->
     Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
-    [#?gpb_field{name=list_to_atom(lists:concat([f,integer_to_list(I)])),
+    [#?gpb_field{name=list_to_atom(lists:concat([f,I])),
                  rnum=I + 1,
                  fnum=I,
                  type=Type,
                  occurrence=Occurrence,
                  opts=[]}
-     || {I, Type} <- lists:zip(lists:seq(1,length(Types1)), Types1)].
+     || {I, Type} <- index_seq(Types1)].
+
+mk_oneof_fields_of_type(Types, Pos) ->
+    Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
+    [#gpb_oneof{
+        name   = o,
+        rnum   = Pos+1,
+        fields = [#?gpb_field{name=list_to_atom(lists:concat([f,I])),
+                              rnum=Pos+1,
+                              fnum=I,
+                              type=Type,
+                              occurrence=optional,
+                              opts=[]}
+                  || {I, Type} <- index_seq(Types1)]}].
+
+index_seq(L) -> lists:zip(lists:seq(1, length(L)), L).
 
 can_do_nif_type(Type) ->
     if Type == int64;
@@ -1374,7 +1445,11 @@ mk_msg(MsgName, Defs, Variant) ->
     R0 = erlang:make_tuple(length(Fields) + 1, undefined, [{1, MsgName}]),
     lists:foldl(fun(#?gpb_field{rnum=RNum}=Field, R) ->
                         Value = mk_field_value(Field, Defs, Variant),
-                        setelement(RNum, R, Value)
+                        setelement(RNum, R, Value);
+                   (#gpb_oneof{rnum=RNum, fields=[OField1 | _]}, R) ->
+                        #?gpb_field{name=Name} = OField1,
+                        Value = mk_field_value(OField1, Defs, Variant),
+                        setelement(RNum, R, {Name, Value})
                 end,
                 R0,
                 Fields).

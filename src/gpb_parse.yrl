@@ -25,11 +25,12 @@ Nonterminals
         enum_def enum_fields enum_field
         opt_enum_opts enum_opts enum_opt
         message_def msg_elems msg_elem
-        opt_field_opts field_opts field_opt cardinality type
+        opt_field_opts field_opts field_opt occurrence type
         package_def
         import_def
         identifiers
         extend_def extensions_def exts ext
+        oneof_def oneof_elems oneof_elem
         option_def
         service_def rpc_defs rpc_def m_opts
         name
@@ -51,6 +52,7 @@ Terminals
         import
         option
         extensions extend max to
+        oneof
         service rpc returns
         packed deprecated
         '.' ';' '(' ')' '{' '}' '[' ']' '=' ','
@@ -123,13 +125,13 @@ msg_elems -> msg_elem msg_elems:        ['$1' | '$2'].
 msg_elems -> ';' msg_elems:             '$2'.
 msg_elems -> '$empty':                  [].
 
-msg_elem -> cardinality type fidentifier '=' dec_lit ';':
+msg_elem -> occurrence type fidentifier '=' dec_lit ';':
                                         #?gpb_field{occurrence='$1',
                                                     type='$2',
                                                     name=identifier_name('$3'),
                                                     fnum=literal_value('$5'),
                                                     opts=[]}.
-msg_elem -> cardinality type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
+msg_elem -> occurrence type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
                                         #?gpb_field{occurrence='$1',
                                                     type='$2',
                                                     name=identifier_name('$3'),
@@ -138,6 +140,7 @@ msg_elem -> cardinality type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
 msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
 msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
+msg_elem -> oneof_def:                  '$1'.
 
 fidentifier -> identifier:              '$1'.
 fidentifier -> package:                 kw_to_identifier('$1').
@@ -190,9 +193,9 @@ field_opt -> deprecated '=' bool_lit:   {deprecated, literal_value('$3')}.
 field_opt -> name:                      {identifier_name('$1'), true}.
 field_opt -> name '=' constant:         {identifier_name('$1'), '$3'}.
 
-cardinality -> required:                required.
-cardinality -> optional:                optional.
-cardinality -> repeated:                repeated.
+occurrence -> required:                 required.
+occurrence -> optional:                 optional.
+occurrence -> repeated:                 repeated.
 
 type -> double:                         double.
 type -> float:                          float.
@@ -233,6 +236,26 @@ exts -> ext:                            ['$1'].
 ext -> integer:                         {'$1','$1'}.
 ext -> integer to integer:              {'$1','$3'}.
 ext -> integer to max:                  {'$1',max}.
+
+oneof_def -> 'oneof' identifier '{' oneof_elems '}':
+                                        #gpb_oneof{name=identifier_name('$2'),
+                                                   fields='$4'}.
+
+oneof_elems -> oneof_elem oneof_elems:  ['$1' | '$2'].
+oneof_elems -> oneof_elem:              ['$1'].
+
+oneof_elem -> type fidentifier '=' dec_lit ';':
+                                        #?gpb_field{occurrence=optional,
+                                                    type='$1',
+                                                    name=identifier_name('$2'),
+                                                    fnum=literal_value('$4'),
+                                                    opts=[]}.
+oneof_elem -> type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
+                                        #?gpb_field{occurrence=optional,
+                                                    type='$1',
+                                                    name=identifier_name('$2'),
+                                                    fnum=literal_value('$4'),
+                                                    opts='$6'}.
 
 extend_def -> extend identifier '{' msg_elems '}':
                                         {{extend,identifier_name('$2')},'$4'}.
@@ -381,6 +404,8 @@ flatten_fields(FieldsOrDefs, FullName) ->
     {RFields2, Defs2} =
         lists:foldl(fun(#?gpb_field{}=F, {Fs,Ds}) ->
                             {[F | Fs], Ds};
+                       (#gpb_oneof{}=O, {Fs,Ds}) ->
+                            {[O | Fs], Ds};
                        (Def, {Fs,Ds}) ->
                             QDefs = flatten_qualify_defnames([Def], FullName),
                             {Fs, QDefs++Ds}
@@ -424,7 +449,11 @@ resolve_field_refs(Fields, Defs, Root, FullName, Reasons) ->
                       {Field, [Reason | Acc]}
               end;
          (#?gpb_field{}=Field, Acc) ->
-              {Field, Acc}
+              {Field, Acc};
+         (#gpb_oneof{fields=OFields1}=Oneof, Acc) ->
+              {OFields2, Acc2} =
+                  resolve_field_refs(OFields1, Defs, Root, FullName, Acc),
+              {Oneof#gpb_oneof{fields=OFields2}, Acc2}
       end,
       Reasons,
       Fields).
@@ -568,6 +597,9 @@ verify_field_defaults({{msg,M}, Fields}, AllDefs) ->
                                   false ->
                                       ok
                               end,
+                        add_acc(Acc, Res);
+                   (#gpb_oneof{fields=OFields}, Acc) ->
+                        Res = verify_field_defaults({{msg,M},OFields}, AllDefs),
                         add_acc(Acc, Res)
                 end,
                 ok,
@@ -696,7 +728,9 @@ reformat_fields(Fields) ->
       fun(#?gpb_field{type={T,Nm}}=F) ->
               F#?gpb_field{type={T,reformat_name(Nm)}};
          (#?gpb_field{}=F) ->
-              F
+              F;
+         (#gpb_oneof{fields=Fs}=O) ->
+              O#gpb_oneof{fields=reformat_fields(Fs)}
       end,
       Fields).
 
@@ -741,7 +775,12 @@ enumerate_msg_fields(Defs) ->
               Defs).
 
 enumerate_fields(Fields) ->
-    lists:map(fun({I, #?gpb_field{}=F}) -> F#?gpb_field{rnum=I} end,
+    lists:map(fun({I, #?gpb_field{}=F}) ->
+                      F#?gpb_field{rnum=I};
+                 ({I, #gpb_oneof{fields=Fs}=O}) ->
+                      NewFields = [F#?gpb_field{rnum=I} || F <- Fs],
+                      O#gpb_oneof{rnum=I, fields=NewFields}
+              end,
               index_seq(2, Fields)).
 
 index_seq(_Start, []) -> [];
@@ -759,7 +798,9 @@ normalize_msg_field_options(Defs) ->
 normalize_field_options(Fields) ->
     lists:map(fun(#?gpb_field{opts=Opts}=F) ->
                       Opts1    = normalize_field_options_2(Opts),
-                      F#?gpb_field{opts = Opts1}
+                      F#?gpb_field{opts = Opts1};
+                 (#gpb_oneof{fields=Fs}=O) ->
+                      O#gpb_oneof{fields=normalize_field_options(Fs)}
               end,
               Fields).
 
