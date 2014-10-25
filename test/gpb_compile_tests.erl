@@ -596,7 +596,7 @@ only_enums_no_msgs_test() ->
     [e] = M:get_enum_names(),
     unload_code(M).
 
-%% --- Returning/reporting warnings/errors tests -----
+%% --- Returning/reporting warnings/errors (and warnings_as_errors) tests -----
 %% ... when compiling to file/binary/defs
 %% ... when compiling from file/defs
 %% ... when there are/aren't warnings/errors
@@ -607,25 +607,19 @@ report_or_return_warnings_or_errors_test_() ->
     {timeout,58,fun report_or_return_warnings_or_errors_test_aux/0}.
 
 report_or_return_warnings_or_errors_test_aux() ->
-    [rwre_go(Options, CompileTo, SrcType, SrcQuality)
-     || Options    <- [[report_warnings, report_errors],
-                       [report_warnings],
-                       [report_errors],
-                       [return_warnings, return_errors],
-                       [return_warnings],
-                       [return_errors],
-                       [report_warnings, return_errors],
-                       [return_warnings, report_errors],
-                       [return_warnings, report_warnings],
-                       [return_errors, report_errors],
-                       [return_warnings, report_warnings]
-                       ++ [return_errors, report_errors],
-                       []
-                      ],
-        CompileTo  <- [to_binary, to_file, to_proto_defs],
-        SrcType    <- [from_file, from_defs],
-        SrcQuality <- [clean_code, warningful_code, erroneous_code,
-                       write_fails],
+    [begin
+         Options = WarningOptions ++ ErrorOptions ++ WarnsAsErrsOpts,
+         rwre_go(Options, CompileTo, SrcType, SrcQuality)
+     end
+     || WarningOptions     <- [[], [report_warnings], [return_warnings],
+                               [report_warnings, return_warnings]],
+        ErrorOptions       <- [[], [report_errors], [return_errors],
+                               [report_errors, return_errors]],
+        WarnsAsErrsOpts    <- [[], [warnings_as_errors]],
+        CompileTo          <- [to_binary, to_file, to_proto_defs],
+        SrcType            <- [from_file, from_defs],
+        SrcQuality         <- [clean_code, warningful_code, erroneous_code,
+                               write_fails],
         %% Exclude a few combos
         not (SrcQuality == erroneous_code andalso SrcType == from_defs),
         not (SrcQuality == write_fails andalso CompileTo == to_binary),
@@ -643,9 +637,19 @@ rwre_go(Options, CompileTo, SrcType, SrcQuality) ->
                 Options, CompileTo, SrcType, SrcQuality),
     ok.
 
-compute_expected_return(Options, CompileTo, write_fails) ->
-    compute_expected_return(Options, CompileTo, erroneous_code);
-compute_expected_return(Options, to_file, SrcQuality) ->
+
+compute_expected_return(Options, CompileTo, SrcQuality) ->
+    WarnsAsErrs = proplists:get_bool(warnings_as_errors, Options),
+    WarnOpt = get_warning_opt_from_perspective_of_return(Options),
+    case {WarnsAsErrs, SrcQuality, WarnOpt} of
+        {true, warningful_code, return} -> {error, '_', non_empty_list};
+        {true, warningful_code, report} -> error;
+        _ -> compute_expected_return_normal_warns(Options, CompileTo, SrcQuality)
+    end.
+
+compute_expected_return_normal_warns(Options, CompileTo, write_fails) ->
+    compute_expected_return_normal_warns(Options, CompileTo, erroneous_code);
+compute_expected_return_normal_warns(Options, to_file, SrcQuality) ->
     WarnOpt = get_warning_opt_from_perspective_of_return(Options),
     ErrOpt = get_error_opt_from_perspective_of_return(Options),
     case {WarnOpt, ErrOpt, SrcQuality} of
@@ -662,7 +666,7 @@ compute_expected_return(Options, to_file, SrcQuality) ->
         {return, report, warningful_code} -> {ok, non_empty_list};
         {return, report, erroneous_code}  -> {error, '_', []}
     end;
-compute_expected_return(Options, to_binary, SrcQuality) ->
+compute_expected_return_normal_warns(Options, to_binary, SrcQuality) ->
     WarnOpt = get_warning_opt_from_perspective_of_return(Options),
     ErrOpt = get_error_opt_from_perspective_of_return(Options),
     case {WarnOpt, ErrOpt, SrcQuality} of
@@ -679,7 +683,7 @@ compute_expected_return(Options, to_binary, SrcQuality) ->
         {return, report, warningful_code} -> {ok, mod, binary, non_empty_list};
         {return, report, erroneous_code}  -> {error, '_', []}
     end;
-compute_expected_return(Options, to_proto_defs, SrcQuality) ->
+compute_expected_return_normal_warns(Options, to_proto_defs, SrcQuality) ->
     WarnOpt = get_warning_opt_from_perspective_of_return(Options),
     ErrOpt = get_error_opt_from_perspective_of_return(Options),
     case {WarnOpt, ErrOpt, SrcQuality} of
@@ -696,6 +700,7 @@ compute_expected_return(Options, to_proto_defs, SrcQuality) ->
         {return, report, warningful_code} -> {ok, non_empty_list,non_empty_list};
         {return, report, erroneous_code}  -> {error, '_', []}
     end.
+
 
 compute_expected_output(_Options, clean_code) ->
     "";

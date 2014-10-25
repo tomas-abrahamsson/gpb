@@ -76,8 +76,13 @@ file(File) ->
 %%                   {o_erl, directory()} | {o_hrl, directory()} |
 %%                   {o_nif_cc, directory()} |
 %%                   binary | to_proto_defs | to_msg_defs |
-%%                   return | return_warnings | return_errors |
-%%                   report | report_warnings | report_errors |
+%%                   return |
+%%                   return_warnings | return_errors |
+%%                   {return_warnings, boolean()} | {return_errors, boolean()} |
+%%                   report |
+%%                   report_warnings | report_errors |
+%%                   {report_warnings, boolean()} | {report_errors, boolean()} |
+%%                   warnings_as_errors |
 %%                   include_as_lib | use_packages |
 %%                   {msg_name_prefix, string() | atom()} |
 %%                   {msg_name_suffix, string() | atom()} |
@@ -87,7 +92,7 @@ file(File) ->
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
 %%                     {ok, ModuleName, Code, Warnings}
-%%            ErrRet = {error, Reason} | {error,Reason,Warnings}
+%%            ErrRet = error | {error, Reason} | {error,Reason,Warnings}
 %%            ModuleName  = atom()
 %%            Code = binary() | ErlAndNifCode
 %%            ErlAndNifCode = [CodeType]
@@ -237,6 +242,10 @@ file(File) ->
 %%       `return_warnings'.</dd>
 %% </dl>
 %%
+%% Setting the `warnings_as_errors' option will cause warnings to be
+%% treated as errors.  If there are warnings but no errors, and
+%% `return_warnings' is not specified, then `error' will be returned.
+%%
 %% See {@link format_error/1} for a way to turn an error <i>Reason</i> to
 %% plain text.
 %%
@@ -295,21 +304,28 @@ normalize_return_report_opts(Opts1) ->
     Opts5.
 
 expand_opt(OptionToTestFor, OptionsToExpandTo, Opts) ->
-    case proplists:get_bool(OptionToTestFor, Opts) of
-        true  -> OptionsToExpandTo ++ delete_bool_opt(OptionToTestFor, Opts);
-        false -> Opts
-    end.
+    lists:append(
+      lists:map(fun(Opt) when Opt == OptionToTestFor -> OptionsToExpandTo;
+                   (Opt) -> [Opt]
+                end,
+                Opts)).
 
 delete_bool_opt(OptToDelete, Opts) ->
     %% Boolean opts can be defined both as [opt] and as [{opt, true|false}],
     %% delete both type of occurrences.
     lists:keydelete(OptToDelete, 1, Opts -- [OptToDelete]).
 
-unless_defined_set(OptionToTestFor, OptionToSet, Opts) ->
-    case proplists:get_bool(OptionToTestFor, Opts) of
+unless_defined_set(OptionToTestFor, Default, Opts) ->
+    case is_option_defined(OptionToTestFor, Opts) of
         true  -> Opts;
-        false -> [OptionToSet | Opts]
+        false -> Opts ++ [Default]
     end.
+
+is_option_defined(Key, Opts) ->
+    lists:any(fun({K, _V}) -> K =:= Key;
+                 (K)       -> K =:= Key
+              end,
+              Opts).
 
 possibly_prefix_mod(BaseNameNoExt, Opts) ->
     case proplists:get_value(module_name_prefix, Opts) of
@@ -457,15 +473,37 @@ possibly_report_error(Res, Opts) ->
 return_warnings_or_errors(Res, Opts) ->
     case proplists:get_bool(return_warnings, Opts) of
         true ->
-            Res;
+            case proplists:get_bool(warnings_as_errors, Opts) of
+                true  -> turn_warnings_to_errors_keep(Res);
+                false -> Res
+            end;
         false ->
-            case Res of
-                {ok, Mod, Bin, _Warns} -> {ok, Mod, Bin};
-                {ok, MsgDefs, _Warns}  -> {ok, MsgDefs};
-                {ok, _Warns}           -> ok;
-                {error, R, _Warns}     -> {error, R}
+            case proplists:get_bool(warnings_as_errors, Opts) of
+                true  -> turn_warnings_to_errors_remove(Res);
+                false -> remove_warnings_from_res(Res)
             end
     end.
+
+turn_warnings_to_errors_keep({ok, _Mod, _Bin, []}=Res) -> Res;
+turn_warnings_to_errors_keep({ok, _MsgDefs, []}=Res)   -> Res;
+turn_warnings_to_errors_keep({ok, []}=Res)             -> Res;
+turn_warnings_to_errors_keep({ok, _Mod, _Bin, Warns})  -> {error, [], Warns};
+turn_warnings_to_errors_keep({ok, _MsgDefs, Warns})    -> {error, [], Warns};
+turn_warnings_to_errors_keep({ok, Warns})              -> {error, [], Warns};
+turn_warnings_to_errors_keep({error, R, Warns})        -> {error, R, Warns}.
+
+turn_warnings_to_errors_remove({ok, Mod, Bin, []})       -> {ok, Mod, Bin};
+turn_warnings_to_errors_remove({ok, MsgDefs, []})        -> {ok, MsgDefs};
+turn_warnings_to_errors_remove({ok, []})                 -> ok;
+turn_warnings_to_errors_remove({ok, _Mod, _Bin, _Warns}) -> error;
+turn_warnings_to_errors_remove({ok, _MsgDefs, _Warns})   -> error;
+turn_warnings_to_errors_remove({ok, _Warns})             -> error;
+turn_warnings_to_errors_remove({error, R, _Warns})       -> {error, R}.
+
+remove_warnings_from_res({ok, Mod, Bin, _Warns}) -> {ok, Mod, Bin};
+remove_warnings_from_res({ok, MsgDefs, _Warns})  -> {ok, MsgDefs};
+remove_warnings_from_res({ok, _Warns})           -> ok;
+remove_warnings_from_res({error, R, _Warns})     -> {error, R}.
 
 get_output_format([binary | _])                -> binary;
 get_output_format([{binary, true} | _])        -> binary;
