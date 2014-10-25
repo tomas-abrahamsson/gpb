@@ -687,89 +687,88 @@ c([F | _]=Files) when is_atom(F); is_list(F) -> %% invoked with -s or -run
 
 opt_specs() ->
     [
-        {"I", string_maybe_appended, i, "\n"
-            "       Specify include directory.\n"
-            "       Option may be specified more than once to specify\n"
-            "       several include directories.\n"},
-        {"o", string, o, "Dir\n"
-            "       Specify output directory for where to generate\n"
-            "       the <ProtoFile>.erl and <ProtoFile>.hrl\n"},
-        {"o-erl", string, o_erl, "Dir\n"
-            "       Specify output directory for where to generate\n"
-            "       the <ProtoFile>.erl.\n"
-            "       The -o-erl Dir option overrides any -o Dir option, and\n"
-            "       similarly for the other file-type specific output options.\n"},
-        {"o-hrl", string, o_hrl, "Dir\n"
-            "       Specify output directory for where to generate\n"
-            "       the <ProtoFile>.hrl\n"},
-        {"o-nif-cc", string, o_nif_cc, "Dir\n"
-            "       Specify output directory for where to generate\n"
-            "       the NIF C++ file, if the -nif option is specified\n"},
-        {"nif", undefined, nif, "\n"
-            "       Generate nifs for linking with the protobuf C(++) library.\n"},
-        {"load_nif", string, load_nif, "FunctionDefinition\n"
-            "       Specify FunctionDefinition as the text that defines the\n"
-            "       function load_nif/0.  This is called as the -on_load.\n"
-            "       hook for loading the NIF.\n"},
-        {"v", {optionally, always, never}, verify, " optionally | always | never\n"
-            "       Specify how the generated encoder should\n"
-            "       verify the message to be encoded.\n"},
-        {"c", {true, false, auto, integer, float}, copy_bytes,
-            " true | false | auto | number() \n"
-            "       Specify how or when the generated decoder should\n"
-            "       copy fields of type bytes.\n"},
-        {"strbin", undefined, strings_as_binaries, "\n"
-            "       Specify that decoded strings should be returend as binaries,\n"
-            "       instead of as strings (lists).\n"},
-        {"pldefs", undefined, defs_as_proplists, "\n"
-            "       Specify that introspection functions shall return proplists\n"
-            "       instead of #field{} records, to make the generated code\n"
-            "       completely free of even compile-time dependencies to gpb.\n"},
-        {"msgprefix", string, msg_name_prefix, "Prefix\n"
-            "       Prefix each message with Prefix.\n"},
-        {"modprefix", string, module_name_prefix, "Prefix\n"
-            "       Prefix the module name with Prefix.\n"},
-        {"msgsuffix", string, msg_name_suffix, "Suffix\n"
-            "       Suffix each message with Suffix.\n"},
-        {"modsuffix", string, module_name_suffix, "Suffix\n"
-            "       Suffix the module name with Suffix.\n"},
-        {"il", undefined, include_as_lib, "\n"
-            "       Generate code that includes gpb.hrl using -include_lib\n"
-            "       instead of -include, which is the default.\n"},
-        {"type", undefined, type_specs, "\n"
-            "       Enables `::Type()' annotations in the generated .hrl file.\n"},
-        {"descr", undefined, descriptor, "\n"
-            "       Generate self-description information.\n"},
-        {"maps", undefined, maps, "\n"
-            "       Generate code that will accept and produce maps instead of\n"
-            "       records.\n"},
-        {"h", undefined, help, "\n"
-            "       Show help\n"},
-        {"-help", undefined, help, "\n"
-            "       Show help\n"},
-        {"V", undefined, version, "\n"
-            "       Show version\n"},
-        {"-version", undefined, version, "\n"
-            "       Show version\n"}
+     {"I", string_maybe_appended, i, "\n"
+      "       Specify include directory.\n"
+      "       Option may be specified more than once to specify\n"
+      "       several include directories.\n"},
+     {"o", string, o, "Dir\n"
+      "       Specify output directory for where to generate\n"
+      "       the <ProtoFile>.erl and <ProtoFile>.hrl\n"},
+     {"o-erl", string, o_erl, "Dir\n"
+      "       Specify output directory for where to generate\n"
+      "       the <ProtoFile>.erl.\n"
+      "       The -o-erl Dir option overrides any -o Dir option, and\n"
+      "       similarly for the other file-type specific output options.\n"},
+     {"o-hrl", string, o_hrl, "Dir\n"
+      "       Specify output directory for where to generate\n"
+      "       the <ProtoFile>.hrl\n"},
+     {"o-nif-cc", string, o_nif_cc, "Dir\n"
+      "       Specify output directory for where to generate\n"
+      "       the NIF C++ file, if the -nif option is specified\n"},
+     {"nif", undefined, nif, "\n"
+      "       Generate nifs for linking with the protobuf C(++) library.\n"},
+     {"load_nif", string, load_nif, "FunctionDefinition\n"
+      "       Specify FunctionDefinition as the text that defines the\n"
+      "       function load_nif/0.  This is called as the -on_load.\n"
+      "       hook for loading the NIF.\n"},
+     {"v", {optionally, always, never}, verify, " optionally | always | never\n"
+      "       Specify how the generated encoder should\n"
+      "       verify the message to be encoded.\n"},
+     {"c", {true, false, auto, integer, float}, copy_bytes,
+      " true | false | auto | number() \n"
+      "       Specify how or when the generated decoder should\n"
+      "       copy fields of type bytes.\n"},
+     {"strbin", undefined, strings_as_binaries, "\n"
+      "       Specify that decoded strings should be returend as binaries,\n"
+      "       instead of as strings (lists).\n"},
+     {"pldefs", undefined, defs_as_proplists, "\n"
+      "       Specify that introspection functions shall return proplists\n"
+      "       instead of #field{} records, to make the generated code\n"
+      "       completely free of even compile-time dependencies to gpb.\n"},
+     {"msgprefix", string, msg_name_prefix, "Prefix\n"
+      "       Prefix each message with Prefix.\n"},
+     {"modprefix", string, module_name_prefix, "Prefix\n"
+      "       Prefix the module name with Prefix.\n"},
+     {"msgsuffix", string, msg_name_suffix, "Suffix\n"
+      "       Suffix each message with Suffix.\n"},
+     {"modsuffix", string, module_name_suffix, "Suffix\n"
+      "       Suffix the module name with Suffix.\n"},
+     {"il", undefined, include_as_lib, "\n"
+      "       Generate code that includes gpb.hrl using -include_lib\n"
+      "       instead of -include, which is the default.\n"},
+     {"type", undefined, type_specs, "\n"
+      "       Enables `::Type()' annotations in the generated .hrl file.\n"},
+     {"descr", undefined, descriptor, "\n"
+      "       Generate self-description information.\n"},
+     {"maps", undefined, maps, "\n"
+      "       Generate code that will accept and produce maps instead of\n"
+      "       records.\n"},
+     {"h", undefined, help, "\n"
+      "       Show help\n"},
+     {"-help", undefined, help, "\n"
+      "       Show help\n"},
+     {"V", undefined, version, "\n"
+      "       Show version\n"},
+     {"-version", undefined, version, "\n"
+      "       Show version\n"}
     ].
 
 find_opt_spec(Opt) ->
-  lists:filter(fun({OptDef, OptType, _, _}) ->
-                % the type of comparison depends on the opt spec type
-                case OptType of
-                    % if the opt arg may be appended to the option
-                    % (ie. -Iinclude1)
-                    string_maybe_appended ->
-                        case re:run(Opt, "^"++OptDef) of
-                            {match, _} ->
-                                true;
-                            nomatch -> false
-                        end;
-                    % for the other cases an exact match is required
-                    _ ->
-                        Opt == OptDef
-                  end
-               end, opt_specs()).
+    lists:filter(fun({OptDef, OptType, _, _}) ->
+                         %% the type of comparison depends on the opt spec type
+                         case OptType of
+                             %% if the opt arg may be appended to the option
+                             %% (ie. -Iinclude1)
+                             string_maybe_appended ->
+                                 case re:run(Opt, "^"++OptDef) of
+                                     {match, _} -> true;
+                                     nomatch -> false
+                                 end;
+                             %% for the other cases an exact match is required
+                             _ ->
+                                 Opt == OptDef
+                         end
+                 end, opt_specs()).
 
 determine_cmdline_op(Opts, FileName) ->
     Help = lists:member(help, Opts) orelse
@@ -817,36 +816,36 @@ parse_opt({Opt, OptArg}) ->
     parse_opt_spec(find_opt_spec(Opt), Opt, OptArg).
 
 parse_opt_spec([{OptDef, string_maybe_appended, OptErl, _}], Opt, OptArg) ->
-    % now check what is the form, <Option> <OptArg> (ie. I include)
-    % or <Option><OptArg> (ie. Iinclude)
+    %% now check what is the form, <Option> <OptArg> (ie. I include)
+    %% or <Option><OptArg> (ie. Iinclude)
     case Opt == OptDef of
         true ->
             [OptArg2] = OptArg,
             {true, {OptErl, OptArg2}};
         false ->
-            % if of the form <Option><OptArg> (ie. Iinclude), must subtract
-            % OptDef from Opt to obtain OptArg
+            %% if of the form <Option><OptArg> (ie. Iinclude), must subtract
+            %% OptDef from Opt to obtain OptArg
             {true, {OptErl, Opt -- OptDef}}
     end;
-% opt spec undefined means that the option has no arg
+%% opt spec undefined means that the option has no arg
 parse_opt_spec([{_, undefined, OptErl, _}], _, _) ->
     {true, OptErl};
-% opt spec with tuples as types means they are restricted to a set of
-% possible values
+%% opt spec with tuples as types means they are restricted to a set of
+%% possible values
 parse_opt_spec([{_, OptType, OptErl, _}], _, [OptArg]) when is_tuple(OptType) ->
     case lists:member(list_to_atom(OptArg), tuple_to_list(OptType)) of
         true -> {true, {OptErl, list_to_atom(OptArg)}};
-        % opt arg does not belong in the tuple, however it could be a number
+        %% opt arg does not belong in the tuple, however it could be a number
         false ->
             case string_to_number(OptArg) of
                 {ok, OptNum} -> {true, {OptErl, OptNum}};
                 error     -> false
             end
     end;
-% standard opt spec with arg
+%% standard opt spec with arg
 parse_opt_spec([{_, _, OptErl, _}], _, [OptArg]) ->
     {true, {OptErl, OptArg}};
-% not a valid option
+%% not a valid option
 parse_opt_spec([], _, _) ->
     false.
 
