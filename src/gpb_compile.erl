@@ -76,8 +76,13 @@ file(File) ->
 %%                   {o_erl, directory()} | {o_hrl, directory()} |
 %%                   {o_nif_cc, directory()} |
 %%                   binary | to_proto_defs | to_msg_defs |
-%%                   return | return_warnings | return_errors |
-%%                   report | report_warnings | report_errors |
+%%                   return |
+%%                   return_warnings | return_errors |
+%%                   {return_warnings, boolean()} | {return_errors, boolean()} |
+%%                   report |
+%%                   report_warnings | report_errors |
+%%                   {report_warnings, boolean()} | {report_errors, boolean()} |
+%%                   warnings_as_errors |
 %%                   include_as_lib | use_packages |
 %%                   {msg_name_prefix, string() | atom()} |
 %%                   {msg_name_suffix, string() | atom()} |
@@ -87,7 +92,7 @@ file(File) ->
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
 %%                     {ok, ModuleName, Code, Warnings}
-%%            ErrRet = {error, Reason} | {error,Reason,Warnings}
+%%            ErrRet = error | {error, Reason} | {error,Reason,Warnings}
 %%            ModuleName  = atom()
 %%            Code = binary() | ErlAndNifCode
 %%            ErlAndNifCode = [CodeType]
@@ -237,6 +242,10 @@ file(File) ->
 %%       `return_warnings'.</dd>
 %% </dl>
 %%
+%% Setting the `warnings_as_errors' option will cause warnings to be
+%% treated as errors.  If there are warnings but no errors, and
+%% `return_warnings' is not specified, then `error' will be returned.
+%%
 %% See {@link format_error/1} for a way to turn an error <i>Reason</i> to
 %% plain text.
 %%
@@ -295,21 +304,28 @@ normalize_return_report_opts(Opts1) ->
     Opts5.
 
 expand_opt(OptionToTestFor, OptionsToExpandTo, Opts) ->
-    case proplists:get_bool(OptionToTestFor, Opts) of
-        true  -> OptionsToExpandTo ++ delete_bool_opt(OptionToTestFor, Opts);
-        false -> Opts
-    end.
+    lists:append(
+      lists:map(fun(Opt) when Opt == OptionToTestFor -> OptionsToExpandTo;
+                   (Opt) -> [Opt]
+                end,
+                Opts)).
 
 delete_bool_opt(OptToDelete, Opts) ->
     %% Boolean opts can be defined both as [opt] and as [{opt, true|false}],
     %% delete both type of occurrences.
     lists:keydelete(OptToDelete, 1, Opts -- [OptToDelete]).
 
-unless_defined_set(OptionToTestFor, OptionToSet, Opts) ->
-    case proplists:get_bool(OptionToTestFor, Opts) of
+unless_defined_set(OptionToTestFor, Default, Opts) ->
+    case is_option_defined(OptionToTestFor, Opts) of
         true  -> Opts;
-        false -> [OptionToSet | Opts]
+        false -> Opts ++ [Default]
     end.
+
+is_option_defined(Key, Opts) ->
+    lists:any(fun({K, _V}) -> K =:= Key;
+                 (K)       -> K =:= Key
+              end,
+              Opts).
 
 possibly_prefix_mod(BaseNameNoExt, Opts) ->
     case proplists:get_value(module_name_prefix, Opts) of
@@ -457,15 +473,37 @@ possibly_report_error(Res, Opts) ->
 return_warnings_or_errors(Res, Opts) ->
     case proplists:get_bool(return_warnings, Opts) of
         true ->
-            Res;
+            case proplists:get_bool(warnings_as_errors, Opts) of
+                true  -> turn_warnings_to_errors_keep(Res);
+                false -> Res
+            end;
         false ->
-            case Res of
-                {ok, Mod, Bin, _Warns} -> {ok, Mod, Bin};
-                {ok, MsgDefs, _Warns}  -> {ok, MsgDefs};
-                {ok, _Warns}           -> ok;
-                {error, R, _Warns}     -> {error, R}
+            case proplists:get_bool(warnings_as_errors, Opts) of
+                true  -> turn_warnings_to_errors_remove(Res);
+                false -> remove_warnings_from_res(Res)
             end
     end.
+
+turn_warnings_to_errors_keep({ok, _Mod, _Bin, []}=Res) -> Res;
+turn_warnings_to_errors_keep({ok, _MsgDefs, []}=Res)   -> Res;
+turn_warnings_to_errors_keep({ok, []}=Res)             -> Res;
+turn_warnings_to_errors_keep({ok, _Mod, _Bin, Warns})  -> {error, [], Warns};
+turn_warnings_to_errors_keep({ok, _MsgDefs, Warns})    -> {error, [], Warns};
+turn_warnings_to_errors_keep({ok, Warns})              -> {error, [], Warns};
+turn_warnings_to_errors_keep({error, R, Warns})        -> {error, R, Warns}.
+
+turn_warnings_to_errors_remove({ok, Mod, Bin, []})       -> {ok, Mod, Bin};
+turn_warnings_to_errors_remove({ok, MsgDefs, []})        -> {ok, MsgDefs};
+turn_warnings_to_errors_remove({ok, []})                 -> ok;
+turn_warnings_to_errors_remove({ok, _Mod, _Bin, _Warns}) -> error;
+turn_warnings_to_errors_remove({ok, _MsgDefs, _Warns})   -> error;
+turn_warnings_to_errors_remove({ok, _Warns})             -> error;
+turn_warnings_to_errors_remove({error, R, _Warns})       -> {error, R}.
+
+remove_warnings_from_res({ok, Mod, Bin, _Warns}) -> {ok, Mod, Bin};
+remove_warnings_from_res({ok, MsgDefs, _Warns})  -> {ok, MsgDefs};
+remove_warnings_from_res({ok, _Warns})           -> ok;
+remove_warnings_from_res({error, R, _Warns})     -> {error, R}.
 
 get_output_format([binary | _])                -> binary;
 get_output_format([{binary, true} | _])        -> binary;
@@ -607,6 +645,10 @@ c() ->
 %%   <dd>Generate code that will accept and produce maps instead of
 %%       records. No .hrl file will be generated. See the `maps' option
 %%       for the function {@link file/2} for more info.</dd>
+%%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
+%%   <dd>`-Werror' means treat warnings as errors<br></br>
+%%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
+%%       `-W' and `-Wall' are the same as `-W1'</dd>
 %%   <dt>`--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
 %%   <dt>`--version' or `-V'</dt>
@@ -649,89 +691,98 @@ c([F | _]=Files) when is_atom(F); is_list(F) -> %% invoked with -s or -run
 
 opt_specs() ->
     [
-        {"I", string_maybe_appended, i, "\n"
-            "       Specify include directory.\n"
-            "       Option may be specified more than once to specify\n"
-            "       several include directories.\n"},
-        {"o", string, o, "Dir\n"
-            "       Specify output directory for where to generate\n"
-            "       the <ProtoFile>.erl and <ProtoFile>.hrl\n"},
-        {"o-erl", string, o_erl, "Dir\n"
-            "       Specify output directory for where to generate\n"
-            "       the <ProtoFile>.erl.\n"
-            "       The -o-erl Dir option overrides any -o Dir option, and\n"
-            "       similarly for the other file-type specific output options.\n"},
-        {"o-hrl", string, o_hrl, "Dir\n"
-            "       Specify output directory for where to generate\n"
-            "       the <ProtoFile>.hrl\n"},
-        {"o-nif-cc", string, o_nif_cc, "Dir\n"
-            "       Specify output directory for where to generate\n"
-            "       the NIF C++ file, if the -nif option is specified\n"},
-        {"nif", undefined, nif, "\n"
-            "       Generate nifs for linking with the protobuf C(++) library.\n"},
-        {"load_nif", string, load_nif, "FunctionDefinition\n"
-            "       Specify FunctionDefinition as the text that defines the\n"
-            "       function load_nif/0.  This is called as the -on_load.\n"
-            "       hook for loading the NIF.\n"},
-        {"v", {optionally, always, never}, verify, " optionally | always | never\n"
-            "       Specify how the generated encoder should\n"
-            "       verify the message to be encoded.\n"},
-        {"c", {true, false, auto, integer, float}, copy_bytes,
-            " true | false | auto | number() \n"
-            "       Specify how or when the generated decoder should\n"
-            "       copy fields of type bytes.\n"},
-        {"strbin", undefined, strings_as_binaries, "\n"
-            "       Specify that decoded strings should be returend as binaries,\n"
-            "       instead of as strings (lists).\n"},
-        {"pldefs", undefined, defs_as_proplists, "\n"
-            "       Specify that introspection functions shall return proplists\n"
-            "       instead of #field{} records, to make the generated code\n"
-            "       completely free of even compile-time dependencies to gpb.\n"},
-        {"msgprefix", string, msg_name_prefix, "Prefix\n"
-            "       Prefix each message with Prefix.\n"},
-        {"modprefix", string, module_name_prefix, "Prefix\n"
-            "       Prefix the module name with Prefix.\n"},
-        {"msgsuffix", string, msg_name_suffix, "Suffix\n"
-            "       Suffix each message with Suffix.\n"},
-        {"modsuffix", string, module_name_suffix, "Suffix\n"
-            "       Suffix the module name with Suffix.\n"},
-        {"il", undefined, include_as_lib, "\n"
-            "       Generate code that includes gpb.hrl using -include_lib\n"
-            "       instead of -include, which is the default.\n"},
-        {"type", undefined, type_specs, "\n"
-            "       Enables `::Type()' annotations in the generated .hrl file.\n"},
-        {"descr", undefined, descriptor, "\n"
-            "       Generate self-description information.\n"},
-        {"maps", undefined, maps, "\n"
-            "       Generate code that will accept and produce maps instead of\n"
-            "       records.\n"},
-        {"h", undefined, help, "\n"
-            "       Show help\n"},
-        {"-help", undefined, help, "\n"
-            "       Show help\n"},
-        {"V", undefined, version, "\n"
-            "       Show version\n"},
-        {"-version", undefined, version, "\n"
-            "       Show version\n"}
+     {"I", string_maybe_appended, i, "\n"
+      "       Specify include directory.\n"
+      "       Option may be specified more than once to specify\n"
+      "       several include directories.\n"},
+     {"o", string, o, "Dir\n"
+      "       Specify output directory for where to generate\n"
+      "       the <ProtoFile>.erl and <ProtoFile>.hrl\n"},
+     {"o-erl", string, o_erl, "Dir\n"
+      "       Specify output directory for where to generate\n"
+      "       the <ProtoFile>.erl.\n"
+      "       The -o-erl Dir option overrides any -o Dir option, and\n"
+      "       similarly for the other file-type specific output options.\n"},
+     {"o-hrl", string, o_hrl, "Dir\n"
+      "       Specify output directory for where to generate\n"
+      "       the <ProtoFile>.hrl\n"},
+     {"o-nif-cc", string, o_nif_cc, "Dir\n"
+      "       Specify output directory for where to generate\n"
+      "       the NIF C++ file, if the -nif option is specified\n"},
+     {"nif", undefined, nif, "\n"
+      "       Generate nifs for linking with the protobuf C(++) library.\n"},
+     {"load_nif", string, load_nif, "FunctionDefinition\n"
+      "       Specify FunctionDefinition as the text that defines the\n"
+      "       function load_nif/0.  This is called as the -on_load.\n"
+      "       hook for loading the NIF.\n"},
+     {"v", {optionally, always, never}, verify, " optionally | always | never\n"
+      "       Specify how the generated encoder should\n"
+      "       verify the message to be encoded.\n"},
+     {"c", {true, false, auto, integer, float}, copy_bytes,
+      " true | false | auto | number() \n"
+      "       Specify how or when the generated decoder should\n"
+      "       copy fields of type bytes.\n"},
+     {"strbin", undefined, strings_as_binaries, "\n"
+      "       Specify that decoded strings should be returend as binaries,\n"
+      "       instead of as strings (lists).\n"},
+     {"pldefs", undefined, defs_as_proplists, "\n"
+      "       Specify that introspection functions shall return proplists\n"
+      "       instead of #field{} records, to make the generated code\n"
+      "       completely free of even compile-time dependencies to gpb.\n"},
+     {"msgprefix", string, msg_name_prefix, "Prefix\n"
+      "       Prefix each message with Prefix.\n"},
+     {"modprefix", string, module_name_prefix, "Prefix\n"
+      "       Prefix the module name with Prefix.\n"},
+     {"msgsuffix", string, msg_name_suffix, "Suffix\n"
+      "       Suffix each message with Suffix.\n"},
+     {"modsuffix", string, module_name_suffix, "Suffix\n"
+      "       Suffix the module name with Suffix.\n"},
+     {"il", undefined, include_as_lib, "\n"
+      "       Generate code that includes gpb.hrl using -include_lib\n"
+      "       instead of -include, which is the default.\n"},
+     {"type", undefined, type_specs, "\n"
+      "       Enables `::Type()' annotations in the generated .hrl file.\n"},
+     {"descr", undefined, descriptor, "\n"
+      "       Generate self-description information.\n"},
+     {"maps", undefined, maps, "\n"
+      "       Generate code that will accept and produce maps instead of\n"
+      "       records.\n"},
+     {"Werror",undefined, warnings_as_errors, "\n"
+      "       Treat warnings as errors\n"},
+     {"W1", undefined, report_warnings, "\n"
+      "       Report warnings\n"},
+     {"W0", undefined, {report_warnings,false}, "\n"
+      "       Do not report warnings\n"},
+     {"Wall", undefined, report_warnings, "\n"
+      "       Same as -W1\n"},
+     {"W", undefined, report_warnings, "\n"
+      "       Same as -W1\n"},
+     {"h", undefined, help, "\n"
+      "       Show help\n"},
+     {"-help", undefined, help, "\n"
+      "       Show help\n"},
+     {"V", undefined, version, "\n"
+      "       Show version\n"},
+     {"-version", undefined, version, "\n"
+      "       Show version\n"}
     ].
 
 find_opt_spec(Opt) ->
-  lists:filter(fun({OptDef, OptType, _, _}) ->
-                % the type of comparison depends on the opt spec type
-                case OptType of
-                    % if the opt arg may be appended to the option
-                    % (ie. -Iinclude1)
-                    string_maybe_appended ->
-                        case re:run(Opt, "^"++OptDef) of
-                            {match, _} ->
-                                true;
-                            nomatch -> false
-                        end;
-                    % for the other cases an exact match is required
-                    _ ->
-                        Opt == OptDef
-                  end
-               end, opt_specs()).
+    lists:filter(fun({OptDef, OptType, _, _}) ->
+                         %% the type of comparison depends on the opt spec type
+                         case OptType of
+                             %% if the opt arg may be appended to the option
+                             %% (ie. -Iinclude1)
+                             string_maybe_appended ->
+                                 case re:run(Opt, "^"++OptDef) of
+                                     {match, _} -> true;
+                                     nomatch -> false
+                                 end;
+                             %% for the other cases an exact match is required
+                             _ ->
+                                 Opt == OptDef
+                         end
+                 end, opt_specs()).
 
 determine_cmdline_op(Opts, FileName) ->
     Help = lists:member(help, Opts) orelse
@@ -779,36 +830,36 @@ parse_opt({Opt, OptArg}) ->
     parse_opt_spec(find_opt_spec(Opt), Opt, OptArg).
 
 parse_opt_spec([{OptDef, string_maybe_appended, OptErl, _}], Opt, OptArg) ->
-    % now check what is the form, <Option> <OptArg> (ie. I include)
-    % or <Option><OptArg> (ie. Iinclude)
+    %% now check what is the form, <Option> <OptArg> (ie. I include)
+    %% or <Option><OptArg> (ie. Iinclude)
     case Opt == OptDef of
         true ->
             [OptArg2] = OptArg,
             {true, {OptErl, OptArg2}};
         false ->
-            % if of the form <Option><OptArg> (ie. Iinclude), must subtract
-            % OptDef from Opt to obtain OptArg
+            %% if of the form <Option><OptArg> (ie. Iinclude), must subtract
+            %% OptDef from Opt to obtain OptArg
             {true, {OptErl, Opt -- OptDef}}
     end;
-% opt spec undefined means that the option has no arg
+%% opt spec undefined means that the option has no arg
 parse_opt_spec([{_, undefined, OptErl, _}], _, _) ->
     {true, OptErl};
-% opt spec with tuples as types means they are restricted to a set of
-% possible values
+%% opt spec with tuples as types means they are restricted to a set of
+%% possible values
 parse_opt_spec([{_, OptType, OptErl, _}], _, [OptArg]) when is_tuple(OptType) ->
     case lists:member(list_to_atom(OptArg), tuple_to_list(OptType)) of
         true -> {true, {OptErl, list_to_atom(OptArg)}};
-        % opt arg does not belong in the tuple, however it could be a number
+        %% opt arg does not belong in the tuple, however it could be a number
         false ->
             case string_to_number(OptArg) of
                 {ok, OptNum} -> {true, {OptErl, OptNum}};
                 error     -> false
             end
     end;
-% standard opt spec with arg
+%% standard opt spec with arg
 parse_opt_spec([{_, _, OptErl, _}], _, [OptArg]) ->
     {true, {OptErl, OptArg}};
-% not a valid option
+%% not a valid option
 parse_opt_spec([], _, _) ->
     false.
 
