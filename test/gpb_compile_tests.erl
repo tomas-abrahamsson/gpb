@@ -596,13 +596,14 @@ only_enums_no_msgs_test() ->
     [e] = M:get_enum_names(),
     unload_code(M).
 
-%% --- Returning/reporting warnings/errors tests ----------
-%% ... when compiling to file/binary
+%% --- Returning/reporting warnings/errors tests -----
+%% ... when compiling to file/binary/defs
+%% ... when compiling from file/defs
 %% ... when there are/aren't warnings/errors
 
 report_or_return_warnings_or_errors_test_() ->
-    %% Without increased timeout, this test sometimes times
-    %% out on my slow machine (1.6 GHz Atom N270)
+    %% Without increased timeout, this test sometimes times out
+    %% on my slow machine (1.6 GHz Atom N270)
     {timeout,58,fun report_or_return_warnings_or_errors_test_aux/0}.
 
 report_or_return_warnings_or_errors_test_aux() ->
@@ -615,6 +616,10 @@ report_or_return_warnings_or_errors_test_aux() ->
                        [return_errors],
                        [report_warnings, return_errors],
                        [return_warnings, report_errors],
+                       [return_warnings, report_warnings],
+                       [return_errors, report_errors],
+                       [return_warnings, report_warnings]
+                       ++ [return_errors, report_errors],
                        []
                       ],
         CompileTo  <- [to_binary, to_file, to_proto_defs],
@@ -641,8 +646,8 @@ rwre_go(Options, CompileTo, SrcType, SrcQuality) ->
 compute_expected_return(Options, CompileTo, write_fails) ->
     compute_expected_return(Options, CompileTo, erroneous_code);
 compute_expected_return(Options, to_file, SrcQuality) ->
-    WarnOpt = get_warning_opt(Options),
-    ErrOpt = get_error_opt(Options),
+    WarnOpt = get_warning_opt_from_perspective_of_return(Options),
+    ErrOpt = get_error_opt_from_perspective_of_return(Options),
     case {WarnOpt, ErrOpt, SrcQuality} of
         {report, report, clean_code}      -> ok;
         {report, report, warningful_code} -> ok;
@@ -658,8 +663,8 @@ compute_expected_return(Options, to_file, SrcQuality) ->
         {return, report, erroneous_code}  -> {error, '_', []}
     end;
 compute_expected_return(Options, to_binary, SrcQuality) ->
-    WarnOpt = get_warning_opt(Options),
-    ErrOpt = get_error_opt(Options),
+    WarnOpt = get_warning_opt_from_perspective_of_return(Options),
+    ErrOpt = get_error_opt_from_perspective_of_return(Options),
     case {WarnOpt, ErrOpt, SrcQuality} of
         {report, report, clean_code}      -> {ok, mod, binary};
         {report, report, warningful_code} -> {ok, mod, binary};
@@ -675,8 +680,8 @@ compute_expected_return(Options, to_binary, SrcQuality) ->
         {return, report, erroneous_code}  -> {error, '_', []}
     end;
 compute_expected_return(Options, to_proto_defs, SrcQuality) ->
-    WarnOpt = get_warning_opt(Options),
-    ErrOpt = get_error_opt(Options),
+    WarnOpt = get_warning_opt_from_perspective_of_return(Options),
+    ErrOpt = get_error_opt_from_perspective_of_return(Options),
     case {WarnOpt, ErrOpt, SrcQuality} of
         {report, report, clean_code}      -> {ok, non_empty_list};
         {report, report, warningful_code} -> {ok, non_empty_list};
@@ -695,8 +700,8 @@ compute_expected_return(Options, to_proto_defs, SrcQuality) ->
 compute_expected_output(_Options, clean_code) ->
     "";
 compute_expected_output(Options, warningful_code) ->
-    WarnOpt = get_warning_opt(Options),
-    ErrOpt = get_error_opt(Options),
+    WarnOpt = get_warning_opt_from_perspective_of_output(Options),
+    ErrOpt = get_error_opt_from_perspective_of_output(Options),
     case {WarnOpt, ErrOpt} of
         {report, report} -> non_empty_list;
         {report, return} -> non_empty_list;
@@ -706,8 +711,8 @@ compute_expected_output(Options, warningful_code) ->
 compute_expected_output(Options, write_fails) ->
     compute_expected_output(Options, erroneous_code);
 compute_expected_output(Options, erroneous_code) ->
-    WarnOpt = get_warning_opt(Options),
-    ErrOpt = get_error_opt(Options),
+    WarnOpt = get_warning_opt_from_perspective_of_output(Options),
+    ErrOpt = get_error_opt_from_perspective_of_output(Options),
     case {WarnOpt, ErrOpt} of
         {report, report} -> non_empty_list;
         {report, return} -> "";
@@ -715,18 +720,26 @@ compute_expected_output(Options, erroneous_code) ->
         {return, return} -> ""
     end.
 
-get_warning_opt(Opts) ->
+get_warning_opt_from_perspective_of_return(Opts) -> get_warn_opt(Opts, return).
+get_warning_opt_from_perspective_of_output(Opts) -> get_warn_opt(Opts, report).
+
+get_error_opt_from_perspective_of_return(Opts) -> get_err_opt(Opts, return).
+get_error_opt_from_perspective_of_output(Opts) -> get_err_opt(Opts, report).
+
+get_warn_opt(Opts, WhatToReturnIfBothAreSet) ->
     case {member(return_warnings, Opts), member(report_warnings, Opts)} of
         {false, false} -> report; %% default
         {true,  false} -> return;
-        {false,  true} -> report
+        {false,  true} -> report;
+        {true,   true} -> WhatToReturnIfBothAreSet
     end.
 
-get_error_opt(Opts) ->
+get_err_opt(Opts, WhatToReturnIfBothAreSet) ->
     case {member(return_errors, Opts), member(report_errors, Opts)} of
         {false, false} -> report; %% default
         {true,  false} -> return;
-        {false,  true} -> report
+        {false,  true} -> report;
+        {true,   true} -> WhatToReturnIfBothAreSet
     end.
 
 member(Elem, List) ->
