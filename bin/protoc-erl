@@ -5,17 +5,18 @@
 parse(Args) ->
     parse([], [], [], [], Args).
 
-% opts all start with -
+%% opts all start with -
 parse([], Acc, OptAcc, ArgAcc, ["-" ++ Opt | Tail]) ->
     parse(gpb_compile:find_opt_spec(Opt), Acc, [OptAcc | Opt], ArgAcc, Tail);
-% undefined opts have no args
+%% undefined opts have no args
 parse([{OptDef, undefined, _, _}], Acc, _, ArgAcc, Tail) ->
     parse([], [{list_to_atom(OptDef), []} | Acc], [], ArgAcc, Tail);
-% string_maybe_appended opts can have args appended to the opt
-% itself (ie. -I. or -I .)
-parse([{OptDef, string_maybe_appended, _, _}], Acc, [OptAcc | Opt], ArgAcc, Tail) ->
-    % now check what is the form, <Option> <OptArg> (ie. I include)
-    % or <Option><OptArg> (ie. Iinclude)
+%% string_maybe_appended opts can have args appended to the opt
+%% itself (ie. -I. or -I .)
+parse([{OptDef, string_maybe_appended, _, _}], Acc, [OptAcc | Opt], ArgAcc,
+      Tail) ->
+    %% now check what is the form, <Option> <OptArg> (ie. I include)
+    %% or <Option><OptArg> (ie. Iinclude)
     case Opt == OptDef of
         true ->
             parse([], Acc, [OptAcc | Opt], ArgAcc, Tail);
@@ -23,51 +24,51 @@ parse([{OptDef, string_maybe_appended, _, _}], Acc, [OptAcc | Opt], ArgAcc, Tail
             parse([], [{list_to_atom(OptDef), [Opt -- OptDef]} | Acc], OptAcc,
                   ArgAcc, Tail)
     end;
-% standard opts with args
+%% standard opts with args
 parse([{_, _, _, _}], Acc, OptAcc, ArgAcc, Tail) ->
     parse([], Acc, OptAcc, ArgAcc, Tail);
-% accumulate an option complete with args
+%% accumulate an option complete with args
 parse([], Acc, [OptAcc | Opt], ArgAcc, [OptArg | Tail]) ->
     parse([], [{list_to_atom(Opt), [OptArg]} | Acc], OptAcc, ArgAcc, Tail);
-% these are trailing args with no opt (ie. proto files)
+%% these are trailing args with no opt (ie. proto files)
 parse([], Acc, [], ArgAcc, [Arg | Tail]) ->
     parse([], Acc, [], [[Arg] | ArgAcc], Tail);
-% final match, end of args
+%% final match, end of args
 parse(_, Acc, _, ArgAcc, []) ->
     {lists:reverse(Acc), lists:reverse(ArgAcc)}.
 
 show_help() ->
     io:format("usage: ~s <options> <.proto files>~n",
-                [filename:basename(escript:script_name())]),
+              [filename:basename(escript:script_name())]),
     gpb_compile:show_args().
 
-main ([]) ->
+main([]) ->
     BinDir = filename:dirname(escript:script_name()),
     EBinDir = filename:join([BinDir, "..", "ebin"]),
-    % add the gpb ebin path to we can have access to
-    % gpb_compile show help methods
+    %% add the gpb ebin path to we can have access to
+    %% gpb_compile show help methods
     true = code:add_pathz(EBinDir),
     show_help(),
     halt(1);
-main (Args) ->
-    % get the dir where protoc-erl is being run from
+main(Args) ->
+    %% get the dir where protoc-erl is being run from
     BinDir = filename:dirname(escript:script_name()),
-    % ebin directory should one dir above
+    %% ebin directory should one dir above
     EBinDir = filename:join([BinDir, "..", "ebin"]),
-    % add the gpb ebin path to we can have access to gpb_compile methods
+    %% add the gpb ebin path to we can have access to gpb_compile methods
     true = code:add_pathz(EBinDir),
-    % parse the command line options and subsequent proto files
-    % {Options, Files} = check_args(parse(Args)),
+    %% parse the command line options and subsequent proto files
+    %% {Options, Files} = check_args(parse(Args)),
     {Options, Files} = case parse(Args) of
-                            {[], []} ->
-                                show_help(),
-                                halt(1);
-                            Result ->
-                                Result
+                           {[], []} ->
+                               show_help(),
+                               halt(1);
+                           Result ->
+                               Result
                        end,
-    % ask gpb_compile to parse them into tuple format
+    %% ask gpb_compile to parse them into tuple format
     GpbOptions = gpb_compile:parse_opts(Options, []),
-    % check for help or version options
+    %% check for help or version options
     Help = lists:member(help, GpbOptions),
     Version = lists:member(version, GpbOptions),
     case {Help, Version} of
@@ -77,9 +78,9 @@ main (Args) ->
             gpb_compile:show_version();
         _ ->
             [case gpb_compile:file(File, GpbOptions) of
-                {error, _} ->
-                    halt(1);
-                ok ->
-                    ok
+                 {error, _} ->
+                     halt(1);
+                 ok ->
+                     ok
              end || [File] <- Files]
     end.

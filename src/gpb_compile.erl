@@ -3301,9 +3301,11 @@ get_gen_descriptor_by_opts(Opts) ->
 
 format_get_service_names(ServiceDefs) ->
     gpb_codegen:format_fn(
-       get_service_names, 
-       fun() -> '<ServiceNames>' end,
-       [replace_term('<ServiceNames>', [ServiceName || {{service, ServiceName}, _Rpcs} <- ServiceDefs])]).
+      get_service_names,
+      fun() -> '<ServiceNames>' end,
+      [replace_term(
+         '<ServiceNames>',
+         [ServiceName || {{service, ServiceName}, _Rpcs} <- ServiceDefs])]).
 
 format_get_service_defs(ServiceDefs, Opts) ->
     gpb_codegen:format_fn(
@@ -3311,10 +3313,11 @@ format_get_service_defs(ServiceDefs, Opts) ->
       fun('<ServiceName>') -> '<ServiceDef>';
          (_) -> error
       end,
-      [repeat_clauses('<ServiceName>',
-                      [[replace_term('<ServiceName>', ServiceName),
-                        replace_tree('<ServiceDef>', service_def_tree(ServiceDef, Opts))]
-                       || {{service, ServiceName}, _Rpcs} = ServiceDef <- ServiceDefs])]).
+      [repeat_clauses(
+         '<ServiceName>',
+         [[replace_term('<ServiceName>', ServiceName),
+           replace_tree('<ServiceDef>', service_def_tree(ServiceDef, Opts))]
+          || {{service, ServiceName}, _Rpcs} = ServiceDef <- ServiceDefs])]).
 
 format_get_rpc_names(ServiceDefs) ->
     gpb_codegen:format_fn(
@@ -3335,11 +3338,12 @@ format_find_rpc_defs(ServiceDefs) ->
       fun('<ServiceName>', RpcName) -> '<ServiceFindRpcDef>'(RpcName);
          (_, _) -> error
       end,
-      [repeat_clauses('<ServiceName>',
-                       [[replace_term('<ServiceName>', ServiceName),
-                         replace_term('<ServiceFindRpcDef>', mk_fn(find_rpc_def_, ServiceName))
-                        ] || {{service, ServiceName}, _} <- ServiceDefs]
-                     )]).
+      [repeat_clauses(
+         '<ServiceName>',
+         [[replace_term('<ServiceName>', ServiceName),
+           replace_term('<ServiceFindRpcDef>',
+                        mk_fn(find_rpc_def_, ServiceName))]
+          || {{service, ServiceName}, _} <- ServiceDefs])]).
 
 format_find_service_rpc_defs(ServiceName, Rpcs, Opts) ->
     gpb_codegen:format_fn(
@@ -3348,15 +3352,16 @@ format_find_service_rpc_defs(ServiceName, Rpcs, Opts) ->
          (_) -> error
       end,
       [repeat_clauses('<RpcName>',
-                       [[replace_term('<RpcName>', RpcName),
-                         replace_tree('<RpcDef>', rpc_def_tree(Rpc, Opts))
-                        ]
+                      [[replace_term('<RpcName>', RpcName),
+                        replace_tree('<RpcDef>', rpc_def_tree(Rpc, Opts))]
                        || #?gpb_rpc{name=RpcName} = Rpc <- Rpcs])]).
 
 format_fetch_rpc_defs([]) ->
     gpb_codegen:format_fn(
       fetch_rpc_def,
-      fun(ServiceName, RpcName) -> erlang:error({no_such_rpc, ServiceName, RpcName}) end);
+      fun(ServiceName, RpcName) ->
+              erlang:error({no_such_rpc, ServiceName, RpcName})
+      end);
 format_fetch_rpc_defs(_ServiceDefs) ->
     gpb_codegen:format_fn(
       fetch_rpc_def,
@@ -3369,7 +3374,8 @@ format_fetch_rpc_defs(_ServiceDefs) ->
 
 service_def_tree({{service, ServiceName}, Rpcs}, Opts) ->
     erl_syntax:tuple(
-      [erl_syntax:tuple([erl_syntax:atom(service), erl_syntax:atom(ServiceName)]),
+      [erl_syntax:tuple([erl_syntax:atom(service),
+                         erl_syntax:atom(ServiceName)]),
        rpcs_def_tree(Rpcs, Opts)]);
 service_def_tree(undefined, _) ->
     erl_syntax:list([]).
@@ -3403,7 +3409,7 @@ rpc_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
             rpc_record_def_tree(Rpc, Opts);
         rpcs_as_proplists ->
             erl_parse:abstract(gpb:rpc_record_to_proplist(Rpc))
-    end.    
+    end.
 
 %% -- hrl -----------------------------------------------------
 
