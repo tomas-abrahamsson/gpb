@@ -645,6 +645,10 @@ c() ->
 %%   <dd>Generate code that will accept and produce maps instead of
 %%       records. No .hrl file will be generated. See the `maps' option
 %%       for the function {@link file/2} for more info.</dd>
+%%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
+%%   <dd>`-Werror' means treat warnings as errors<br></br>
+%%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
+%%       `-W' and `-Wall' are the same as `-W1'</dd>
 %%   <dt>`--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
 %%   <dt>`--version' or `-V'</dt>
@@ -743,6 +747,16 @@ opt_specs() ->
      {"maps", undefined, maps, "\n"
       "       Generate code that will accept and produce maps instead of\n"
       "       records.\n"},
+     {"Werror",undefined, warnings_as_errors, "\n"
+      "       Treat warnings as errors\n"},
+     {"W1", undefined, report_warnings, "\n"
+      "       Report warnings\n"},
+     {"W0", undefined, {report_warnings,false}, "\n"
+      "       Do not report warnings\n"},
+     {"Wall", undefined, report_warnings, "\n"
+      "       Same as -W1\n"},
+     {"W", undefined, report_warnings, "\n"
+      "       Same as -W1\n"},
      {"h", undefined, help, "\n"
       "       Show help\n"},
      {"-help", undefined, help, "\n"

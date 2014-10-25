@@ -76,10 +76,9 @@ main (Args) ->
         {_, true} ->
             gpb_compile:show_version();
         _ ->
-            [case gpb_compile:file(File, GpbOptions) of
-                {error, _} ->
-                    halt(1);
-                ok ->
-                    ok
-             end || [File] <- Files]
+            Results = [gpb_compile:file(File, GpbOptions) || File <- Files],
+            case lists:usort(Results) of
+                [ok] -> halt(0);
+                _    -> halt(1)
+            end
     end.
