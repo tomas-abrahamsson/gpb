@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 %% -*- erlang -*-
-%%! -noshell
+%%! -noinput +B
 
 parse(Args) ->
     parse([], [], [], [], Args).
