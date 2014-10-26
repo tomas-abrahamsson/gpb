@@ -1,5 +1,21 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.0
+2014-Oct-26
+
+	* Support oneof fields. It appeared in protobuf 2.6.0, and is
+	essentially several optional fields sharing the same record
+	position (memory in the C++ alternative).
+	* Make the name of the two records for fields and rpcs
+	configurable. They ought to have been prefixed with gpb_ long ago,
+	but that was not done. At least now, it is possible to redefine
+	the record names, in case of clashes.
+	* Handle services in descriptors.
+	* Bugfix compilation for descriptors.
+        * Add an option `warnings_as_errors' along with command line
+	options -Werror, -Wall, -W1, -W0 and -W, that mimimcs the options
+	to erlc. This also adds a new return value for failures: error.
+
 Version 3.16.0
 2014-Oct-13
 
