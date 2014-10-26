@@ -1521,69 +1521,89 @@ mk_float(_, _) -> 1.0.
 
 %% --- command line options tests -----------------
 
+cmdline_parses_include_opt_test() ->
+    {ok, {[{i,"inc"}], []}} = gpb_compile:parse_opts_and_args(["-Iinc"]),
+    {ok, {[{i,"inc"}], []}} = gpb_compile:parse_opts_and_args(["-I","inc"]),
+    {error, _} = gpb_compile:parse_opts_and_args(["-I"]).
+
+cmdline_parses_noarg_opt_test() ->
+    {ok, {[defs_as_proplists], []}} =
+         gpb_compile:parse_opts_and_args(["-pldefs"]).
+
+cmdline_parses_string_opt_test() ->
+    {ok, {[{o_erl, "src"}], []}} =
+        gpb_compile:parse_opts_and_args(["-o-erl", "src"]),
+    {error, _} = gpb_compile:parse_opts_and_args(["-o-erl"]).
+
+cmdline_parses_alternatives_opt_test() ->
+    {ok, {[{copy_bytes, true}], []}} =
+        gpb_compile:parse_opts_and_args(["-c", "true"]),
+    {ok, {[{copy_bytes, 1.25}], []}} =
+        gpb_compile:parse_opts_and_args(["-c", "1.25"]).
+
+cmdline_parses_files_test() ->
+    {ok, {[], []}} = gpb_compile:parse_opts_and_args([]),
+    {ok, {[], ["f.proto"]}} = gpb_compile:parse_opts_and_args(["f.proto"]).
+
+cmdline_parses_also_non_proto_extensions_test() ->
+    {ok, {[type_specs, {copy_bytes,auto}], ["a.x", "y.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-type", "-c", "auto",
+                                         "a.x", "y.proto"]).
+
 opt_test() ->
-
-    [{"I",string_maybe_appended,i, _}] = gpb_compile:find_opt_spec("Iinclude1"),
-    [{"I",string_maybe_appended,i, _}] = gpb_compile:find_opt_spec("I"),
-    [{"o-erl",string,o_erl, _}] = gpb_compile:find_opt_spec("o-erl"),
-    [{"o", string, o, _}] = gpb_compile:find_opt_spec("o"),
-    [{"o-hrl", string, o_hrl, _}] = gpb_compile:find_opt_spec("o-hrl"),
-
-    [{i,"include1"},
-     {i,"include2"},
-     {o,"out-dir"},
-     {o_erl,"o-erl-dir"},
-     {o_hrl,"o-hrl-dir"},
-     nif,
-     {load_nif, "load-nif"},
-     {verify,optionally},
-     {verify,always},
-     {verify,never},
-     {copy_bytes,true},
-     {copy_bytes,false},
-     {copy_bytes,auto},
-     {copy_bytes,42},
-     strings_as_binaries,defs_as_proplists,
-     {msg_name_prefix,"_msg_suffix"},
-     {module_name_prefix,"_mod_prefix"},
-     {msg_name_suffix,"_msg_suffix"},
-     {module_name_suffix,"_mod_suffix"},
-     include_as_lib,type_specs,
-     descriptor,
-     maps,help,help,version,version] = gpb_compile:parse_opts([
-            {list_to_atom("Iinclude1"), []},
-            {list_to_atom("I"), ["include2"]},
-            {o, ["out-dir"]},
-            {wrong_arg, ["wrong-arg-str"]},
-            {root, ["root-dir"]},
-            {list_to_atom("o-erl"), ["o-erl-dir"]},
-            {list_to_atom("o-hrl"), ["o-hrl-dir"]},
-            {list_to_atom("o-nic-cc"), ["o-nic-cc-dir"]},
-            {nif, []},
-            {load_nif, ["load-nif"]},
-            {v, ["optionally"]},
-            {v, ["always"]},
-            {v, ["never"]},
-            {c, ["true"]},
-            {c, ["false"]},
-            {c, ["auto"]},
-            {c, ["42"]},
-            {wrong_arg2, []},
-            {strbin, []},
-            {pldefs, []},
-            {msgprefix, ["_msg_suffix"]},
-            {modprefix, ["_mod_prefix"]},
-            {msgsuffix, ["_msg_suffix"]},
-            {modsuffix, ["_mod_suffix"]},
-            {il, []},
-            {type, []},
-            {descr, []},
-            {maps, []},
-            {h, []},
-            {list_to_atom("-help"), []},
-            {list_to_atom("V"), []},
-            {list_to_atom("-version"), []}
-        ], []).
+    {ok, {[{i, "include1"},
+           {i, "include2"},
+           {o, "out-dir"},
+           {o_erl, "o-erl-dir"},
+           {o_hrl, "o-hrl-dir"},
+           {o_nif_cc, "o-nif-cc-dir"},
+           nif,
+           {load_nif, "load-nif"},
+           {verify, optionally},
+           {verify, always},
+           {verify, never},
+           {copy_bytes, true},
+           {copy_bytes, false},
+           {copy_bytes, auto},
+           {copy_bytes, 42},
+           strings_as_binaries, defs_as_proplists,
+           {msg_name_prefix,    "msg_prefix_"},
+           {module_name_prefix, "mod_prefix_"},
+           {msg_name_suffix,    "_msg_suffix"},
+           {module_name_suffix, "_mod_suffix"},
+           include_as_lib, type_specs,
+           descriptor, maps,
+           help, help, version, version],
+          ["x.proto", "y.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-Iinclude1",
+           "-I", "include2",
+           "-o", "out-dir",
+           "-o-erl", "o-erl-dir",
+           "-o-hrl", "o-hrl-dir",
+           "-o-nif-cc", "o-nif-cc-dir",
+           "-nif",
+           "-load_nif", "load-nif",
+           "-v", "optionally",
+           "-v", "always",
+           "-v", "never",
+           "-c", "true",
+           "-c", "false",
+           "-c", "auto",
+           "-c", "42",
+           "-strbin",
+           "-pldefs",
+           "-msgprefix", "msg_prefix_",
+           "-modprefix", "mod_prefix_",
+           "-msgsuffix", "_msg_suffix",
+           "-modsuffix", "_mod_suffix",
+           "-il",
+           "-type",
+           "-descr",
+           "-maps",
+           "-h", "--help",
+           "-V", "--version",
+           "x.proto", "y.proto"]).
 
 %% --- auxiliaries -----------------
 
