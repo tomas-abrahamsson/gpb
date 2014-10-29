@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.1
+2014-Oct-29
+
+	* Bugfix decoding oneof when for sub messages, in the data-driven
+	decoder in gpb. When the same oneof sub message appeared twice,
+	the oneof field was overwritten instead of merged. This did not
+	affect generated code. It only affected the gpb:decode_msg/3.
+
 Version 3.17.0
 2014-Oct-26
 
