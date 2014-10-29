@@ -370,6 +370,26 @@ decoding_oneof_test() ->
     #m1{a = {a1, 150}} = decode_msg(<<8, 150, 1>>, m1, Defs),
     #m1{a = {a2, 150}} = decode_msg(<<16, 150, 1>>, m1, Defs).
 
+decoding_oneof_with_merge_test() ->
+    Defs = [{{msg,m1}, [#gpb_oneof{
+                           name=a, rnum=#m1.a,
+                           fields=[#?gpb_field{name=x, fnum=1, rnum=#m1.a,
+                                               type={msg,m2},occurrence=optional,
+                                               opts=[]},
+                                   #?gpb_field{name=y, fnum=2, rnum=#m1.a,
+                                               type=int32, occurrence=optional,
+                                               opts=[]}]}]},
+            {{msg,m2},  [#?gpb_field{name=b, fnum=1, rnum=#m2.b,
+                                     type=fixed32, occurrence=repeated}]}],
+    B1 = encode_msg(#m1{a={x,#m2{b=[1]}}}, Defs),
+    B2 = encode_msg(#m1{a={x,#m2{b=[2]}}}, Defs),
+    B3 = encode_msg(#m1{a={y,150}}, Defs),
+
+    %% Will get b=[1,2] since messages are merged
+    #m1{a = {x, #m2{b=[1,2]}}} = decode_msg(<<B1/binary, B2/binary>>, m1, Defs),
+    %% Different oneof fields ==> no merge
+    #m1{a = {y,150}}           = decode_msg(<<B1/binary, B3/binary>>, m1, Defs).
+
 %% -------------------------------------------------------------
 
 encode_required_varint_field_test() ->

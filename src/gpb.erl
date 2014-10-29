@@ -161,7 +161,7 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
         false ->
             Rest2 = skip_field(Rest, WireType),
             decode_field(Rest2, MsgDef, MsgDefs, Msg);
-        {#?gpb_field{name=FName, type=FieldType, rnum=RNum}=FieldDef, IsOneof} ->
+        {#?gpb_field{type=FieldType, rnum=RNum}=FieldDef, IsOneof} ->
             case fielddef_matches_wiretype_get_packed(WireType, FieldDef) of
                 {yes,true} ->
                     AccSeq = element(RNum, Msg),
@@ -171,11 +171,8 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
                     decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
                 {yes,false} ->
                     {NewValue, Rest2} = decode_type(FieldType, Rest, MsgDefs),
-                    NewMsg = if IsOneof ->
-                                     setelement(RNum, Msg, {FName, NewValue});
-                                not IsOneof ->
-                                     add_field(NewValue, FieldDef, MsgDefs, Msg)
-                             end,
+                    NewMsg = add_field(NewValue, FieldDef, IsOneof, MsgDefs,
+                                       Msg),
                     decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
                 no ->
                     Rest2 = skip_field(Rest, WireType),
@@ -307,7 +304,7 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {N, Rest}
     end.
 
-add_field(Value, FieldDef, MsgDefs, Record) ->
+add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
     %% the same value appears multiple times, the parser accepts the
     %% last value it sees." But what about bytes?
@@ -324,6 +321,20 @@ add_field(Value, FieldDef, MsgDefs, Record) ->
             setelement(RNum, Record, Value);
         #?gpb_field{rnum = RNum, occurrence = repeated} ->
             append_to_element(RNum, Value, Record)
+    end;
+add_field(Value, FieldDef, true=_IsOneof, MsgDefs, Record) ->
+    #?gpb_field{rnum=RNum, name=Name} = FieldDef,
+    case FieldDef of
+        #?gpb_field{type={msg,_SubMsgType}} ->
+            case element(RNum, Record) of
+                {Name, PrevMsg} ->
+                    MergedMsg = {Name, merge_msgs(PrevMsg, Value, MsgDefs)},
+                    setelement(RNum, Record, MergedMsg);
+                _ ->
+                    setelement(RNum, Record, {Name, Value})
+            end;
+        _ ->
+            setelement(RNum, Record, {Name, Value})
     end.
 
 merge_field(RNum, NewMsg, Record, MsgDefs) ->
