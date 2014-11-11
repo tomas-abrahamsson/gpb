@@ -25,13 +25,14 @@ z40=0000000000000000000000000000000000000000
 IFS=' '
 while read local_ref local_sha remote_ref remote_sha
 do
-    case "$url" in
-	*github.com*)
+    case "$local_ref"::"$url" in
+	refs/heads/master::*github.com*)
 	    # Example: url = git@github.com:SOME-GITHUB-USER/gpb.git
 	    d=`git describe --always --tags --match '[0-9]*.[0-9]*' $local_sha`
 	    if ! (echo "$d" | egrep '^[0-9]+(\.[0-9]+)*$' >/dev/null)
 	    then
 		echo "ERROR: attempt to push non-n.m...-tagged version"
+		echo "       on master ($local_ref)"
 		echo "       to github: $d"
 		exit 1
 	    fi
