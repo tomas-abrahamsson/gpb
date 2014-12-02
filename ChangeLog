@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.3
+2014-Dec-02
+
+	* Bugfix parsing of files that specify a package, and import other
+	files that also specify a(nother) package. Thanks to Wang Chao for
+	asking the question prompting me to fix this.
+	* Add a -pkgs command line option, for use_packages.
+
 Version 3.17.2
 2014-Nov-13
 
