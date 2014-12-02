@@ -623,6 +623,11 @@ c() ->
 %%   <dd>Specify that introspection functions shall return proplists
 %%       instead of `#field{}' records, to make the generated code
 %%       completely free of even compile-time dependencies to gpb.</dd>
+%%   <dt>`-pkgs'</dt>
+%%   <dd>Prepend the name of a package to every message it contains.
+%%       If no package is defined, nothing will be prepended.
+%%       Default is to not prepend package names for backwards
+%%       compatibility, but it is needed for some proto files.</dd>
 %%   <dt>`-msgprefix Prefix'</dt>
 %%   <dd>Prefix each message with `Prefix'. This can be useful to
 %%       when including different sub-projects that have colliding
@@ -818,6 +823,11 @@ opt_specs() ->
       "       Specify that introspection functions shall return proplists\n"
       "       instead of #field{} records, to make the generated code\n"
       "       completely free of even compile-time dependencies to gpb.\n"},
+     {"pkgs", undefined, use_packages, "\n"
+      "       Prepend the name of a package to every message it contains.\n"
+      "       If no package is defined, nothing will be prepended.\n"
+      "       Default is to not prepend package names for backwards\n"
+      "       compatibility, but it is needed for some proto files.\n"},
      {"msgprefix", 'string()', msg_name_prefix, "Prefix\n"
       "       Prefix each message with Prefix.\n"},
      {"modprefix", 'string()', module_name_prefix, "Prefix\n"
