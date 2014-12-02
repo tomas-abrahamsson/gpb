@@ -611,7 +611,7 @@ verify_catches_invalid_rpc_arg_ref_test() ->
 
 do_parse_verify_defs(Lines) ->
     {ok, Elems} = parse_lines(Lines),
-    case gpb_parse:post_process(Elems, []) of
+    case post_process(Elems, []) of
         {ok, _} ->
             ok;
         {error, Reasons} ->
@@ -654,5 +654,10 @@ do_process_sort_defs(Defs) ->
     do_process_sort_defs(Defs, []).
 
 do_process_sort_defs(Defs, Opts) ->
-    {ok, Defs2} = gpb_parse:post_process(Defs, Opts),
+    {ok, Defs2} = post_process(Defs, Opts),
     lists:sort(Defs2).
+
+post_process(Elems, Opts) ->
+    {ok, Elems2} = gpb_parse:post_process_one_file(Elems, Opts),
+    gpb_parse:post_process_all_files(Elems2, Opts).
+

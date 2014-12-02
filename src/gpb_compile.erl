@@ -901,7 +901,7 @@ string_to_number(S) ->
 parse_file(FName, Opts) ->
     case parse_file_and_imports(FName, Opts) of
         {ok, {Defs1, _AllImported}} ->
-            case gpb_parse:post_process(Defs1, Opts) of
+            case gpb_parse:post_process_all_files(Defs1, Opts) of
                 {ok, Defs2} ->
                     {ok, Defs2};
                 {error, Reasons} ->
@@ -921,7 +921,7 @@ parse_file_and_imports(FName, AlreadyImported, Opts) ->
             %% case we get an error we don't want to try to reprocess it later
             %% (in case it is multiply imported) and get the error again.
             AlreadyImported2 = [FName | AlreadyImported],
-            case scan_and_parse_string(binary_to_list(Contents), FName) of
+            case scan_and_parse_string(binary_to_list(Contents), FName, Opts) of
                 {ok, Defs} ->
                     Imports = gpb_parse:fetch_imports(Defs),
                     read_and_parse_imports(Imports,AlreadyImported2,Defs,Opts);
@@ -932,12 +932,17 @@ parse_file_and_imports(FName, AlreadyImported, Opts) ->
             {error, Reason}
     end.
 
-scan_and_parse_string(S, FName) ->
+scan_and_parse_string(S, FName, Opts) ->
     case gpb_scan:string(S) of
         {ok, Tokens, _} ->
             case gpb_parse:parse(Tokens++[{'$end', 999}]) of
-                {ok, Result} ->
-                    {ok, Result};
+                {ok, ParseTree} ->
+                    case gpb_parse:post_process_one_file(ParseTree, Opts) of
+                        {ok, Result} ->
+                            {ok, Result};
+                        {error, Reason} ->
+                            {error, {parse_error, FName, Reason}}
+                    end;
                 {error, {_Line, _Module, _ErrInfo}=Reason} ->
                     {error, {parse_error, FName, Reason}}
             end;
