@@ -3685,6 +3685,9 @@ d_r("."++Rest, New) -> New ++ d_r(Rest, New);
 d_r([C|Rest], New)  -> [C | d_r(Rest, New)];
 d_r("", _New)       -> "".
 
+is_dotted(S) when is_list(S) -> string:str(S, ".") > 0;
+is_dotted(S) when is_atom(S) -> is_dotted(atom_to_list(S)).
+
 %% -- nif c++ code -----------------------------------------------------
 
 possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
@@ -4300,16 +4303,20 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                   "}\n",
                   [SrcVar, MsgVar, SetterFnName, MsgVar, SetterFnName]);
            {enum, EnumName} ->
+               EPrefix = case is_dotted(EnumName) of
+                             false -> "";
+                             true  -> dot_replace_s(EnumName, "_") ++ "_"
+                         end,
                {value, {{enum,EnumName}, Enumerations}} =
                    lists:keysearch({enum,EnumName}, 1, Defs),
                ["{\n",
                 [?f("    ~sif (enif_is_identical(~s, ~s))\n"
-                    "        ~s->~s(~s);\n",
+                    "        ~s->~s(~s~s);\n",
                     [if I == 1 -> "";
                         I >  1 -> "else "
                      end,
                      SrcVar, mk_c_var(gpb_aa_, Sym),
-                     MsgVar, SetterFnName, Sym])
+                     MsgVar, SetterFnName, EPrefix, Sym])
                  || {I, {Sym, _Val}} <- index_seq(Enumerations)],
                 "    else\n"
                 "        return 0;\n"
@@ -4550,12 +4557,16 @@ format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs) ->
              ?f("else\n"),
              ?f("    ~s = gpb_aa_false;\n", [DestVar])];
         {enum, EnumName} ->
+            EPrefix = case is_dotted(EnumName) of
+                          false -> "";
+                          true  -> dot_replace_s(EnumName, "_") ++ "_"
+                      end,
             {value, {{enum,EnumName}, Enumerations}} =
                 lists:keysearch({enum,EnumName}, 1, Defs),
             [] ++
                 [?f("switch (~s->~s()) {\n", [MsgVar, LCFName])] ++
-                [?f("    case ~s: ~s = ~s; break;\n",
-                    [Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
+                [?f("    case ~s~s: ~s = ~s; break;\n",
+                    [EPrefix, Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
                  || {Sym, _Value} <- Enumerations] ++
                 [?f("    default: ~s = gpb_aa_undefined;\n", [DestVar])] ++
                 [?f("}\n")];
@@ -4586,7 +4597,6 @@ format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs) ->
             [?f("~s = ~s(env, &~s->~s());\n",
                 [DestVar, UnpackFnName, MsgVar, LCFName])]
     end.
-
 
 format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
     #?gpb_field{name=FName, type=FType} = Field,
@@ -4631,12 +4641,16 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
                 ?f("else\n"),
                 ?f("    relem[i] = gpb_aa_false;\n")];
            {enum, EnumName} ->
+               EPrefix = case is_dotted(EnumName) of
+                             false -> "";
+                             true  -> dot_replace_s(EnumName, "_") ++ "_"
+                         end,
                {value, {{enum,EnumName}, Enumerations}} =
                    lists:keysearch({enum,EnumName}, 1, Defs),
                [] ++
                    [?f("switch (~s->~s(i)) {\n", [MsgVar, LCFName])] ++
-                   [?f("    case ~s: relem[i] = ~s; break;\n",
-                       [Sym, mk_c_var(gpb_aa_, Sym)])
+                   [?f("    case ~s~s: relem[i] = ~s; break;\n",
+                       [EPrefix, Sym, mk_c_var(gpb_aa_, Sym)])
                     || {Sym, _Value} <- Enumerations] ++
                    [?f("    default: relem[i] = gpb_aa_undefined;\n")] ++
                    [?f("}\n")];

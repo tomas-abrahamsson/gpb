@@ -1064,7 +1064,8 @@ nif_code_test_() ->
             {_,_,false} -> {"No C++ compiler found, not trying to compile", []};
             {_,_,_}     -> {"nif tests",
                             [{"Nif compiles", fun nif_compiles/0},
-                             {"Nif encode decode", fun nif_encode_decode/0}]}
+                             {"Nif encode decode", fun nif_encode_decode/0},
+                             {"Nif enums in msgs", fun nif_enum_in_msg/0}]}
         end,
     %% Without increased timeout, this test frequently times
     %% out on my slow laptop (1.6 GHz Atom N270)
@@ -1169,7 +1170,42 @@ nif_encode_decode_oneof(NEDM, Defs) ->
                   Alts).
 
 
-compile_msg_defs(M, MsgDefs, TmpDir) ->
+nif_enum_in_msg() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_enum_in_msgs,
+              DefsTxt = lf_lines(["message test {",
+                                  "    enum bo {",
+                                  "        x = 1;",
+                                  "        y = 2;",
+                                  "    };",
+                                  "    optional bo f1 = 1;",
+                                  "    repeated bo f2 = 2;",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_msg_defs(M, DefsTxt, TmpDir),
+              with_tmpcode(
+                M, Code,
+                fun() ->
+                        OrigMsg = {test,x,[x,y]},
+                        MEncoded  = M:encode_msg(OrigMsg),
+                        GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                        MMDecoded = M:decode_msg(MEncoded, test),
+                        GMDecoded = gpb:decode_msg(MEncoded, test, Defs),
+                        MGDecoded = M:decode_msg(GEncoded, test),
+                        ?assertEqual(OrigMsg, MMDecoded),
+                        ?assertEqual(OrigMsg, GMDecoded),
+                        ?assertEqual(OrigMsg, MGDecoded)
+                end)
+      end).
+
+
+compile_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
+    {MsgDefs, ProtoTxt} =
+        case is_iolist(MsgDefsOrIoList) of
+            true  -> {parse_to_proto_defs(MsgDefsOrIoList), MsgDefsOrIoList};
+            false -> {MsgDefsOrIoList, msg_defs_to_proto(MsgDefsOrIoList)}
+        end,
     [NifCcPath, PbCcPath, NifOPath, PbOPath, NifSoPath, ProtoPath] = Files  =
         [filename:join(TmpDir, lists:concat([M, Ext]))
          || Ext <- [".nif.cc", ".pb.cc", ".nif.o", ".pb.o", ".nif.so",
@@ -1181,7 +1217,6 @@ compile_msg_defs(M, MsgDefs, TmpDir) ->
     {ok, M, Codes} = gpb_compile:proto_defs(M, MsgDefs, Opts),
     Code = proplists:get_value(erl, Codes),
     NifTxt = proplists:get_value(nif, Codes),
-    ProtoTxt = msg_defs_to_proto(MsgDefs),
     %%
     ok = file:write_file(NifCcPath, NifTxt),
     ok = file:write_file(ProtoPath, ProtoTxt),
@@ -1217,6 +1252,23 @@ compile_msg_defs(M, MsgDefs, TmpDir) ->
                          ++ CompilePb ++ "\n"
                          ++ CompileSo]),
     {ok, Code}.
+
+lf_lines(Lines) ->
+    [[L,"\n"] || L <- Lines].
+
+is_iolist(X) ->
+    try iolist_to_binary(X), true
+    catch error:badarg -> false
+    end.
+
+parse_to_proto_defs(Iolist) ->
+    B = iolist_to_binary(Iolist),
+    {ok, ProtoDefs} = gpb_compile:file(
+                        "X.proto",
+                        [mk_fileop_opt([{read_file, fun(_) -> {ok, B} end}]),
+                         {i,"."},
+                         to_proto_defs, report_warnings]),
+    ProtoDefs.
 
 %% Option to run with `save' for debugging nifs
 with_tmpdir(Fun) ->
