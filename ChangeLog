@@ -1,5 +1,16 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.4
+2014-Dec-12
+
+	* Bugfix generated NIF code for enums defined within
+	messages. Thanks to Louis-Philippe Gauthier for reporting and
+	providing an initial solution.
+	* Bugfix generated NIF code for strings with the -strbin (or
+	strings_as_binaries) option. Thanks to Louis-Philippe Gauthier for
+	reporting and providing a solution.
+
+
 Version 3.17.3
 2014-Dec-02
 
