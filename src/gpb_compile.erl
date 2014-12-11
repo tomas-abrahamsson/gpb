@@ -4328,7 +4328,8 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                           "    ErlNifBinary b;\n"
                           "    if (!enif_inspect_binary(env, ~s, &b))\n"
                           "        return 0;\n"
-                          "    ~s->~s(b.data, b.size);\n"
+                          "    ~s->~s(reinterpret_cast<const char *>(b.data),\n"
+                          "           b.size);\n"
                           "}\n",
                           [SrcVar, MsgVar, SetterFnName]);
                    false ->
