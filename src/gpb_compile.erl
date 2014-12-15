@@ -3812,113 +3812,118 @@ is_any_field_of_type_bool(#anres{used_types=UsedTypes}) ->
     sets:is_element(bool, UsedTypes).
 
 format_nif_cc_utf8_conversion_code(Opts) ->
-    ["/* Source for info is https://www.ietf.org/rfc/rfc2279.txt */\n",
-     "\n",
-     "static int\n",
-     "utf8_count_codepoints(const char *sinit, int len)\n",
-     "{\n",
-     "    int n = 0;\n",
-     "    const unsigned char *s0 = (unsigned char *)sinit;\n",
-     "    const unsigned char *s  = s0;\n",
-     "\n",
-     "    while ((s - s0) < len)\n",
-     "    {\n",
-     "        if (*s <= 0x7f) { n++; s++; } /* code point fits 1 octet */\n",
-     "        else if (*s <= 0xdf) { n++; s += 2; } /* 2 octets */\n",
-     "        else if (*s <= 0xef) { n++; s += 3; } /* 3 octets */\n",
-     "        else if (*s <= 0xf7) { n++; s += 4; }\n",
-     "        else if (*s <= 0xfb) { n++; s += 5; }\n",
-     "        else if (*s <= 0xfd) { n++; s += 6; }\n",
-     "        else return -1;\n",
-     "\n",
-     "        if ((s - s0) > len)\n",
-     "            return -1;\n",
-     "    }\n",
-     "    return n;\n",
-     "}\n",
-     "\n",
-     "static int\n",
-     "utf8_to_uint32(unsigned int *dest, const char *src, int numCodePoints)\n",
-     "{\n",
-     "    int i;\n",
-     "    const unsigned char *s = (unsigned char *)src;\n",
-     "\n",
-     "\n",
-     "    /* Should perhaps check for illegal chars in d800-dfff and\n",
-     "     * a other illegal chars\n",
-     "     */\n",
-     "\n",
-     "    for (i = 0; i < numCodePoints; i++)\n",
-     "    {\n",
-     "        if (*s <= 0x7f)\n",
-     "            *dest++ = *s++;\n",
-     "        else if (*s <= 0xdf) /* code point is 2 octets long */\n",
-     "        {\n",
-     "            *dest   =  *s++ & 0x1f; *dest <<= 6;\n",
-     "            *dest++ |= *s++ & 0x3f;\n",
-     "        }\n",
-     "        else if (*s <= 0xef) /* code point is 3 octets long */\n",
-     "        {\n",
-     "            *dest   =  *s++ & 0x0f; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest++ |= *s++ & 0x3f;\n",
-     "        }\n",
-     "        else if (*s <= 0xf7) /* code point is 4 octets long */\n",
-     "        {\n",
-     "            *dest   =  *s++ & 0x07; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest++ |= *s++ & 0x3f;\n",
-     "        }\n",
-     "        else if (*s <= 0xfb) /* code point is 5 octets long */\n",
-     "        {\n",
-     "            *dest   =  *s++ & 0x03; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest++ |= *s++ & 0x3f;\n",
-     "        }\n",
-     "        else if (*s <= 0xfd) /* code point is 6 octets long */\n",
-     "        {\n",
-     "            *dest   =  *s++ & 0x01; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
-     "            *dest++ |= *s++ & 0x3f;\n",
-     "        }\n",
-     "        else\n",
-     "            return 0;\n",
-     "    }\n",
-     "    return 1;\n",
-     "}\n",
-     "\n"
-     "static ERL_NIF_TERM\n",
-     "utf8_to_erl_string(ErlNifEnv *env,\n",
-     "                   const char *utf8data,\n",
-     "                   unsigned int numOctets)\n",
-     "{\n",
-     "    int numcp = utf8_count_codepoints(utf8data, numOctets);\n",
-     "\n",
-     "    if (numcp < 0)\n",
-     "    {\n",
-     "        return enif_make_string(env,\n",
-     "                                \"<invalid UTF-8>\",\n",
-     "                                ERL_NIF_LATIN1);\n",
-     "    }\n",
-     "    else\n",
-     case get_strings_as_binaries_by_opts(Opts) of
+    [case get_strings_as_binaries_by_opts(Opts) of
          true ->
-             ["    {\n",
-              "        ERL_NIF_TERM   b;\n",
-              "        unsigned char *data;\n",
+             ["static ERL_NIF_TERM\n",
+              "utf8_to_erl_string(ErlNifEnv *env,\n",
+              "                   const char *utf8data,\n",
+              "                   unsigned int numOctets)\n"
+              "{\n",
+              "    ERL_NIF_TERM   b;\n",
+              "    unsigned char *data;\n",
               "\n",
-              "        data = enif_make_new_binary(env, numOctets, &b);\n",
-              "        memmove(data, utf8data, numOctets);\n",
-              "        return b;\n",
-              "    }\n"];
+              "    data = enif_make_new_binary(env, numOctets, &b);\n",
+              "    memmove(data, utf8data, numOctets);\n",
+              "    return b;\n",
+              "}\n"];
          false ->
-             ["    {\n",
+             ["/* Source for info is https://www.ietf.org/rfc/rfc2279.txt */\n",
+              "\n",
+              "static int\n",
+              "utf8_count_codepoints(const char *sinit, int len)\n",
+              "{\n",
+              "    int n = 0;\n",
+              "    const unsigned char *s0 = (unsigned char *)sinit;\n",
+              "    const unsigned char *s  = s0;\n",
+              "\n",
+              "    while ((s - s0) < len)\n",
+              "    {\n",
+              "        if (*s <= 0x7f) { n++; s++; } /* code point fits 1 octet */\n",
+              "        else if (*s <= 0xdf) { n++; s += 2; } /* 2 octets */\n",
+              "        else if (*s <= 0xef) { n++; s += 3; } /* 3 octets */\n",
+              "        else if (*s <= 0xf7) { n++; s += 4; }\n",
+              "        else if (*s <= 0xfb) { n++; s += 5; }\n",
+              "        else if (*s <= 0xfd) { n++; s += 6; }\n",
+              "        else return -1;\n",
+              "\n",
+              "        if ((s - s0) > len)\n",
+              "            return -1;\n",
+              "    }\n",
+              "    return n;\n",
+              "}\n",
+              "\n",
+              "static int\n",
+              "utf8_to_uint32(unsigned int *dest, const char *src,\n",
+              "               int numCodePoints)\n",
+              "{\n",
+              "    int i;\n",
+              "    const unsigned char *s = (unsigned char *)src;\n",
+              "\n",
+              "\n",
+              "    /* Should perhaps check for illegal chars in d800-dfff and\n",
+              "     * a other illegal chars\n",
+              "     */\n",
+              "\n",
+              "    for (i = 0; i < numCodePoints; i++)\n",
+              "    {\n",
+              "        if (*s <= 0x7f)\n",
+              "            *dest++ = *s++;\n",
+              "        else if (*s <= 0xdf) /* code point is 2 octets long */\n",
+              "        {\n",
+              "            *dest   =  *s++ & 0x1f; *dest <<= 6;\n",
+              "            *dest++ |= *s++ & 0x3f;\n",
+              "        }\n",
+              "        else if (*s <= 0xef) /* code point is 3 octets long */\n",
+              "        {\n",
+              "            *dest   =  *s++ & 0x0f; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest++ |= *s++ & 0x3f;\n",
+              "        }\n",
+              "        else if (*s <= 0xf7) /* code point is 4 octets long */\n",
+              "        {\n",
+              "            *dest   =  *s++ & 0x07; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest++ |= *s++ & 0x3f;\n",
+              "        }\n",
+              "        else if (*s <= 0xfb) /* code point is 5 octets long */\n",
+              "        {\n",
+              "            *dest   =  *s++ & 0x03; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest++ |= *s++ & 0x3f;\n",
+              "        }\n",
+              "        else if (*s <= 0xfd) /* code point is 6 octets long */\n",
+              "        {\n",
+              "            *dest   =  *s++ & 0x01; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest   |= *s++ & 0x3f; *dest <<= 6;\n",
+              "            *dest++ |= *s++ & 0x3f;\n",
+              "        }\n",
+              "        else\n",
+              "            return 0;\n",
+              "    }\n",
+              "    return 1;\n",
+              "}\n",
+              "\n",
+              "static ERL_NIF_TERM\n",
+              "utf8_to_erl_string(ErlNifEnv *env,\n",
+              "                   const char *utf8data,\n",
+              "                   unsigned int numOctets)\n",
+              "{\n",
+              "    int numcp = utf8_count_codepoints(utf8data, numOctets);\n",
+              "\n",
+              "    if (numcp < 0)\n",
+              "    {\n",
+              "        return enif_make_string(env,\n",
+              "                                \"<invalid UTF-8>\",\n",
+              "                                ERL_NIF_LATIN1);\n",
+              "    }\n",
+              "    else\n",
+              "    {\n",
               "        unsigned int  cp[numcp];\n",
               "        ERL_NIF_TERM  es[numcp];\n",
               "        int i;\n",
@@ -3927,101 +3932,101 @@ format_nif_cc_utf8_conversion_code(Opts) ->
               "        for (i = 0; i < numcp; i++)\n",
               "            es[i] = enif_make_uint(env, cp[i]);\n",
               "        return enif_make_list_from_array(env, es, numcp);\n"
-              "    }\n"]
+              "    }\n",
+              "}\n"]
      end,
-     "}\n",
      "\n",
      case get_strings_as_binaries_by_opts(Opts) of
          true ->
              "";
          false ->
-              "static int\n"
-              "utf8_count_octets(ErlNifEnv *env, ERL_NIF_TERM str)\n"
-              "{\n"
-              "    int n = 0;\n"
-              "\n"
-              "    while (!enif_is_empty_list(env, str))\n"
-              "    {\n"
-              "        ERL_NIF_TERM head, tail;\n"
-              "        unsigned int c;\n"
-              "\n"
-              "        if (!enif_get_list_cell(env, str, &head, &tail))\n"
-              "            return -1;\n"
-              "        if (!enif_get_uint(env, head, &c))\n"
-              "            return -1;\n"
-              "\n"
-              "        if (c <= 0x7f) n += 1;\n"
-              "        else if (c <= 0x7ff) n += 2;\n"
-              "        else if (c <= 0xffff) n += 3;\n"
-              "        else if (c <= 0x1Fffff) n += 4;\n"
-              "        else if (c <= 0x3FFffff) n += 5;\n"
-              "        else if (c <= 0x7FFFffff) n += 6;\n"
-              "        else return -1;\n"
-              "\n"
-              "        str = tail;\n"
-              "    }\n"
-              "    return n;\n"
-              "}\n"
-              "\n"
-              "static int\n"
-              "utf8_to_octets(ErlNifEnv *env, ERL_NIF_TERM str, char *dest)\n"
-              "{\n"
-              "    unsigned char *s = (unsigned char *)dest;\n"
-              "\n"
-              "    while (!enif_is_empty_list(env, str))\n"
-              "    {\n"
-              "        ERL_NIF_TERM head, tail;\n"
-              "        unsigned int c;\n"
-              "\n"
-              "        if (!enif_get_list_cell(env, str, &head, &tail))\n"
-              "            return -1;\n"
-              "        if (!enif_get_uint(env, head, &c))\n"
-              "            return -1;\n"
-              "\n"
-              "        if (c <= 0x7f)\n"
-              "            *s++ = c;\n"
-              "        else if (c <= 0x7ff)\n"
-              "        {\n"
-              "            *s++ = 0xc0 | (c >> 6);\n"
-              "            *s++ = 0x80 | (c & 0x3f);\n"
-              "        }\n"
-              "        else if (c <= 0xffff)\n"
-              "        {\n"
-              "            *s++ = 0xe0 | (c >> 12);\n"
-              "            *s++ = 0x80 | ((c >> 6) & 0x3f);\n"
-              "            *s++ = 0x80 | (c        & 0x3f);\n"
-              "        }\n"
-              "        else if (c <= 0x1Fffff)\n"
-              "        {\n"
-              "            *s++ = 0xf0 | (c >> 18);\n"
-              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n"
-              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n"
-              "            *s++ = 0x80 | (c         & 0x3f);\n"
-              "        }\n"
-              "        else if (c <= 0x3FFffff)\n"
-              "        {\n"
-              "            *s++ = 0xf0 | (c >> 24);\n"
-              "            *s++ = 0x80 | ((c >> 18) & 0x3f);\n"
-              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n"
-              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n"
-              "            *s++ = 0x80 | (c         & 0x3f);\n"
-              "        }\n"
-              "        else if (c <= 0x7FFFffff)\n"
-              "        {\n"
-              "            *s++ = 0xf0 | (c >> 30);\n"
-              "            *s++ = 0x80 | ((c >> 24) & 0x3f);\n"
-              "            *s++ = 0x80 | ((c >> 18) & 0x3f);\n"
-              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n"
-              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n"
-              "            *s++ = 0x80 | (c         & 0x3f);\n"
-              "        }\n"
-              "        else\n"
-              "            return 0;\n"
-              "\n"
-              "        str = tail;\n"
-              "    }\n"
+             ["static int\n",
+              "utf8_count_octets(ErlNifEnv *env, ERL_NIF_TERM str)\n",
+              "{\n",
+              "    int n = 0;\n",
+              "\n",
+              "    while (!enif_is_empty_list(env, str))\n",
+              "    {\n",
+              "        ERL_NIF_TERM head, tail;\n",
+              "        unsigned int c;\n",
+              "\n",
+              "        if (!enif_get_list_cell(env, str, &head, &tail))\n",
+              "            return -1;\n",
+              "        if (!enif_get_uint(env, head, &c))\n",
+              "            return -1;\n",
+              "\n",
+              "        if (c <= 0x7f) n += 1;\n",
+              "        else if (c <= 0x7ff) n += 2;\n",
+              "        else if (c <= 0xffff) n += 3;\n",
+              "        else if (c <= 0x1Fffff) n += 4;\n",
+              "        else if (c <= 0x3FFffff) n += 5;\n",
+              "        else if (c <= 0x7FFFffff) n += 6;\n",
+              "        else return -1;\n",
+              "\n",
+              "        str = tail;\n",
+              "    }\n",
+              "    return n;\n",
+              "}\n",
+              "\n",
+              "static int\n",
+              "utf8_to_octets(ErlNifEnv *env, ERL_NIF_TERM str, char *dest)\n",
+              "{\n",
+              "    unsigned char *s = (unsigned char *)dest;\n",
+              "\n",
+              "    while (!enif_is_empty_list(env, str))\n",
+              "    {\n",
+              "        ERL_NIF_TERM head, tail;\n",
+              "        unsigned int c;\n",
+              "\n",
+              "        if (!enif_get_list_cell(env, str, &head, &tail))\n",
+              "            return -1;\n",
+              "        if (!enif_get_uint(env, head, &c))\n",
+              "            return -1;\n",
+              "\n",
+              "        if (c <= 0x7f)\n",
+              "            *s++ = c;\n",
+              "        else if (c <= 0x7ff)\n",
+              "        {\n",
+              "            *s++ = 0xc0 | (c >> 6);\n",
+              "            *s++ = 0x80 | (c & 0x3f);\n",
+              "        }\n",
+              "        else if (c <= 0xffff)\n",
+              "        {\n",
+              "            *s++ = 0xe0 | (c >> 12);\n",
+              "            *s++ = 0x80 | ((c >> 6) & 0x3f);\n",
+              "            *s++ = 0x80 | (c        & 0x3f);\n",
+              "        }\n",
+              "        else if (c <= 0x1Fffff)\n",
+              "        {\n",
+              "            *s++ = 0xf0 | (c >> 18);\n",
+              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n",
+              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n",
+              "            *s++ = 0x80 | (c         & 0x3f);\n",
+              "        }\n",
+              "        else if (c <= 0x3FFffff)\n",
+              "        {\n",
+              "            *s++ = 0xf0 | (c >> 24);\n",
+              "            *s++ = 0x80 | ((c >> 18) & 0x3f);\n",
+              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n",
+              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n",
+              "            *s++ = 0x80 | (c         & 0x3f);\n",
+              "        }\n",
+              "        else if (c <= 0x7FFFffff)\n",
+              "        {\n",
+              "            *s++ = 0xf0 | (c >> 30);\n",
+              "            *s++ = 0x80 | ((c >> 24) & 0x3f);\n",
+              "            *s++ = 0x80 | ((c >> 18) & 0x3f);\n",
+              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n",
+              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n",
+              "            *s++ = 0x80 | (c         & 0x3f);\n",
+              "        }\n",
+              "        else\n",
+              "            return 0;\n",
+              "\n",
+              "        str = tail;\n",
+              "    }\n",
               "    return 1;\n"
-              "}\n"
+              "}\n"]
      end,
      "\n"].
 
