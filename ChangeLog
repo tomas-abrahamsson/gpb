@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.5
+2014-Dec-15
+
+	* Bugifx generated NIF code for with the -strbin option: the
+	utf8_to_uint32 function was unused, as was (mostly) the
+	utf8_count_codepoints. Thanks to Louis-Philippe Gauthier for
+	reporting.
+
 Version 3.17.4
 2014-Dec-12
 
