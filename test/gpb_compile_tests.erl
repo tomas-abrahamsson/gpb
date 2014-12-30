@@ -1423,11 +1423,16 @@ get_cflags() ->
                CxxFlags -> CxxFlags
            end ++ " " ++ f("-I'~s'", [CIncDir]).
 
+platform_ldflags({unix, darwin}) ->
+  " -undefined dynamic_lookup -dynamiclib";
+platform_ldflags(_) ->
+  "".
+
 get_ldflags() ->
     case os:getenv("LDFLAGS") of
         false   -> "";
         LdFlags -> LdFlags
-    end.
+    end ++ platform_ldflags(os:type()).
 
 msg_defs_to_proto(MsgDefs) ->
     iolist_to_binary(lists:map(fun msg_def_to_proto/1, MsgDefs)).
