@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.6
+2014-Dec-30
+
+	* Bugfix NIF linking in eunit tests on Mac. Thanks to Luis
+	Rascão.
+
 Version 3.17.5
 2014-Dec-15
 
