@@ -3529,7 +3529,7 @@ format_hfields(Indent, Fields, CompileOpts, Defs) ->
                                             end;
                                  Default -> ?f(" = ~p", [Default])
                              end,
-                TypeStr = ?f("~s", [type_to_typestr(Field, Defs)]),
+                TypeStr = ?f("~s", [type_to_typestr(Field, Defs, CompileOpts)]),
                 CommaSep = if I < length(Fields) -> ",";
                               true               -> "" %% last entry
                            end,
@@ -3550,7 +3550,7 @@ format_hfields(Indent, Fields, CompileOpts, Defs) ->
                    [FieldTxt2, LineUpStr2, FNum,
                     [", " || TypeComment /= ""], TypeComment]);
            ({I, #gpb_oneof{name=Name}=Field}) ->
-                TypeStr = ?f("~s", [type_to_typestr(Field, Defs)]),
+                TypeStr = ?f("~s", [type_to_typestr(Field, Defs, CompileOpts)]),
                 CommaSep = if I < length(Fields) -> ",";
                               true               -> "" %% last entry
                            end,
@@ -3577,36 +3577,44 @@ get_type_specs_by_opts(Opts) ->
     Default = false,
     proplists:get_value(type_specs, Opts, Default).
 
-type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs) ->
+type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs, Opts) ->
     case Occurrence of
-        required -> type_to_typestr_2(Type, Defs);
-        repeated -> "[" ++ type_to_typestr_2(Type, Defs) ++ "]";
-        optional -> type_to_typestr_2(Type, Defs) ++ " | 'undefined'"
+        required -> type_to_typestr_2(Type, Defs, Opts);
+        repeated -> "[" ++ type_to_typestr_2(Type, Defs, Opts) ++ "]";
+        optional -> type_to_typestr_2(Type, Defs, Opts) ++ " | 'undefined'"
     end;
-type_to_typestr(#gpb_oneof{fields=OFields}, Defs) ->
+type_to_typestr(#gpb_oneof{fields=OFields}, Defs, Opts) ->
     string:join(
       ["undefined"
-       | [?f("{~s, ~s}", [Name, type_to_typestr_2(Type, Defs)])
+       | [?f("{~s, ~s}", [Name, type_to_typestr_2(Type, Defs, Opts)])
           || #?gpb_field{name=Name, type=Type} <- OFields]],
       " | ").
 
-type_to_typestr_2(sint32, _Defs)   -> "integer()";
-type_to_typestr_2(sint64, _Defs)   -> "integer()";
-type_to_typestr_2(int32, _Defs)    -> "integer()";
-type_to_typestr_2(int64, _Defs)    -> "integer()";
-type_to_typestr_2(uint32, _Defs)   -> "non_neg_integer()";
-type_to_typestr_2(uint64, _Defs)   -> "non_neg_integer()";
-type_to_typestr_2(bool, _Defs)     -> "boolean()";
-type_to_typestr_2(fixed32, _Defs)  -> "non_neg_integer()";
-type_to_typestr_2(fixed64, _Defs)  -> "non_neg_integer()";
-type_to_typestr_2(sfixed32, _Defs) -> "integer()";
-type_to_typestr_2(sfixed64, _Defs) -> "integer()";
-type_to_typestr_2(float, _Defs)    -> "float()";
-type_to_typestr_2(double, _Defs)   -> "float()";
-type_to_typestr_2(string, _Defs)   -> "string()";
-type_to_typestr_2(bytes, _Defs)    -> "binary()";
-type_to_typestr_2({enum,E}, Defs)  -> enum_typestr(E, Defs);
-type_to_typestr_2({msg,M}, _DEfs)  -> ?f("#~p{}", [M]).
+type_to_typestr_2(sint32, _Defs, _Opts)   -> "integer()";
+type_to_typestr_2(sint64, _Defs, _Opts)   -> "integer()";
+type_to_typestr_2(int32, _Defs, _Opts)    -> "integer()";
+type_to_typestr_2(int64, _Defs, _Opts)    -> "integer()";
+type_to_typestr_2(uint32, _Defs, _Opts)   -> "non_neg_integer()";
+type_to_typestr_2(uint64, _Defs, _Opts)   -> "non_neg_integer()";
+type_to_typestr_2(bool, _Defs, _Opts)     -> "boolean()";
+type_to_typestr_2(fixed32, _Defs, _Opts)  -> "non_neg_integer()";
+type_to_typestr_2(fixed64, _Defs, _Opts)  -> "non_neg_integer()";
+type_to_typestr_2(sfixed32, _Defs, _Opts) -> "integer()";
+type_to_typestr_2(sfixed64, _Defs, _Opts) -> "integer()";
+type_to_typestr_2(float, _Defs, _Opts)    -> "float()";
+type_to_typestr_2(double, _Defs, _Opts)   -> "float()";
+type_to_typestr_2(string, _Defs, Opts)    ->
+  string_to_typestr(get_strings_as_binaries_by_opts(Opts));
+type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
+type_to_typestr_2({enum,E}, Defs, _Opts)  -> enum_typestr(E, Defs);
+type_to_typestr_2({msg,M}, _DEfs, _Opts)  -> ?f("#~p{}", [M]).
+
+% when the strings_as_binaries option is requested the corresponding
+% typespec should be spec'ed
+string_to_typestr(true) ->
+  "binary()";
+string_to_typestr(false) ->
+  "string()".
 
 enum_typestr(E, Defs) ->
     {value, {{enum,E}, Enumerations}} = lists:keysearch({enum,E}, 1, Defs),
