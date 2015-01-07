@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.7
+2015-Jan-07
+
+	* Bugfix type specs for strings when using the strings_as_binaries
+	option. Thanks to Luis Rascão.
+
 Version 3.17.6
 2014-Dec-30
 
