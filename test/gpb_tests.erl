@@ -173,6 +173,17 @@ decode_msg_with_negative_enum_value_test() ->
                     {{enum,e}, [{v1, 100},
                                 {v2, -2}]}]).
 
+decode_msg_with_enum_aliases_test() ->
+    #m1{a = v1} =
+        decode_msg(<<8,100>>,
+                   m1,
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type={enum,e}, occurrence=required,
+                                            opts=[]}]},
+                    {{enum,e}, [{option, allow_alias, true},
+                                {v1, 100},
+                                {v2, 100}]}]).
+
 decode_msg_with_bool_field_test() ->
     #m1{a = true} =
         decode_msg(<<8,1>>,
@@ -461,6 +472,16 @@ encode_msg_with_negative_enum_value_test() ->
         <<254,255,255,255,15>>                    -> ok; %% encoded as 32 bits
         <<254,255,255,255,255,255,255,255,255,1>> -> ok  %% encoded as 64 bits
     end.
+
+encode_msg_with_enum_aliases_test() ->
+    Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type={enum,e}, occurrence=required,
+                                            opts=[]}]},
+                    {{enum,e}, [{option, allow_alias, true},
+                                {v1, 100},
+                                {v2, 100}]}],
+    <<8,100>> = encode_msg(#m1{a = v1}, Defs),
+    <<8,100>> = encode_msg(#m1{a = v2}, Defs).
 
 encode_msg_with_bool_field_test() ->
     <<8,1>> =

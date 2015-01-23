@@ -101,6 +101,7 @@ enum_def -> enum identifier '{' enum_fields '}':
                                         {{enum,identifier_name('$2')},'$4'}.
 
 enum_fields -> enum_field enum_fields:  ['$1' | '$2'].
+enum_fields -> option_def enum_fields:  ['$1' | '$2'].
 enum_fields -> ';' enum_fields:         '$2'.
 enum_fields -> '$empty':                [].
 
@@ -713,7 +714,7 @@ reformat_names(Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
                       {{msg,reformat_name(Name)}, reformat_fields(Fields)};
                  ({{enum,Name}, ENs}) ->
-                      {{enum,reformat_name(Name)}, ENs};
+                      {{enum,reformat_name(Name)}, reformat_enum_opt_names(ENs)};
                  ({{extensions,Name}, Exts}) ->
                       {{extensions,reformat_name(Name)}, Exts};
                  ({{extend,Name}, Fields}) ->
@@ -737,6 +738,16 @@ reformat_fields(Fields) ->
               O#gpb_oneof{fields=reformat_fields(Fs)}
       end,
       Fields).
+
+%% `Defs' is expected to be parsed.
+reformat_enum_opt_names(Def) ->
+    [case Item of
+         {option, Name, Value} ->
+             {option, reformat_name(Name), Value};
+         Other ->
+             Other
+     end
+     || Item <- Def].
 
 reformat_name(Name) ->
     list_to_atom(string:join([atom_to_list(P) || P <- Name,

@@ -1965,7 +1965,7 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
        [repeat_clauses('<EnumValue>',
                        [[replace_term('<EnumValue>', EnumValue),
                          replace_term('<EnumSym>', EnumSym)]
-                        || {EnumSym, EnumValue} <- EnumDef])])
+                        || {EnumSym, EnumValue} <- unalias_enum(EnumDef)])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
@@ -3311,7 +3311,7 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
          [repeat_clauses('<Value>',
                          [[replace_term('<Value>', EnumValue),
                            replace_term('<Sym>', EnumSym)]
-                          || {EnumSym, EnumValue} <- EnumDef])]),
+                          || {EnumSym, EnumValue} <- unalias_enum(EnumDef)])]),
        "\n",
        gpb_codegen:format_fn(
          mk_fn(enum_value_by_symbol_, EnumName),
@@ -4960,6 +4960,15 @@ map_kvalues(KVars) ->
      end
      || {Key, Expr} <- KVars].
 
+%% The "option allow_alias = true;" inside an enum X { ... }
+%% says it is ok to have multiple symbols that map to the same numeric value.
+%% Appeared in protobuf 2.5.0.
+unalias_enum([{_Sym,Value}=Enum | Rest]) ->
+    [Enum | unalias_enum([E || {_,V}=E <- Rest, V /= Value])];
+unalias_enum([{option,_Name,_Value} | Rest]) ->
+    unalias_enum(Rest);
+unalias_enum([]) ->
+    [].
 
 var_f_n(N) -> var_n("F", N).
 var_b_n(N) -> var_n("B", N).

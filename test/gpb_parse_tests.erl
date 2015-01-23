@@ -181,6 +181,15 @@ parses_import_test() ->
         parse_lines(["package p1.p2;",
                      "import \"a/b/c.proto\";"]).
 
+parses_enum_option_test() ->
+    {ok, Elems} = parse_lines(["enum e1 {",
+                               "  option allow_alias = true;",
+                               "  ee1 = 1;",
+                               "  ee2 = 1;",
+                               "}"]),
+    [{{enum,e1}, [{option, allow_alias, true}, {ee1,1},{ee2,1}]}] =
+        do_process_sort_defs(Elems).
+
 generates_correct_absolute_names_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
                                "  message m2 { required uint32 x = 1; }",
