@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.8
+2015-Jan-25
+
+	* Add support for the enum "option allow_alias = true;" which
+	allows more than one enum to have the same numerical value. Gpb
+	will decode to the first defined enum symbol. Gpb no longer
+	supports allow_alias = false. This option appeared in Google
+	Protobuf version 2.5.0. Thanks to bb4242 for reporting.
+
 Version 3.17.7
 2015-Jan-07
 
