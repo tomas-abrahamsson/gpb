@@ -18,7 +18,8 @@ Features of gpb
    - importing other proto files
    - nested types
    - message extensions
-   - the 'packed' and 'default' options
+   - the 'packed' and 'default' options for fields
+   - the 'allow_alias' enum option (treated as if it is always set true)
    - generating metadata information
    - package namespacing (optional)
    - oneof
