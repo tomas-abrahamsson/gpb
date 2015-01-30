@@ -1333,6 +1333,8 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        [?f("-export([descriptor/0]).~n") || get_gen_descriptor_by_opts(Opts)],
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
+       format_export_types(get_type_specs_by_opts(Opts), Defs),
+       "\n",
        [["-on_load(load_nif/0).\n",
          "-export([load_nif/0]). %% for debugging of nif loading\n",
          "\n"]
@@ -3482,6 +3484,22 @@ rpc_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
         rpcs_as_proplists ->
             erl_parse:abstract(gpb:rpc_record_to_proplist(Rpc))
     end.
+
+% --- exported types -----------------------------------------------------
+format_enum_typespec(Enum, Enumeration) ->
+  ?f("-type '~s'() :: ~s.", [Enum,
+    string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumeration], " | ")]).
+
+format_export_types(false, _Defs) -> "";
+format_export_types(true, Defs) ->
+  iolist_to_binary(
+    [string:join([format_enum_typespec(Enum, Enumeration)
+                    || {{enum, Enum}, Enumeration} <- Defs],
+                "\n"),
+    "\n",
+     ?f("-export_type([~s]).",
+        [string:join(["'"++atom_to_list(Enum)++"'/0" || {{enum, Enum}, _} <- Defs], ", ")]),
+     "\n"]).
 
 %% -- hrl -----------------------------------------------------
 
