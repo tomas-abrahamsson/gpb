@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.9
+2015-Jan-30
+
+	* When generating typespecs, generate types for enums, and export
+	those types. Thanks to Luis Rascão.
+
 Version 3.17.8
 2015-Jan-25
 
