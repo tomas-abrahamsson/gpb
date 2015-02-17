@@ -1,5 +1,10 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.10
+2015-Feb-17
+
+	* Fix Issues Building on Windows/Cygwin. Thanks to Brett Bethke.
+
 Version 3.17.9
 2015-Jan-30
 
