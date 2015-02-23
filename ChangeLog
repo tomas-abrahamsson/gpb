@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.11
+2015-Feb-23
+
+	* When generating typespecs, generate types for messages, and
+	export those types. Thanks to Luis Rascão.
+
 Version 3.17.10
 2015-Feb-17
 
