@@ -1333,8 +1333,6 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        [?f("-export([descriptor/0]).~n") || get_gen_descriptor_by_opts(Opts)],
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
-       format_export_types(get_type_specs_by_opts(Opts), Defs),
-       "\n",
        [["-on_load(load_nif/0).\n",
          "-export([load_nif/0]). %% for debugging of nif loading\n",
          "\n"]
@@ -1355,6 +1353,9 @@ format_erl(Mod, Defs, AnRes, Opts) ->
            maps ->
                ""
        end,
+       "\n",
+       format_export_types(get_type_specs_by_opts(Opts),
+                           get_records_or_maps_by_opts(Opts), Defs),
        "\n",
        [[?f("~s~n", [format_load_nif(Mod, Opts)]),
          "\n"]
@@ -3490,15 +3491,35 @@ format_enum_typespec(Enum, Enumeration) ->
   ?f("-type '~s'() :: ~s.", [Enum,
     string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumeration], " | ")]).
 
-format_export_types(false, _Defs) -> "";
-format_export_types(true, Defs) ->
+format_record_typespec(records, Msg, _Fields, _Defs) ->
+  ?f("-type '~s'() :: #~s{}.", [Msg, Msg]);
+format_record_typespec(maps, Msg, Fields, Defs) ->
+  ?f("-type '~s'() :: ~n"
+     "      #{~s~n"
+     "       }.",
+      [Msg, outdent_first(format_hfields(7 + 1, Fields,
+                                         [{maps, true}, {type_specs, true}], Defs))]).
+
+format_export_types(false, _, _Defs) -> "";
+format_export_types(true, MapsOrRecords, Defs) ->
   iolist_to_binary(
-    [string:join([format_enum_typespec(Enum, Enumeration)
+    ["%% enumerate types\n",
+     string:join([format_enum_typespec(Enum, Enumeration)
                     || {{enum, Enum}, Enumeration} <- Defs],
                 "\n"),
     "\n",
      ?f("-export_type([~s]).",
-        [string:join(["'"++atom_to_list(Enum)++"'/0" || {{enum, Enum}, _} <- Defs], ", ")]),
+        [string:join(["'"++atom_to_list(Enum)++"'/0"
+                    || {{enum, Enum}, _} <- Defs], ", ")]),
+    "\n\n",
+    "%% message types\n",
+    string:join([format_record_typespec(MapsOrRecords, Msg, Fields, Defs)
+                    || {{msg, Msg}, Fields} <- Defs],
+                "\n"),
+    "\n",
+     ?f("-export_type([~s]).",
+        [string:join(["'"++atom_to_list(Msg)++"'/0"
+                    || {{msg, Msg}, _} <- Defs], ", ")]),
      "\n"]).
 
 %% -- hrl -----------------------------------------------------
@@ -3536,13 +3557,18 @@ format_msg_record(Msg, Fields, Opts, Defs) ->
 
 format_hfields(Indent, Fields, CompileOpts, Defs) ->
     TypeSpecs = get_type_specs_by_opts(CompileOpts),
+    MapsOrRecords = get_records_or_maps_by_opts(CompileOpts),
+    TypeSpecifierSep = case MapsOrRecords of
+                           records -> "::";
+                           maps -> "=>"
+                       end,
     string:join(
       lists:map(
         fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts,
                             occurrence=Occur}=Field}) ->
                 DefaultStr = case proplists:get_value(default, FOpts, '$no') of
-                                 '$no'   -> case Occur of
-                                                repeated -> ?f(" = []");
+                                 '$no'   -> case {Occur, MapsOrRecords} of
+                                                {repeated, records} -> ?f(" = []");
                                                 _        -> ""
                                             end;
                                  Default -> ?f(" = ~p", [Default])
@@ -3554,7 +3580,8 @@ format_hfields(Indent, Fields, CompileOpts, Defs) ->
                 FieldTxt1 = indent(Indent, ?f("~w~s", [Name, DefaultStr])),
                 FieldTxt2 = if TypeSpecs ->
                                     LineUp = lineup(iolist_size(FieldTxt1), 32),
-                                    ?f("~s~s:: ~s~s", [FieldTxt1, LineUp,
+                                    ?f("~s~s~s ~s~s", [FieldTxt1, LineUp,
+                                                       TypeSpecifierSep,
                                                        TypeStr, CommaSep]);
                                not TypeSpecs ->
                                     ?f("~s~s", [FieldTxt1, CommaSep])
@@ -3575,7 +3602,8 @@ format_hfields(Indent, Fields, CompileOpts, Defs) ->
                 FieldTxt1 = indent(Indent, ?f("~w", [Name])),
                 FieldTxt2 = if TypeSpecs ->
                                     LineUp = lineup(iolist_size(FieldTxt1), 32),
-                                    ?f("~s~s:: ~s~s", [FieldTxt1, LineUp,
+                                    ?f("~s~s~s ~s~s", [FieldTxt1, LineUp,
+                                                       TypeSpecifierSep,
                                                        TypeStr, CommaSep]);
                                not TypeSpecs ->
                                     ?f("~s~s", [FieldTxt1, CommaSep])
@@ -3625,7 +3653,13 @@ type_to_typestr_2(string, _Defs, Opts)    ->
   string_to_typestr(get_strings_as_binaries_by_opts(Opts));
 type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
 type_to_typestr_2({enum,E}, Defs, _Opts)  -> enum_typestr(E, Defs);
-type_to_typestr_2({msg,M}, _DEfs, _Opts)  -> ?f("#~p{}", [M]).
+type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts).
+
+msg_to_typestr(M, Opts) ->
+  case get_records_or_maps_by_opts(Opts) of
+    records -> ?f("#~p{}", [M]);
+    maps -> ?f("~p()", [M])
+  end.
 
 % when the strings_as_binaries option is requested the corresponding
 % typespec should be spec'ed
@@ -4795,13 +4829,19 @@ compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
                         PossibleNifCode,Opts,Reason})
              end
              || Ts <- FormToks],
-    {AttrForms, CodeForms} = split_forms_at_first_code(Forms),
+    {AttrForms0, CodeForms} = split_forms_at_first_code(Forms),
+    % extract export_type and type forms from attribute forms
+    AttrForms = lists:filter(fun ({attribute, _, export_type, _}) -> false;
+                                 ({attribute, _, type, _}) -> false;
+                                 (_) -> true
+                             end, AttrForms0),
+    TypeForms = AttrForms -- AttrForms0,
     FieldDef = field_record_to_attr_form(),
     OneofDef = oneof_record_to_attr_form(),
     RpcDef   = rpc_record_to_attr_form(),
     RecordBaseDefs = [FieldDef, OneofDef, RpcDef],
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
-    AllForms = AttrForms ++ RecordBaseDefs ++ MsgRecordForms ++ CodeForms,
+    AllForms = AttrForms ++ RecordBaseDefs ++ MsgRecordForms ++ TypeForms ++ CodeForms,
     combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
                                  PossibleNifCode).
 
