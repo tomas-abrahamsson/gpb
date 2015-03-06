@@ -3492,7 +3492,7 @@ format_enum_typespec(Enum, Enumeration) ->
     string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumeration], " | ")]).
 
 format_record_typespec(records, Msg, _Fields, _Defs) ->
-  ?f("-type '~s'() :: #~s{}.", [Msg, Msg]);
+  ?f("-type '~s'() :: #'~s'{}.", [Msg, Msg]);
 format_record_typespec(maps, Msg, Fields, Defs) ->
   ?f("-type '~s'() :: ~n"
      "      #{~s~n"
