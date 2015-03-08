@@ -772,7 +772,8 @@ get_proto_defs(write_fails) ->
     get_proto_defs(clean_code).
 
 get_proto_file(clean_code) ->
-    "message m1 { optional uint32 field11 = 1; }\n";
+    "message m1 { optional uint32 field11 = 1; }\n" ++
+    "message MessageInfo1 { optional uint32 field11 = 1; }\n";
 get_proto_file(warningful_code) ->
     %% circular msg definitions ==> warning about omitting type specs
     ["message m1 { optional m2 field11 = 1; }\n"
