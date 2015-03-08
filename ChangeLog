@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.12
+2015-Mar-08
+
+	* Bugfix exported types for CamelCase message names. Thanks to
+	Louis-Philippe Gauthier for fixing and to Luis Rascão for adding a
+	test for it.
+
 Version 3.17.11
 2015-Feb-23
 
