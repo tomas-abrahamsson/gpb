@@ -688,7 +688,7 @@ verify_float(V, _) when is_integer(V) -> ok;
 verify_float(V, Path) ->
     mk_type_error(bad_floating_point_value, V, Path).
 
-verify_string(V, Path) when is_list(V) ->
+verify_string(V, Path) when is_list(V); is_binary(V) ->
     try
         unicode:characters_to_binary(V),
         ok
