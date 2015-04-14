@@ -580,6 +580,15 @@ accepts_both_strings_and_binaries_as_input_test() ->
     {m1, "some string", "some other string"} = M:decode_msg(Data, m1),
     unload_code(M).
 
+verifies_both_strings_and_binaries_as_input_test() ->
+    M = compile_iolist(["message m1 {"
+                        "  required string f1 = 1;",
+                        "  required string f2 = 2;",
+                        "}"],
+                        [strings_as_binaries]),
+    R = {m1, "some string", <<"some other string">>},
+    ok = M:verify_msg(R),
+    unload_code(M).
 
 %% --- misc ----------
 
