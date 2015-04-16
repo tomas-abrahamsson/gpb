@@ -3097,7 +3097,7 @@ format_float_verifier(FlType) ->
 format_string_verifier() ->
     gpb_codegen:format_fn(
       mk_fn(v_type_, string),
-      fun(S, Path) when is_list(S) ->
+      fun(S, Path) when is_list(S); is_binary(S) ->
               try
                   unicode:characters_to_binary(S),
                   ok
