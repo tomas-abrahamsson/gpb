@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.17.13
+2015-Apr-16
+
+	* Bugfix verification of strings with the strings_as_binary
+	(-strbin) option. Thanks to Tilman Holschuh for fixing and to Luis
+	Rascão for adding a test for it.
+
 Version 3.17.12
 2015-Mar-08
 
