@@ -588,6 +588,7 @@ verifies_both_strings_and_binaries_as_input_test() ->
                         [strings_as_binaries]),
     R = {m1, "some string", <<"some other string">>},
     ok = M:verify_msg(R),
+    ?assertError(_, M:verify_msg({m1, "a", <<97,98,99,255,191>>})),
     unload_code(M).
 
 %% --- misc ----------

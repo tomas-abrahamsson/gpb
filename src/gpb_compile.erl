@@ -3098,9 +3098,11 @@ format_string_verifier() ->
     gpb_codegen:format_fn(
       mk_fn(v_type_, string),
       fun(S, Path) when is_list(S); is_binary(S) ->
-              try
-                  unicode:characters_to_binary(S),
-                  ok
+              try unicode:characters_to_binary(S) of
+                  B when is_binary(B) ->
+                      ok;
+                  {error, _, _} -> %% a non-UTF-8 binary
+                      mk_type_error(bad_unicode_string, S, Path)
               catch error:badarg ->
                       mk_type_error(bad_unicode_string, S, Path)
               end;
