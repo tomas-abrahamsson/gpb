@@ -126,12 +126,12 @@ the C++, Python and Java serializers/deserializers of protobuf-2.4.1
                   |       |(speed)|(size) | (lite) |       |(size) | (speed)|
     --------------+-------+-------+-------+--------+-------+-------+--------+
     small msgs    |       |       |       |        |       |       |        |
-      serialize   | 27.56 | 479.9 | 31.81 |  302.8 |  3.09 | 27.08 |  547.9 |
-      deserialize | 27.30 | 269.8 | 28.16 |  381.7 |  2.49 | 32.00 |  325.1 |
+      serialize   | 29.14 | 479.9 | 31.81 |  302.8 |  3.09 | 27.08 |  547.9 |
+      deserialize | 35.73 | 269.8 | 28.16 |  381.7 |  2.49 | 32.00 |  325.1 |
     --------------+-------+-------+-------+--------+-------+-------+--------+
     large msgs    |       |       |       |        |       |       |        |
-      serialize   | 18.83 | 447.7 | 26.87 |  284.8 |  2.20 | 24.82 |  314.2 |
-      deserialize | 24.39 | 269.6 | 24.69 |  337.2 |  1.74 | 17.93 |  215.0 |
+      serialize   | 20.24 | 447.7 | 26.87 |  284.8 |  2.20 | 24.82 |  314.2 |
+      deserialize | 25.17 | 269.6 | 24.69 |  337.2 |  1.74 | 17.93 |  215.0 |
     --------------+-------+-------+-------+--------+-------+-------+--------+
 
 The performances are measured as number of processed MB/s,
@@ -143,8 +143,8 @@ bytes, respectively, in serialized form)
 The Java benchmark is run with optimization both for code size and for
 speed. The Python implementation cannot optimize for speed.
 
-    SW: Python 2.6.6, Java SE 1.6.0_22, Erlang/OTP R16B01, g++ 4.6.1
-        Linux kernel 3.10, Debian, protobuf-2.4.1,
+    SW: Python 2.6.6, Java SE 1.6.0_22, Erlang/OTP 17.3, g++ 4.6.1
+        Linux kernel 3.16, Debian, protobuf-2.4.1,
     HW: Intel Core i5 760, 2.8GHz, 4x256 kB L2 cache, 8MB L3 cache
         (Turbo boost turned off, CPU frequency pinned to 2.8 GHz)
 
