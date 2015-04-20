@@ -126,12 +126,12 @@ the C++, Python and Java serializers/deserializers of protobuf-2.4.1
                   |       |(speed)|(size) | (lite) |       |(size) | (speed)|
     --------------+-------+-------+-------+--------+-------+-------+--------+
     small msgs    |       |       |       |        |       |       |        |
-      serialize   | 29.14 | 479.9 | 31.81 |  302.8 |  3.09 | 27.08 |  547.9 |
-      deserialize | 35.73 | 269.8 | 28.16 |  381.7 |  2.49 | 32.00 |  325.1 |
+      serialize   | 44.32 | 863.4 | 54.67 |  510.8 |  6.77 | 60.28 |  907.9 |
+      deserialize | 59.62 | 534.1 | 52.89 |  532.5 |  5.75 | 81.36 |  337.2 |
     --------------+-------+-------+-------+--------+-------+-------+--------+
     large msgs    |       |       |       |        |       |       |        |
-      serialize   | 20.24 | 447.7 | 26.87 |  284.8 |  2.20 | 24.82 |  314.2 |
-      deserialize | 25.17 | 269.6 | 24.69 |  337.2 |  1.74 | 17.93 |  215.0 |
+      serialize   | 28.76 | 667.9 | 45.71 |  396.5 |  4.71 | 58.28 |  562.9 |
+      deserialize | 37.01 | 396.3 | 44.84 |  276.3 |  4.07 | 55.33 |  356.8 |
     --------------+-------+-------+-------+--------+-------+-------+--------+
 
 The performances are measured as number of processed MB/s,
@@ -143,10 +143,10 @@ bytes, respectively, in serialized form)
 The Java benchmark is run with optimization both for code size and for
 speed. The Python implementation cannot optimize for speed.
 
-    SW: Python 2.6.6, Java SE 1.6.0_22, Erlang/OTP 17.3, g++ 4.6.1
-        Linux kernel 3.16, Debian, protobuf-2.4.1,
-    HW: Intel Core i5 760, 2.8GHz, 4x256 kB L2 cache, 8MB L3 cache
-        (Turbo boost turned off, CPU frequency pinned to 2.8 GHz)
+    SW: Python 2.7.9, Java 1.7.0_75 (OpenJDK), Erlang/OTP 17.3, g++ 4.9.2
+        Linux kernel 3.16, Debian (in 32 bit mode), protobuf-2.6.1,
+    HW: Intel Core i7 5820k, 3.3GHz, 6x256 kB L2 cache, 15MB L3 cache
+        (CPU frequency pinned to 3.3 GHz)
 
 The benchmarks are all done with the exact same messages files and
 proto files.  The source of the benchmarks was found in the Google
