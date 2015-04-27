@@ -1380,8 +1380,7 @@ format_erl(Mod, Defs, AnRes, Opts) ->
                ""
        end,
        "\n",
-       format_export_types(get_type_specs_by_opts(Opts),
-                           get_records_or_maps_by_opts(Opts), Defs),
+       format_export_types(Defs, Opts),
        "\n",
        [[?f("~s~n", [format_load_nif(Mod, Opts)]),
          "\n"]
@@ -3861,38 +3860,46 @@ rpc_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
 % --- exported types -----------------------------------------------------
 format_enum_typespec(Enum, Enumeration) ->
   ?f("-type '~s'() :: ~s.", [Enum,
-    string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumeration], " | ")]).
+    string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumeration],
+                " | ")]).
 
-format_record_typespec(records, Msg, _Fields, _Defs) ->
-  ?f("-type '~s'() :: #'~s'{}.", [Msg, Msg]);
-format_record_typespec(maps, Msg, Fields, Defs) ->
-  ?f("-type '~s'() :: ~n"
-     "      #{~s~n"
-     "       }.",
-      [Msg, outdent_first(format_hfields(7 + 1, Fields,
-                                         [{maps, true}, {type_specs, true}], Defs))]).
 
-format_export_types(false, _, _Defs) -> "";
-format_export_types(true, MapsOrRecords, Defs) ->
-  iolist_to_binary(
-    ["%% enumerate types\n",
-     string:join([format_enum_typespec(Enum, Enumeration)
-                    || {{enum, Enum}, Enumeration} <- Defs],
-                "\n"),
-    "\n",
-     ?f("-export_type([~s]).",
-        [string:join(["'"++atom_to_list(Enum)++"'/0"
-                    || {{enum, Enum}, _} <- Defs], ", ")]),
-    "\n\n",
-    "%% message types\n",
-    string:join([format_record_typespec(MapsOrRecords, Msg, Fields, Defs)
-                    || {{msg, Msg}, Fields} <- Defs],
-                "\n"),
-    "\n",
-     ?f("-export_type([~s]).",
-        [string:join(["'"++atom_to_list(Msg)++"'/0"
-                    || {{msg, Msg}, _} <- Defs], ", ")]),
-     "\n"]).
+format_record_typespec(Msg, Fields, Defs, Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records ->
+            ?f("-type ~p() :: #~p{}.", [Msg, Msg]);
+        maps ->
+            ?f("-type ~p() ::~n"
+               "      #{~s~n"
+               "       }.",
+               [Msg, outdent_first(format_hfields(7 + 1, Fields, Opts, Defs))])
+    end.
+
+format_export_types(Defs, Opts) ->
+    case get_type_specs_by_opts(Opts) of
+        false ->
+            "";
+        true ->
+            iolist_to_binary(
+              ["%% enumerate types\n",
+               string:join([format_enum_typespec(Enum, Enumeration)
+                            || {{enum, Enum}, Enumeration} <- Defs],
+                           "\n"),
+               "\n",
+               ?f("-export_type([~s]).",
+                  [string:join(["'"++atom_to_list(Enum)++"'/0"
+                                || {{enum, Enum}, _} <- Defs], ", ")]),
+               "\n\n",
+               "%% message types\n",
+               string:join([format_record_typespec(Msg, Fields, Defs, Opts)
+                            || {{msg, Msg}, Fields} <- Defs],
+                           "\n"),
+               "\n",
+               ?f("-export_type([~s]).",
+                  [string:join(["'"++atom_to_list(Msg)++"'/0"
+                                || {{msg, Msg}, _} <- Defs], ", ")]),
+               "\n"])
+    end.
 
 %% -- hrl -----------------------------------------------------
 
@@ -3927,29 +3934,44 @@ format_msg_record(Msg, Fields, Opts, Defs) ->
      "\n",
      ?f("        }).~n")].
 
-format_hfields(Indent, Fields, CompileOpts, Defs) ->
-    TypeSpecs = get_type_specs_by_opts(CompileOpts),
-    MapsOrRecords = get_records_or_maps_by_opts(CompileOpts),
+format_hfields(Indent, Fields, Opts, Defs) ->
+    TypeSpecs = get_type_specs_by_opts(Opts),
+    MapsOrRecords = get_records_or_maps_by_opts(Opts),
     TypeSpecifierSep = case MapsOrRecords of
                            records -> "::";
                            maps -> "=>"
                        end,
+    MappingAndUnset = get_mapping_and_unset_by_opts(Opts),
+    LastIndex = case MappingAndUnset of
+                    records -> length(Fields);
+                    {maps, present_undefined} -> length(Fields);
+                    {maps, omitted} -> find_last_nonopt_field_index(Fields)
+                end,
     string:join(
       lists:map(
         fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts,
                             occurrence=Occur}=Field}) ->
-                DefaultStr = case proplists:get_value(default, FOpts, '$no') of
-                                 '$no'   -> case {Occur, MapsOrRecords} of
-                                                {repeated, records} -> ?f(" = []");
-                                                _        -> ""
-                                            end;
-                                 Default -> ?f(" = ~p", [Default])
-                             end,
-                TypeStr = ?f("~s", [type_to_typestr(Field, Defs, CompileOpts)]),
-                CommaSep = if I < length(Fields) -> ",";
-                              true               -> "" %% last entry
+                LineLead = if MappingAndUnset == {maps, omitted},
+                              Occur == optional ->
+                                   "%% ";
+                              true ->
+                                   ""
                            end,
-                FieldTxt1 = indent(Indent, ?f("~w~s", [Name, DefaultStr])),
+                DefaultStr = case proplists:get_value(default, FOpts, '$no') of
+                                 '$no' ->
+                                     case {Occur, MapsOrRecords} of
+                                         {repeated, records} -> ?f(" = []");
+                                         _        -> ""
+                                     end;
+                                 Default ->
+                                     ?f(" = ~p", [Default])
+                             end,
+                TypeStr = ?f("~s", [type_to_typestr(Field, Defs, Opts)]),
+                CommaSep = if I < LastIndex -> ",";
+                              true          -> "" %% last entry
+                           end,
+                FieldTxt0 = ?f("~s~w~s", [LineLead, Name, DefaultStr]),
+                FieldTxt1 = indent(Indent, FieldTxt0),
                 FieldTxt2 = if TypeSpecs ->
                                     LineUp = lineup(iolist_size(FieldTxt1), 32),
                                     ?f("~s~s~s ~s~s", [FieldTxt1, LineUp,
@@ -3967,11 +3989,15 @@ format_hfields(Indent, Fields, CompileOpts, Defs) ->
                    [FieldTxt2, LineUpStr2, FNum,
                     [", " || TypeComment /= ""], TypeComment]);
            ({I, #gpb_oneof{name=Name}=Field}) ->
-                TypeStr = ?f("~s", [type_to_typestr(Field, Defs, CompileOpts)]),
-                CommaSep = if I < length(Fields) -> ",";
-                              true               -> "" %% last entry
+                LineLead = if MappingAndUnset == {maps, omitted} -> "%% ";
+                              true -> ""
                            end,
-                FieldTxt1 = indent(Indent, ?f("~w", [Name])),
+                TypeStr = ?f("~s", [type_to_typestr(Field, Defs, Opts)]),
+                CommaSep = if I < LastIndex -> ",";
+                              true          -> "" %% last entry
+                           end,
+                FieldTxt0 = ?f("~s~w", [LineLead, Name]),
+                FieldTxt1 = indent(Indent, FieldTxt0),
                 FieldTxt2 = if TypeSpecs ->
                                     LineUp = lineup(iolist_size(FieldTxt1), 32),
                                     ?f("~s~s~s ~s~s", [FieldTxt1, LineUp,
@@ -3995,17 +4021,38 @@ get_type_specs_by_opts(Opts) ->
     Default = false,
     proplists:get_value(type_specs, Opts, Default).
 
+find_last_nonopt_field_index(Fields) ->
+    lists:foldl(fun({I, F}, Acc) ->
+                        case get_field_occurrence(F) of
+                            required -> I;
+                            repeated -> I;
+                            optional -> Acc
+                        end
+                end,
+                0,
+                index_seq(Fields)).
+
 type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs, Opts) ->
+    OrUndefined = case get_mapping_and_unset_by_opts(Opts) of
+                      records                   -> " | undefined";
+                      {maps, present_undefined} -> " | undefined";
+                      {maps, omitted}           -> ""
+                  end,
     case Occurrence of
         required -> type_to_typestr_2(Type, Defs, Opts);
         repeated -> "[" ++ type_to_typestr_2(Type, Defs, Opts) ++ "]";
-        optional -> type_to_typestr_2(Type, Defs, Opts) ++ " | 'undefined'"
+        optional -> type_to_typestr_2(Type, Defs, Opts) ++ OrUndefined
     end;
 type_to_typestr(#gpb_oneof{fields=OFields}, Defs, Opts) ->
+    OrUndefined = case get_mapping_and_unset_by_opts(Opts) of
+                      records                   -> ["undefined"];
+                      {maps, present_undefined} -> ["undefined"];
+                      {maps, omitted}           -> []
+                  end,
     string:join(
-      ["undefined"
-       | [?f("{~s, ~s}", [Name, type_to_typestr_2(Type, Defs, Opts)])
-          || #?gpb_field{name=Name, type=Type} <- OFields]],
+      [?f("{~s, ~s}", [Name, type_to_typestr_2(Type, Defs, Opts)])
+       || #?gpb_field{name=Name, type=Type} <- OFields]
+      ++ OrUndefined,
       " | ").
 
 type_to_typestr_2(sint32, _Defs, _Opts)   -> "integer()";
