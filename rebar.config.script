@@ -1,4 +1,10 @@
 %% -*- erlang -*-
+
+HaveMapsOpts = try maps:size(maps:new()) of
+                   0 -> [{d,'HAVE_MAPS',true}]
+               catch error:undef -> []
+               end.
+
 [{require_otp_vsn, ".*"},
 
  {pre_hooks,
@@ -15,7 +21,7 @@
 
  %% This line is useful if you have gpb_eqc.erl symlinked to
  %% the symlink in the test/ directory.
- {eunit_compile_opts, [{i,"../include"}]},
+ {eunit_compile_opts, [{i,"../include"}] ++ HaveMapsOpts},
 
  {post_hooks,
   [{compile,
