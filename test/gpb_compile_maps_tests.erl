@@ -148,4 +148,66 @@ merge_maps_with_opts_omitted_test() ->
                          m1))),
     unload_code(M).
 
+
+%% verify ------------------------------------------------
+verify_maps_with_opts_present_undefined_test() ->
+    M = compile_iolist(["message m1 {",
+                        "  required string f1 = 1;",
+                        "  repeated string f2 = 2;",
+                        "  optional uint32 f3 = 3;",
+                        "  oneof o1 {",
+                        "    m2     f11 = 11;",
+                        "    uint32 f12 = 12;",
+                        "  };",
+                        "}",
+                        "message m2 {",
+                        "  repeated uint32 g1 = 1;",
+                        "}"],
+                       [maps, {maps_unset_optional, present_undefined},
+                        type_specs]),
+    ok = M:verify_msg(#{f1 => "x", f2 => ["a"],
+                        f3 => undefined, o1 => undefined},
+                      m1),
+    ok = M:verify_msg(#{f1 => "x", f2 => ["a"],
+                        f3 => undefined, o1 => {f12,99}},
+                      m1),
+    ?assertError(_, M:verify_msg(#{f1 => "x", f2 => ["a"],
+                                   f3 => undefined, o1 => fzx},
+                                 m1)),
+    ?assertError(_, M:verify_msg(#{f1 => "x", f2 => ["a"],
+                                   f3 => undefined, o1 => {fzx,yy}},
+                                 m1)),
+    ?assertError(_, M:verify_msg(#{f1 => "x", f2 => ["a"],
+                                   f3 => "abc", o1 => undefined},
+                                 m1)),
+    unload_code(M).
+
+verify_maps_with_opts_omitted_test() ->
+    M = compile_iolist(["message m1 {",
+                        "  required string f1 = 1;",
+                        "  repeated string f2 = 2;",
+                        "  optional uint32 f3 = 3;",
+                        "  oneof o1 {",
+                        "    m2     f11 = 11;",
+                        "    uint32 f12 = 12;",
+                        "  };",
+                        "}",
+                        "message m2 {",
+                        "  repeated uint32 g1 = 1;",
+                        "}"],
+                       [maps, {maps_unset_optional, omitted},
+                        type_specs]),
+    ok = M:verify_msg(#{f1 => "x", f2 => ["a"]},
+                      m1),
+    ok = M:verify_msg(#{f1 => "x", f2 => ["a"], o1 => {f12,99}},
+                      m1),
+    ?assertError(_, M:verify_msg(#{f1 => "x", f2 => ["a"], o1 => fzx},
+                                 m1)),
+    ?assertError(_, M:verify_msg(#{f1 => "x", f2 => ["a"], o1 => {fzx,yy}},
+                                 m1)),
+    ?assertError(_, M:verify_msg(#{f1 => "x", f2 => ["a"], f3 => "abc"},
+                                 m1)),
+    unload_code(M).
+
+
 -endif. %% HAVE_MAPS

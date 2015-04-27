@@ -3226,8 +3226,24 @@ format_msg_verifiers(Defs, AnRes, Opts) ->
      || {{msg,MsgName}, MsgDef} <- Defs].
 
 format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
-    FVars = [{var_f_n(I), Field} || {I, Field} <- index_seq(MsgDef)],
-    RFields = [{get_field_name(Field), Var} || {Var, Field} <- FVars],
+    FNames = get_field_names(MsgDef),
+    FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
+    MsgVar = ?expr(M),
+    FieldMatching =
+        case get_mapping_and_unset_by_opts(Opts) of
+            X when X == records;
+                   X == {maps, present_undefined} ->
+                mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
+            {maps, omitted} ->
+                FMap = zip_for_non_opt_fields(MsgDef, FVars),
+                if length(FMap) == length(FNames) ->
+                        map_match(FMap);
+                   length(FMap) < length(FNames) ->
+                        ?expr('mapmatch' = 'M',
+                              [replace_tree('mapmatch', map_match(FMap)),
+                               replace_tree('M', MsgVar)])
+                end
+        end,
     NeedsMatchOther = case get_records_or_maps_by_opts(Opts) of
                           records -> can_occur_as_sub_msg(MsgName, AnRes);
                           maps    -> true
@@ -3240,22 +3256,24 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
          ('<X>', Path) ->
               mk_type_error({expected_msg,'<MsgName>'}, X, Path)
       end,
-      [replace_tree('<msg-match>', mapping_match(MsgName, RFields, Opts)),
+      [replace_tree('<msg-match>', FieldMatching),
        replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
                                  MsgDef /= [] -> ?expr(Path)
                               end),
-       splice_trees('<verify-fields>', field_verifiers(FVars)),
+       splice_trees('<verify-fields>',
+                    field_verifiers(MsgDef, FVars, MsgVar, Opts)),
        repeat_clauses('<X>', case NeedsMatchOther of
                                  true  -> [[replace_tree('<X>', ?expr(X))]];
                                  false -> [] %% omit the else clause
                              end),
        replace_term('<MsgName>', MsgName)]).
 
-field_verifiers(FVars) ->
-    [field_verifier(FVar, Field) || {FVar, Field} <- FVars].
+field_verifiers(Fields, FVars, MsgVar, Opts) ->
+    [field_verifier(Field, FVar, MsgVar, Opts)
+     || {Field, FVar} <- lists:zip(Fields, FVars)].
 
-field_verifier(FVar,
-               #?gpb_field{name=FName, type=Type, occurrence=Occurrence}) ->
+field_verifier(#?gpb_field{name=FName, type=Type, occurrence=Occurrence},
+               FVar, MsgVar, Opts) ->
     FVerifierFn = case Type of
                       {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
                       {enum,EnumName} -> mk_fn(v_enum_, EnumName);
@@ -3282,39 +3300,87 @@ field_verifier(FVar,
                   end,
                   Replacements);
         optional ->
-            ?expr(if '<F>' == undefined -> ok;
-                     true -> '<verify-fn>'('<F>', ['<FName>' | Path])
-                  end,
-                  Replacements)
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    ?expr(if '<F>' == undefined -> ok;
+                             true -> '<verify-fn>'('<F>', ['<FName>' | Path])
+                          end,
+                          Replacements);
+                {maps, omitted} ->
+                    ?expr(case maps:find('<FName>', 'M') of
+                              error ->
+                                  ok;
+                              {ok, '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FName>' | Path])
+                          end,
+                          [replace_tree('M', MsgVar) | Replacements])
+            end
     end;
-field_verifier(FVar,
-               #gpb_oneof{name=FName, fields=OFields}) ->
-    ?expr(
-       case '<F>' of
-           undefined ->
-               ok;
-           '<oneof-pattern>' ->
-               '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path]);
-           _ ->
-               mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
-       end,
-       [replace_tree('<F>', FVar),
-        replace_term('<FName>', FName),
-        repeat_clauses(
-          '<oneof-pattern>',
-          [begin
-               FVerifierFn = case Type of
-                                 {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
-                                 {enum,EnumName} -> mk_fn(v_enum_, EnumName);
-                                 Type            -> mk_fn(v_type_, Type)
-                             end,
-               OFVar = prefix_var("O", FVar),
-               [replace_tree('<oneof-pattern>', ?expr({'<OFName>','<OFVar>'})),
-                replace_term('<verify-fn>', FVerifierFn),
-                replace_tree('<OFVar>', OFVar),
-                replace_term('<OFName>', OFName)]
-           end
-           || #?gpb_field{name=OFName, type=Type} <- OFields])]).
+field_verifier(#gpb_oneof{name=FName, fields=OFields}, FVar, MsgVar, Opts) ->
+    case get_mapping_and_unset_by_opts(Opts) of
+        X when X == records;
+               X == {maps, present_undefined} ->
+            ?expr(
+               case '<F>' of
+                   undefined ->
+                       ok;
+                   '<oneof-pattern>' ->
+                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path]);
+                   _ ->
+                       mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
+               end,
+               [replace_tree('<F>', FVar),
+                replace_term('<FName>', FName),
+                repeat_clauses(
+                  '<oneof-pattern>',
+                  [begin
+                       FVerifierFn =
+                           case Type of
+                               {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
+                               {enum,EnumName} -> mk_fn(v_enum_, EnumName);
+                               Type            -> mk_fn(v_type_, Type)
+                           end,
+                       OFVar = prefix_var("O", FVar),
+                       [replace_tree('M', MsgVar),
+                        replace_tree('<oneof-pattern>',
+                                     ?expr({'<OFName>','<OFVar>'})),
+                        replace_term('<verify-fn>', FVerifierFn),
+                        replace_tree('<OFVar>', OFVar),
+                        replace_term('<OFName>', OFName)]
+                   end
+                   || #?gpb_field{name=OFName, type=Type} <- OFields])]);
+        {maps, omitted} ->
+            ?expr(
+               case maps:find('<FName>', 'M') of
+                   error ->
+                       ok;
+                   '<oneof-pattern>' ->
+                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path]);
+                   {ok, '<F>'} ->
+                       mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
+               end,
+               [replace_tree('<F>', FVar),
+                replace_term('<FName>', FName),
+                replace_tree('M', MsgVar),
+                repeat_clauses(
+                  '<oneof-pattern>',
+                  [begin
+                       FVerifierFn =
+                           case Type of
+                               {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
+                               {enum,EnumName} -> mk_fn(v_enum_, EnumName);
+                               Type            -> mk_fn(v_type_, Type)
+                           end,
+                       OFVar = prefix_var("O", FVar),
+                       [replace_tree('<oneof-pattern>',
+                                     ?expr({ok, {'<OFName>','<OFVar>'}})),
+                        replace_term('<verify-fn>', FVerifierFn),
+                        replace_tree('<OFVar>', OFVar),
+                        replace_term('<OFName>', OFName)]
+                   end
+                   || #?gpb_field{name=OFName, type=Type} <- OFields])])
+    end.
 
 
 can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
