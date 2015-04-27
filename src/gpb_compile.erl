@@ -70,6 +70,7 @@ file(File) ->
 %%                   {defs_as_proplists, boolean()} | defs_as_proplists |
 %%                   {descriptor,boolean()} | descriptor |
 %%                   {maps,boolean()} | maps |
+%%                   {maps_unset_optional, omitted | present_undefined} |
 %%                   {nif,boolean()} | nif |
 %%                   {load_nif, LoadNif} |
 %%                   {i, directory()} |
@@ -201,6 +202,25 @@ file(File) ->
 %% `#field{}' records, unless, of course `defs_as_proplists' is specified,
 %% in which case they will be proplists instead. This option is not
 %% compatible with the `nif' option.
+%%
+%% For maps, for optional fields, if not set, the
+%% `maps_unset_optional' option specifies the Erlang-internal
+%% representation; both how it is expected to be found at encoding,
+%% and how decoding will return it:
+%% <dl>
+%%   <dt>`omitted'</dt>
+%%   <dd>This means it is not included in the map</dd>
+%%   <dt>`present_undefined'</dt>
+%%   <dd>This means it is present and has the value `undefined'.
+%%       This is the default, for historical reasons mostly, due to
+%%       the way records works, but there are some caveats, although
+%%       apparently rare, but still.  imagine an enum with a symbol
+%%       `undefined', and an optional field of that enum type. It will
+%%       not be possible to tell the difference between it being unset
+%%       and being present and set.  Encoding will assume it is unset.
+%%   </dd>
+%% </dl>
+%%
 %%
 %% The `nif' option will cause the compiler to generate nif C++ code
 %% for encoding and decoding. The generated nif C++ code can be linked
@@ -653,6 +673,8 @@ c() ->
 %%   <dd>Generate code that will accept and produce maps instead of
 %%       records. No .hrl file will be generated. See the `maps' option
 %%       for the function {@link file/2} for more info.</dd>
+%%   <dt>`-maps_unset_optional omitted | present_undefined'</dt>
+%%   <dd>Specifies the interal format for optional fields that are unset.</dd>
 %%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
@@ -846,6 +868,10 @@ opt_specs() ->
      {"maps", undefined, maps, "\n"
       "       Generate code that will accept and produce maps instead of\n"
       "       records.\n"},
+     {"maps_unset_optional", {omitted, present_undefined}, maps_unset_optional,
+      "\n"
+      "       Specifies the interal format for optional fields\n"
+      "       that are unset.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
