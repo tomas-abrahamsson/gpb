@@ -1,0 +1,31 @@
+%% -*- erlang -*-
+[{require_otp_vsn, ".*"},
+
+ {pre_hooks,
+  [{compile,
+    %% invoking shell script as an argument to sh appears to  be
+    %% needed with rebar for windows/cygwin
+    "sh build/mk_version_hrl"
+    "    < include/gpb_version.hrl.in"
+    "    > include/gpb_version.hrl "}
+  ]},
+
+ %% Erlang compiler options
+ {erl_opts, [debug_info]},
+
+ %% This line is useful if you have gpb_eqc.erl symlinked to
+ %% the symlink in the test/ directory.
+ {eunit_compile_opts, [{i,"../include"}]},
+
+ {post_hooks,
+  [{compile,
+    %% way of invoking shell script: see above
+    "sh build/compile_descriptor"}]},
+
+ %% XRef checks to perform
+ {xref_checks, [undefined_function_calls]},
+
+ %% Clean files
+ {clean_files, [".eunit", "ebin/*.beam", "include/gpb_version.hrl",
+                "descr_src/gpb_descriptor.erl", "descr_src/gpb_descriptor.hrl"]}
+].
