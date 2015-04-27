@@ -1559,21 +1559,39 @@ format_msg_encoder(MsgName, MsgDef, Opts) ->
     FNames = get_field_names(MsgDef),
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
     BVars = [var_b_n(I) || I <- lists:seq(1, length(FNames)-1)] ++ [last],
+    MsgVar = ?expr(M),
     {EncodeExprs, _} =
         lists:mapfoldl(
           fun({NewBVar, Field, FVar}, PrevBVar) when NewBVar /= last ->
-                  EncExpr = field_encode_expr(MsgName, Field, FVar, PrevBVar),
+                  EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
+                                              PrevBVar, Opts),
                   E = ?expr('<NewB>' = '<encode-expr>',
                             [replace_tree('<NewB>', NewBVar),
                              replace_tree('<encode-expr>', EncExpr)]),
                   {E, NewBVar};
              ({last, Field, FVar}, PrevBVar) ->
-                  EncExpr = field_encode_expr(MsgName, Field, FVar, PrevBVar),
+                  EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
+                                              PrevBVar, Opts),
                   {EncExpr, dummy}
           end,
           ?expr(Bin),
           lists:zip3(BVars, MsgDef, FVars)),
     FnName = mk_fn(e_msg_, MsgName),
+    FieldMatching =
+        case get_mapping_and_unset_by_opts(Opts) of
+            X when X == records;
+                   X == {maps, present_undefined} ->
+                mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
+            {maps, omitted} ->
+                FMap = zip_for_non_opt_fields(MsgDef, FVars),
+                if length(FMap) == length(FNames) ->
+                        map_match(FMap);
+                   length(FMap) < length(FNames) ->
+                        ?expr('mapmatch' = 'M',
+                              [replace_tree('mapmatch', map_match(FMap)),
+                               replace_tree('M', MsgVar)])
+                end
+        end,
     [gpb_codegen:format_fn(
        FnName,
        fun(Msg) ->
@@ -1585,8 +1603,7 @@ format_msg_encoder(MsgName, MsgDef, Opts) ->
        fun('<msg-matching>', Bin) ->
                '<encode-param-exprs>'
        end,
-       [replace_tree('<msg-matching>',
-                     mapping_match(MsgName, lists:zip(FNames, FVars), Opts)),
+       [replace_tree('<msg-matching>', FieldMatching),
         splice_trees('<encode-param-exprs>', EncodeExprs)])].
 
 get_field_names(MsgDef) ->
@@ -1596,20 +1613,47 @@ get_field_names(MsgDef) ->
      end
      || Field <- MsgDef].
 
-field_encode_expr(MsgName, #?gpb_field{}=Field, FVar, PrevBVar) ->
+zip_for_non_opt_fields([#?gpb_field{name=FName, occurrence=Occurrence} | FRest],
+                       [Elem | ERest]) ->
+    case Occurrence of
+        optional -> zip_for_non_opt_fields(FRest, ERest);
+        required -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)];
+        repeated -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)]
+    end;
+zip_for_non_opt_fields([#gpb_oneof{} | FRest], [_Elem | ERest]) ->
+    zip_for_non_opt_fields(FRest, ERest);
+zip_for_non_opt_fields([], []) ->
+    [].
+
+field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field, FVar,
+                  PrevBVar, Opts)->
     FEncoder = mk_field_encode_fn_name(MsgName, Field),
     #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum}=Field,
-    Transforms = [replace_tree('<F>', FVar),
+    Transforms = [replace_term('fieldname', FName),
+                  replace_tree('<F>', FVar),
                   replace_term('<enc>', FEncoder),
                   replace_tree('<Bin>', PrevBVar),
                   splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
     case Occurrence of
         optional ->
-            ?expr(
-               if '<F>' == undefined -> '<Bin>';
-                  true -> '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
-               end,
-               Transforms);
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    ?expr(
+                       if '<F>' == undefined -> '<Bin>';
+                          true -> '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+                       end,
+                       Transforms);
+                {maps, omitted} ->
+                    ?expr(
+                       case maps:find('fieldname', 'M') of
+                           error ->
+                               '<Bin>';
+                           {ok, '<F>'} ->
+                               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+                       end,
+                       [replace_tree('M', MsgVar) | Transforms])
+            end;
         repeated ->
             ?expr(
                if '<F>' == [] -> '<Bin>';
@@ -1621,31 +1665,54 @@ field_encode_expr(MsgName, #?gpb_field{}=Field, FVar, PrevBVar) ->
                '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>),
                Transforms)
     end;
-field_encode_expr(MsgName, #gpb_oneof{fields=OFields}, FVar, PrevBVar) ->
+field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields}, FVar,
+                  PrevBVar, Opts) ->
     OFVar = prefix_var("O", FVar),
     OneofClauseTransform =
         repeat_clauses(
           '<oneof...>',
           [begin
-               MatchPattern = ?expr({'<oneof-name>', '<OF>'},
-                                    [replace_term('<oneof-name>', Name),
-                                     replace_tree('<OF>', OFVar)]),
+               MatchPattern =
+                   case get_mapping_and_unset_by_opts(Opts) of
+                       X when X == records;
+                              X == {maps, present_undefined} ->
+                           ?expr({'<oneof-name>', '<OF>'},
+                                 [replace_term('<oneof-name>', Name),
+                                  replace_tree('<OF>', OFVar)]);
+                       {maps, omitted} ->
+                           ?expr({ok, {'<oneof-name>', '<OF>'}},
+                                 [replace_term('<oneof-name>', Name),
+                                  replace_tree('<OF>', OFVar)])
+                   end,
                %% undefined is already handled, we have a match,
                %% the field occurs, as if it had been required
                OField2 = OField#?gpb_field{occurrence=required},
-               EncExpr = field_encode_expr(MsgName, OField2, OFVar, PrevBVar),
+               EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
+                                           PrevBVar, Opts),
                [replace_tree('<oneof...>', MatchPattern),
                 replace_tree('<expr>', EncExpr)]
            end
            || #?gpb_field{name=Name}=OField <- OFields]),
-    ?expr(case '<F>' of
-              undefined    -> '<Bin>';
-              '<oneof...>' -> '<expr>'
-          end,
-          [replace_tree('<F>', FVar),
-           replace_tree('<Bin>', PrevBVar),
-           OneofClauseTransform]).
-%%).
+    case get_mapping_and_unset_by_opts(Opts) of
+        X when X == records;
+               X == {maps, present_undefined} ->
+            ?expr(case '<F>' of
+                      undefined    -> '<Bin>';
+                      '<oneof...>' -> '<expr>'
+                  end,
+                  [replace_tree('<F>', FVar),
+                   replace_tree('<Bin>', PrevBVar),
+                   OneofClauseTransform]);
+        {maps, omitted} ->
+            ?expr(case maps:find('fieldname', 'M') of
+                      error        -> '<Bin>';
+                      '<oneof...>' -> '<expr>'
+                  end,
+                  [replace_term('fieldname', FName),
+                   replace_tree('M', MsgVar),
+                   replace_tree('<Bin>', PrevBVar),
+                   OneofClauseTransform])
+    end.
 
 mk_field_encode_fn_name(MsgName, #?gpb_field{occurrence=repeated, name=FName}) ->
     mk_fn(e_field_, MsgName, FName);
@@ -4988,6 +5055,14 @@ get_records_or_maps_by_opts(Opts) ->
         true  -> maps
     end.
 
+get_mapping_and_unset_by_opts(Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records ->
+            records;
+        maps ->
+            Default = present_undefined,
+            {maps, proplists:get_value(maps_unset_optional, Opts, Default)}
+    end.
 
 %% records
 record_match(RName, Fields) -> record_create_or_match(RName, Fields).
