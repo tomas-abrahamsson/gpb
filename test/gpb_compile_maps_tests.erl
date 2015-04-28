@@ -40,9 +40,44 @@ simple_maps_test() ->
                         "  required string f1 = 1;",
                         "  required uint32 f2 = 2;",
                         "}"],
-                       [maps]),
+                       [maps, type_specs]),
     Data = M:encode_msg(#{f1 => "some string", f2 => 33}, m1),
     #{f1 := "some string", f2 := 33} = M:decode_msg(Data, m1),
+    unload_code(M).
+
+encode_decode_maps_with_opts_present_undefined_test() ->
+    M = compile_iolist(["message m1 {"
+                        "  required string f1 = 1;",
+                        "  optional uint32 f2 = 2;",
+                        "  oneof o1 {",
+                        "    uint32 f3 = 3;",
+                        "    uint32 f4 = 4;",
+                        "  };",
+                        "}"],
+                       [maps, {maps_unset_optional, present_undefined},
+                        type_specs]),
+    Data1 = M:encode_msg(#{f1 => "x", f2 => 33,        o1 => undefined}, m1),
+    Data2 = M:encode_msg(#{f1 => "x", f2 => undefined, o1 => undefined}, m1),
+    [{f1,"x"}, {f2,33}, {o1, undefined}] =
+        lists:sort(maps:to_list(M:decode_msg(Data1, m1))),
+    [{f1,"x"}, {f2,undefined}, {o1, undefined}] =
+        lists:sort(maps:to_list(M:decode_msg(Data2, m1))),
+    unload_code(M).
+
+encode_decode_maps_with_opts_omitted_test() ->
+    M = compile_iolist(["message m1 {"
+                        "  required string f1 = 1;",
+                        "  optional uint32 f2 = 2;",
+                        "  oneof o1 {",
+                        "    uint32 f3 = 3;",
+                        "    uint32 f4 = 4;",
+                        "  };",
+                        "}"],
+                       [maps, {maps_unset_optional, omitted}, type_specs]),
+    Data1 = M:encode_msg(#{f1 => "x", f2 => 33}, m1),
+    Data2 = M:encode_msg(#{f1 => "x"}, m1),
+    [{f1,"x"}, {f2,33}] = lists:sort(maps:to_list(M:decode_msg(Data1, m1))),
+    [{f1,"x"}] = lists:sort(maps:to_list(M:decode_msg(Data2, m1))),
     unload_code(M).
 
 -endif. %% HAVE_MAPS

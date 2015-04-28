@@ -2119,7 +2119,7 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
          [[replace_tree('<precomputed-binary-match>', BinMatch),
            replace_tree('<calls-to-field-decoding>', FnCall)]
           || {BinMatch, FnCall} <- decoder_fp(Bindings, MsgName, MsgDef)]),
-       replace_tree('<finalize-result>',
+       splice_trees('<finalize-result>',
                     decoder_finalize_result(Params, FFields,
                                             MsgName, MsgDef, AnRes, Opts)),
        replace_term('<decode-general>', mk_fn(dg_read_field_def_, MsgName))]).
@@ -2148,35 +2148,45 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
        splice_trees('<FParams>', FParams),
        replace_tree('<calls-to-field-decoding-or-skip>',
                     decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
-       replace_tree('<finalize-result>',
+       splice_trees('<finalize-result>',
                     decoder_finalize_result(Params, FFields,
                                             MsgName, MsgDef, AnRes, Opts))]).
 
 msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
-    FNVExprs = [case Field of
-                    #?gpb_field{name=FName, occurrence=Occurrence} ->
-                        case Occurrence of
-                            repeated -> {FName, [],        ?expr([])};
-                            required -> {FName, undefined, ?expr(undefined)};
-                            optional -> {FName, undefined, ?expr(undefined)}
-                        end;
-                    #gpb_oneof{name=FName} ->
-                        {FName, undefined, ?expr(undefined)}
-                end
-                || Field <- MsgDef],
+    ExprInfos =
+        [case Field of
+             #?gpb_field{name=FName, occurrence=Occurrence} ->
+                 case Occurrence of
+                     repeated -> {FName, m, ?expr([]),        ?expr([])};
+                     required -> {FName, o, ?expr(undefined), ?expr(undefined)};
+                     optional -> {FName, o, ?expr(undefined), ?expr('$undef')}
+                 end;
+             #gpb_oneof{name=FName} ->
+                 {FName, o, ?expr(undefined), ?expr('$undef')}
+         end
+         || Field <- MsgDef],
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
-            [Expr || {_FName, _Value, Expr} <- FNVExprs];
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    [Expr || {_FName, _, Expr, _MOExpr} <- ExprInfos];
+                {maps, omitted} ->
+                    [MapsOmittedExpr
+                     || {_FName, _, _Expr, MapsOmittedExpr} <- ExprInfos]
+            end;
         pass_as_record ->
-            case get_records_or_maps_by_opts(Opts) of
+            case get_mapping_and_unset_by_opts(Opts) of
                 records ->
                     [record_create(
                        MsgName,
-                       [{FName, Expr} || {FName, Value, Expr} <- FNVExprs,
-                                         Value /= undefined])];
-                maps ->
+                       [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos])];
+                {maps, present_undefined} ->
                     [map_create(
-                       [{FName, Expr} || {FName, _Value, Expr} <- FNVExprs])]
+                       [{FName, Expr} || {FName, _, Expr, _} <- ExprInfos])];
+                {maps, omitted} ->
+                    [map_create(
+                       [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos])]
             end
     end.
 
@@ -2301,35 +2311,68 @@ decoder_field_selectors(MsgName, MsgDef) ->
 decoder_finalize_result(Params, FFields, MsgName, MsgDef, AnRes, Opts) ->
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
-            mapping_create(
-              MsgName,
-              [begin
-                   FName = get_field_name(Field),
-                   Occurrence = get_field_occurrence(Field),
-                   FValueExpr =
-                       case Occurrence of
-                           required -> Param;
-                           optional -> Param;
-                           repeated -> ?expr(lists:reverse('<Param>'),
-                                             [replace_tree('<Param>', Param)])
-                       end,
-                   {FName, FValueExpr}
-               end
-               || {Field, Param} <- lists:zip(MsgDef, Params)],
-              Opts);
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    decoder_finalize_params_all_present(Params, MsgName, MsgDef,
+                                                        AnRes, Opts);
+                {maps, omitted} ->
+                    decoder_finalize_params_opt_omitted(Params, MsgName, MsgDef,
+                                                        AnRes, Opts)
+            end;
         pass_as_record ->
             MsgVar = hd(Params),
-            mapping_update(
-              MsgVar,
-              MsgName,
-              [begin
-                   FValueExpr = ?expr(lists:reverse('<FVar>'),
-                                      [replace_tree('<FVar>', FVar)]),
-                   {FName, FValueExpr}
-               end
-               || {FName, FVar} <- FFields],
-              Opts)
+            [mapping_update(
+               MsgVar,
+               MsgName,
+               [begin
+                    FValueExpr = ?expr(lists:reverse('<FVar>'),
+                                       [replace_tree('<FVar>', FVar)]),
+                    {FName, FValueExpr}
+                end
+                || {FName, FVar} <- FFields],
+               Opts)]
     end.
+
+decoder_finalize_params_all_present(Params, MsgName, MsgDef, _AnRes, Opts) ->
+    [mapping_create(
+       MsgName,
+       [decoder_finalize_param_for_mapping(Field, Param)
+        || {Field, Param} <- lists:zip(MsgDef, Params)],
+       Opts)].
+
+decoder_finalize_params_opt_omitted(Params, _MsgName, MsgDef, _AnRes, _Opts) ->
+    {Optionals, NonOptionals} =
+        lists:partition(fun({Field, _Param}) ->
+                                get_field_occurrence(Field) == optional
+                        end,
+                        lists:zip(MsgDef, Params)),
+    NonOptionalsMap = map_create(
+                        [decoder_finalize_param_for_mapping(Field, Param)
+                         || {Field, Param} <- NonOptionals]),
+    do_exprs(fun({Field, Param}, Var) ->
+                     FV = decoder_finalize_param_for_mapping(Field, Param),
+                     ?expr(if 'Param' == '$undef' -> 'Var';
+                              true -> 'Var#{field => Param}'
+                           end,
+                           [replace_tree('Param', Param),
+                            replace_tree('Var', Var),
+                            replace_tree('Var#{field => Param}',
+                                         map_set(Var, [FV]))])
+             end,
+             NonOptionalsMap,
+             Optionals).
+
+decoder_finalize_param_for_mapping(Field, Param) ->
+    FName = get_field_name(Field),
+    FValueExpr = case get_field_occurrence(Field) of
+                     required -> Param;
+                     optional -> Param;
+                     repeated -> ?expr(lists:reverse('Param'),
+                                       [replace_tree('Param', Param)])
+                 end,
+    {FName, FValueExpr}.
+
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
     map_msgdef_fields_o(
@@ -2597,19 +2640,19 @@ updated_merged_params(MsgName, XFieldDef, AnRes, NewValue, PrevValue,
                       Params, Opts) ->
     case {get_field_pass(MsgName, AnRes), XFieldDef} of
         {pass_as_params, {#?gpb_field{rnum=RNum}, _IsOneof}} ->
-            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue),
+            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue, Opts),
             lists_setelement(RNum - 1, Params, MergedValue);
         {pass_as_record, {#?gpb_field{name=FName}, false}} ->
             MsgVar = hd(Params),
-            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue),
+            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue, Opts),
             [mapping_update(MsgVar, MsgName, [{FName, MergedValue}], Opts)];
         {pass_as_record, {_OField, {true, CFName}}} ->
             MsgVar = hd(Params),
-            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue),
+            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue, Opts),
             [mapping_update(MsgVar, MsgName, [{CFName, MergedValue}], Opts)]
     end.
 
-merge_field_expr({FieldDef, false}, PrevValue, NewValue) ->
+merge_field_expr({FieldDef, false}, PrevValue, NewValue, Opts) ->
     case classify_field_merge_action(FieldDef) of
         overwrite ->
             NewValue;
@@ -2619,32 +2662,66 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue) ->
                    replace_tree('<Acc>', PrevValue)]);
         msgmerge ->
             #?gpb_field{type={msg,FMsgName}} = FieldDef,
-            ?expr(if '<Prev>' == undefined -> '<New>';
-                     true -> '<merge-msgs>'('<Prev>', '<New>')
-                  end,
-                  [replace_term('<merge-msgs>', mk_fn(merge_msg_, FMsgName)),
-                   replace_tree('<Prev>', PrevValue),
-                   replace_tree('<New>', NewValue)])
+            MergeFn = mk_fn(merge_msg_, FMsgName),
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    ?expr(if 'Prev' == undefined -> 'New';
+                             true -> 'merge_msg_X'('Prev', 'New')
+                          end,
+                          [replace_term('merge_msg_X', MergeFn),
+                           replace_tree('Prev', PrevValue),
+                           replace_tree('New', NewValue)]);
+                {maps, omitted} ->
+                    ?expr(case maps:find('fieldname', 'Msg') of
+                              error -> 'New';
+                              {ok, Prev} -> 'merge_msg_X'(Prev, 'New')
+                          end,
+                          [replace_term('fieldname', get_field_name(FieldDef)),
+                           replace_tree('Msg', PrevValue),
+                           replace_term('merge_msg_X', MergeFn),
+                           replace_tree('New', NewValue)])
+            end
     end;
-merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue) ->
+merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue, Opts) ->
     #?gpb_field{name=FName, type=Type} = FieldDef,
     case Type of
         {msg, FMsgName} ->
-            MVPrev = prefix_var("MV", PrevValue),
-            ?expr(case '<Prev>' of
-                      undefined ->
-                          {'fieldname', '<New>'};
-                      {'fieldname', '<MVPrev>'} ->
-                          {'fieldname',
-                           '<merge-msgs>'('<MVPrev>', '<New>')};
-                      _ ->
-                          {'fieldname', '<New>'}
-                  end,
-                  [replace_term('<merge-msgs>', mk_fn(merge_msg_, FMsgName)),
-                   replace_tree('<Prev>', PrevValue),
-                   replace_tree('<MVPrev>', MVPrev),
-                   replace_tree('<New>', NewValue),
-                   replace_term('fieldname', FName)]);
+            MergeFn = mk_fn(merge_msg_, FMsgName),
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    MVPrev = prefix_var("MV", PrevValue),
+                    ?expr(case 'Prev' of
+                              undefined ->
+                                  {'fieldname', 'New'};
+                              {'fieldname', 'MVPrev'} ->
+                                  {'fieldname',
+                                   'merge_msg_X'('MVPrev', 'New')};
+                              _ ->
+                                  {'fieldname', 'New'}
+                          end,
+                          [replace_tree('Prev', PrevValue),
+                           replace_term('fieldname', FName),
+                           replace_tree('New', NewValue),
+                           replace_term('merge_msg_X', MergeFn),
+                           replace_tree('MVPrev', MVPrev)]);
+                {maps, omitted} ->
+                    MsgVar = PrevValue,
+                    ?expr(case maps:find('fieldname', 'Msg') of
+                              error ->
+                                  {'fieldname', 'New'};
+                              {ok, {'fieldname', MVPrev}} ->
+                                  {'fieldname',
+                                   'merge_msg_X'(MVPrev, 'New')};
+                              _ ->
+                                  {'fieldname', 'New'}
+                          end,
+                          [replace_term('fieldname', FName),
+                           replace_tree('Msg', MsgVar),
+                           replace_term('merge_msg_X', MergeFn),
+                           replace_tree('New', NewValue)])
+            end;
         _ ->
             %% Replace
             ?expr({'fieldname', '<expr>'},
@@ -2666,14 +2743,21 @@ decoder_in_params(Params, MsgName, {FieldDef, false}, AnRes, Opts) ->
             end;
         pass_as_record ->
             Prev = ?expr(Prev),
-            MMatch = mapping_match(MsgName, [{FName, Prev}], Opts),
-            InParams = [?expr(mmatch = '<Msg>',
-                              [replace_tree(mmatch, MMatch),
-                               replace_tree('<Msg>', hd(Params))])],
+            InParams = [match_bind_var(
+                          mapping_match(MsgName, [{FName, Prev}], Opts),
+                          hd(Params))],
             case classify_field_merge_action(FieldDef) of
                 overwrite -> {Params, Any};
                 seqadd    -> {InParams, Prev};
-                msgmerge  -> {InParams, Prev}
+                msgmerge  ->
+                    case get_mapping_and_unset_by_opts(Opts) of
+                        X when X == records;
+                               X == {maps, present_undefined} ->
+                            {InParams, Prev};
+                        {maps, omitted} ->
+                            MsgVar = hd(Params),
+                            {[MsgVar], MsgVar}
+                    end
             end
     end;
 decoder_in_params(Params, MsgName, {FieldDef, {true, CFName}}, AnRes, Opts) ->
@@ -2686,12 +2770,20 @@ decoder_in_params(Params, MsgName, {FieldDef, {true, CFName}}, AnRes, Opts) ->
                     Prev = lists:nth(RNum-1, Params),
                     {Params, Prev};
                 pass_as_record ->
-                    Prev = ?expr(Prev),
-                    MMatch = mapping_match(MsgName, [{CFName, Prev}], Opts),
-                    InParams = [?expr(mmatch = '<Msg>',
-                                      [replace_tree(mmatch, MMatch),
-                                       replace_tree('<Msg>', hd(Params))])],
-                    {InParams, Prev}
+                    case get_mapping_and_unset_by_opts(Opts) of
+                        X when X == records;
+                               X == {maps, present_undefined} ->
+                            Prev = ?expr(Prev),
+                            InParams = [match_bind_var(
+                                          mapping_match(MsgName,
+                                                        [{CFName, Prev}],
+                                                        Opts),
+                                          hd(Params))],
+                            {InParams, Prev};
+                        {maps, omitted} ->
+                            MsgVar = hd(Params),
+                            {[MsgVar], MsgVar}
+                    end
             end;
         _ ->
             %% Non-messages, treat as an optional field
@@ -2737,6 +2829,12 @@ assign_to_var(Var, Expr) ->
     ?expr('<Var>' = '<Expr>',
           [replace_tree('<Var>', Var),
            replace_tree('<Expr>', Expr)]).
+
+match_bind_var(Pattern, Var) ->
+    ?expr('Pattern' = 'Var',
+          [replace_tree('Pattern', Pattern),
+           replace_tree('Var', Var)]).
+
 
 decode_zigzag_to_var(ResVar, ValueExpr) ->
     ?exprs(ZValue = '<Value>',
@@ -5105,6 +5203,17 @@ map_update(Var, FieldsValueTrees) ->
                         || {FName, Val} <- map_kvalues(FieldsValueTrees)],
                        ", ")])).
 
+map_set(Var, []) when Var /= none ->
+    %% No updates to be made, maybe no fields
+    Var;
+map_set(Var, FieldsValueTrees) ->
+    erl_syntax:text(
+      ?ff("~s#{~s}",
+          [var_literal(Var),
+           string:join([?ff("~p => ~s", [FName, Val])
+                        || {FName, Val} <- map_kvalues(FieldsValueTrees)],
+                       ", ")])).
+
 %% -> [{atom(), string()}]
 map_kvars(KVars) ->
     [{Key, var_literal(Var)} || {Key, Var} <- KVars].
@@ -5160,6 +5269,26 @@ get_field_occurrence(#gpb_oneof{})                       -> optional.
 
 is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
+
+%% Given a sequence, `Seq', of expressions, and an inital expression,
+%% Construct:
+%%     TmpVar1 = InitialExpr,
+%%     TmpVar2 = <1st expression in sequence, possibly involving TmpVar1>
+%%     TmpVar3 = <2st expression in sequence, possibly involving TmpVar2>
+%%     ...
+%%     <final expression in sequence, possibly involving TmpVarN-1>
+do_exprs(F, InitExpr, Seq) ->
+    {LastExpr, ExprsReversed, _N} =
+        lists:foldl(
+          fun(Elem, {PrevE,Es,N}) ->
+                  Var = var_n("S", N),
+                  BoundPrevE = assign_to_var(Var, PrevE),
+                  E = F(Elem, Var),
+                  {E, [BoundPrevE | Es], N+1}
+          end,
+          {InitExpr, [], 1},
+          Seq),
+    lists:reverse([LastExpr | ExprsReversed]).
 
 get_field_pass(MsgName, #anres{d_field_pass_method=D}) ->
     dict:fetch(MsgName, D).
