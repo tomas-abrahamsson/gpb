@@ -86,18 +86,14 @@ Features of gpb
    - strings, bytes, sub messages or packed repeated fields,
      where the encoded length is longer than the remaining binary
 
-*  Maps (NB: this area is settling down)
+*  Maps
 
-   Gpb can generate encoders/decoders for maps. It is not yet very
-   widely used, and there are still some issues not yet fully
-   explored:
+   Gpb can generate encoders/decoders for maps.
 
-   (a) should non-present optional fields be represented as
-   `#{key => undefined}` or should the binding be omitted altogether?
-   Currently, there is a `key => undefined`.  Also (b), should there
-   be some `id` binding, representing the name of the message?
-   Currently, there is no such binding and for example `encode_msg`
-   takes an additional parameter to specify the type of the map.
+   The option `maps_unset_optional` can be used to specify behaviour
+   for non-present optional fields: whether they are omitted from
+   matps, or whether they are present, but have the value `undefined`
+   like for records.
 
 *  Reporting of errors in .proto files
 
