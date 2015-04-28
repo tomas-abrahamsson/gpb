@@ -95,6 +95,23 @@ ERLC_FLAGS += -Wall +debug_info -I$(incdir)
 
 ERL_BATCH_FLAGS = +B -noshell -noinput
 
+ifdef HAVE_MAPS
+EUNIT_ERLC_FLAGS += -DHAVE_MAPS=true
+else
+## attempt to auto-detect
+ERLVM_SUPPORTS_MAPS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                             try maps:size(maps:new()) of \
+                                0 -> io:format("true~n") \
+                             catch error:undef -> io:format("false~n") \
+                             end, \
+                             receive after 10 -> ok end.' \
+                         -s erlang halt)
+ifeq ($(ERLVM_SUPPORTS_MAPS),true)
+EUNIT_ERLC_FLAGS += -DHAVE_MAPS=true
+endif
+endif
+
+
 MODULES := \
 	$(patsubst $(src)/%.erl,%,$(wildcard $(src)/*.erl)) \
 	$(patsubst $(src)/%.yrl,%,$(wildcard $(src)/*.yrl)) \
@@ -112,7 +129,8 @@ TEST_MODULES := \
 
 BEAMS       := $(patsubst %,$(ebin)/%.beam,$(MODULES))
 DESCR_BEAMS := $(patsubst %,$(ebin)/%.beam,$(DESCR_MODULES))
-TEST_BEAMS  := $(patsubst %,$(test)/%.beam,$(TEST_MODULES))
+TEST_BEAMS  := $(patsubst %,$(test)/%.beam,$(TEST_MODULES)) \
+               $(test)/gpb_compile_maps_tests.beam
 
 TARGETS = \
 	$(incdir)/gpb_version.hrl \
@@ -170,7 +188,7 @@ $(ebin)/%.beam: $(descr_src)/%.erl | $(ebin)
 	$(ERLC) $(ERLC_FLAGS) -pa $(ebin) -o $(ebin) $<
 
 $(test)/%.beam: $(test)/%.erl | $(ebin)
-	$(ERLC) $(ERLC_FLAGS) -pa $(ebin) -o $(test) $<
+	$(ERLC) $(ERLC_FLAGS) $(EUNIT_ERLC_FLAGS) -pa $(ebin) -o $(test) $<
 
 $(src)/%.erl: $(src)/%.yrl
 	$(ERLC) -o $(src) $<

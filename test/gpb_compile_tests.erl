@@ -25,6 +25,9 @@
 
 -export([test_nifs/1]). %% set whether to test nifs or not
 
+-export([compile_iolist/2]).
+-export([unload_code/1]).
+
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
 %% for gpb and for the code that gpb_compile generates.
