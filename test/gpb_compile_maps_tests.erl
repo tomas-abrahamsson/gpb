@@ -80,4 +80,72 @@ encode_decode_maps_with_opts_omitted_test() ->
     [{f1,"x"}] = lists:sort(maps:to_list(M:decode_msg(Data2, m1))),
     unload_code(M).
 
+%% merge ------------------------------------------------
+merge_maps_with_opts_present_undefined_test() ->
+    M = compile_iolist(["message m1 {",
+                        "  required string f1 = 1;",
+                        "  repeated string f2 = 2;",
+                        "  optional uint32 f3 = 3;",
+                        "  oneof o1 {",
+                        "    m2     f11 = 11;",
+                        "    uint32 f12 = 12;",
+                        "  };",
+                        "}",
+                        "message m2 {",
+                        "  repeated uint32 g1 = 1;",
+                        "}"],
+                       [maps, {maps_unset_optional, present_undefined},
+                        type_specs]),
+    [{f1,"y"}, {f2,["a","b","c"]}, {f3,393}, {o1,{f12,99}}] =
+        lists:sort(
+          maps:to_list(
+            M:merge_msgs(#{f1 => "x", f2 => ["a"],
+                           f3 => undefined,
+                           o1 => undefined},
+                         #{f1 => "y", f2 => ["b","c"],
+                           f3 => 393, o1 => {f12, 99}},
+                         m1))),
+    [{f1,"y"}, {f2,[]}, {f3,111}, {o1,{f11,#{g1 := [1,2,3,4]}}}] =
+        lists:sort(
+          maps:to_list(
+            M:merge_msgs(#{f1 => "x", f2 => [],
+                           f3 => 111,
+                           o1 => {f11,#{g1 => [1,2]}}},
+                         #{f1 => "y", f2 => [], f3 => undefined,
+                           o1 => {f11,#{g1 => [3,4]}}},
+                         m1))),
+    unload_code(M).
+
+merge_maps_with_opts_omitted_test() ->
+    M = compile_iolist(["message m1 {",
+                        "  required string f1 = 1;",
+                        "  repeated string f2 = 2;",
+                        "  optional uint32 f3 = 3;",
+                        "  oneof o1 {",
+                        "    m2     f11 = 11;",
+                        "    uint32 f12 = 12;",
+                        "  };",
+                        "}",
+                        "message m2 {",
+                        "  repeated uint32 g1 = 1;",
+                        "}"],
+                       [maps, {maps_unset_optional, omitted}, type_specs]),
+    [{f1,"y"}, {f2,["a","b","c"]}, {f3,393}, {o1,{f12,99}}] =
+        lists:sort(
+          maps:to_list(
+            M:merge_msgs(#{f1 => "x", f2 => ["a"]},
+                         #{f1 => "y", f2 => ["b","c"],
+                           f3 => 393, o1 => {f12, 99}},
+                         m1))),
+    [{f1,"y"}, {f2,[]}, {f3,111}, {o1,{f11,#{g1 := [1,2,3,4]}}}] =
+        lists:sort(
+          maps:to_list(
+            M:merge_msgs(#{f1 => "x", f2 => [],
+                           f3 => 111,
+                           o1 => {f11,#{g1 => [1,2]}}},
+                         #{f1 => "y", f2 => [],
+                           o1 => {f11,#{g1 => [3,4]}}},
+                         m1))),
+    unload_code(M).
+
 -endif. %% HAVE_MAPS

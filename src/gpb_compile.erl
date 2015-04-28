@@ -2342,11 +2342,8 @@ decoder_finalize_params_all_present(Params, MsgName, MsgDef, _AnRes, Opts) ->
        Opts)].
 
 decoder_finalize_params_opt_omitted(Params, _MsgName, MsgDef, _AnRes, _Opts) ->
-    {Optionals, NonOptionals} =
-        lists:partition(fun({Field, _Param}) ->
-                                get_field_occurrence(Field) == optional
-                        end,
-                        lists:zip(MsgDef, Params)),
+    {Optionals, NonOptionals} = key_partition_on_optionality(
+                                  1, lists:zip(MsgDef, Params)),
     NonOptionalsMap = map_create(
                         [decoder_finalize_param_for_mapping(Field, Param)
                          || {Field, Param} <- NonOptionals]),
@@ -2372,7 +2369,6 @@ decoder_finalize_param_for_mapping(Field, Param) ->
                                        [replace_tree('Param', Param)])
                  end,
     {FName, FValueExpr}.
-
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
     map_msgdef_fields_o(
@@ -2830,12 +2826,6 @@ assign_to_var(Var, Expr) ->
           [replace_tree('<Var>', Var),
            replace_tree('<Expr>', Expr)]).
 
-match_bind_var(Pattern, Var) ->
-    ?expr('Pattern' = 'Var',
-          [replace_tree('Pattern', Pattern),
-           replace_tree('Var', Var)]).
-
-
 decode_zigzag_to_var(ResVar, ValueExpr) ->
     ?exprs(ZValue = '<Value>',
            '<Res>' = if ZValue band 1 =:= 0 -> ZValue bsr 1;
@@ -2923,89 +2913,212 @@ format_msg_merger(MsgName, [], _AnRes, _Opts) ->
       mk_fn(merge_msg_, MsgName),
       fun(_Prev, New) -> New end);
 format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
-    {PFields, NFields, Mergings} = compute_msg_field_merge_exprs(MsgDef),
-    Transforms = [replace_tree('<Prev>', mapping_match(MsgName, PFields, Opts)),
-                  replace_tree('<New>', mapping_match(MsgName, NFields, Opts)),
-                  replace_tree('<merge>',
-                               mapping_create(MsgName, Mergings, Opts))],
-    MsgUndefFnClauses =
-        case occurs_as_optional_submsg(MsgName, AnRes) of
-            true ->
-                [?fn_clause(fun(Prev, undefined) -> Prev end),
-                 ?fn_clause(fun(undefined, New)  -> New end)];
-            false ->
-                []
-        end,
-
+    MsgUndefFnClauses = compute_msg_merger_undef_clauses(MsgName, AnRes, Opts),
+    {PrevMatch, NewMatch, ExtraInfo} =
+        format_msg_merger_fnclause_match(MsgName, MsgDef, Opts),
+    {MandatoryMergings, OptMergings} = compute_msg_field_mergers(ExtraInfo),
     gpb_codegen:format_fn(
       mk_fn(merge_msg_, MsgName),
       fun('<msg-undefined-handling>', _) -> '<return-the-defined-msg>';
-         ('<Prev>', '<New>')             -> '<merge>'
+         ('Prev', 'New')                 -> '<merge-it>'
       end,
-      Transforms ++ [splice_clauses('<msg-undefined-handling>',
-                                    MsgUndefFnClauses)]).
+      [replace_tree('Prev',  PrevMatch),
+       replace_tree('New',   NewMatch),
+       splice_trees(
+         '<merge-it>',
+         do_exprs(fun render_omissible_merger/2,
+                  render_field_mergers(MsgName, MandatoryMergings, Opts),
+                  OptMergings)),
+       splice_clauses('<msg-undefined-handling>', MsgUndefFnClauses)]).
 
-compute_msg_field_merge_exprs(MsgDef) ->
+compute_msg_merger_undef_clauses(MsgName, AnRes, Opts) ->
+    case occurs_as_optional_submsg(MsgName, AnRes) of
+        false ->
+            %% If it cannot occur as optional sub message,
+            %% then it cannot be called with either Prev or New being
+            %% undefined. Don't layout code for it. Eg. Dialyzer will
+            %% find it and complain.
+            [];
+        true ->
+            case get_mapping_and_unset_by_opts(Opts) of
+                Y when Y == records;
+                       Y == {maps, present_undefined} ->
+                    [?fn_clause(fun(Prev, undefined) -> Prev end),
+                     ?fn_clause(fun(undefined, New)  -> New end)];
+                {maps, omitted} ->
+                    %% Similar to above: The entire map is always
+                    %% matched to a variable.
+                    %% FIXME: also if all field are non-optionals??
+                    []
+            end
+    end.
+
+format_msg_merger_fnclause_match(_MsgName, [], _Opts) ->
+    {?expr(PF), ?expr(_), no_fields};
+format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
     FNames  = [get_field_name(Field) || Field <- MsgDef],
-    PFVars  = [erl_syntax:variable(?ff("PF~s", [FName])) || FName <- FNames],
-    NFVars  = [erl_syntax:variable(?ff("NF~s", [FName])) || FName <- FNames],
+    PFVars  = [var("PF~s", [FName]) || FName <- FNames],
+    NFVars  = [var("NF~s", [FName]) || FName <- FNames],
     PFields = lists:zip(FNames, PFVars),
     NFields = lists:zip(FNames, NFVars),
-    Mergings =
-        [begin
-             FName = get_field_name(Field),
-             {FName, format_field_merge_expr(Field, PF, NF)}
-         end
-         || {Field, PF, NF} <- lists:zip3(MsgDef, PFVars, NFVars)],
-    {PFields, NFields, Mergings}.
+    Infos = zip4(FNames, PFVars, NFVars, MsgDef),
+    case get_mapping_and_unset_by_opts(Opts) of
+        X when X == records;
+               X == {maps, present_undefined} ->
+            P = mapping_match(MsgName, PFields, Opts),
+            N = mapping_match(MsgName, NFields, Opts),
+            {P, N, {pr, Infos}};
+        {maps, omitted} ->
+            {OptInfos, MandInfos} = key_partition_on_optionality(4, Infos),
+            PMsg = ?expr(PMsg),
+            NMsg = ?expr(NMsg),
+            P = map_match([{FName, PFVar} || {FName,PFVar,_,_} <- MandInfos]),
+            N = map_match([{FName, NFVar} || {FName,_,NFVar,_} <- MandInfos]),
+            PB = match_bind_var(P, PMsg),
+            NB = match_bind_var(N, NMsg),
+            XInfo = {om, {MandInfos, OptInfos, PMsg, NMsg}},
+            case {MandInfos, OptInfos} of
+                {_, []} -> {P, N, XInfo};
+                {[], _} -> {PMsg, NMsg, XInfo};
+                {_,  _} -> {PB, NB, XInfo}
+            end
+    end.
 
-format_field_merge_expr(#?gpb_field{}=Field, PF, NF) ->
-    Transforms = [replace_tree('<PF>', PF),
-                  replace_tree('<NF>', NF)],
+compute_msg_field_mergers({pr, XInfo}) ->
+    Merges = [{FName, format_field_merge_expr(Field, PFVar, NFVar)}
+              || {FName, PFVar, NFVar, Field} <- XInfo],
+    {Merges, []};
+compute_msg_field_mergers({om, {MandXInfo, OptXInfo, PMsg, NMsg}}) ->
+    {MandMergs, []} = compute_msg_field_mergers({pr, MandXInfo}),
+    {OptMergs, []} = compute_msg_field_mergers({pr, OptXInfo}),
+    {MandMergs, reshape_cases_for_maps_find(OptMergs, PMsg, NMsg)}.
+
+format_field_merge_expr(#?gpb_field{}=Field, PF, NF)->
+    Transforms = [replace_tree('PF', PF),
+                  replace_tree('NF', NF)],
     case classify_field_merge_action(Field) of
         overwrite ->
-            ?expr(if '<NF>' =:= undefined -> '<PF>';
-                     true                 -> '<NF>'
-                  end,
-                  Transforms);
+            {overwrite, {PF, NF}};
         seqadd ->
-            ?expr('<PF>' ++ '<NF>', Transforms);
+            {expr, ?expr('PF' ++ 'NF', Transforms)};
         msgmerge ->
             #?gpb_field{type={msg,SubMsgName}}=Field,
-            MergeFn = mk_fn(merge_msg_, SubMsgName),
-            NewTranform = replace_term('<merge>', MergeFn),
-            MTransforms = [NewTranform | Transforms],
-            ?expr('<merge>'('<PF>', '<NF>'), MTransforms)
+            {merge, {{PF, NF}, mk_fn(merge_msg_, SubMsgName)}}
     end;
 format_field_merge_expr(#gpb_oneof{fields=OFields}, PF, NF) ->
-    Transforms = [replace_tree('<PF>', PF),
-                  replace_tree('<NF>', NF)],
     case [OField || #?gpb_field{type={msg,_}}=OField <- OFields] of
         [] ->
-            ?expr(if '<NF>' =:= undefined -> '<PF>';
-                     true                 -> '<NF>'
-                  end,
-                  Transforms);
+            {overwrite, {PF, NF}};
         MOFields ->
-            Transforms2 = Transforms ++
-                [replace_tree('<OPF>', prefix_var("O", PF)),
-                 replace_tree('<ONF>', prefix_var("O", NF))],
-            ?expr(
-               case {'<PF>', '<NF>'} of
-                   '<same-msg>' -> {'T', merge_submsg('<OPF>','<ONF>')};
-                   {_, undefined}   -> '<PF>';
-                   _                -> '<NF>'
-               end,
-               [repeat_clauses(
-                  '<same-msg>',
-                  [[replace_tree('<same-msg>',
-                                 ?expr({{'T', '<OPF>'}, {'T', '<ONF>'}})),
-                    replace_term('T', OFName),
-                    replace_term(merge_submsg, mk_fn(merge_msg_, M2Name))
-                    | Transforms2]
-                   || #?gpb_field{name=OFName, type={msg,M2Name}} <- MOFields])
-                | Transforms2])
+            {oneof,
+             {{PF, NF},
+              [{OFName, mk_fn(merge_msg_, M2Name)}
+               || #?gpb_field{name=OFName, type={msg,M2Name}} <- MOFields]}}
     end.
+
+reshape_cases_for_maps_find(Merges, PMsg, NMsg) ->
+    [{FName, case Merge of
+                 {overwrite, {_, _}} ->
+                     {overwrite, {PMsg, NMsg}};
+                 {merge, {{_, _}, MergeFn}} ->
+                     {merge, {{PMsg, NMsg}, MergeFn}};
+                 {oneof, {{_, _}, OFMerges}} ->
+                     {oneof, {{PMsg, NMsg}, OFMerges}}
+             end}
+     || {FName, Merge} <- Merges].
+
+render_field_mergers(MsgName, Mergings, Opts) ->
+    Fields = [{FName, render_field_merger(Merge)}
+              || {FName, Merge} <- Mergings],
+    mapping_create(MsgName, Fields, Opts).
+
+render_field_merger({overwrite, {PF, NF}}) ->
+    ?expr(if 'NF' =:= undefined -> 'PF';
+             true               -> 'NF'
+          end,
+          [replace_tree('PF', PF),
+           replace_tree('NF', NF)]);
+render_field_merger({expr, Expr}) ->
+    Expr;
+render_field_merger({merge, {{PF, NF}, MergeFn}}) ->
+    ?expr('merge'('PF', 'NF'),
+          [replace_tree('PF', PF),
+           replace_tree('NF', NF),
+           replace_term('merge', MergeFn)]);
+render_field_merger({oneof, {{PF, NF}, OFMerges}}) ->
+    Transforms = [replace_tree('PF', PF),
+                  replace_tree('NF', NF),
+                  replace_tree('OPF', prefix_var("O", PF)),
+                  replace_tree('ONF', prefix_var("O", NF))],
+    ?expr(case {'PF', 'NF'} of
+              '{{tag,OPF},{tag,ONF}}' -> {'tag', 'merge'('OPF','ONF')};
+              {_, undefined}          -> 'PF';
+              _                       -> 'NF'
+          end,
+          [repeat_clauses(
+             '{{tag,OPF},{tag,ONF}}',
+             [[replace_tree('{{tag,OPF},{tag,ONF}}',
+                            ?expr({{'tag','OPF'},{'tag','ONF'}})),
+               replace_term('tag', OFName),
+               replace_term('merge', OFMergeFn) | Transforms]
+              || {OFName, OFMergeFn} <- OFMerges])
+           | Transforms]).
+
+render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var) ->
+    ?expr(case {maps:find('fname', 'PMsg'), maps:find('fname', 'NMsg')} of
+              {error, error}  -> 'Var';
+              {_, {ok, 'NF'}} -> 'Var#{fname=>NF}';
+              {{ok, 'PF'}, _} -> 'Var#{fname=>PF}'
+          end,
+          std_omitable_merge_transforms(PMsg, NMsg, FName, Var));
+render_omissible_merger({FName, {merge, {{PMsg, NMsg}, MergeFn}}}, Var) ->
+    ?expr(case {maps:find('fname', 'PMsg'), maps:find('fname', 'NMsg')} of
+              {error, error}           -> 'Var';
+              {error, {ok, 'NF'}}      -> 'Var#{fname=>NF}';
+              {{ok, 'PF'}, error}      -> 'Var#{fname=>PF}';
+              {{ok, 'PF'}, {ok, 'NF'}} -> 'merge'('PF', 'NF')
+          end,
+          [replace_term('merge', MergeFn)
+           | std_omitable_merge_transforms(PMsg, NMsg, FName, Var)]);
+render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
+    OneofTransforms = [replace_tree('OPF', var("OPF~s", [FName])),
+                       replace_tree('ONF', var("ONF~s", [FName]))],
+    ?expr(case {maps:find('fname', 'PMsg'), maps:find('fname', 'NMsg')} of
+              {error, error} ->
+                  'Var';
+              '{{ok,{tag,OPF}},{ok,{tag,ONF}}}' ->
+                  'Var#{fname=>{tag,merge(OPF,ONF)}}';
+              {_, {ok, 'NF'}} ->
+                  'Var#{fname=>NF}';
+              {{ok, 'PF'}, _} ->
+                  'Var#{fname=>PF}'
+          end,
+          [repeat_clauses(
+             '{{ok,{tag,OPF}},{ok,{tag,ONF}}}',
+             [begin
+                  Trs2 = [replace_term('tag', OFName),
+                          replace_term('merge', OFMergeFn)] ++ OneofTransforms,
+                  MergeCall = ?expr({'tag','merge'('OPF','ONF')}, Trs2),
+                  [replace_tree('{{ok,{tag,OPF}},{ok,{tag,ONF}}}',
+                                ?expr({{ok,{'tag','OPF'}},{ok,{'tag','ONF'}}})),
+                   replace_tree('Var#{fname=>{tag,merge(OPF,ONF)}}',
+                                map_set(Var, [{FName,MergeCall}]))
+                   | Trs2]
+              end
+              || {OFName, OFMergeFn} <- OFMerges])
+           | std_omitable_merge_transforms(PMsg, NMsg, FName, Var)]).
+
+std_omitable_merge_transforms(PMsg, NMsg, FName, Var) ->
+    PF = var("PF~s", [FName]),
+    NF = var("NF~s", [FName]),
+    [replace_term('fname', FName),
+     replace_tree('PMsg', PMsg),
+     replace_tree('NMsg', NMsg),
+     replace_tree('PF', PF),
+     replace_tree('NF', NF),
+     replace_tree('Var', Var),
+     replace_tree('Var#{fname=>NF}', map_set(Var, [{FName, NF}])),
+     replace_tree('Var#{fname=>PF}', map_set(Var, [{FName, PF}]))].
 
 occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
     %% Note: order of evaluation below is important (the exprs of `andalso'):
@@ -5244,10 +5357,18 @@ var_f_n(N) -> var_n("F", N).
 var_b_n(N) -> var_n("B", N).
 
 var_n(S, N) ->
-    erl_syntax:variable(?ff("~s~w", [S, N])).
+    var("~s~w", [S, N]).
+
+var(Fmt, Args) ->
+    erl_syntax:variable(?ff(Fmt, Args)).
 
 prefix_var(Prefix, Var) ->
     erl_syntax:variable(Prefix ++ erl_syntax:variable_literal(Var)).
+
+match_bind_var(Pattern, Var) ->
+    ?expr('Pattern' = 'Var',
+          [replace_tree('Pattern', Pattern),
+           replace_tree('Var', Var)]).
 
 enum_to_binary_fields(Value) ->
     <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
@@ -5266,6 +5387,14 @@ get_field_name(#gpb_oneof{name=FName})  -> FName.
 
 get_field_occurrence(#?gpb_field{occurrence=Occurrence}) -> Occurrence;
 get_field_occurrence(#gpb_oneof{})                       -> optional.
+
+%% -> {Optionals, NonOptionals}
+key_partition_on_optionality(Key, Items) ->
+    lists:partition(fun(Item) ->
+                            Field = element(Key, Item),
+                            get_field_occurrence(Field) == optional
+                    end,
+                    Items).
 
 is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
@@ -5319,6 +5448,9 @@ lists_setelement(1, [_ | Rest], New) ->
     [New | Rest];
 lists_setelement(N, [X | Rest], New) when N > 1 ->
     [X | lists_setelement(N - 1, Rest, New)].
+
+zip4([A|T1], [B|T2], [C|T3], [D|T4]) -> [{A,B,C,D} | zip4(T1, T2, T3, T4)];
+zip4([], [], [], [])                 -> [].
 
 %% Parse tree transform instructions
 replace_term(Marker, NewTerm) when is_atom(Marker) ->
