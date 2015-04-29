@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.1
+2015-Apr-29
+
+	* Bugfix the helper/package-for-hex.pm about the file name change
+	rebar.config -> rebar.config.script
+
 Version 3.18.0
 2015-Apr-29
 
