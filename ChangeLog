@@ -1,5 +1,20 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.0
+2015-Apr-29
+
+	* Add an option, maps_unset_optional, for omitting optional
+	values, for maps. With this option, there can now be an enumerator
+	value that is 'undefined' without any confusion if it is
+	optional. Thanks to Brett Bethke for prompting this to get
+	implemented.
+	* Test the generated code also for maps. This is ifdef-protected,
+	so it still works with older Erlang versions, but maps are not
+	tested then, of course. Due to this, the rebar.config has now
+	turned into rebar.config.script.
+	* Update the benchmarks to newer software versions and newer
+	hardware.
+
 Version 3.17.13
 2015-Apr-16
 
