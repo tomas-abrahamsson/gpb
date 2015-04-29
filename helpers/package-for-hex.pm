@@ -74,7 +74,7 @@ cd "$d"
 ## Fixup the vsn tag in the src/gpb.app.src
 "$script_path"/xsillyed src/gpb.app.src key:vsn change-to:' {vsn,"'"$vsn"'"}'
 ## Fixup vsn substitution in include/gpb_version.hrl
-"$script_path"/xsillyed rebar.config key:pre_hooks delete-paragraph
+"$script_path"/xsillyed rebar.config.script key:pre_hooks delete-paragraph
 build/mk_version_hrl < include/gpb_version.hrl.in > include/gpb_version.hrl
 /bin/rm include/gpb_version.hrl.in
 
@@ -100,7 +100,7 @@ defmodule Gpb.Mixfile do
   end
 
   defp package do
-    [files: ~w(src include descr_src COPYING.LIB README.* rebar.config ChangeLog Makefile),
+    [files: ~w(src include descr_src COPYING.LIB README.* rebar.config.script ChangeLog Makefile),
      contributors: $contributors,
      licenses: ["LGPL 2.1"],
      links: %{"GitHub" => "https://github.com/tomas-abrahamsson/gpb"}]
