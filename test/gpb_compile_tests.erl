@@ -1331,7 +1331,7 @@ with_tmpdir(Save, Fun) ->
     end.
 
 get_tmpdir() ->
-    {A, B, C} = now(),
+    {A, B, C} = os:timestamp(),
     random:seed(erlang:phash2(A+B+C), erlang:phash2(B+C), erlang:phash2(A+C)),
     mktempdir(
       filename:join(case os:getenv("TMPDIR") of
