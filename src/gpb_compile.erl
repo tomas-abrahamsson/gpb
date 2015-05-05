@@ -2635,19 +2635,22 @@ updated_merged_params(MsgName, XFieldDef, AnRes, NewValue, PrevValue,
                       Params, Opts) ->
     case {get_field_pass(MsgName, AnRes), XFieldDef} of
         {pass_as_params, {#?gpb_field{rnum=RNum}, _IsOneof}} ->
-            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue, Opts),
+            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue,
+                                           MsgName, AnRes, Opts),
             lists_setelement(RNum - 1, Params, MergedValue);
         {pass_as_record, {#?gpb_field{name=FName}, false}} ->
             MsgVar = hd(Params),
-            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue, Opts),
+            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue,
+                                           MsgName, AnRes, Opts),
             [mapping_update(MsgVar, MsgName, [{FName, MergedValue}], Opts)];
         {pass_as_record, {_OField, {true, CFName}}} ->
             MsgVar = hd(Params),
-            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue, Opts),
+            MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue,
+                                           MsgName, AnRes, Opts),
             [mapping_update(MsgVar, MsgName, [{CFName, MergedValue}], Opts)]
     end.
 
-merge_field_expr({FieldDef, false}, PrevValue, NewValue, Opts) ->
+merge_field_expr({FieldDef, false}, PrevValue, NewValue, MsgName, AnRes, Opts) ->
     case classify_field_merge_action(FieldDef) of
         overwrite ->
             NewValue;
@@ -2668,17 +2671,29 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue, Opts) ->
                            replace_tree('Prev', PrevValue),
                            replace_tree('New', NewValue)]);
                 {maps, omitted} ->
-                    ?expr(case maps:find('fieldname', 'Msg') of
-                              error -> 'New';
-                              {ok, Prev} -> 'merge_msg_X'(Prev, 'New')
-                          end,
-                          [replace_term('fieldname', get_field_name(FieldDef)),
-                           replace_tree('Msg', PrevValue),
-                           replace_term('merge_msg_X', MergeFn),
-                           replace_tree('New', NewValue)])
+                    case get_field_pass(MsgName, AnRes) of
+                        pass_as_params ->
+                            ?expr(if 'Prev' =:= '$undef' -> 'New';
+                                     true -> 'merge_msg_X'('Prev', 'New')
+                                  end,
+                                  [replace_tree('Prev', PrevValue),
+                                   replace_term('merge_msg_X', MergeFn),
+                                   replace_tree('New', NewValue)]);
+                        pass_as_record ->
+                            ?expr(case maps:find('fieldname', 'Msg') of
+                                      error -> 'New';
+                                      {ok, Prev} -> 'merge_msg_X'(Prev, 'New')
+                                  end,
+                                  [replace_term('fieldname',
+                                                get_field_name(FieldDef)),
+                                   replace_tree('Msg', PrevValue),
+                                   replace_term('merge_msg_X', MergeFn),
+                                   replace_tree('New', NewValue)])
+                    end
             end
     end;
-merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue, Opts) ->
+merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue,
+                 MsgName, AnRes, Opts)->
     #?gpb_field{name=FName, type=Type} = FieldDef,
     case Type of
         {msg, FMsgName} ->
@@ -2703,19 +2718,36 @@ merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue, Opts) ->
                            replace_tree('MVPrev', MVPrev)]);
                 {maps, omitted} ->
                     MsgVar = PrevValue,
-                    ?expr(case maps:find('fieldname', 'Msg') of
-                              error ->
-                                  {'fieldname', 'New'};
-                              {ok, {'fieldname', MVPrev}} ->
-                                  {'fieldname',
-                                   'merge_msg_X'(MVPrev, 'New')};
-                              _ ->
-                                  {'fieldname', 'New'}
-                          end,
-                          [replace_term('fieldname', FName),
-                           replace_tree('Msg', MsgVar),
-                           replace_term('merge_msg_X', MergeFn),
-                           replace_tree('New', NewValue)])
+                    case get_field_pass(MsgName, AnRes) of
+                        pass_as_params ->
+                            ?expr(case 'Prev' of
+                                      '$undef' ->
+                                          {'fieldname', 'New'};
+                                      {'fieldname', MVPrev} ->
+                                          {'fieldname',
+                                           'merge_msg_X'(MVPrev, 'New')};
+                                      _ ->
+                                          {'fieldname', 'New'}
+                                  end,
+                                  [replace_term('fieldname', FName),
+                                   replace_tree('Prev', PrevValue),
+                                   replace_term('merge_msg_X', MergeFn),
+                                   replace_tree('New', NewValue)]);
+                        pass_as_record ->
+                            ?expr(case maps:find('fieldname', 'Msg') of
+                                      error ->
+                                          {'fieldname', 'New'};
+                                      {ok, {'fieldname', MVPrev}} ->
+                                          {'fieldname',
+                                           'merge_msg_X'(MVPrev, 'New')};
+                                      _ ->
+                                          {'fieldname', 'New'}
+                                  end,
+                                  [replace_term('fieldname', FName),
+                                   replace_tree('Msg', MsgVar),
+                                   replace_term('merge_msg_X', MergeFn),
+                                   replace_tree('New', NewValue)])
+                    end
             end;
         _ ->
             %% Replace

@@ -80,6 +80,26 @@ encode_decode_maps_with_opts_omitted_test() ->
     [{f1,"x"}] = lists:sort(maps:to_list(M:decode_msg(Data2, m1))),
     unload_code(M).
 
+encode_decode_submsg_with_omitted_test() ->
+    M = compile_iolist(["message t1 {",
+                        "  optional m2 f2 = 3;",
+                        "};"
+                        "message t2 {",
+                        "  oneof o {",
+                        "    m2 f2 = 3;",
+                        "  }",
+                        "};",
+                        "message m2 {",
+                        "  optional uint32 sf1 = 11;",
+                        "};"],
+                       [maps, {maps_unset_optional, omitted}, type_specs,
+                        {field_pass_method,pass_as_params}]),
+    BT1 = M:encode_msg(#{f2 => #{sf1 => 11}}, t1),
+    [{f2,#{sf1:=11}}] = maps:to_list(M:decode_msg(BT1, t1)),
+    BT2 = M:encode_msg(#{o => {f2, #{sf1 => 11}}}, t2),
+    [{o,{f2,#{sf1:=11}}}] = maps:to_list(M:decode_msg(BT2, t2)),
+    unload_code(M).
+
 %% merge ------------------------------------------------
 merge_maps_with_opts_present_undefined_test() ->
     M = compile_iolist(["message m1 {",
