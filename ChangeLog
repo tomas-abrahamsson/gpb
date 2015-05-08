@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.2
+2015-May-08
+
+	* Bugfix the version tag in the hex package. Thanks to Tilman
+	Holschuh.
+	* Bugfix decoding, for fields with optional submessages, for maps,
+	generated with the option maps_unset_optional set to omitted.
+
 Version 3.18.1
 2015-Apr-29
 
