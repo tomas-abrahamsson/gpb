@@ -1,9 +1,15 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.3
+2015-May-08
+
+	* Include the protoc-erl in the hex.pm package. Thanks to Tilman
+	Holschuh for finding it out.
+
 Version 3.18.2
 2015-May-08
 
-	* Bugfix the version tag in the hex package. Thanks to Tilman
+	* Bugfix the version tag in the hex.pm package. Thanks to Tilman
 	Holschuh.
 	* Bugfix decoding, for fields with optional submessages, for maps,
 	generated with the option maps_unset_optional set to omitted.
