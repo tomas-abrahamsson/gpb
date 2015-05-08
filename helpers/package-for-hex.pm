@@ -72,7 +72,7 @@ cd "$d"
 ## Include that version in the package, verbatim
 
 ## Fixup the vsn tag in the src/gpb.app.src
-"$script_path"/xsillyed src/gpb.app.src key:vsn change-to:' {vsn,"'"$vsn"'"}'
+"$script_path"/xsillyed src/gpb.app.src key:vsn change-to:' {vsn,"'"$vsn"'"},'
 ## Fixup vsn substitution in include/gpb_version.hrl
 "$script_path"/xsillyed rebar.config.script key:pre_hooks delete-paragraph
 build/mk_version_hrl < include/gpb_version.hrl.in > include/gpb_version.hrl
@@ -122,4 +122,4 @@ else
     (LC_ALL=en_US.utf-8 MIX_EXS=package.exs mix hex.publish)
 fi
 
-/bin/rm -rf 
+/bin/rm -rf
