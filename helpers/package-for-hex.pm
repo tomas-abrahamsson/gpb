@@ -100,7 +100,7 @@ defmodule Gpb.Mixfile do
   end
 
   defp package do
-    [files: ~w(src include descr_src bin COPYING.LIB README.* rebar.config.script ChangeLog Makefile),
+    [files: ~w(src include descr_src bin build COPYING.LIB README.* rebar.config.script ChangeLog Makefile),
      contributors: $contributors,
      licenses: ["LGPL 2.1"],
      links: %{"GitHub" => "https://github.com/tomas-abrahamsson/gpb"}]
