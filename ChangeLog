@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.4
+2015-May-09
+
+	* Include also the build in the hex.pm package. Thanks to Tilman
+	Holschuh for finding it out.
+
 Version 3.18.3
 2015-May-08
 
