@@ -22,7 +22,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
--ifndef(HAVE_MAPS).
+-ifdef(NO_HAVE_MAPS).
 
 no_maps_tests__test() ->
     %% rebar.config.script or the Makefile
@@ -30,7 +30,7 @@ no_maps_tests__test() ->
     %% support for maps.
     ok.
 
--else. %% HAVE_MAPS
+-else. %% NO_HAVE_MAPS
 
 -import(gpb_compile_tests, [compile_iolist/2]).
 -import(gpb_compile_tests, [unload_code/1]).
@@ -230,4 +230,4 @@ verify_maps_with_opts_omitted_test() ->
     unload_code(M).
 
 
--endif. %% HAVE_MAPS
+-endif. %% NO_HAVE_MAPS

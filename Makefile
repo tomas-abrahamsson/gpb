@@ -95,8 +95,8 @@ ERLC_FLAGS += -Wall +debug_info -I$(incdir)
 
 ERL_BATCH_FLAGS = +B -noshell -noinput
 
-ifdef HAVE_MAPS
-EUNIT_ERLC_FLAGS += -DHAVE_MAPS=true
+ifdef NO_HAVE_MAPS
+ERLC_FLAGS += -DNO_HAVE_MAPS=true
 else
 ## attempt to auto-detect
 ERLVM_SUPPORTS_MAPS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
@@ -106,8 +106,8 @@ ERLVM_SUPPORTS_MAPS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
                              end, \
                              receive after 10 -> ok end.' \
                          -s erlang halt)
-ifeq ($(ERLVM_SUPPORTS_MAPS),true)
-EUNIT_ERLC_FLAGS += -DHAVE_MAPS=true
+ifeq ($(ERLVM_SUPPORTS_MAPS),false)
+ERLC_FLAGS += -DNO_HAVE_MAPS=true
 endif
 endif
 

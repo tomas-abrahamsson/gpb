@@ -1,9 +1,9 @@
 %% -*- erlang -*-
 
-HaveMapsOpts = try maps:size(maps:new()) of
-                   0 -> [{d,'HAVE_MAPS',true}]
-               catch error:undef -> []
-               end.
+NoHaveMapsOpts = try maps:size(maps:new()) of
+                     0 -> []
+                 catch error:undef -> [{d,'NO_HAVE_MAPS',true}]
+                 end.
 
 [{require_otp_vsn, ".*"},
 
@@ -21,7 +21,7 @@ HaveMapsOpts = try maps:size(maps:new()) of
 
  %% This line is useful if you have gpb_eqc.erl symlinked to
  %% the symlink in the test/ directory.
- {eunit_compile_opts, [{i,"../include"}] ++ HaveMapsOpts},
+ {eunit_compile_opts, [{i,"../include"}] ++ NoHaveMapsOpts},
 
  {post_hooks,
   [{compile,
