@@ -20,7 +20,7 @@
 %%
 %% Unfortunately, they are already part of the API, so they can't
 %% be changed without breaking backwards compatibility.
-%% (They appear as parameters or retrun values for functions in `gpb'
+%% (They appear as parameters or return values for functions in `gpb'
 %% in generated code.)
 %%
 %% In case a clash, it is possible to redefine the name locally.
