@@ -5447,6 +5447,35 @@ record_update(Var, RecordName, FieldsValueTrees) ->
        || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
 
 %% maps
+-ifndef(NO_HAVE_MAPS).
+map_match(Fields) ->
+    erl_syntax:map_expr(
+      [erl_syntax:map_field_exact(erl_syntax:atom(FName), Expr)
+       || {FName, Expr} <- Fields]).
+
+map_create(Fields) ->
+    map_set(none, Fields).
+
+map_update(Var, []) when Var /= none ->
+    %% No updates to be made, maybe no fields
+    Var;
+map_update(Var, FieldsValueTrees) ->
+    erl_syntax:map_expr(
+      Var,
+      [erl_syntax:map_field_exact(erl_syntax:atom(FName), Expr)
+       || {FName, Expr} <- FieldsValueTrees]).
+
+map_set(Var, []) when Var /= none ->
+    %% No updates to be made, maybe no fields
+    Var;
+map_set(Var, FieldsValueTrees) ->
+    erl_syntax:map_expr(
+      Var,
+      [erl_syntax:map_field_assoc(erl_syntax:atom(FName), Expr)
+       || {FName, Expr} <- FieldsValueTrees]).
+
+-else. %% on a pre Erlang 17 system
+
 map_match(Fields) ->
     erl_syntax:text(
       ?ff("#{~s}", [string:join([?ff("~p := ~s", [FName, Var])
@@ -5496,6 +5525,9 @@ map_kvalues(KVars) ->
          {Key, ExprAsStr}
      end
      || {Key, Expr} <- KVars].
+
+-endif. %% NO_HAVE_MAPS
+
 
 %% The "option allow_alias = true;" inside an enum X { ... }
 %% says it is ok to have multiple symbols that map to the same numeric value.
