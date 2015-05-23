@@ -84,6 +84,7 @@ encode_decode_maps_with_opts_omitted_test() ->
 encode_decode_submsg_with_omitted_test() ->
     M = compile_iolist(["message t1 {",
                         "  optional m2 f2 = 3;",
+                        "  required m2 f4 = 4;"
                         "};"
                         "message t2 {",
                         "  oneof o {",
@@ -95,8 +96,8 @@ encode_decode_submsg_with_omitted_test() ->
                         "};"],
                        [maps, {maps_unset_optional, omitted}, type_specs,
                         {field_pass_method,pass_as_params}]),
-    BT1 = M:encode_msg(#{f2 => #{sf1 => 11}}, t1),
-    [{f2,#{sf1:=11}}] = maps:to_list(M:decode_msg(BT1, t1)),
+    BT1 = M:encode_msg(#{f2 => #{sf1 => 11}, f4 => #{}}, t1),
+    [{f2,#{sf1:=11}},{f4,#{}}] = maps:to_list(M:decode_msg(BT1, t1)),
     BT2 = M:encode_msg(#{o => {f2, #{sf1 => 11}}}, t2),
     [{o,{f2,#{sf1:=11}}}] = maps:to_list(M:decode_msg(BT2, t2)),
     unload_code(M).

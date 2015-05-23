@@ -2157,7 +2157,7 @@ msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
              #?gpb_field{name=FName, occurrence=Occurrence} ->
                  case Occurrence of
                      repeated -> {FName, m, ?expr([]),        ?expr([])};
-                     required -> {FName, o, ?expr(undefined), ?expr(undefined)};
+                     required -> {FName, o, ?expr(undefined), ?expr('$undef')};
                      optional -> {FName, o, ?expr(undefined), ?expr('$undef')}
                  end;
              #gpb_oneof{name=FName} ->
