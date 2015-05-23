@@ -150,6 +150,9 @@ merge_maps_with_opts_omitted_test() ->
                         "}",
                         "message m2 {",
                         "  repeated uint32 g1 = 1;",
+                        "}"
+                        "message m0 {",
+                        "  optional m2 f2 = 2;",
                         "}"],
                        [maps, {maps_unset_optional, omitted}, type_specs]),
     [{f1,"y"}, {f2,["a","b","c"]}, {f3,393}, {o1,{f12,99}}] =
@@ -168,6 +171,10 @@ merge_maps_with_opts_omitted_test() ->
                          #{f1 => "y", f2 => [],
                            o1 => {f11,#{g1 => [3,4]}}},
                          m1))),
+    #{f2 := #{g1 := [1,2,3,4]}} =
+        M:merge_msgs(#{f2 => #{g1 => [1,2]}},
+                     #{f2 => #{g1 => [3,4]}},
+                     m0),
     unload_code(M).
 
 

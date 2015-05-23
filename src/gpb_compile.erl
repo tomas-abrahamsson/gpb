@@ -3103,14 +3103,18 @@ render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var) ->
           end,
           std_omitable_merge_transforms(PMsg, NMsg, FName, Var));
 render_omissible_merger({FName, {merge, {{PMsg, NMsg}, MergeFn}}}, Var) ->
+    Trs = std_omitable_merge_transforms(PMsg, NMsg, FName, Var),
+    MergeCall = ?expr('merge'('PF','NF'), [replace_term(merge,MergeFn) | Trs]),
     ?expr(case {maps:find('fname', 'PMsg'), maps:find('fname', 'NMsg')} of
               {error, error}           -> 'Var';
               {error, {ok, 'NF'}}      -> 'Var#{fname=>NF}';
               {{ok, 'PF'}, error}      -> 'Var#{fname=>PF}';
-              {{ok, 'PF'}, {ok, 'NF'}} -> 'merge'('PF', 'NF')
+              {{ok, 'PF'}, {ok, 'NF'}} -> 'Var#{fname=>merge(PF,NF)}'
           end,
-          [replace_term('merge', MergeFn)
-           | std_omitable_merge_transforms(PMsg, NMsg, FName, Var)]);
+          [replace_term('merge', MergeFn),
+           replace_tree('Var#{fname=>merge(PF,NF)}',
+                        map_set(Var, [{FName,MergeCall}]))
+           | Trs]);
 render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
     OneofTransforms = [replace_tree('OPF', var("OPF~s", [FName])),
                        replace_tree('ONF', var("ONF~s", [FName]))],
