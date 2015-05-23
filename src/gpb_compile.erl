@@ -5400,8 +5400,13 @@ mapping_create(RName, Fields, Opts) ->
 
 mapping_update(Var, RName, FieldsValues, Opts) ->
     case get_records_or_maps_by_opts(Opts) of
-        records -> record_update(Var, RName, FieldsValues);
-        maps    -> map_update(Var, FieldsValues)
+        records ->
+            record_update(Var, RName, FieldsValues);
+        maps ->
+            case get_mapping_and_unset_by_opts(Opts) of
+                {maps, present_undefined} -> map_update(Var, FieldsValues);
+                {maps, omitted}           -> map_set(Var, FieldsValues)
+            end
     end.
 
 get_records_or_maps_by_opts(Opts) ->
