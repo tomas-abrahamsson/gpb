@@ -12,15 +12,22 @@ Options:
           This will also disable the check for whether the
           version is not on n.m or n.m.x format, ie if we are
           on a non-tagged git commit.
+    -m    Almost dry-run (moist) This will disable the
+          version format check, but it will not answer 'no' to the
+          proceed question. It will, however, verify that the MIX_HOME
+          and HEX_HOME environment variables are set. These are expected
+          to be set to some mock installation.
 EOF
 }
 
 dry_run=false
-while getopts "hn" opt
+moist_run=false
+while getopts "hnm" opt
 do
     case "$opt" in
 	h) show_usage; exit 0;;
 	n) dry_run=true;;
+	m) moist_run=true;;
     esac
 done
 shift $OPTIND
@@ -41,7 +48,7 @@ cleanup () { /bin/rm -rf "$repo_path/$d"; }
 trap 'xc=$?; cleanup; exit $xc' EXIT INT QUIT TERM
 
 vsn="$(git describe --always --tags --match '[0-9]*.[0-9]*')"
-if [ $dry_run = false ]
+if [ $dry_run = false -a $moist_run = false ]
 then
     if ! (echo "$vsn" | egrep '^[0-9]+(\.[0-9]+)*$' >/dev/null)
     then
@@ -119,6 +126,17 @@ then
     echo no | (LC_ALL=en_US.utf-8 MIX_EXS=package.exs mix hex.publish)
     echo "(answered no)"
 else
+    if [ $moist_run = true ]
+    then
+	if [ -z "$MIX_HOME" -o -z "$HEX_HOME" ]
+	then
+	    echo "Extected MIX_HOME and HEX_HOME environment variables" >&2
+	    echo "to be set, presumably to some mocked setup." >&2
+	    echo "  MIX_HOME=\"$MIX_HOME\"" >&2
+	    echo "  HEX_HOME=\"$HEX_HOME\"" >&2
+	    exit 1
+	fi
+    fi
     (LC_ALL=en_US.utf-8 MIX_EXS=package.exs mix hex.publish)
 fi
 
