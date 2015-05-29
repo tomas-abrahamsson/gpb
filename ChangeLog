@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.5
+2015-May-29
+
+	* Fix a few decoding/merging bugs for maps with option
+	maps_unset_optional set to omitted. The bugs were found with the
+	help of quickcheck and the gpb-eqc.
+	* The gpb_compile_descr module was forgotten in the gpb.app.src
+	file, now it is included.
+
 Version 3.18.4
 2015-May-09
 
