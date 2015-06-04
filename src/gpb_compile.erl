@@ -442,9 +442,22 @@ do_proto_defs(Defs, Mod, AnRes, Opts) ->
     end.
 
 verify_opts(Opts) ->
-    case {get_records_or_maps_by_opts(Opts), proplists:get_bool(nif, Opts)} of
-        {maps, true} ->
-            {error, {option_error, {not_supported, maps_and_nif}}};
+    case proplists:get_bool(nif, Opts) of
+        true ->
+            case get_mapping_and_unset_by_opts(Opts) of
+                records ->
+                    ok;
+                {maps, present_undefined} ->
+                    ok;
+                {maps, omitted} ->
+                    %% Need to trigger on other atom than 'undefined'
+                    %% (gpb_aa_undefined) to be able to tell difference
+                    %% with enums with 'undefined' as an enumerator.
+                    %% The generated erlang code uses '$undef' under
+                    %% the assumption that this can never be a valid
+                    %% enumerator value. Do similar in the nif.
+                    {error, {option_error, {not_supported, maps_omitted_nif}}}
+            end;
         _ ->
             ok
     end.
@@ -559,8 +572,8 @@ format_error({error, Reason})         -> fmt_err(Reason);
 format_error(Reason)                  -> fmt_err(Reason).
 
 %% Note: do NOT include trailing newline (\n or ~n)
-fmt_err({option_error, {not_supported, maps_and_nif}}) ->
-    ?f("Options maps and nif are mutually exclusive");
+fmt_err({option_error, {not_supported, maps_omitted_nif}}) ->
+    ?f("Options maps, maps_unset_optional=omitted and nif is not supported");
 fmt_err({parse_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
 fmt_err({scan_error, FileName, {Line, Module, ErrInfo}}) ->
