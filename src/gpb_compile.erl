@@ -4228,6 +4228,7 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
     iolist_to_binary(
       [format_nif_cc_includes(Mod, Defs, Opts),
        format_nif_cc_oneof_version_check_if_present(Defs),
+       format_nif_cc_map_api_check_if_needed(Opts),
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
        format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
@@ -4282,6 +4283,24 @@ contains_oneof([_ | Rest]) ->
     contains_oneof(Rest);
 contains_oneof([]) ->
     false.
+
+format_nif_cc_map_api_check_if_needed(Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records ->
+            "";
+        maps ->
+            %% The maps api functions appeared in erl_nif.h version 2.6,
+            %% which is Erlang 17, but they were not documented until 18.0.
+            %% There were some changes to the iterators in 2.8 (= Erlang 18.0)
+            %% but those are not needed.
+            ["#if (!(", format_nif_check_version_or_later(2, 6), "))\n"
+             "#error \"Maps was specified. The needed nif interface for\"\n"
+             "#error \"maps appeared in version 2.6 (Erlang 17), but\" \n"
+             "#error \"it appears your erl_nif version is older.  Please\"\n"
+             "#error \"update Erlang.\"\n"
+             "#endif\n"
+             "\n"]
+    end.
 
 format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
     CPkg = get_cc_pkg(Defs),
