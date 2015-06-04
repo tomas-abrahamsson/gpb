@@ -4250,11 +4250,12 @@ format_nif_cc_oneof_version_check_if_present(Defs) ->
     case contains_oneof(Defs) of
         true ->
             ["#if GOOGLE_PROTOBUF_VERSION < 2006000\n"
-             "#error The proto definitions contain 'oneof' fields.\n"
-             "#error This feature appeared in protobuf 2.6.0, but\n"
-             "#error it appears your protobuf is older.  Please\n"
-             "#error update protobuf.\n"
-             "#endif\n"];
+             "#error \"The proto definitions contain 'oneof' fields.\"\n"
+             "#error \"This feature appeared in protobuf 2.6.0, but\"\n"
+             "#error \"it appears your protobuf is older.  Please\"\n"
+             "#error \"update protobuf.\"\n"
+             "#endif\n"
+             "\n"];
         false ->
             ""
     end.
