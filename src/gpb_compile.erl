@@ -5039,12 +5039,13 @@ format_nif_cc_decoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
      "}\n"
      "\n"].
 
-format_nif_cc_unpackers(_Mod, Defs, _Opts) ->
+format_nif_cc_unpackers(_Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
-    [format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs)
+    [format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts)
      || {{msg, MsgName}, Fields} <- Defs].
 
-format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
+format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
+    Maps = get_records_or_maps_by_opts(Opts) == maps,
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     Is = [I || {I,_} <- index_seq(Fields)],
@@ -5052,7 +5053,8 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
      UnpackFnName,"(ErlNifEnv *env, const ",CMsgType," *m)\n",
      "{\n",
      "    ERL_NIF_TERM res;\n",
-     ?f("    ERL_NIF_TERM rname = ~s;\n", [mk_c_var(gpb_aa_, MsgName)]),
+     [?f("    ERL_NIF_TERM rname = ~s;\n", [mk_c_var(gpb_aa_, MsgName)])
+      || not Maps],
      [?f("    ERL_NIF_TERM elem~w;\n", [I]) || I <- Is],
      "\n",
      [begin
@@ -5061,8 +5063,15 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
       end
       || {I, Field} <- index_seq(Fields)],
      "\n",
-     ?f("    res = enif_make_tuple(env, ~w, rname~s);\n",
-        [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]]),
+     if Maps ->
+             [?f("    res = enif_make_new_map(env);\n"),
+              [?f("    enif_make_map_put(env, res, gpb_aa_~s, elem~w, &res);\n",
+                  [get_field_name(Field), I])
+               || {I, Field} <- index_seq(Fields)]];
+        not Maps ->
+             ?f("    res = enif_make_tuple(env, ~w, rname~s);\n",
+                [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]])
+     end,
      "    return res;\n"
      "}\n",
      "\n"].
