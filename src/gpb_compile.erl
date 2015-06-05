@@ -4317,7 +4317,8 @@ format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
       || {{msg, MsgName}, _Fields} <- Defs],
      "\n"].
 
-format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
+format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
+    Maps = get_records_or_maps_by_opts(Opts) == maps,
     EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
                                || {{enum, _}, EnumDef} <- Defs]),
     RecordAtoms = [MsgName || {{msg, MsgName}, _Fields} <- Defs],
@@ -4327,7 +4328,16 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
                      true  -> MiscAtoms0 ++ [true, false];
                      false -> MiscAtoms0
                  end,
-    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms1),
+    FieldAtoms = if Maps ->
+                         lists:usort(
+                           lists:flatten(
+                             [[get_field_name(Field) || Field <- Fields]
+                              || {{msg,_MsgName}, Fields} <- Defs]));
+                    not Maps ->
+                         []
+                 end,
+    MiscAtoms2 = MiscAtoms1 ++ FieldAtoms,
+    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms2),
     AtomVars = [{mk_c_var(gpb_aa_, A), A} || A <- Atoms],
 
     [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
@@ -4705,21 +4715,59 @@ format_nif_cc_packers(_Mod, Defs, Opts) ->
      || {{msg, MsgName}, Fields} <- Defs].
 
 format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
+    Maps = get_records_or_maps_by_opts(Opts) == maps,
     PackFnName = mk_c_fn(p_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     ["static int\n",
-     PackFnName,"(ErlNifEnv *env, const ERL_NIF_TERM r, ",CMsgType," *m)\n",
+     PackFnName,["(ErlNifEnv *env, ",
+                 "const ERL_NIF_TERM r,",
+                 " ",CMsgType," *m)\n"],
      "{\n",
-     "    int arity;\n"
-     "    const ERL_NIF_TERM *elem;\n"
-     "\n"
-     "    if (!enif_get_tuple(env, r, &arity, &elem))\n"
-     "        return 0;\n"
-     "\n",
-     ?f("    if (arity != ~w)\n"
-        "        return 0;\n",
-        [length(Fields) + 1]),
-     "\n",
+     if Maps ->
+             NFieldsPlus1 = integer_to_list(length(Fields)+1),
+             ["    ERL_NIF_TERM k, v;\n",
+              "    ErlNifMapIterator iter;\n",
+              "    ERL_NIF_TERM elem[",NFieldsPlus1,"];\n",
+              "    ErlNifMapIteratorEntry first;\n",
+              "    int i;\n",
+              "\n"
+              "#if ",format_nif_check_version_or_later(2, 8),"\n",
+              "    first = ERL_NIF_MAP_ITERATOR_FIRST;\n",
+              "#else /* before 2.8 which appeared 18.0 */\n",
+              "    first = ERL_NIF_MAP_ITERATOR_HEAD;\n",
+              "#endif\n",
+              "    for (i = 1; i < ",NFieldsPlus1,"; i++)\n",
+              "        elem[i] = gpb_aa_undefined;\n",
+              "\n",
+              "    if (!enif_map_iterator_create(env, r, &iter, first))\n",
+              "        return 0;\n",
+              "\n",
+              "    while (enif_map_iterator_get_pair(env, &iter, &k, &v))\n",
+              "    {\n",
+              [?f("        ~sif (enif_is_identical(k, ~s))\n"
+                  "            elem[~w] = v;\n",
+                  [if I == 1 -> "";
+                      I >  1 -> "else "
+                   end,
+                   mk_c_var(gpb_aa_, get_field_name(Field)),
+                   get_field_rnum(Field)-1])
+               || {I, Field} <- index_seq(Fields)],
+              "        enif_map_iterator_next(env, &iter);\n",
+              "    }\n",
+              "    enif_map_iterator_destroy(env, &iter);\n",
+              "\n"];
+        not Maps ->
+             ["    int arity;\n"
+              "    const ERL_NIF_TERM *elem;\n"
+              "\n"
+              "    if (!enif_get_tuple(env, r, &arity, &elem))\n"
+              "        return 0;\n"
+              "\n",
+              ?f("    if (arity != ~w)\n"
+                 "        return 0;\n",
+                 [length(Fields) + 1]),
+              "\n"]
+     end,
      [begin
           SrcVar = ?f("elem[~w]",[I]),
           format_nif_cc_field_packer(SrcVar, "m", Field, Defs, Opts)
@@ -5606,6 +5654,9 @@ get_field_name(#gpb_oneof{name=FName})  -> FName.
 
 get_field_occurrence(#?gpb_field{occurrence=Occurrence}) -> Occurrence;
 get_field_occurrence(#gpb_oneof{})                       -> optional.
+
+get_field_rnum(#?gpb_field{rnum=RNum}) -> RNum;
+get_field_rnum(#gpb_oneof{rnum=RNum})  -> RNum.
 
 %% -> {Optionals, NonOptionals}
 key_partition_on_optionality(Key, Items) ->
