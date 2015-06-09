@@ -28,6 +28,9 @@
 -export([compile_iolist/2]).
 -export([unload_code/1]).
 
+%% internally used
+-export([main_in_separate_vm/1]).
+
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
 %% for gpb and for the code that gpb_compile generates.
@@ -1095,7 +1098,7 @@ nif_compiles() ->
       fun(TmpDir) ->
               NCM = gpb_nif_test_c1,
               Defs = mk_one_msg_field_of_each_type(),
-              {ok, _Code} = compile_msg_defs(NCM, Defs, TmpDir)
+              {ok, _Code} = compile_nif_msg_defs(NCM, Defs, TmpDir)
       end).
 
 nif_encode_decode() ->
@@ -1104,9 +1107,9 @@ nif_encode_decode() ->
       fun(TmpDir) ->
               NEDM = gpb_nif_test_ed1,
               Defs = mk_one_msg_field_of_each_type(),
-              {ok, Code} = compile_msg_defs(NEDM, Defs, TmpDir),
-              with_tmpcode(
-                NEDM, Code,
+              {ok, Code} = compile_nif_msg_defs(NEDM, Defs, TmpDir),
+              in_separate_vm(
+                TmpDir, NEDM, Code,
                 fun() ->
                         nif_encode_decode_test_it(NEDM, Defs),
                         nif_encode_decode_strings(NEDM, Defs),
@@ -1198,9 +1201,9 @@ nif_enum_in_msg() ->
                                   "    repeated bo f2 = 2;",
                                   "}"]),
               Defs = parse_to_proto_defs(DefsTxt),
-              {ok, Code} = compile_msg_defs(M, DefsTxt, TmpDir),
-              with_tmpcode(
-                M, Code,
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir),
+              in_separate_vm(
+                TmpDir, M, Code,
                 fun() ->
                         OrigMsg = {ntest1,x,[x,y]},
                         MEncoded  = M:encode_msg(OrigMsg),
@@ -1222,10 +1225,10 @@ nif_with_strbin() ->
                                   "    required string s = 1;",
                                   "}"]),
               Defs = parse_to_proto_defs(DefsTxt),
-              {ok, Code} = compile_msg_defs(M, DefsTxt, TmpDir,
-                                            [strings_as_binaries]),
-              with_tmpcode(
-                M, Code,
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir,
+                                                [strings_as_binaries]),
+              in_separate_vm(
+                TmpDir, M, Code,
                 fun() ->
                         OrigMsgB = {ntest2,<<"abc">>},
                         OrigMsgS = {ntest2,"abc"}, %% gpb doesn't can't strbin
@@ -1241,10 +1244,10 @@ nif_with_strbin() ->
       end).
 
 
-compile_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
-    compile_msg_defs(M, MsgDefsOrIoList, TmpDir, []).
+compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
+    compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, []).
 
-compile_msg_defs(M, MsgDefsOrIoList, TmpDir, Opts) ->
+compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, Opts) ->
     {MsgDefs, ProtoTxt} =
         case is_iolist(MsgDefsOrIoList) of
             true -> {parse_to_proto_defs(MsgDefsOrIoList,Opts), MsgDefsOrIoList};
@@ -1352,12 +1355,107 @@ mktempdir(Base) ->
 clean_tmpdir(TmpDir) ->
     os:cmd(f("/bin/rm -rf '~s'", [TmpDir])).
 
-with_tmpcode(Module, Code, Fun) ->
-    try
-        load_code(Module, Code),
-        Fun()
-    after
-        unload_code(Module)
+in_separate_vm(TmpDir, Module, Code, Fun) ->
+    %% With nifs in Erlang, one cannot control unloading of the nif,
+    %% and thus cannot control when unloading of the protobuf library
+    %% happens. I've seen cases where rapid unloading and reloading of
+    %% nifs with new proto defs cause segvs (in strcmp), and from the
+    %% stack trace, it looks like the protobuf library is unloading at
+    %% the time when (or probably while) the next nif was being
+    %% loaded. Since the loaded/linked protobuf dynamic library is a
+    %% shared resource, if unloading and (re)loading happens in
+    %% different threads, then there might be trouble.
+    %%
+    %% Therefore, to make the eunit tests stable, we run them in a
+    %% separate vm.
+    TmpCodeWrapperFun = fun() ->
+                                try
+                                    load_code(Module, Code),
+                                    Fun()
+                                after
+                                    unload_code(Module)
+                                end
+                        end,
+    FBin = term_to_binary(TmpCodeWrapperFun),
+    FBinFile = filename:join(TmpDir, "fun-to-run"),
+    FResFile = filename:join(TmpDir, "fun-run-result"),
+    ok = file:write_file(FBinFile, FBin),
+    DirOfThisBeam = filename:dirname(code:which(?MODULE)),
+    GpbEbin = filename:dirname(code:which(gpb)),
+    ModuleS = atom_to_list(?MODULE),
+    CmdResult = run_cmd_collect_output(
+                  "erl",
+                  ["+B","-noinput",
+                   "-boot","start_clean",
+                   "-sasl","errlog_type","true",
+                   "-pa",TmpDir,
+                   "-pa",DirOfThisBeam,
+                   "-pa",GpbEbin,
+                   "-run",ModuleS,"main_in_separate_vm", FBinFile,FResFile]),
+    analyze_output_from_separate_vm(CmdResult, FResFile).
+
+main_in_separate_vm([FBinFile, FResFile]) ->
+    {ok, FBin} = file:read_file(FBinFile),
+    Fun = binary_to_term(FBin),
+    Res = try Fun()
+          catch Class:Reason -> {'EXIT',{Class,Reason,erlang:get_stacktrace()}}
+          end,
+    ResBin = term_to_binary(Res),
+    WRes = file:write_file(FResFile, ResBin),
+    io:format("Wrote result file (~p bytes) -> ~p~n", [byte_size(ResBin),WRes]),
+    ensure_output_flushed_halt().
+
+ensure_output_flushed_halt() ->
+    case erlang:system_info(otp_release) of
+        "R"++_ = Release ->
+            %% Erlang R16 or earlier, attempt to support earlier releases
+            %% if not too much work.
+            if Release >= "R15B01" ->
+                    %% R15B01 and later: halt waits until pending io has finished
+                    halt(0);
+               Release < "R15B01" ->
+                    timer:sleep(100),
+                    halt(0)
+            end;
+        _ ->
+            %% Erlang 17 or later
+            halt(0)
+    end.
+
+run_cmd_collect_output(Cmd, Args) ->
+    case os:find_executable(Cmd) of
+        false ->
+            error({could_not_find_cmd,Cmd});
+        CmdPath ->
+            Port = erlang:open_port({spawn_executable,CmdPath},
+                                    [use_stdio, stderr_to_stdout, binary,
+                                     exit_status, {args,Args}]),
+            collect_output(Port, [])
+    end.
+
+collect_output(Port, Acc) ->
+    receive
+        {Port, {data, Txt}} ->
+            collect_output(Port, [Txt | Acc]);
+        {Port, {exit_status,ExitCode}} ->
+            {ExitCode, iolist_to_binary(lists:reverse(Acc))}
+    end.
+
+analyze_output_from_separate_vm({ExitCode, Output}, ResultFile) ->
+    case file:read_file(ResultFile) of
+        {ok, B} ->
+            case binary_to_term(B) of
+                {'EXIT',Class,Reason,StackTrace} ->
+                    erlang:raise(Class, {in_separate_vm,Reason}, StackTrace);
+                _Result ->
+                    %% Anything not a crash is success, just like usual
+                    ok
+            end;
+        {error, Reason} ->
+            ?debugFmt("~nNo result from separate vm, output=~n~s~n", [Output]),
+            error({no_result_file_from_separate_vm,{ResultFile,Reason},
+                   {exit_code,ExitCode},
+                   {execution_output,Output}})
     end.
 
 test_nifs(Boolean) when is_boolean(Boolean) ->
