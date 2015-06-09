@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.6
+2015-Jun-10
+
+	* Implement support for maps in NIFs. As part of this, rework the
+	eunit tests to run the NIFs in a separate erlang vm, for stability.
+
 Version 3.18.5
 2015-May-29
 
