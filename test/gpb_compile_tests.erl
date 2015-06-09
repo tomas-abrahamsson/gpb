@@ -28,6 +28,13 @@
 -export([compile_iolist/2]).
 -export([unload_code/1]).
 
+%% NIF related
+-export([nif_tests_check_prerequisites/1]).
+-export([with_tmpdir/1]).
+-export([in_separate_vm/4]).
+-export([compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
+-export([check_protoc_can_do_oneof/0]).
+
 %% internally used
 -export([main_in_separate_vm/1]).
 
@@ -1074,24 +1081,27 @@ generates_nif_as_binary_and_file_test() ->
     ?assertMatch(Nif1, Nif2).
 
 nif_code_test_() ->
-    {Descr, Tests} =
+    nif_tests_check_prerequisites(
+      [{"Nif compiles", fun nif_compiles/0},
+       {"Nif encode decode", fun nif_encode_decode/0},
+       {"Nif enums in msgs", fun nif_enum_in_msg/0},
+       {"Nif with strbin", fun nif_with_strbin/0}]).
+
+nif_tests_check_prerequisites(Tests) ->
+    {Descr, Tests1} =
         case {want_nif_tests(), find_protoc(), find_cplusplus_compiler()} of
             {false,_,_} -> {"NIF tests not wanted", []};
             {_,false,_} -> {"Protoc not found, not trying to compile", []};
             {_,_,false} -> {"No C++ compiler found, not trying to compile", []};
-            {_,_,_}     -> {"nif tests",
-                            [{"Nif compiles", fun nif_compiles/0},
-                             {"Nif encode decode", fun nif_encode_decode/0},
-                             {"Nif enums in msgs", fun nif_enum_in_msg/0},
-                             {"Nif with strbin", fun nif_with_strbin/0}]}
+            {_,_,_}     -> {"nif tests", Tests}
         end,
-    %% Without increased timeout, this test frequently times
+    %% Without increased timeout, the nif test frequently times
     %% out on my slow laptop (1.6 GHz Atom N270)
     {Descr,
      {timeout, 300,  %% timeout for all tests
       [{timeout, 100, %% timeout for each test
         [{TestDescr, TestFun}]}
-       || {TestDescr, TestFun} <- Tests]}}.
+       || {TestDescr, TestFun} <- Tests1]}}.
 
 nif_compiles() ->
     with_tmpdir(

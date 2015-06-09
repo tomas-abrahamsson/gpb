@@ -35,6 +35,13 @@ no_maps_tests__test() ->
 -import(gpb_compile_tests, [compile_iolist/2]).
 -import(gpb_compile_tests, [unload_code/1]).
 
+-import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
+-import(gpb_compile_tests, [with_tmpdir/1]).
+-import(gpb_compile_tests, [in_separate_vm/4]).
+-import(gpb_compile_tests, [compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
+-import(gpb_compile_tests, [check_protoc_can_do_oneof/0]).
+
+
 simple_maps_test() ->
     M = compile_iolist(["message m1 {"
                         "  required string f1 = 1;",
@@ -238,5 +245,45 @@ verify_maps_with_opts_omitted_test() ->
                                  m1)),
     unload_code(M).
 
+%% verify ------------------------------------------------
+
+nif_test_() ->
+    nif_tests_check_prerequisites(
+      [{"Nif encode decode with unset optionals present_undefined",
+        fun nif_encode_decode_present_undefined/0}]).
+
+nif_encode_decode_present_undefined() ->
+    ProtocCanOneof = check_protoc_can_do_oneof(),
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_mpu_ed1,
+              Defs = ["message x_mpu {\n",
+                      "    optional uint32 o1 = 1;\n",
+                      "    optional uint32 o2 = 2;\n",
+                      [["    oneof oo1 {\n",
+                        "        uint32 of1 = 3;\n",
+                        "    }\n",
+                        "    oneof oo2 {\n",
+                        "        uint32 of2 = 4;\n",
+                        "    }\n"] || ProtocCanOneof],
+                      "    required uint32 rq = 5;\n",
+                      "    repeated uint32 rp = 6;\n",
+                      "}\n"],
+              Opts = [maps, {maps_unset_optional, present_undefined}],
+              {ok, Code} = compile_nif_msg_defs(M, Defs, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Msg01 = #{o1 => 1, o2 => undefined, rq => 4, rp => [5]},
+                        Msg1 = if ProtocCanOneof ->
+                                       Msg01#{oo1 => undefined, oo2 => {of2,4}};
+                                  true ->
+                                       Msg01
+                               end,
+                        Bin1 = M:encode_msg(Msg1, x_mpu),
+                        Msg1 = M:decode_msg(Bin1, x_mpu),
+                        ok
+                end)
+      end).
 
 -endif. %% NO_HAVE_MAPS
