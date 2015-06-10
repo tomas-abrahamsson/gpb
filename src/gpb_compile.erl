@@ -441,13 +441,9 @@ do_proto_defs(Defs, Mod, AnRes, Opts) ->
             end
     end.
 
-verify_opts(Opts) ->
-    case {get_records_or_maps_by_opts(Opts), proplists:get_bool(nif, Opts)} of
-        {maps, true} ->
-            {error, {option_error, {not_supported, maps_and_nif}}};
-        _ ->
-            ok
-    end.
+verify_opts(_Opts) ->
+    %% placeholder for verifications
+    ok.
 
 return_or_report_warnings_or_errors(Res, ExtraWarns, Opts, OutFormat) ->
     Res2 = merge_warns(Res, ExtraWarns, OutFormat),
@@ -559,8 +555,8 @@ format_error({error, Reason})         -> fmt_err(Reason);
 format_error(Reason)                  -> fmt_err(Reason).
 
 %% Note: do NOT include trailing newline (\n or ~n)
-fmt_err({option_error, {not_supported, maps_and_nif}}) ->
-    ?f("Options maps and nif are mutually exclusive");
+fmt_err({option_error, {not_supported, maps_omitted_nif}}) ->
+    ?f("Options maps, maps_unset_optional=omitted and nif is not supported");
 fmt_err({parse_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
 fmt_err({scan_error, FileName, {Line, Module, ErrInfo}}) ->
@@ -4215,6 +4211,7 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
     iolist_to_binary(
       [format_nif_cc_includes(Mod, Defs, Opts),
        format_nif_cc_oneof_version_check_if_present(Defs),
+       format_nif_cc_map_api_check_if_needed(Opts),
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
        format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
@@ -4250,11 +4247,12 @@ format_nif_cc_oneof_version_check_if_present(Defs) ->
     case contains_oneof(Defs) of
         true ->
             ["#if GOOGLE_PROTOBUF_VERSION < 2006000\n"
-             "#error The proto definitions contain 'oneof' fields.\n"
-             "#error This feature appeared in protobuf 2.6.0, but\n"
-             "#error it appears your protobuf is older.  Please\n"
-             "#error update protobuf.\n"
-             "#endif\n"];
+             "#error \"The proto definitions contain 'oneof' fields.\"\n"
+             "#error \"This feature appeared in protobuf 2.6.0, but\"\n"
+             "#error \"it appears your protobuf is older.  Please\"\n"
+             "#error \"update protobuf.\"\n"
+             "#endif\n"
+             "\n"];
         false ->
             ""
     end.
@@ -4268,6 +4266,24 @@ contains_oneof([_ | Rest]) ->
     contains_oneof(Rest);
 contains_oneof([]) ->
     false.
+
+format_nif_cc_map_api_check_if_needed(Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records ->
+            "";
+        maps ->
+            %% The maps api functions appeared in erl_nif.h version 2.6,
+            %% which is Erlang 17, but they were not documented until 18.0.
+            %% There were some changes to the iterators in 2.8 (= Erlang 18.0)
+            %% but those are not needed.
+            ["#if (!(", format_nif_check_version_or_later(2, 6), "))\n"
+             "#error \"Maps was specified. The needed nif interface for\"\n"
+             "#error \"maps appeared in version 2.6 (Erlang 17), but\" \n"
+             "#error \"it appears your erl_nif version is older.  Please\"\n"
+             "#error \"update Erlang.\"\n"
+             "#endif\n"
+             "\n"]
+    end.
 
 format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
     CPkg = get_cc_pkg(Defs),
@@ -4284,25 +4300,43 @@ format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
       || {{msg, MsgName}, _Fields} <- Defs],
      "\n"].
 
-format_nif_cc_mk_atoms(_Mod, Defs, AnRes, _Opts) ->
+format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
+    Maps = get_records_or_maps_by_opts(Opts) == maps,
     EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
                                || {{enum, _}, EnumDef} <- Defs]),
     RecordAtoms = [MsgName || {{msg, MsgName}, _Fields} <- Defs],
     OneofNames = collect_oneof_fields(Defs),
-    MiscAtoms0 = [undefined],
+    MiscAtoms0 = case is_any_field_of_type_enum(AnRes) of
+                     true  -> [undefined];
+                     false -> []
+                 end,
     MiscAtoms1 = case is_any_field_of_type_bool(AnRes) of
                      true  -> MiscAtoms0 ++ [true, false];
                      false -> MiscAtoms0
                  end,
-    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms1),
-    AtomVars = [{mk_c_var(gpb_aa_, A), A} || A <- Atoms],
-
-    [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
+    FieldAtoms = if Maps ->
+                         lists:usort(
+                           lists:flatten(
+                             [[get_field_name(Field) || Field <- Fields]
+                              || {{msg,_MsgName}, Fields} <- Defs]));
+                    not Maps ->
+                         []
+                 end,
+    MiscAtoms2 = MiscAtoms1 ++ FieldAtoms,
+    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms2),
+    AtomVars0 = [{mk_c_var(gpb_aa_, A), A} || A <- Atoms],
+    NoValue = case get_mapping_and_unset_by_opts(Opts) of
+                  records -> undefined;
+                  {maps, present_undefined} -> undefined;
+                  {maps, omitted} -> '$undef'
+              end,
+    AtomVars1 = [{"gpb_x_no_value", NoValue} | AtomVars0],
+    [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars1],
      "\n",
      ["static void install_atoms(ErlNifEnv *env)\n"
       "{\n",
       [?f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
-       || {AtomVar, Atom} <- AtomVars],
+       || {AtomVar, Atom} <- AtomVars1],
       "}\n",
       "\n"]].
 
@@ -4322,6 +4356,13 @@ format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, Opts) ->
 
 is_any_field_of_type_string(#anres{used_types=UsedTypes}) ->
     sets:is_element(string, UsedTypes).
+
+is_any_field_of_type_enum(#anres{used_types=UsedTypes}) ->
+    sets:fold(fun({enum,_}, _) -> true;
+                 (_, Acc) -> Acc
+              end,
+              false,
+              UsedTypes).
 
 is_any_field_of_type_bool(#anres{used_types=UsedTypes}) ->
     sets:is_element(bool, UsedTypes).
@@ -4672,21 +4713,59 @@ format_nif_cc_packers(_Mod, Defs, Opts) ->
      || {{msg, MsgName}, Fields} <- Defs].
 
 format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
+    Maps = get_records_or_maps_by_opts(Opts) == maps,
     PackFnName = mk_c_fn(p_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     ["static int\n",
-     PackFnName,"(ErlNifEnv *env, const ERL_NIF_TERM r, ",CMsgType," *m)\n",
+     PackFnName,["(ErlNifEnv *env, ",
+                 "const ERL_NIF_TERM r,",
+                 " ",CMsgType," *m)\n"],
      "{\n",
-     "    int arity;\n"
-     "    const ERL_NIF_TERM *elem;\n"
-     "\n"
-     "    if (!enif_get_tuple(env, r, &arity, &elem))\n"
-     "        return 0;\n"
-     "\n",
-     ?f("    if (arity != ~w)\n"
-        "        return 0;\n",
-        [length(Fields) + 1]),
-     "\n",
+     if Maps ->
+             NFieldsPlus1 = integer_to_list(length(Fields)+1),
+             ["    ERL_NIF_TERM k, v;\n",
+              "    ErlNifMapIterator iter;\n",
+              "    ERL_NIF_TERM elem[",NFieldsPlus1,"];\n",
+              "    ErlNifMapIteratorEntry first;\n",
+              "    int i;\n",
+              "\n"
+              "#if ",format_nif_check_version_or_later(2, 8),"\n",
+              "    first = ERL_NIF_MAP_ITERATOR_FIRST;\n",
+              "#else /* before 2.8 which appeared 18.0 */\n",
+              "    first = ERL_NIF_MAP_ITERATOR_HEAD;\n",
+              "#endif\n",
+              "    for (i = 1; i < ",NFieldsPlus1,"; i++)\n",
+              "        elem[i] = gpb_x_no_value;\n",
+              "\n",
+              "    if (!enif_map_iterator_create(env, r, &iter, first))\n",
+              "        return 0;\n",
+              "\n",
+              "    while (enif_map_iterator_get_pair(env, &iter, &k, &v))\n",
+              "    {\n",
+              [?f("        ~sif (enif_is_identical(k, ~s))\n"
+                  "            elem[~w] = v;\n",
+                  [if I == 1 -> "";
+                      I >  1 -> "else "
+                   end,
+                   mk_c_var(gpb_aa_, get_field_name(Field)),
+                   get_field_rnum(Field)-1])
+               || {I, Field} <- index_seq(Fields)],
+              "        enif_map_iterator_next(env, &iter);\n",
+              "    }\n",
+              "    enif_map_iterator_destroy(env, &iter);\n",
+              "\n"];
+        not Maps ->
+             ["    int arity;\n"
+              "    const ERL_NIF_TERM *elem;\n"
+              "\n"
+              "    if (!enif_get_tuple(env, r, &arity, &elem))\n"
+              "        return 0;\n"
+              "\n",
+              ?f("    if (arity != ~w)\n"
+                 "        return 0;\n",
+                 [length(Fields) + 1]),
+              "\n"]
+     end,
      [begin
           SrcVar = ?f("elem[~w]",[I]),
           format_nif_cc_field_packer(SrcVar, "m", Field, Defs, Opts)
@@ -4714,7 +4793,7 @@ format_nif_cc_field_packer(SrcVar, MsgVar, #gpb_oneof{}=Field, Defs, Opts) ->
     #gpb_oneof{fields=OFields} = Field,
     [split_indent_iolist(
        4,
-       ?f("if (!enif_is_identical(~s, gpb_aa_undefined))~n"
+       ?f("if (!enif_is_identical(~s, gpb_x_no_value))~n"
           "{~n"
           "    int oarity;~n"
           "    const ERL_NIF_TERM *oelem;~n"
@@ -4747,7 +4826,7 @@ format_nif_cc_oneof_packer(NameVar, SrcVar, MsgVar, OFields, Defs, Opts) ->
        "    return 0;\n"]).
 
 format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs, Opts) ->
-    [?f("    if (!enif_is_identical(~s, gpb_aa_undefined))\n", [SrcVar]),
+    [?f("    if (!enif_is_identical(~s, gpb_x_no_value))\n", [SrcVar]),
      format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, set)].
 
 format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
@@ -4958,12 +5037,13 @@ format_nif_cc_decoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
      "}\n"
      "\n"].
 
-format_nif_cc_unpackers(_Mod, Defs, _Opts) ->
+format_nif_cc_unpackers(_Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
-    [format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs)
+    [format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts)
      || {{msg, MsgName}, Fields} <- Defs].
 
-format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
+format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
+    Maps = get_records_or_maps_by_opts(Opts) == maps,
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     Is = [I || {I,_} <- index_seq(Fields)],
@@ -4971,7 +5051,8 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
      UnpackFnName,"(ErlNifEnv *env, const ",CMsgType," *m)\n",
      "{\n",
      "    ERL_NIF_TERM res;\n",
-     ?f("    ERL_NIF_TERM rname = ~s;\n", [mk_c_var(gpb_aa_, MsgName)]),
+     [?f("    ERL_NIF_TERM rname = ~s;\n", [mk_c_var(gpb_aa_, MsgName)])
+      || not Maps],
      [?f("    ERL_NIF_TERM elem~w;\n", [I]) || I <- Is],
      "\n",
      [begin
@@ -4980,8 +5061,34 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs) ->
       end
       || {I, Field} <- index_seq(Fields)],
      "\n",
-     ?f("    res = enif_make_tuple(env, ~w, rname~s);\n",
-        [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]]),
+     case get_mapping_and_unset_by_opts(Opts) of
+         records ->
+             ?f("    res = enif_make_tuple(env, ~w, rname~s);\n",
+                [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]]);
+         {maps, present_undefined} ->
+             [?f("    res = enif_make_new_map(env);\n"),
+              [?f("    enif_make_map_put(env, res, gpb_aa_~s, elem~w, &res);\n",
+                  [get_field_name(Field), I])
+               || {I, Field} <- index_seq(Fields)]];
+         {maps, omitted} ->
+             [?f("    res = enif_make_new_map(env);\n"),
+              [begin
+                   Put = ?f("enif_make_map_put("++
+                                "env, res, gpb_aa_~s, elem~w, &res);",
+                            [get_field_name(Field), I]),
+                   Test = ?f("if (!enif_is_identical(elem~w, gpb_x_no_value))",
+                             [I]),
+                   PutLine = Put ++ "\n",
+                   TestLine = Test ++ "\n",
+                   case get_field_occurrence(Field) of
+                       optional ->
+                           indent_lines(4, [TestLine, indent(4, PutLine)]);
+                       _ ->
+                           indent(4, PutLine)
+                   end
+               end
+               || {I, Field} <- index_seq(Fields)]]
+     end,
      "    return res;\n"
      "}\n",
      "\n"].
@@ -5030,7 +5137,7 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
           4,
           [?f("case ~s::~s_NOT_SET: /* FALL THROUGH */~n", [CMsgType, UCOFName]),
            ?f("default:~n"),
-           ?f("    ~s = gpb_aa_undefined;\n", [DestVar])]),
+           ?f("    ~s = gpb_x_no_value;\n", [DestVar])]),
         ?f("}\n")]),
      "\n"].
 
@@ -5038,7 +5145,7 @@ format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
     #?gpb_field{name=FName} = Field,
     LCFName = to_lower(FName),
     [?f("    if (!~s->has_~s())\n", [MsgVar, LCFName]),
-     ?f("        ~s = gpb_aa_undefined;\n", [DestVar]),
+     ?f("        ~s = gpb_x_no_value;\n", [DestVar]),
      ?f("    else\n"),
      indent_lines(
        8, format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs)),
@@ -5573,6 +5680,9 @@ get_field_name(#gpb_oneof{name=FName})  -> FName.
 
 get_field_occurrence(#?gpb_field{occurrence=Occurrence}) -> Occurrence;
 get_field_occurrence(#gpb_oneof{})                       -> optional.
+
+get_field_rnum(#?gpb_field{rnum=RNum}) -> RNum;
+get_field_rnum(#gpb_oneof{rnum=RNum})  -> RNum.
 
 %% -> {Optionals, NonOptionals}
 key_partition_on_optionality(Key, Items) ->
