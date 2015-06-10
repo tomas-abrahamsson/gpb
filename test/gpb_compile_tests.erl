@@ -1472,7 +1472,14 @@ test_nifs(Boolean) when is_boolean(Boolean) ->
     os:putenv("GPB_NIF_TESTS", lists:concat([Boolean])).
 
 want_nif_tests() ->
-    %% It can be useful to disable nif testing due to the
+    %% It can be useful to disable nif testing.
+    %% Previously, it was very desirable, as described below,
+    %% but since the move to test nifs in a separate vm,
+    %% this is no longer as compelling a reason. It might still
+    %% be desirable, eg if the c++ or protoc is not set up.
+    %%
+    %% Previously, when the nif tests were executed
+    %% in the same vm as the eunit tests, then due to the
     %% behaviour in the libprotoc, that if it detects loading
     %% a proto definition with the same name as it already
     %% has loaded, it will refuse, and may stop the entire
