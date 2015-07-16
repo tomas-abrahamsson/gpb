@@ -633,7 +633,7 @@ c() ->
 %%       copy fields of type `bytes'. See the `copy_bytes' option
 %%       for the function {@link file/2} for more info.</dd>
 %%   <dt>`-strbin'</dt>
-%%   <dd>Specify that decoded strings should be returend as binaries,
+%%   <dd>Specify that decoded strings should be returned as binaries,
 %%       instead of as strings (lists).</dd>
 %%   <dt>`-pldefs'</dt>
 %%   <dd>Specify that introspection functions shall return proplists
@@ -655,12 +655,12 @@ c() ->
 %%       useful when including different sub-projects that have
 %%       colliding proto file names.</dd>
 %%   <dt>`-msgsuffix Suffix'</dt>
-%%   <dd>Sufffix each message name with `Suffix'.</dd>
+%%   <dd>Suffix each message name with `Suffix'.</dd>
 %%   <dt>`-modsuffix Suffix'</dt>
 %%   <dd>Suffix each module name with `Suffix'.</dd>
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
-%%       instad of `-include', which is the default.</dd>
+%%       instead of `-include', which is the default.</dd>
 %%   <dt>`-type'</dt>
 %%   <dd>Enables `::Type()' annotations in the generated .hrl file.</dd>
 %%   <dt>`-descr'</dt>
@@ -670,7 +670,7 @@ c() ->
 %%       records. No .hrl file will be generated. See the `maps' option
 %%       for the function {@link file/2} for more info.</dd>
 %%   <dt>`-maps_unset_optional omitted | present_undefined'</dt>
-%%   <dd>Specifies the interal format for optional fields that are unset.</dd>
+%%   <dd>Specifies the internal format for optional fields that are unset.</dd>
 %%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
@@ -835,7 +835,7 @@ opt_specs() ->
       "       Specify how or when the generated decoder should\n"
       "       copy fields of type bytes.\n"},
      {"strbin", undefined, strings_as_binaries, "\n"
-      "       Specify that decoded strings should be returend as binaries,\n"
+      "       Specify that decoded strings should be returned as binaries,\n"
       "       instead of as strings (lists).\n"},
      {"pldefs", undefined, defs_as_proplists, "\n"
       "       Specify that introspection functions shall return proplists\n"
@@ -866,7 +866,7 @@ opt_specs() ->
       "       records.\n"},
      {"maps_unset_optional", {omitted, present_undefined}, maps_unset_optional,
       "\n"
-      "       Specifies the interal format for optional fields\n"
+      "       Specifies the internal format for optional fields\n"
       "       that are unset.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
