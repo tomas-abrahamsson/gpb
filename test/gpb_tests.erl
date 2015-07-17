@@ -648,7 +648,7 @@ merge_oneof_msg_test() ->
 
 -define(verify_gpb_err(Expr), ?assertError({gpb_type_error, _}, Expr)).
 
-verify_presetn_required_field_succeeds_test() ->
+verify_present_required_field_succeeds_test() ->
     ok = verify_msg(#m1{a=1},
                     [{{msg,m1},
                       [#?gpb_field{name=a,fnum=1,rnum=#m1.a, type=uint32,

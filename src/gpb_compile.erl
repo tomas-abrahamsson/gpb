@@ -135,7 +135,7 @@ file(File) ->
 %%        whether or not to verify values.</dd>
 %% </dl>
 %%
-%% Erlang value verfication either succeeds or crashes with the `error'
+%% Erlang value verification either succeeds or crashes with the `error'
 %% `{gpb_type_error,Reason}'. Regardless of the `verify' option,
 %% a function, `verify_msg/1' is always generated.
 %%
@@ -161,7 +161,7 @@ file(File) ->
 %% </dl>
 %%
 %% The `strings_as_binaries' option specifies whether strings should
-%% be returned from decoding as strings (list of unicode code points),
+%% be returned from decoding as strings (list of Unicode code points),
 %% or as binaries (UTF-8 encoded). The `copy_bytes' option applies
 %% to strings as well, when the `strings_as_binaries' option is set.
 %% Upon encoding, both binaries and lists are accepted.
@@ -232,15 +232,15 @@ file(File) ->
 %% The `binary' option will cause the generated and compiled code to be
 %% returned as a binary. No files will be written. The return value
 %% will be on the form `{ok,Mod,Code}' or `{ok,Mod,Code,Warnings}'
-%% if the compilation is succesful. This option may be useful
+%% if the compilation is successful. This option may be useful
 %% e.g. when generating test cases. In case the `nif' option is set,
 %% the `Code' will be a list of tuples: `{erl,binary()}' which
-%% contains the erlang object byte code, and `{nif,binary()}' which
+%% contains the Erlang object byte code, and `{nif,binary()}' which
 %% contains the C++ code. You will have to compile the C++ code with a
-%% C++ compiler, before you can use the erlang code.
+%% C++ compiler, before you can use the Erlang code.
 %%
 %% The `to_proto_defs' option will result in `{ok,Defs}' or
-%% `{ok,Defs,Warns}' being returned if the compilation is succesful.
+%% `{ok,Defs,Warns}' being returned if the compilation is successful.
 %% The returned message definitions can be used with the
 %% {@link proto_defs/2} or {@link proto_defs/3} functions.
 %%
@@ -273,7 +273,7 @@ file(File) ->
 %% If the `include_as_lib' option is set, the generated code will include
 %% gpb.hrl as a library, which is necessary if dependencies are managed with
 %% Rebar. Otherwise, the header file is included directly and must be located
-%% in the path, which is default behaviour.
+%% in the path, which is default behavior.
 %%
 %% The `use_packages' option instructs gpb to prepend the name of a package
 %% to every message it contains. If no package is defined, nothing will be
@@ -287,7 +287,7 @@ file(File) ->
 %% project. The `{msg_name_suffix,Suffix}' works correspondingly.
 %%
 %% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
-%% to the generated code and defintion files. The `{module_name_suffix,Suffix}'
+%% to the generated code and definition files. The `{module_name_suffix,Suffix}'
 %% works correspondingly.
 file(File, Opts0) ->
     Opts1 = normalize_alias_opts(Opts0),
@@ -708,7 +708,7 @@ init_args_to_argv(InitArgs) ->
                      is_gpb_opt(OptName)]).
 
 %% Opts are expected to be on same format as accepted by file/2.
-%% pased by parse_opts_and_args/2.
+%% passed by parse_opts_and_args/2.
 c(Opts, Args) ->
     case determine_cmdline_op(Opts, Args) of
         error  ->
@@ -2208,7 +2208,7 @@ decoder_read_field_params(MsgName, MsgDef, AnRes, Opts) ->
             %%      M#{f1 := lists:reverse(F1)
             %%
             %% Here we must provide enough info to generate
-            %% the finalizing code (ei: the function body in the example above)
+            %% the finalizing code (ie: the function body in the example above)
             %%
             Params = decoder_params(MsgName, AnRes),
             MappingVar = hd(Params),
@@ -3692,7 +3692,7 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
     %% A difference between this function and `d_enum_X' as generated
     %% by `format_enum_decoders' is that this function generates
     %% value/symbol converters for all enums, not only for the ones
-    %% that are used in messags.
+    %% that are used in messages.
     [gpb_codegen:format_fn(
        enum_symbol_by_value,
        fun('<EnumName>', Value) -> 'cvt'(Value) end,
@@ -3913,7 +3913,7 @@ format_export_types(Defs, Opts) ->
             "";
         true ->
             iolist_to_binary(
-              ["%% enumerate types\n",
+              ["%% enumerated types\n",
                string:join([format_enum_typespec(Enum, Enumeration)
                             || {{enum, Enum}, Enumeration} <- Defs],
                            "\n"),
@@ -4112,8 +4112,8 @@ msg_to_typestr(M, Opts) ->
     maps -> ?f("~p()", [M])
   end.
 
-% when the strings_as_binaries option is requested the corresponding
-% typespec should be spec'ed
+%% when the strings_as_binaries option is requested the corresponding
+%% typespec should be spec'ed
 string_to_typestr(true) ->
   "binary()";
 string_to_typestr(false) ->
@@ -4417,7 +4417,7 @@ format_nif_cc_utf8_conversion_code(Opts) ->
               "\n",
               "\n",
               "    /* Should perhaps check for illegal chars in d800-dfff and\n",
-              "     * a other illegal chars\n",
+              "     * other illegal chars\n",
               "     */\n",
               "\n",
               "    for (i = 0; i < numCodePoints; i++)\n",
@@ -4731,7 +4731,7 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
               "\n"
               "#if ",format_nif_check_version_or_later(2, 8),"\n",
               "    first = ERL_NIF_MAP_ITERATOR_FIRST;\n",
-              "#else /* before 2.8 which appeared 18.0 */\n",
+              "#else /* before 2.8 which appeared in 18.0 */\n",
               "    first = ERL_NIF_MAP_ITERATOR_HEAD;\n",
               "#endif\n",
               "    for (i = 1; i < ",NFieldsPlus1,"; i++)\n",
@@ -5695,7 +5695,7 @@ key_partition_on_optionality(Key, Items) ->
 is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
 
-%% Given a sequence, `Seq', of expressions, and an inital expression,
+%% Given a sequence, `Seq', of expressions, and an initial expression,
 %% Construct:
 %%     TmpVar1 = InitialExpr,
 %%     TmpVar2 = <1st expression in sequence, possibly involving TmpVar1>

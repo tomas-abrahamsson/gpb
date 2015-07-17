@@ -363,7 +363,7 @@ find_package_def(Defs, Opts) ->
 %%               {{msg,M2}, [...]},
 %%               {{enum,E2}, [...]}]}]
 %% '''
-%% Flattenning means to lift the nested m2 and e2 definition to the top-level,
+%% Flattening means to lift the nested m2 and e2 definition to the top-level,
 %% so the above turns into:
 %% ```
 %%   [{{msg,M1},[#field{}]},
@@ -418,7 +418,7 @@ flatten_fields(FieldsOrDefs, FullName) ->
                     FieldsOrDefs),
     {lists:reverse(RFields2), Defs2}.
 
-%% Resolve any refs in
+%% Resolve any refs
 resolve_refs(Defs) ->
     Root = ['.'],
     {ResolvedRefs, Reasons} =
@@ -685,7 +685,7 @@ fmt_err({{invalid_default_enum_value, Default}, {Msg, Field}}) ->
     ?f("in msg ~s, field ~s: undefined enumerator in default value ~s",
        [Msg, Field, Default]);
 fmt_err({{{value_out_of_range, Signedness, Bits}, Default}, {Msg, Field}}) ->
-    ?f("in msg ~s, field ~s: default value ~p ouf of range for ~p ~p bit int",
+    ?f("in msg ~s, field ~s: default value ~p out of range for ~p ~p bit int",
        [Msg, Field, Default, Signedness, Bits]);
 fmt_err({{{bad_integer_value, Signedness, Bits}, Default}, {Msg, Field}}) ->
     ?f("in msg ~s, field ~s: bad default value ~p for ~p ~p bit int",

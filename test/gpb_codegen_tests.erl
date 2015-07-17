@@ -155,7 +155,7 @@ can_runtime_transform_case_clause_test() ->
     one   = M:FnName(1),
     ok.
 
-runtime_tranforms_for_expr_test() ->
+runtime_transforms_for_expr_test() ->
     E1 = ?expr(a, [{replace_term, a, 1}]),
     E2 = ?expr(b, [{replace_tree, b, ?expr(bee)}]),
     E3 = ?expr({c}, [{splice_trees, c, [?expr(see), ?expr(X)]}]),

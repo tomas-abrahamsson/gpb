@@ -90,9 +90,9 @@ Features of gpb
 
    Gpb can generate encoders/decoders for maps.
 
-   The option `maps_unset_optional` can be used to specify behaviour
+   The option `maps_unset_optional` can be used to specify behavior
    for non-present optional fields: whether they are omitted from
-   matps, or whether they are present, but have the value `undefined`
+   maps, or whether they are present, but have the value `undefined`
    like for records.
 
 *  Reporting of errors in .proto files
@@ -149,7 +149,7 @@ proto files.  The source of the benchmarks was found in the Google
 protobuf's svn repository.  The gpb does not support groups, but the
 benchmarks in the protobuf used groups, so I converted the
 google_message*.dat to use sub message structures instead.
-For protobuf, that change was only barely noticable.
+For protobuf, that change was only barely noticeable.
 
 For performance, the generated Erlang code avoids creating sub
 binaries as far as possible. It has to for sub messages, strings and

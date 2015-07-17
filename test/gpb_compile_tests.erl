@@ -1004,7 +1004,7 @@ format_error_works_when_import_file_not_found_test() ->
       [{read_file_info, [{"ZZ.proto", {error, enoent}}]}],
       ["import", "not"]).
 
-format_error_works_for_verification_erros_test() ->
+format_error_works_for_verification_errors_test() ->
     compile_and_assert_that_format_error_produces_iolist(
       ["message Msg1 { required Msg2 field1 = 2;}\n"],
       ["Msg2", "Msg1", "field1"]).
@@ -1156,9 +1156,9 @@ nif_encode_decode_strings(NEDM, Defs) ->
                   16#10000,     16#10FFff], %% this range reqiures 4 octets
     %%            16#200000,   16#3ffFFff,  %% would require 5 octets
     %%            16#4000000, 16#7fffFFff   %% would require 6 octets
-    %% These are outside of unicode, but encodable integers using utf-8:
+    %% These are outside of unicode, but encodable integers using UTF-8:
     %% Maybe ought to run these through the nif encoder/decoder just
-    %% to test its utf8 handling, but (a) would be able to cross check with
+    %% to test its UTF-8 handling, but (a) would be able to cross check with
     %% the gpb encoder/decoder, and (b) might not get it through the protoc
     %% lib.
     lists:foreach(fun(CodePoint) ->
@@ -1241,7 +1241,7 @@ nif_with_strbin() ->
                 TmpDir, M, Code,
                 fun() ->
                         OrigMsgB = {ntest2,<<"abc">>},
-                        OrigMsgS = {ntest2,"abc"}, %% gpb doesn't can't strbin
+                        OrigMsgS = {ntest2,"abc"}, %% gpb can't do strbin
                         MEncoded  = M:encode_msg(OrigMsgB),
                         GEncoded  = gpb:encode_msg(OrigMsgB, Defs),
                         MMDecoded = M:decode_msg(MEncoded, ntest2),
@@ -1480,7 +1480,7 @@ want_nif_tests() ->
     %%
     %% Previously, when the nif tests were executed
     %% in the same vm as the eunit tests, then due to the
-    %% behaviour in the libprotoc, that if it detects loading
+    %% behavior in the libprotoc, that if it detects loading
     %% a proto definition with the same name as it already
     %% has loaded, it will refuse, and may stop the entire
     %% erlang-vm. See the documentation in gpb_compile:c/1,2,

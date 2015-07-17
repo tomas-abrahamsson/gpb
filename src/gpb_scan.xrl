@@ -171,11 +171,11 @@ str_to_float_2("."++_=S) -> str_to_float_1("0"++S);
 str_to_float_2("+."++T)  -> str_to_float_1("0."++T);
 str_to_float_2("-."++T)  -> str_to_float_1("-0."++T).
 
-str_to_float_3(S) -> %% No decimals after `.' Possiby e+-<n> following `.'
+str_to_float_3(S) -> %% No decimals after `.' Possibly e+-<n> following `.'
     {UpToDot, "."++Rest} = collect(fun isnt_dot/1, S),
     str_to_float_1(UpToDot++"."++"0"++Rest).
 
-str_to_float_4(S) -> %% Integer preceeding e+-<n>
+str_to_float_4(S) -> %% Integer preceding e+-<n>
     {UpToDot, Rest} = collect(fun isnt_exp_e/1, S),
     str_to_float_1(UpToDot++"."++"0"++Rest).
 

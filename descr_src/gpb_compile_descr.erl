@@ -72,7 +72,7 @@ defs_to_msgtype(Defs) ->
     %% resolves and extends such things.
     %%
     %% To produce a faithful (ie: similar to what protoc would
-    %% produce) defintion, the parser would need to additionally
+    %% produce) definition, the parser would need to additionally
     %% save also the unprocessed parse results.
     [#'DescriptorProto'{
         name            = atom_to_ustring(MsgName),

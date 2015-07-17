@@ -477,7 +477,7 @@ can_suffix_record_names_test() ->
                  output=m2_s} %% .. and result msgs to be prefixed
       ]}] = do_process_sort_defs(Defs, [{msg_name_suffix, "_s"}]).
 
-verify_ingores_import_statements_test() ->
+verify_ignores_import_statements_test() ->
     ok = do_parse_verify_defs(["import \"Y.proto\";",
                                "message m2 { required uint32 x = 1; }"]).
 

@@ -37,7 +37,7 @@
 %% TODO
 %%
 %% * Add a new_default_msg that sets default values according to
-%%   type (and optionalness) as docoumented on the google web:
+%%   type (and optionalness) as documented on the google web:
 %%   strings="", booleans=false, integers=0, enums=<first value> and so on.
 %%   Maybe only for required fields?
 %%
