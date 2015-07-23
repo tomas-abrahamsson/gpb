@@ -2700,15 +2700,14 @@ merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                     MVPrev = prefix_var("MV", PrevValue),
                     ?expr(case 'Prev' of
                               undefined ->
-                                  {'fieldname', 'New'};
-                              {'fieldname', 'MVPrev'} ->
-                                  {'fieldname',
-                                   'merge_msg_X'('MVPrev', 'New')};
+                                  {'tag', 'New'};
+                              {'tag', 'MVPrev'} ->
+                                  {'tag', 'merge_msg_X'('MVPrev', 'New')};
                               _ ->
-                                  {'fieldname', 'New'}
+                                  {'tag', 'New'}
                           end,
                           [replace_tree('Prev', PrevValue),
-                           replace_term('fieldname', FName),
+                           replace_term('tag', FName),
                            replace_tree('New', NewValue),
                            replace_term('merge_msg_X', MergeFn),
                            replace_tree('MVPrev', MVPrev)]);
@@ -2718,14 +2717,13 @@ merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                         pass_as_params ->
                             ?expr(case 'Prev' of
                                       '$undef' ->
-                                          {'fieldname', 'New'};
-                                      {'fieldname', MVPrev} ->
-                                          {'fieldname',
-                                           'merge_msg_X'(MVPrev, 'New')};
+                                          {'tag', 'New'};
+                                      {'tag', MVPrev} ->
+                                          {'tag', 'merge_msg_X'(MVPrev, 'New')};
                                       _ ->
-                                          {'fieldname', 'New'}
+                                          {'tag', 'New'}
                                   end,
-                                  [replace_term('fieldname', FName),
+                                  [replace_term('tag', FName),
                                    replace_tree('Prev', PrevValue),
                                    replace_term('merge_msg_X', MergeFn),
                                    replace_tree('New', NewValue)]);
