@@ -2688,7 +2688,7 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue, MsgName, AnRes, Opts) -
                     end
             end
     end;
-merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue,
+merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                  MsgName, AnRes, Opts)->
     #?gpb_field{name=FName, type=Type} = FieldDef,
     case Type of
@@ -2732,14 +2732,14 @@ merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue,
                         pass_as_record ->
                             ?expr(case maps:find('fieldname', 'Msg') of
                                       error ->
-                                          {'fieldname', 'New'};
-                                      {ok, {'fieldname', MVPrev}} ->
-                                          {'fieldname',
-                                           'merge_msg_X'(MVPrev, 'New')};
+                                          {'tag', 'New'};
+                                      {ok, {'tag', MVPrev}} ->
+                                          {'tag', 'merge_msg_X'(MVPrev, 'New')};
                                       _ ->
-                                          {'fieldname', 'New'}
+                                          {'tag', 'New'}
                                   end,
-                                  [replace_term('fieldname', FName),
+                                  [replace_term('fieldname', CFName),
+                                   replace_term('tag', FName),
                                    replace_tree('Msg', MsgVar),
                                    replace_term('merge_msg_X', MergeFn),
                                    replace_tree('New', NewValue)])

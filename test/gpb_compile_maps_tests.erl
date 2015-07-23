@@ -109,6 +109,19 @@ encode_decode_submsg_with_omitted_test() ->
     [{o,{f2,#{sf1:=11}}}] = maps:to_list(M:decode_msg(BT2, t2)),
     unload_code(M).
 
+decode_merge_submsg_with_omitted_test() ->
+    M = compile_iolist(["message t1 { oneof c {s2 a = 1;} };"
+                        "message s2 { repeated uint32 f = 2; };"],
+                       [maps, {maps_unset_optional, omitted}, type_specs,
+                        {field_pass_method,pass_as_record}]),
+    M1 = #{c => {a, #{f => [395]}}},
+    M2 = #{c => {a, #{f => []}}},
+    B1 = M:encode_msg(M1, t1),
+    B2 = M:encode_msg(M2, t1),
+    #{c := {a, #{f := [395]}}} = M:merge_msgs(M1, M2, t1),
+    #{c := {a, #{f := [395]}}} = M:decode_msg(<<B1/binary, B2/binary>>, t1),
+    unload_code(M).
+
 %% merge ------------------------------------------------
 merge_maps_with_opts_present_undefined_test() ->
     M = compile_iolist(["message m1 {",
