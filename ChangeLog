@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.8
+2015-Jun-24
+
+	* Fix another decoding/merging bug for maps with the option
+	maps_unset_optional=omitted, this time for oneof with sub messages
+	to be merged. This bug, too, was found with the quickcheck and
+	gpb-eqc.
+
 Version 3.18.7
 2015-Jun-17
 
