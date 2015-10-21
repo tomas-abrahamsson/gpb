@@ -258,8 +258,8 @@ oneof_elem -> type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
                                                     fnum=literal_value('$4'),
                                                     opts='$6'}.
 
-extend_def -> extend identifier '{' msg_elems '}':
-                                        {{extend,identifier_name('$2')},'$4'}.
+extend_def -> extend name '{' msg_elems '}':
+                                        {{extend,'$2'},'$4'}.
 
 
 service_def -> service identifier '{' rpc_defs '}':
@@ -305,11 +305,12 @@ post_process_one_file(Defs, Opts) ->
 post_process_all_files(Defs, Opts) ->
     case resolve_names(Defs) of
         {ok, Defs2} ->
+            Packages = all_packages(Defs2),
             {ok, possibly_prefix_suffix_msgs(
                    normalize_msg_field_options( %% Sort it?
                      enumerate_msg_fields(
                        reformat_names(
-                         extend_msgs(Defs2)))),
+                         extend_msgs(Defs2, Packages)))),
                    Opts)};
         {error, Reasons} ->
             {error, Reasons}
@@ -764,21 +765,70 @@ reformat_rpcs(RPCs) ->
 
 %% `Defs' is expected to be flattened and may or may not be reformatted
 %% `Defs' is expected to be verified, to not extend missing messages
-extend_msgs(Defs) ->
-    [possibly_extend_msg(Def, Defs) || Def <- Defs,
-                                       not is_extended(Def, Defs)].
+extend_msgs(Defs, Packages) ->
+    lists:foldl(fun(Def, Acc) ->
+                    case is_extended(Def, Defs) of
+                        true  -> Acc;
+                        false -> possibly_extend_msg(Def, Acc, Packages)
+                    end
+                end,
+                Defs,
+                Defs).
 
 is_extended({{msg,Msg}, _Fields}, Defs) ->
     lists:keymember({extend,Msg}, 1, Defs);
 is_extended(_OtherDef, _Defs) ->
     false.
 
-possibly_extend_msg({{extend,Msg}, MoreFields}, Defs) ->
-    {value, {{msg,Msg}, OrigFields}} = lists:keysearch({msg,Msg}, 1, Defs),
-    {{msg,Msg}, OrigFields ++ MoreFields};
-possibly_extend_msg(OtherElem, _Defs) ->
-    OtherElem.
+possibly_extend_msg({{extend,Msg}, MoreFields} = Extend, Defs, Packages) ->
+    case lists:keytake({msg,Msg}, 1, Defs) of
+        {value, {{msg,Msg}, OrigFields}, DefsT} ->
+            [{{msg,Msg}, OrigFields ++ MoreFields}|DefsT];
+        false ->
+            repackage_extended_msg(Extend, Defs, Packages)
+    end;
 
+possibly_extend_msg(_OtherElem, Defs, _Packages) ->
+    Defs.
+
+repackage_extended_msg({{extend,OrigMsg}, MoreFields}, Defs, Packages) ->
+    Msg = fix_last_package(OrigMsg, Packages),
+    NewDefs = lists:keydelete({extend,OrigMsg}, 1, Defs),
+    possibly_extend_msg({{extend,Msg}, MoreFields}, NewDefs, Packages).
+
+
+%% keeps stripping found packages from the Msg name until it can no longer do
+%% so, then adds back the last one it took off. All the others were incorrectly
+%% added during a previous post_process_one_file run. That run doens't know
+%% about any other packages yet, so is unable to know whether to add them or
+%% not, meaning it always adds them. Here we take them off again.
+fix_last_package(Msg, Packages) ->
+    fix_last_package(Msg, Packages, [], dropped_none, []).
+
+fix_last_package(Msg, [], DonePackages, Dropped, LastDropped)
+    when DonePackages =:= []; Dropped =:= dropped_none ->
+    LastDropped ++ Msg;
+
+fix_last_package(Msg, [], DonePackages, dropped_one, LastPackage) ->
+    fix_last_package(Msg, DonePackages, [], dropped_none, LastPackage);
+fix_last_package(Msg, [H|T], DonePackages, Dropped, LastPackage) ->
+    case lists:split(length(H), Msg) of
+        {H, NewMsg} ->
+            fix_last_package(NewMsg, T, DonePackages, dropped_one, H);
+        _ ->
+            fix_last_package(Msg, T, [H|DonePackages], Dropped, LastPackage)
+    end.
+
+
+%% 'Defs' is expected to be flattened
+%% returns all package names with added '.' prefix
+all_packages(Defs) ->
+    lists:filtermap(fun({package,Package}) ->
+                          {true, ['.' | Package]};
+                       (_) ->
+                          false
+                    end,
+                    Defs).
 
 %% `Defs' is expected to be flattened
 enumerate_msg_fields(Defs) ->
