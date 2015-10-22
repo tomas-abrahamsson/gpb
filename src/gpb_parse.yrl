@@ -432,6 +432,10 @@ resolve_refs(Defs) ->
                   {NewRPCs, Acc2} =
                       resolve_rpc_refs(Rpcs, Defs, Root, FullName, Acc),
                   {{{service,FullName}, NewRPCs}, Acc2};
+             ({{extend,FullName}, Fields}, Acc) ->
+                  {NewFields, Acc2} =
+                      resolve_field_refs(Fields, Defs, Root, FullName, Acc),
+                  {{{extend,FullName}, NewFields}, Acc2};
              (OtherElem, Acc) ->
                   {OtherElem, Acc}
           end,
