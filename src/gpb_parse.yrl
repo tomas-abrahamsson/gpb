@@ -142,6 +142,8 @@ msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
 msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
 msg_elem -> oneof_def:                  '$1'.
+msg_elem -> extend identifier '{' msg_elems '}':
+                                 {{extend,identifier_name('$2')},'$4'}.
 
 fidentifier -> identifier:              '$1'.
 fidentifier -> package:                 kw_to_identifier('$1').
@@ -410,6 +412,10 @@ flatten_fields(FieldsOrDefs, FullName) ->
                             {[F | Fs], Ds};
                        (#gpb_oneof{}=O, {Fs,Ds}) ->
                             {[O | Fs], Ds};
+                       ({{extend, _Msg},_}=Def, {Fs,Ds}) ->
+                            QDefs = flatten_qualify_defnames(
+                                      [Def], drop_last_level(FullName)),
+                            {Fs, QDefs ++ Ds};
                        (Def, {Fs,Ds}) ->
                             QDefs = flatten_qualify_defnames([Def], FullName),
                             {Fs, QDefs++Ds}
