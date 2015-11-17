@@ -1,5 +1,10 @@
 -*- coding: utf-8 -*-
 
+Version 3.18.9
+2015-Nov-17
+
+	* Support'extend inside a message body. Thanks to Michael Ries.
+
 Version 3.18.8
 2015-Jun-24
 
