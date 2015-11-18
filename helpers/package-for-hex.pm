@@ -60,15 +60,6 @@ then
     fi
 fi
 
-# Contributors are those who in one way or another
-# are mentioned in the ChangeLog fiel
-# (run a  too??)
-contributors="$(("$script_path"/extract-contributors "$repo_top"/ChangeLog; \
-                 git log --format=%an ) | \
-                sort -u | \
-                "$script_path"/lines-to-strlist --indent-but-first-to=19
-                )"
-
 git archive --format=tar --prefix="$d"/ HEAD | tar xf -
 
 set -e
@@ -108,9 +99,10 @@ defmodule Gpb.Mixfile do
 
   defp package do
     [files: ~w(src include descr_src bin build COPYING.LIB README.* rebar.config.script ChangeLog Makefile),
-     contributors: $contributors,
+     maintainers: ["Tomas Abrahamsson"],
      licenses: ["LGPL 2.1"],
-     links: %{"GitHub" => "https://github.com/tomas-abrahamsson/gpb"}]
+     links: %{"GitHub" => "https://github.com/tomas-abrahamsson/gpb"},
+     build_tools: ["rebar", "make"]]
    end
 end
 
