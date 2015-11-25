@@ -305,13 +305,12 @@ post_process_one_file(Defs, Opts) ->
     end.
 
 post_process_all_files(Defs, Opts) ->
-    case resolve_names(Defs) of
+    case resolve_names(extend_msgs(Defs)) of
         {ok, Defs2} ->
             {ok, possibly_prefix_suffix_msgs(
                    normalize_msg_field_options( %% Sort it?
                      enumerate_msg_fields(
-                       reformat_names(
-                         extend_msgs(Defs2)))),
+                       reformat_names(Defs2))),
                    Opts)};
         {error, Reasons} ->
             {error, Reasons}
