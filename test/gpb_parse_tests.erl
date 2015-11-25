@@ -386,6 +386,26 @@ parses_nested_extending_msgs_test() ->
                                    occurrence=optional}]}] =
         do_process_sort_defs(Defs).
 
+parses_extending_msgs_with_nested_msg_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required uint32 f1=1 [default=17];",
+                             "  extensions 200 to 299;",
+                             "}",
+                             "message m2 {",
+                             "  optional uint32 num = 1;",
+                             "}",
+                             "extend m1 {",
+                             "  optional m2 ext_m2 = 200;",
+                             "}"]),
+    [{{extensions,m1},[{200,299}]},
+     {{msg,m1},       [#?gpb_field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
+                                   occurrence=required},
+                       #?gpb_field{name=ext_m2, fnum=200, rnum=3, opts=[],
+                                   occurrence=optional, type={msg, m2}}]},
+     {{msg,m2},       [#?gpb_field{name=num, fnum=1, rnum=2, opts=[],
+                                   occurrence=optional}]}] =
+        do_process_sort_defs(Defs).
+
 parses_nested_extending_msgs_in_package_test() ->
     {ok,Defs} = parse_lines(["package p1.p2;",
                              "message m1 {",
