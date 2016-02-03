@@ -659,6 +659,9 @@ c() ->
 %%   <dd>Suffix each message name with `Suffix'.</dd>
 %%   <dt>`-modsuffix Suffix'</dt>
 %%   <dd>Suffix each module name with `Suffix'.</dd>
+%%   <dt>`-msgtolower'</dt>
+%%   <dd>ToLower each message. Any prefixes/suffixes are added
+%%       after case modification.</dd>
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instead of `-include', which is the default.</dd>
@@ -854,7 +857,8 @@ opt_specs() ->
      {"msgsuffix", 'string()', msg_name_suffix, "Suffix\n"
       "       Suffix each message with Suffix.\n"},
      {"msgtolower", undefined, msg_name_to_lower, "ToLower\n"
-      "       ToLower each message.\n"},
+      "       ToLower each message.  Any prefixes/suffixes are added\n"
+      "       after case modification.\n"},
      {"modsuffix", 'string()', module_name_suffix, "Suffix\n"
       "       Suffix the module name with Suffix.\n"},
      {"il", undefined, include_as_lib, "\n"
