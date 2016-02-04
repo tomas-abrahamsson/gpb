@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.19.0
+2016-Feb-04
+
+	Add an option msg_name_to_lower (Cmdline: -msgtolower) for
+	changing all message name to lower case. Thanks to Roowe.
+
 Version 3.18.10
 2015-Nov-27
 
