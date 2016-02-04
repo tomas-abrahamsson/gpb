@@ -1793,6 +1793,7 @@ opt_test() ->
            {module_name_suffix, "_mod_suffix"},
            include_as_lib, type_specs,
            descriptor, maps,
+           msg_name_to_lower,
            help, help, version, version],
           ["x.proto", "y.proto"]}} =
         gpb_compile:parse_opts_and_args(
@@ -1822,6 +1823,7 @@ opt_test() ->
            "-type",
            "-descr",
            "-maps",
+           "-msgtolower",
            "-h", "--help",
            "-V", "--version",
            "x.proto", "y.proto"]).

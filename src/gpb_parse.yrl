@@ -837,44 +837,56 @@ opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
 possibly_prefix_suffix_msgs(Defs, Opts) ->
     Prefix = proplists:get_value(msg_name_prefix, Opts, ""),
     Suffix = proplists:get_value(msg_name_suffix, Opts, ""),
-    if Prefix == "", Suffix == "" ->
+    ToLower = proplists:get_value(msg_name_to_lower, Opts, false),
+
+    if Prefix == "", Suffix == "", ToLower == false ->
             Defs;
        true ->
-            prefix_suffix_msgs(Prefix, Suffix, Defs)
+            prefix_suffix_msgs(Prefix, Suffix, ToLower, Defs)
     end.
 
 
-prefix_suffix_msgs(Prefix, Suffix, Defs) ->
+prefix_suffix_msgs(Prefix, Suffix, ToLower, Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
-                      {{msg,prefix_suffix_name(Prefix, Suffix, Name)},
-                       prefix_suffix_fields(Prefix, Suffix, Fields)};
+                      {{msg,prefix_suffix_name(Prefix, Suffix, ToLower, Name)},
+                       prefix_suffix_fields(Prefix, Suffix, ToLower, Fields)};
                  ({{extensions,Name}, Exts}) ->
-                      {{extensions,prefix_suffix_name(Prefix, Suffix, Name)},
+                      {{extensions,
+                        prefix_suffix_name(Prefix, Suffix, ToLower, Name)},
                        Exts};
                  ({{service,Name}, RPCs}) ->
-                      {{service,Name}, prefix_suffix_rpcs(Prefix, Suffix, RPCs)};
+                      {{service,maybe_tolower_name(Name, ToLower)},
+                       prefix_suffix_rpcs(Prefix, Suffix, ToLower, RPCs)};
+                 ({package,Name}) ->
+                      {package,maybe_tolower_name(Name,ToLower)};
                  (OtherElem) ->
                       OtherElem
               end,
               Defs).
 
-prefix_suffix_fields(Prefix, Suffix, Fields) ->
+prefix_suffix_fields(Prefix, Suffix, ToLower, Fields) ->
     lists:map(
       fun(#?gpb_field{type={msg,MsgName}}=F) ->
-              NewMsgName = prefix_suffix_name(Prefix, Suffix, MsgName),
+              NewMsgName = prefix_suffix_name(Prefix, Suffix, ToLower, MsgName),
               F#?gpb_field{type={msg,NewMsgName}};
          (#?gpb_field{}=F) ->
               F
       end,
       Fields).
 
-prefix_suffix_name(Prefix, Suffix, Name) ->
-    list_to_atom(lists:concat([Prefix, Name, Suffix])).
+prefix_suffix_name(Prefix, Suffix, ToLower, Name) ->
+    Name1 = maybe_tolower_name(Name, ToLower),
+    Name2 = lists:concat([Prefix, Name1, Suffix]),
+    list_to_atom(Name2).
 
-prefix_suffix_rpcs(Prefix, Suffix, RPCs) ->
+maybe_tolower_name(Name, false) -> Name;
+maybe_tolower_name(Name, true) ->
+    list_to_atom(string:to_lower(atom_to_list(Name))).
+
+prefix_suffix_rpcs(Prefix, Suffix, ToLower, RPCs) ->
     lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}) ->
-                      NewArg = prefix_suffix_name(Prefix, Suffix, Arg),
-                      NewReturn = prefix_suffix_name(Prefix, Suffix, Return),
+                      NewArg = prefix_suffix_name(Prefix, Suffix, ToLower, Arg),
+                      NewReturn = prefix_suffix_name(Prefix, Suffix, ToLower, Return),
                       #?gpb_rpc{name=RpcName,
                                 input=NewArg,
                                 output=NewReturn}

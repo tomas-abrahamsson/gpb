@@ -88,6 +88,7 @@ file(File) ->
 %%                   include_as_lib | use_packages |
 %%                   {msg_name_prefix, string() | atom()} |
 %%                   {msg_name_suffix, string() | atom()} |
+%%                   {msg_name_to_lower, boolean()} |
 %%                   {module_name_prefix, string() | atom()} |
 %%                   {module_name_suffix, string() | atom()}
 %%            CompRet = ModRet | BinRet | ErrRet
@@ -658,6 +659,9 @@ c() ->
 %%   <dd>Suffix each message name with `Suffix'.</dd>
 %%   <dt>`-modsuffix Suffix'</dt>
 %%   <dd>Suffix each module name with `Suffix'.</dd>
+%%   <dt>`-msgtolower'</dt>
+%%   <dd>ToLower each message. Any prefixes/suffixes are added
+%%       after case modification.</dd>
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instead of `-include', which is the default.</dd>
@@ -852,6 +856,9 @@ opt_specs() ->
       "       Prefix the module name with Prefix.\n"},
      {"msgsuffix", 'string()', msg_name_suffix, "Suffix\n"
       "       Suffix each message with Suffix.\n"},
+     {"msgtolower", undefined, msg_name_to_lower, "ToLower\n"
+      "       ToLower each message.  Any prefixes/suffixes are added\n"
+      "       after case modification.\n"},
      {"modsuffix", 'string()', module_name_suffix, "Suffix\n"
       "       Suffix the module name with Suffix.\n"},
      {"il", undefined, include_as_lib, "\n"
@@ -3958,11 +3965,15 @@ format_hrl(Mod, Defs, Opts) ->
        ?f("-endif.~n")]).
 
 format_msg_record(Msg, Fields, Opts, Defs) ->
-    [?f("-record(~p,~n", [Msg]),
+    Def = list_to_atom(string:to_upper(lists:concat([Msg, "_PB_H"]))),
+    [?f("-ifndef(~p).~n", [Def]),
+     ?f("-define(~p, true).~n", [Def]),
+     ?f("-record(~p,~n", [Msg]),
      ?f("        {"),
      outdent_first(format_hfields(8+1, Fields, Opts, Defs)),
      "\n",
-     ?f("        }).~n")].
+     ?f("        }).~n"),
+     ?f("-endif.~n")].
 
 format_hfields(Indent, Fields, Opts, Defs) ->
     TypeSpecs = get_type_specs_by_opts(Opts),

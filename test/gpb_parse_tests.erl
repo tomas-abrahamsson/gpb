@@ -530,6 +530,40 @@ can_suffix_record_names_test() ->
                  output=m2_s} %% .. and result msgs to be prefixed
       ]}] = do_process_sort_defs(Defs, [{msg_name_suffix, "_s"}]).
 
+can_tolower_record_names_test() ->
+    {ok, Defs} = parse_lines(["message Msg1 {required Msg2   f1=1;}",
+                              "message Msg2 {required uint32 g1=1;}",
+                              "service Svc1 {",
+                              "  rpc req(Msg1) returns (Msg2) {};",
+                              "}",
+                              "extend Msg1 { optional uint32 fm2=2; }"]),
+    [{{msg,msg1}, [#?gpb_field{name=f1, type={msg,msg2}},
+                   #?gpb_field{name=fm2}]},
+     {{msg,msg2}, [#?gpb_field{name=g1}]},
+     {{service,svc1},
+      [#?gpb_rpc{name=req,
+                 input=msg1,  %% both argument ...
+                 output=msg2} %% .. and result msgs to be to-lower
+      ]}] = do_process_sort_defs(Defs, [msg_name_to_lower]).
+
+can_tolower_record_names_with_packages_test() ->
+    {ok, Defs} = parse_lines(["package Pkg1;",
+                              "message Msg1 {required Msg2   f1=1;}",
+                              "message Msg2 {required uint32 g1=1;}",
+                              "service Svc1 {",
+                              "  rpc req(Msg1) returns (Msg2) {};",
+                              "}",
+                              "extend Msg1 { optional uint32 fm2=2; }"]),
+    [{package, 'pkg1'},
+     {{msg,'pkg1.msg1'}, [#?gpb_field{name=f1, type={msg,'pkg1.msg2'}},
+                          #?gpb_field{name=fm2}]},
+     {{msg,'pkg1.msg2'}, [#?gpb_field{name=g1}]},
+     {{service,'pkg1.svc1'},
+      [#?gpb_rpc{name=req,
+                 input='pkg1.msg1',  %% both argument ...
+                 output='pkg1.msg2'} %% .. and result msgs to be to-lower
+      ]}] = do_process_sort_defs(Defs, [msg_name_to_lower, use_packages]).
+
 verify_ignores_import_statements_test() ->
     ok = do_parse_verify_defs(["import \"Y.proto\";",
                                "message m2 { required uint32 x = 1; }"]).
