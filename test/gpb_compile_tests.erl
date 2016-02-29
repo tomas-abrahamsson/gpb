@@ -1794,7 +1794,9 @@ opt_test() ->
            include_as_lib, type_specs,
            descriptor, maps,
            msg_name_to_lower,
-           help, help, version, version],
+           help, help, version, version,
+           {erlc_compile_options, "debug_info, inline_list_funcs"}
+           ],
           ["x.proto", "y.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-Iinclude1",
@@ -1826,6 +1828,7 @@ opt_test() ->
            "-msgtolower",
            "-h", "--help",
            "-V", "--version",
+           "-erlc_compile_options", "debug_info, inline_list_funcs",
            "x.proto", "y.proto"]).
 
 %% --- auxiliaries -----------------
