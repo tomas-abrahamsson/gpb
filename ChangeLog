@@ -1,9 +1,16 @@
 -*- coding: utf-8 -*-
 
+Version 3.20.0
+2016-Mar-01
+
+	* Add an option {erlc_compile_options,Str} (-erlc_compile_options Str)
+	for inserting a -compile(Str) option into the generated code.
+	Thanks to Guilherme Andrade.
+
 Version 3.19.0
 2016-Feb-04
 
-	Add an option msg_name_to_lower (Cmdline: -msgtolower) for
+	* Add an option msg_name_to_lower (Cmdline: -msgtolower) for
 	changing all message name to lower case. Thanks to Roowe.
 
 Version 3.18.10
