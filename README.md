@@ -1,8 +1,8 @@
 The gpb is a compiler for Google protocol buffer definitions files
 for Erlang.
 
-See https://code.google.com/p/protobuf/ for further information on
-the Google protocol buffers.
+See https://developers.google.com/protocol-buffers/ for further information
+on the Google protocol buffers.
 
 Features of gpb
 ---------------
