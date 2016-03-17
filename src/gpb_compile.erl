@@ -4934,16 +4934,17 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                              false -> "";
                              true  -> dot_replace_s(EnumName, "_") ++ "_"
                          end,
+               CPkg = get_cc_pkg(Defs),
                {value, {{enum,EnumName}, Enumerations}} =
                    lists:keysearch({enum,EnumName}, 1, Defs),
                ["{\n",
                 [?f("    ~sif (enif_is_identical(~s, ~s))\n"
-                    "        ~s->~s(~s~s);\n",
+                    "        ~s->~s(~s::~s~s);\n",
                     [if I == 1 -> "";
                         I >  1 -> "else "
                      end,
                      SrcVar, mk_c_var(gpb_aa_, Sym),
-                     MsgVar, SetterFnName, EPrefix, Sym])
+                     MsgVar, SetterFnName, CPkg, EPrefix, Sym])
                  || {I, {Sym, _Val}} <- index_seq(Enumerations)],
                 "    else\n"
                 "        return 0;\n"
@@ -5217,12 +5218,13 @@ format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs) ->
                           false -> "";
                           true  -> dot_replace_s(EnumName, "_") ++ "_"
                       end,
+            CPkg = get_cc_pkg(Defs),
             {value, {{enum,EnumName}, Enumerations}} =
                 lists:keysearch({enum,EnumName}, 1, Defs),
             [] ++
                 [?f("switch (~s->~s()) {\n", [MsgVar, LCFName])] ++
-                [?f("    case ~s~s: ~s = ~s; break;\n",
-                    [EPrefix, Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
+                [?f("    case ~s::~s~s: ~s = ~s; break;\n",
+                    [CPkg, EPrefix, Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
                  || {Sym, _Value} <- Enumerations] ++
                 [?f("    default: ~s = gpb_aa_undefined;\n", [DestVar])] ++
                 [?f("}\n")];

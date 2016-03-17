@@ -1085,6 +1085,7 @@ nif_code_test_() ->
       [{"Nif compiles", fun nif_compiles/0},
        {"Nif encode decode", fun nif_encode_decode/0},
        {"Nif enums in msgs", fun nif_enum_in_msg/0},
+       {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
        {"Nif with strbin", fun nif_with_strbin/0}]).
 
 nif_tests_check_prerequisites(Tests) ->
@@ -1221,6 +1222,35 @@ nif_enum_in_msg() ->
                         MMDecoded = M:decode_msg(MEncoded, ntest1),
                         GMDecoded = gpb:decode_msg(MEncoded, ntest1, Defs),
                         MGDecoded = M:decode_msg(GEncoded, ntest1),
+                        ?assertEqual(OrigMsg, MMDecoded),
+                        ?assertEqual(OrigMsg, GMDecoded),
+                        ?assertEqual(OrigMsg, MGDecoded)
+                end)
+      end).
+
+nif_enum_with_pkgs() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_enum_with_pkgs,
+              DefsTxt = lf_lines(["package p1.p2;",
+                                  "    enum ee {",
+                                  "        ee1 = 1;",
+                                  "        ee2 = 2;",
+                                  "    };",
+                                  "message ntest2 {",
+                                  "    optional ee f1 = 1;",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {ntest2,ee1},
+                        MEncoded  = M:encode_msg(OrigMsg),
+                        GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                        MMDecoded = M:decode_msg(MEncoded, ntest2),
+                        GMDecoded = gpb:decode_msg(MEncoded, ntest2, Defs),
+                        MGDecoded = M:decode_msg(GEncoded, ntest2),
                         ?assertEqual(OrigMsg, MMDecoded),
                         ?assertEqual(OrigMsg, GMDecoded),
                         ?assertEqual(OrigMsg, MGDecoded)
