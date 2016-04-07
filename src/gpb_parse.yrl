@@ -21,6 +21,7 @@
 
 Nonterminals
         proto
+        syntax_def
         elements element
         enum_def enum_fields enum_field
         opt_enum_opts enum_opts enum_opt
@@ -55,6 +56,7 @@ Terminals
         oneof
         service rpc returns
         packed deprecated
+        syntax
         '.' ';' '(' ')' '{' '}' '[' ']' '=' ','
         .
 
@@ -67,10 +69,11 @@ Endsymbol
 
 %% TODO: implement verification of references
 %% TODO: implement (custom) options: allowed everywhere
-%% TODO: implement syntax as in syntax = "proto2"; (must come first)
 
 proto -> elements:                      '$1'.
-%% proto -> syntax_def elements:           '$1'.
+proto -> syntax_def elements:           ['$1' | '$2'].
+
+syntax_def -> syntax '=' str_lit ';':   verify_syntax('$3').
 
 elements -> element elements:           ['$1' | '$2'].
 elements -> ';' elements:               '$2'.
@@ -288,6 +291,13 @@ Erlang code.
 -export([post_process_all_files/2]).
 -export([format_post_process_error/1]).
 -export([fetch_imports/1]).
+
+verify_syntax({str_lit, _Line, "proto2"}) ->
+    {syntax, "proto2"};
+verify_syntax({str_lit, Line, "proto"++_ = Unsupported}) ->
+    return_error(Line, "Unsupported proto version: " ++ Unsupported);
+verify_syntax({str_lit, Line, Unsupported}) ->
+    return_error(Line, "Unsupported proto syntax: " ++ Unsupported).
 
 identifier_name({identifier, _Line, Name}) -> list_to_atom(Name).
 

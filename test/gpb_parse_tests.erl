@@ -22,6 +22,13 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
+parses_syntax_test() ->
+    {ok, [{syntax,"proto2"}]} = parse_lines(["syntax=\"proto2\";"]),
+    ?assertError({parse_error,_,{_LNum,_Module,_EMsg}},
+                 parse_lines(["syntax=\"proto3\";"])),
+    ?assertError({parse_error,_,{_LNum,_Module,_EMsg}},
+                 parse_lines(["syntax=\"totally-unknonwn\";"])).
+
 parses_simple_msg_test() ->
     {ok, [{{msg,'Msg'}, [#?gpb_field{name=x, type=uint32, fnum=1,
                                      occurrence=optional, opts=[]}]}]} =
