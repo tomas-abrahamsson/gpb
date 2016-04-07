@@ -4024,7 +4024,12 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                                          _        -> ""
                                      end;
                                  Default ->
-                                     ?f(" = ~p", [Default])
+                                     case MapsOrRecords of
+                                         records ->
+                                             ?f(" = ~p", [Default]);
+                                         maps ->
+                                             ""
+                                     end
                              end,
                 TypeStr = ?f("~s", [type_to_typestr(Field, Defs, Opts)]),
                 CommaSep = if I < LastIndex -> ",";
