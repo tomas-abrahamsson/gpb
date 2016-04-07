@@ -1,6 +1,15 @@
 -ifndef(gpb_hrl).
 -define(gpb_hrl, true).
 
+-type gpb_map_key_type() ::
+        int32 | int64
+        | uint32 | uint64
+        | sint32 | sint64
+        | fixed32 | fixed64
+        | sfixed32 | sfixed64
+        | bool
+        | string.
+
 -type gpb_field_type() ::        %% Erlang type  Comment
         'int32' | 'int64'         % integer()    variable-length encoded
         | 'uint32' | 'uint64'     % integer()    variable-length encoded
@@ -12,7 +21,8 @@
         | 'string'                % string()     UTF-8 encoded
         | 'bytes'                 % binary()
         | {'enum',atom()}         % atom()       the enum literal is the atom
-        | {'msg',atom()}.         % record()     the msg name is record name
+        | {'msg',atom()}          % record()     the msg name is record name
+        | {'map',gpb_map_key_type(), gpb_field_type()}. % [{K,V}] or map()
 
 %% The following two definitions (`gpb_field' and `gpb_rpc') are to
 %% avoid clashes with other code, since the `field' and `rpc' are

@@ -47,6 +47,7 @@ sfixed64        : {token, {sfixed64,TokenLine}}.
 bool            : {token, {bool,TokenLine}}.
 string          : {token, {string,TokenLine}}.
 bytes           : {token, {bytes,TokenLine}}.
+map             : {token, {map,TokenLine}}.
 
 package         : {token, {package,TokenLine}}.
 message         : {token, {message,TokenLine}}.
@@ -105,7 +106,8 @@ syntax          : {token, {syntax,TokenLine}}.
 \)              : {token, {')', TokenLine}}.
 =               : {token, {'=', TokenLine}}.
 ,               : {token, {',', TokenLine}}.
-
+<               : {token, {'<', TokenLine}}.
+>               : {token, {'>', TokenLine}}.
 
 
 //.*\n          : skip_token.                    %% C++-style comment
