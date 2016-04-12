@@ -23,6 +23,7 @@
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
 -export([verify_msg/2, check_scalar/2]).
+-export([map_item_pseudo_fields/2]).
 -export([encode_varint/1, decode_varint/1, decode_varint/2]).
 -export([encode_wiretype/1, decode_wiretype/1]).
 -export([version_as_string/0, version_as_list/0]).
@@ -852,14 +853,16 @@ proplist_to_rpc_record(PL) when is_list(PL) ->
     list_to_tuple([?gpb_rpc | RFields]).
 
 map_item_tmp_def(KeyType, ValueType) ->
-    {{msg, map_item_tmp_name()},
-     [#?gpb_field{name=key, fnum=1, rnum=2,
-                  occurrence=optional, type=KeyType},
-      #?gpb_field{name=value, fnum=2, rnum=3,
-                  occurrence=optional, type=ValueType}]}.
+    {{msg, map_item_tmp_name()}, map_item_pseudo_fields(KeyType, ValueType)}.
 
 map_item_tmp_name() ->
     '$mapitem'.
+
+map_item_pseudo_fields(KeyType, ValueType) ->
+    [#?gpb_field{name=key, fnum=1, rnum=2,
+                 occurrence=required, type=KeyType},
+     #?gpb_field{name=value, fnum=2, rnum=3,
+                 occurrence=required, type=ValueType}].
 
 %% --
 
