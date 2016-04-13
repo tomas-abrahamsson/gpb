@@ -401,7 +401,6 @@ decoding_oneof_with_merge_test() ->
     %% Different oneof fields ==> no merge
     #m1{a = {y,150}}           = decode_msg(<<B1/binary, B3/binary>>, m1, Defs).
 
--ifndef(gpb_compile_common_tests). %% maps not yet implemented in gpb_compile
 decoding_map_test() ->
     Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                     type={map,string,fixed32},
@@ -437,7 +436,6 @@ decoding_map_with_duplicate_keys_test() ->
                      m1,
                      Defs),
     [{"x",17},{"y",18}] = lists:sort(Map).
--endif.
 
 %% -------------------------------------------------------------
 
@@ -578,7 +576,6 @@ encode_oneof_test() ->
     <<8,150,1>>  = encode_msg(#m1{a={a1,150}}, Defs),
     <<16,150,1>> = encode_msg(#m1{a={a2,150}}, Defs).
 
--ifndef(gpb_compile_common_tests). %% maps not yet implemented in gpb_compile
 encode_map_test() ->
     Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                     type={map,string,fixed32},
@@ -590,7 +587,6 @@ encode_map_test() ->
       10, 1, "y",       %% key
       21, 18:32/little  %% value
     >> = encode_msg(#m1{a = [{"x",17},{"y",18}]}, Defs).
--endif.
 
 %% -------------------------------------------------------------
 
@@ -696,7 +692,6 @@ merge_oneof_msg_test() ->
                                             #m1{a={y,150}},
                                             Defs).
 
--ifndef(gpb_compile_common_tests). %% maps not yet implemented in gpb_compile
 merge_map_test() ->
     Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                     type={map,string,fixed32},
@@ -705,7 +700,7 @@ merge_map_test() ->
                                     #m1{a = [{"x",17},{"z",19}]},
                                     Defs),
     [{"x",17},{"y",18},{"z",19}] = lists:sort(MergedMap).
--endif.
+
 %% -------------------------------------------------------------
 
 -define(verify_gpb_err(Expr), ?assertError({gpb_type_error, _}, Expr)).
@@ -912,13 +907,11 @@ verify_valid_submsg_succeeds_test() ->
                                              type=uint32,
                                              occurrence=required}]}]).
 
--ifndef(gpb_compile_common_tests). %% maps not yet implemented in gpb_compile
 verify_valid_map_succeeds_test() ->
     ok = verify_msg(#m1{a = [{"x",17},{"y",18}]},
                     [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                              type={map,string,fixed32},
                                              occurrence=repeated, opts=[]}]}]).
--endif.
 
 verify_invalid_submsg_fails_test() ->
     MsgDefs = [{{msg,m1}, [#?gpb_field{name=a,fnum=1,rnum=#m1.a,
@@ -961,7 +954,6 @@ verify_invalid_oneof_test() ->
     ?verify_gpb_err(verify_msg(#m1{a={a3,150}}, Defs)),
     ?verify_gpb_err(verify_msg(#m1{a={a1,false}}, Defs)).
 
--ifndef(gpb_compile_common_tests). %% maps not yet implemented in gpb_compile
 verify_invalid_map_fails_test() ->
     Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                     type={map,string,fixed32},
@@ -970,7 +962,6 @@ verify_invalid_map_fails_test() ->
     ?verify_gpb_err(verify_msg(#m1{a = [not_a_map_item]}, Defs)),
     ?verify_gpb_err(verify_msg(#m1{a = [{16,"x"}]}, Defs)), %% wrong key type
     ?verify_gpb_err(verify_msg(#m1{a = [{"x","wrong value type"}]}, Defs)).
--endif.
 
 
 verify_path_when_failure_test() ->
