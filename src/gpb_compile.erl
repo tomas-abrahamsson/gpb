@@ -1266,7 +1266,7 @@ find_msgsize_2([], AccSize, _Defs, _T) ->
 all_enum_values_encode_to_same_size(EnumName, Defs) ->
     {{enum,EnumName}, EnumDef} = lists:keyfind({enum,EnumName}, 1, Defs),
     EnumSizes = [begin
-                     <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
+                     <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
                      byte_size(gpb:encode_varint(N))
                  end
                  || {_EnumSym, Value} <- EnumDef],
@@ -1974,16 +1974,19 @@ format_sint_encoder() ->
               e_varint(Value * -2 - 1, Bin)
       end).
 
-format_int_encoder(Type, BitLen) ->
+format_int_encoder(Type, _BitLen) ->
     gpb_codegen:format_fn(
       mk_fn(e_type_, Type),
       fun(Value, Bin) when 0 =< Value, Value =< 127 ->
               <<Bin/binary, Value>>; %% fast path
          (Value, Bin) ->
-              <<N:'<Sz>'/unsigned-native>> = <<Value:'<Sz>'/signed-native>>,
+              %% Encode as a 64 bit value, for interop compatibility.
+              %% Some implementations don't decode 32 bits properly,
+              %% and Google's protobuf (C++) encodes as 64 bits
+              <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
               e_varint(N, Bin)
       end,
-      [replace_term('<Sz>', BitLen)]).
+      []).
 
 format_bool_encoder() ->
     gpb_codegen:format_fn(
@@ -2886,6 +2889,10 @@ decode_zigzag_to_var(ResVar, ValueExpr) ->
             replace_tree('<Res>', ResVar)]).
 
 uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
+    %% Contrary to the 64 bit encoding done for int32 (and enum),
+    %% decode the value as 32 bits, so we decode negatives
+    %% given both as 32 bits and as 64 bits wire encodings
+    %% to the same integer.
     ?expr(
        <<'<Res>':'<N>'/signed-native>> = <<('<Value>'):'<N>'/unsigned-native>>,
        [replace_term('<N>', NumBits),
@@ -5699,7 +5706,10 @@ match_bind_var(Pattern, Var) ->
            replace_tree('Var', Var)]).
 
 enum_to_binary_fields(Value) ->
-    <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
+    %% Encode as a 64 bit value, for interop compatibility.
+    %% Some implementations don't decode 32 bits properly,
+    %% and Google's protobuf (C++) encodes as 64 bits
+    <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
     varint_to_binary_fields(N).
 
 key_to_binary_fields(FNum, Type) ->

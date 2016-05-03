@@ -254,6 +254,10 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {decode_zigzag(NV), T};
         int32 ->
             {NV, T} = decode_varint(Bin, 32),
+            %% Contrary to the 64 bit encoding done for int32 (and enum),
+            %% decode the value as 32 bits, so we decode negatives
+            %% given both as 32 bits and as 64 bits wire encodings
+            %% to the same integer.
             <<N:32/signed>> = <<NV:32>>,
             {N, T};
         int64 ->
@@ -491,7 +495,10 @@ encode_value(Value, Type, MsgDefs) ->
             if Value >= 0 ->
                     encode_varint(Value);
                true ->
-                    <<N:32/unsigned-native>> = <<Value:32/signed-native>>,
+                    %% Encode as a 64 bit value, for interop compatibility.
+                    %% Some implementations don't decode 32 bits properly,
+                    %% and Google's protobuf (C++) encodes as 64 bits
+                    <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
                     encode_varint(N)
             end;
         int64 ->

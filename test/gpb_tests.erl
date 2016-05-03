@@ -460,18 +460,49 @@ encode_msg_with_enum_field_test() ->
                     {{enum,e}, [{v1, 100},
                                 {v2, 150}]}]).
 
-encode_msg_with_negative_enum_value_test() ->
-    <<8, Rest/binary>> =
-        encode_msg(#m1{a = v2},
-                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
-                                            type={enum,e}, occurrence=required,
-                                            opts=[]}]},
-                    {{enum,e}, [{v1, 100},
-                                {v2, -2}]}]),
-    case Rest of
-        <<254,255,255,255,15>>                    -> ok; %% encoded as 32 bits
-        <<254,255,255,255,255,255,255,255,255,1>> -> ok  %% encoded as 64 bits
-    end.
+negative_int32_types_test() ->
+    %% Interop with other protobuf implementations:
+    %%
+    %% A value of -1 for an int32 can be encoded as:
+    %% <<8,255,255,255,255,15>>, but the Google protobuf (C++) encodes
+    %% it as <<8,255,255,255,255,255,255,255,255,255,1>>, ie using 64
+    %% bits.
+    %%
+    %% Google protobuf (C++) decodes both octet sequences to -1, but
+    %% there are other protobuf implementations that decode to
+    %% different values. So for interop, encode using 64 bits,
+    %% on decoding, accept both 32 and 64 bits.
+    %%
+    %% Enums are encoded as int32.
+    %%
+    %% The sint32 type is different.
+    %%
+    Defs = [{{msg,m4}, [#?gpb_field{name=x, fnum=1, rnum=#m4.x,
+                                    type=int32, occurrence=optional,
+                                    opts=[]},
+                        #?gpb_field{name=y, fnum=2, rnum=#m4.y,
+                                    type={enum,e}, occurrence=optional,
+                                    opts=[]}]},
+            {{enum,e}, [{z, 0},
+                        {n2, -2},
+                        {p2, 2}]}],
+    Minus2As64Bits = <<254,255,255,255,255,255,255,255,255,1>>,
+    Minus2As32Bits = <<254,255,255,255,15>>,
+    X_Minus2As64Bits = <<8, Minus2As64Bits/binary>>,
+    X_Minus2As32Bits = <<8, Minus2As32Bits/binary>>,
+    Y_Minus2As64Bits = <<16, Minus2As64Bits/binary>>,
+    Y_Minus2As32Bits = <<16, Minus2As32Bits/binary>>,
+
+    %% Check int32
+    X_Minus2As64Bits = encode_msg(#m4{x = -2}, Defs),
+    #m4{x = -2} = decode_msg(X_Minus2As64Bits, m4, Defs),
+    #m4{x = -2} = decode_msg(X_Minus2As32Bits, m4, Defs),
+
+    %% Check enums
+    Y_Minus2As64Bits = encode_msg(#m4{y = n2}, Defs),
+    #m4{y = n2} = decode_msg(Y_Minus2As64Bits, m4, Defs),
+    #m4{y = n2} = decode_msg(Y_Minus2As32Bits, m4, Defs),
+    ok.
 
 encode_msg_with_enum_aliases_test() ->
     Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
