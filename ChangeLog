@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 3.20.3
+2016-May-04
+
+	* Encode negative int32 values using 64 bits, for interop with
+	other implementations. On decoding, assume either 32 or 64 bit
+	encodings can appear. This is what Google's protobuf (C++) does.
+	The same goes for negative enums. Thanks to YeJun Su for
+	reporting.
+
 Version 3.20.2
 2016-Apr-08
 
