@@ -22,7 +22,7 @@ Features of gpb
    - the 'allow_alias' enum option (treated as if it is always set true)
    - generating metadata information
    - package namespacing (optional)
-   - oneof
+   - oneof (introduced in protobuf 2.6.0)
 
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'
@@ -182,8 +182,11 @@ Mapping of protocol buffer datatypes to erlang
     enum                  atom
     ----------------------------------------------------------------
     message               record (thus tuple)
+                          or maps, if the maps (-maps) option is specified
     ----------------------------------------------------------------
     string                unicode string, thus list of integers
+                          or binaries, if the strings_as_binaries (-strbin)
+                          option is specified
     ----------------------------------------------------------------
     bytes                 binary
     ----------------------------------------------------------------
