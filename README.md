@@ -23,6 +23,7 @@ Features of gpb
    - generating metadata information
    - package namespacing (optional)
    - oneof
+   - map<_,_> (introduced in protobuf 3.0.0)
 
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'
@@ -188,6 +189,9 @@ Mapping of protocol buffer datatypes to erlang
     bytes                 binary
     ----------------------------------------------------------------
     oneof                 {ChosenFieldName, Value}
+    ----------------------------------------------------------------
+    map<_,_>              An unordered list of 2-tuples: [{Key,Value}]
+                          or a map, if the maps (-maps) option is specified
 
 
 Interaction with rebar
