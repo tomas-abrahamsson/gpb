@@ -49,7 +49,8 @@ defs_to_descr_2(Name, Defs) ->
        service          = defs_to_service(Defs),
        extension        = [],        %% [#'FieldDescriptorProto'{}]
        options          = undefined, %% #'FileOptions'{} | undefined
-       source_code_info = undefined  %% #'SourceCodeInfo'{} | undefined
+       source_code_info = undefined, %% #'SourceCodeInfo'{} | undefined
+       syntax           = proplists:get_value(syntax, Defs, "proto2")
       }.
 
 get_all_oneofs(Defs) ->
