@@ -1085,6 +1085,7 @@ nif_code_test_() ->
     nif_tests_check_prerequisites(
       [{"Nif compiles", fun nif_compiles/0},
        {"Nif encode decode", fun nif_encode_decode/0},
+       nif_encode_decode_oneof_(),
        nif_encode_decode_maps_(),
        {"Nif enums in msgs", fun nif_enum_in_msg/0},
        {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
@@ -1105,6 +1106,21 @@ nif_tests_check_prerequisites(Tests) ->
       [{timeout, 100, %% timeout for each test
         [{TestDescr, TestFun}]}
        || {TestDescr, TestFun} <- Tests1]}}.
+
+nif_encode_decode_oneof_() ->
+    ProtocCanOneof = check_protoc_can_do_oneof(),
+    {Descr, Tests} =
+        if ProtocCanOneof ->
+                {"Nif with oneof fields",
+                 [{"encode decode", fun nif_encode_decode_oneof/0}]};
+           true ->
+                {"Protoc < 2.6.0, not testing nifs with oneof", []}
+        end,
+    {Descr,
+     {timeout, 300,  %% timeout for all tests
+      [{timeout, 100, %% timeout for each test
+        [{TestDescr, TestFun}]}
+       || {TestDescr, TestFun} <- Tests]}}.
 
 nif_encode_decode_maps_() ->
     ProtocCanMapfields = check_protoc_can_do_mapfields(),
@@ -1130,7 +1146,6 @@ nif_compiles() ->
       end).
 
 nif_encode_decode() ->
-    ProtocCanOneof = check_protoc_can_do_oneof(),
     with_tmpdir(
       fun(TmpDir) ->
               NEDM = gpb_nif_test_ed1,
@@ -1141,7 +1156,6 @@ nif_encode_decode() ->
                 fun() ->
                         nif_encode_decode_test_it(NEDM, Defs),
                         nif_encode_decode_strings(NEDM, Defs),
-                        [nif_encode_decode_oneof(NEDM, Defs) || ProtocCanOneof],
                         ok
                 end)
       end).
@@ -1194,6 +1208,21 @@ nif_encode_decode_strings(NEDM, Defs) ->
                           ?assertEqual(OrigMsg, MGDecoded)
                   end,
                   CodePoints).
+
+nif_encode_decode_oneof() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              NEDM = gpb_nif_test_ed_oneof1,
+              Defs = mk_one_oneof_field_of_each_type(),
+              {ok, Code} = compile_nif_msg_defs(NEDM, Defs, TmpDir),
+              in_separate_vm(
+                TmpDir, NEDM, Code,
+                fun() ->
+                        nif_encode_decode_oneof(NEDM, Defs),
+                        ok
+                end)
+      end).
+
 
 nif_encode_decode_oneof(NEDM, Defs) ->
     [#gpb_oneof{fields=OFields}] = [O || {{msg, oneof1}, [O]} <- Defs],
@@ -1738,10 +1767,18 @@ mk_one_msg_field_of_each_type() ->
     TopMsgDef1 = {{msg, topmsg1}, mk_fields_of_type(EachType, required)},
     TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(EachType, repeated)},
     TopMsgDef3 = {{msg, topmsg3}, mk_fields_of_type(EachType, optional)},
-    OneofMsg1  = {{msg, oneof1},  mk_oneof_fields_of_type(EachType, 1)},
     StringMsg = {{msg,strmsg}, mk_fields_of_type([string], required)},
-    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3, StringMsg] ++
-     [OneofMsg1 || check_protoc_can_do_oneof()].
+    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3, StringMsg].
+
+mk_one_oneof_field_of_each_type() ->
+    EachType   = [sint32, sint64, int32, int64, uint32,
+                  uint64, bool, fixed64, sfixed64,
+                  double, string, bytes, fixed32, sfixed32,
+                  float, {enum, ee}, {msg, submsg1}],
+    EnumDef    = {{enum, ee}, [{en1, 1}, {en2, 2}]},
+    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], required)},
+    OneofMsg1  = {{msg, oneof1},  mk_oneof_fields_of_type(EachType, 1)},
+    [EnumDef, SubMsgDef, OneofMsg1].
 
 mk_one_map_field_of_each_type() ->
     %% Reduced set of int types to shorten compilation times,
