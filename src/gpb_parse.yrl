@@ -183,6 +183,7 @@ fidentifier -> rpc:                     kw_to_identifier('$1').
 fidentifier -> returns:                 kw_to_identifier('$1').
 fidentifier -> packed:                  kw_to_identifier('$1').
 fidentifier -> deprecated:              kw_to_identifier('$1').
+fidentifier -> syntax:                  kw_to_identifier('$1').
 
 opt_field_opts -> field_opts:           '$1'.
 opt_field_opts -> '$empty':             [].
