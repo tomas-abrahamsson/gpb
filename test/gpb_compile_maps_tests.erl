@@ -36,6 +36,8 @@ no_maps_tests__test() ->
 -import(gpb_compile_tests, [unload_code/1]).
 
 -import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
+-import(gpb_compile_tests, [nif_mapfield_tests_check_prerequisites/1]).
+-import(gpb_compile_tests, [increase_timeouts/1]).
 -import(gpb_compile_tests, [with_tmpdir/1]).
 -import(gpb_compile_tests, [in_separate_vm/4]).
 -import(gpb_compile_tests, [compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
@@ -308,11 +310,15 @@ verify_maps_with_opts_omitted_test() ->
 %% verify ------------------------------------------------
 
 nif_test_() ->
-    nif_tests_check_prerequisites(
-      [{"Nif encode decode with unset optionals present_undefined",
-        fun nif_encode_decode_present_undefined/0},
-       {"Nif encode decode with unset optionals omitted",
-        fun nif_encode_decode_omitted/0}]).
+    increase_timeouts(
+      nif_tests_check_prerequisites(
+        [{"Nif encode decode with unset optionals present_undefined",
+          fun nif_encode_decode_present_undefined/0},
+         {"Nif encode decode with unset optionals omitted",
+          fun nif_encode_decode_omitted/0},
+         increase_timeouts(
+           nif_mapfield_tests_check_prerequisites(
+             [{"Encode decode", fun nif_encode_decode_mapfields/0}]))])).
 
 nif_encode_decode_present_undefined() ->
     ProtocCanOneof = check_protoc_can_do_oneof(),
@@ -378,6 +384,35 @@ nif_encode_decode_omitted() ->
                                end,
                         Bin1 = M:encode_msg(Msg1, x_mo),
                         Msg1 = M:decode_msg(Bin1, x_mo),
+                        ok
+                end)
+      end).
+
+nif_encode_decode_mapfields() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_maps_with_mapfields_ed1,
+              %% No need to test all types of keys/values, since that
+              %% is already done in gpb_compile_tests.  Test only the
+              %% map mechanism (as opposed to list of 2-tuples) here.
+              Defs = ["message x {\n",
+                      "   map<fixed32,string> i2s = 1;\n"
+                      "}"],
+              Opts = [maps],
+              {ok, Code} = compile_nif_msg_defs(M, Defs, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Msg1 = #{i2s => #{11 => "aa",
+                                          22 => "bb",
+                                          33 => "cc"}},
+                        Bin1 = M:encode_msg(Msg1, x),
+                        Msg1 = M:decode_msg(Bin1, x),
+
+                        Msg2 = #{i2s => #{}},
+                        Bin2 = M:encode_msg(Msg2, x),
+                        Msg2 = M:decode_msg(Bin2, x),
+
                         ok
                 end)
       end).
