@@ -24,6 +24,7 @@
 -export([merge_msgs/3]).
 -export([verify_msg/2, check_scalar/2]).
 -export([map_item_pseudo_fields/2]).
+-export([is_allowed_as_key_type/1]).
 -export([encode_varint/1, decode_varint/1, decode_varint/2]).
 -export([encode_wiretype/1, decode_wiretype/1]).
 -export([version_as_string/0, version_as_list/0]).
@@ -863,6 +864,13 @@ map_item_pseudo_fields(KeyType, ValueType) ->
                  occurrence=required, type=KeyType},
      #?gpb_field{name=value, fnum=2, rnum=3,
                  occurrence=required, type=ValueType}].
+
+is_allowed_as_key_type({enum,_}) -> false;
+is_allowed_as_key_type({msg,_}) -> false;
+is_allowed_as_key_type(double) -> false;
+is_allowed_as_key_type(float) -> false;
+is_allowed_as_key_type(bytes) -> false;
+is_allowed_as_key_type(_) -> true.
 
 %% --
 
