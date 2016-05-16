@@ -40,11 +40,13 @@ defs_to_descriptor(Name, Defs) ->
     #'FileDescriptorSet'{file = [defs_to_descr_2(Name, Defs)]}.
 
 defs_to_descr_2(Name, Defs) ->
+    {TypesToPseudoMsgNames, PseudoMsgs} = compute_map_field_pseudo_msgs(Defs),
     #'FileDescriptorProto'{
        name             = Name,      %% string() | undefined
        package          = defs_to_package(Defs),
        dependency       = [],        %% [string()]
-       message_type     = defs_to_msgtype(Defs),
+       message_type     = defs_to_msgtype(Defs,
+                                          TypesToPseudoMsgNames, PseudoMsgs),
        enum_type        = defs_to_enumtype(Defs),
        service          = defs_to_service(Defs),
        extension        = [],        %% [#'FieldDescriptorProto'{}]
@@ -65,7 +67,7 @@ defs_to_package(Defs) ->
         []    -> undefined
     end.
 
-defs_to_msgtype(Defs) ->
+defs_to_msgtype(Defs, MapTypesToPseudoMsgNames, MapPseudoMsgs) ->
     AllOneofs = get_all_oneofs(Defs),
     %% There is a slight bit of mismatch here: the DescriptorProto
     %% contains fields for `nested_type' and `enum_type', and defines
@@ -77,7 +79,8 @@ defs_to_msgtype(Defs) ->
     %% save also the unprocessed parse results.
     [#'DescriptorProto'{
         name            = atom_to_ustring(MsgName),
-        field           = field_defs_to_mgstype_fields(Fields, AllOneofs),
+        field           = field_defs_to_mgstype_fields(
+                            Fields, AllOneofs, MapTypesToPseudoMsgNames),
         extension       = [],
         nested_type     = [],
         enum_type       = [],
@@ -85,10 +88,23 @@ defs_to_msgtype(Defs) ->
         options         = undefined,
         oneof_decl      = oneof_decl(AllOneofs)
        }
-     || {{msg,MsgName}, Fields} <- Defs].
+     || {{msg,MsgName}, Fields} <- Defs] ++
+        [#'DescriptorProto'{
+            name            = atom_to_ustring(MsgName),
+            field           = field_defs_to_mgstype_fields(
+                                Fields, AllOneofs, MapTypesToPseudoMsgNames),
+            extension       = [],
+            nested_type     = [],
+            enum_type       = [],
+            extension_range = [],
+            options         = #'MessageOptions'{map_entry=true},
+            oneof_decl      = []
+           }
+         || {{msg,MsgName}, Fields} <- MapPseudoMsgs].
 
-field_defs_to_mgstype_fields(Fields, AllOneofs) ->
-    lists:append([field_def_to_msgtype_field(Field, AllOneofs)
+field_defs_to_mgstype_fields(Fields, AllOneofs, MapTypesToPseudoMsgNames) ->
+    lists:append([field_def_to_msgtype_field(Field, AllOneofs,
+                                             MapTypesToPseudoMsgNames)
                   || Field <- Fields]).
 
 field_def_to_msgtype_field(#?gpb_field{name=FName,
@@ -96,21 +112,24 @@ field_def_to_msgtype_field(#?gpb_field{name=FName,
                                        type=Type,
                                        occurrence=Occurrence,
                                        opts=Opts}=Field,
-                           _AllOneofs) ->
+                           _AllOneofs,
+                           MapTypesToPseudoMsgNames) ->
     [#'FieldDescriptorProto'{
         name          = atom_to_ustring(FName),
         number        = FNum,
         label         = occurrence_def_to_descr_label(Occurrence),
         type          = type_to_descr_type(Type),
-        type_name     = type_to_descr_type_name(Type),
+        type_name     = type_to_descr_type_name(Type, MapTypesToPseudoMsgNames),
         default_value = field_default_value(Field),
         options       = field_options(Opts)}];
 field_def_to_msgtype_field(#gpb_oneof{name=FName,
                                       fields=OFields},
-                           AllOneofs) ->
+                           AllOneofs,
+                           MapTypesToPseudoMsgNames) ->
     OneofIndex = find_oneof_index(FName, AllOneofs),
     [begin
-         [F] = field_def_to_msgtype_field(OField, AllOneofs),
+         [F] = field_def_to_msgtype_field(OField, AllOneofs,
+                                          MapTypesToPseudoMsgNames),
          F#'FieldDescriptorProto'{oneof_index = OneofIndex}
      end
      || OField <- OFields].
@@ -141,11 +160,13 @@ type_to_descr_type(bytes)            -> 'TYPE_BYTES';
 type_to_descr_type({msg,_MsgName})   -> 'TYPE_MESSAGE';
 type_to_descr_type(fixed32)          -> 'TYPE_FIXED32';
 type_to_descr_type(sfixed32)         -> 'TYPE_SFIXED32';
-type_to_descr_type(float)            -> 'TYPE_FLOAT'.
+type_to_descr_type(float)            -> 'TYPE_FLOAT';
+type_to_descr_type({map,_,_})        -> 'TYPE_MESSAGE'.
 
-type_to_descr_type_name({msg,MsgName})   -> atom_to_ustring(MsgName);
-type_to_descr_type_name({enum,EnumName}) -> atom_to_ustring(EnumName);
-type_to_descr_type_name(_)               -> undefined.
+type_to_descr_type_name({msg,MsgName}, _)   -> atom_to_ustring(MsgName);
+type_to_descr_type_name({enum,EnumName}, _) -> atom_to_ustring(EnumName);
+type_to_descr_type_name({map,_,_}=T, M)     -> atom_to_ustring(dict:fetch(T,M));
+type_to_descr_type_name(_, _)               -> undefined.
 
 field_default_value(#?gpb_field{type=Type, opts=Opts}) ->
     case {Type, proplists:get_value(default, Opts)} of
@@ -206,6 +227,46 @@ defs_to_service(Defs) ->
 
 oneof_decl(AllOneofs) ->
     [#'OneofDescriptorProto'{name=atom_to_ustring(Name)} || Name <- AllOneofs].
+
+compute_map_field_pseudo_msgs(Defs) ->
+    AllMapTypes = find_all_map_types(Defs),
+    MapTypePseudoMsgNames = invent_unused_msg_names(Defs, length(AllMapTypes)),
+    ToName = lists:zip(AllMapTypes, MapTypePseudoMsgNames),
+    ToMapT = lists:zip(MapTypePseudoMsgNames, AllMapTypes),
+    {dict:from_list(ToName),
+     [{{msg, Name}, gpb:map_item_pseudo_fields(KeyType, ValueType)}
+      || {Name, {map, KeyType, ValueType}} <- ToMapT]}.
+
+find_all_map_types(Defs) ->
+    lists:sort(
+      sets:to_list(
+        lists:foldl(
+          fun({{msg,_}, Fields}, Acc) ->
+                  lists:foldl(fun(#?gpb_field{type={map,_,_}=T}, Acc2) ->
+                                      sets:add_element(T, Acc2);
+                                 (_, Acc2) ->
+                                      Acc2
+                              end,
+                              Acc,
+                              Fields);
+             (_, Acc) ->
+                  Acc
+          end,
+          sets:new(),
+          Defs))).
+
+invent_unused_msg_names(Defs, N) ->
+    AllMsgNames = sets:from_list([Name || {{msg,Name}, _Fields} <- Defs]),
+    Base = "MapFieldEntry",
+    invent_unused_msg_names_aux(Base, 1, N, AllMsgNames).
+
+invent_unused_msg_names_aux(Base, I, N, AllMsgNames) ->
+    NewNames = sets:from_list([list_to_atom(?ff("~s_~w_~w", [Base, I, J]))
+                               || J <- lists:seq(1,N)]),
+    case sets:is_disjoint(NewNames, AllMsgNames) of
+        true  -> sets:to_list(NewNames);
+        false -> invent_unused_msg_names_aux(Base, I+1, N, AllMsgNames)
+    end.
 
 atom_to_ustring(A) ->
     Utf8Str = atom_to_list(A),
