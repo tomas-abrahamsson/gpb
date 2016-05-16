@@ -5828,77 +5828,9 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
      ?f("        for (i = 0; i < numElems; i++)\n"),
      indent_lines(
        12,
-       case FType of
-           float ->
-               [?f("relem[i] = enif_make_double(env, (double)~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           double ->
-               [?f("relem[i] = enif_make_double(env, ~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           _S32 when FType == sint32;
-                     FType == int32;
-                     FType == sfixed32 ->
-               [?f("relem[i] = enif_make_int(env, ~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           _S64 when FType == sint64;
-                     FType == int64;
-                     FType == sfixed64 ->
-               [?f("relem[i] = enif_make_int64(env, (ErlNifSInt64)~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           _U32 when FType == uint32;
-                     FType == fixed32 ->
-               [?f("relem[i] = enif_make_uint(env, ~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           _U64 when FType == uint64;
-                     FType == fixed64 ->
-               [?f("relem[i] = enif_make_uint64(env,\n"
-                   "                            (ErlNifUInt64)~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           bool ->
-               [?f("if (~s->~s(i))\n", [MsgVar, LCFName]),
-                ?f("    relem[i] = gpb_aa_true;\n"),
-                ?f("else\n"),
-                ?f("    relem[i] = gpb_aa_false;\n")];
-           {enum, EnumName} ->
-               EPrefix = case is_dotted(EnumName) of
-                             false -> "";
-                             true  -> dot_replace_s(EnumName, "_") ++ "_"
-                         end,
-               {value, {{enum,EnumName}, Enumerations}} =
-                   lists:keysearch({enum,EnumName}, 1, Defs),
-               [] ++
-                   [?f("switch (~s->~s(i)) {\n", [MsgVar, LCFName])] ++
-                   [?f("    case ~s~s: relem[i] = ~s; break;\n",
-                       [EPrefix, Sym, mk_c_var(gpb_aa_, Sym)])
-                    || {Sym, _Value} <- Enumerations] ++
-                   [?f("    default: relem[i] = gpb_aa_undefined;\n")] ++
-                   [?f("}\n")];
-           string ->
-               [?f("{\n"),
-                ?f("    const char    *sData = ~s->~s(i).data();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    unsigned int   sSize = ~s->~s(i).size();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    relem[i] = utf8_to_erl_string(env, sData, sSize);\n"),
-                ?f("}\n")];
-           bytes ->
-               [?f("{\n"),
-                ?f("    unsigned char *data;\n"),
-                ?f("    unsigned int   bSize = ~s->~s(i).size();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    const char    *bData = ~s->~s(i).data();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    data = enif_make_new_binary(\n"), %% can data be NULL??
-                ?f("               env,\n"),
-                ?f("               bSize,\n"),
-                ?f("               &relem[i]);\n"),
-                ?f("    memmove(data, bData, bSize);\n"),
-                ?f("}\n")];
-           {msg, Msg2Name} ->
-               UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
-               [?f("relem[i] = ~s(env, &~s->~s(i));\n",
-                   [UnpackFnName, MsgVar, LCFName])]
-       end),
+       format_nif_cc_field_unpacker_by_type(
+         "relem[i]", ?f("~s->~s(i)", [MsgVar, LCFName]),
+         FType, Defs)),
      ?f("        ~s = enif_make_list_from_array(env, relem, numElems);\n",
         [DestVar]),
      "    }\n",
