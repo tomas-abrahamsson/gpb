@@ -1,5 +1,27 @@
 -*- coding: utf-8 -*-
 
+Version 3.21.0
+2016-May-17
+
+	* Add support for map fields, ie fields of type
+	map<KeyType,ValueType>. Only scalars (but not enums) and strings
+	(not bytes) are allowed as keys. Any type, except maps, is
+	allowed as value. Map fields are about to make it into Google
+	protobuf 3.0.0, which as of this writing is still in beta. It
+	appears it will be available in 3.0.0 for both proto2 and proto3
+	syntaxes. (So far, gpb does not support proto3 at all.) Map fields
+	have been tested with Google protobuf 3.0.0-beta2.
+	The erlang-internal representation of a map<_,_> field is a list
+	of 2-tuples---the order is undefined on decoding---or an Erlang map
+	if the maps option is used.
+	* Some option texts have been improved for the "protoc-erl --help"
+	command.
+	* With the maps option specified, the generated verifier now produces
+	a more helpful error if any non-optional fields are missing from
+	the map.
+	* The descriptor proto has been updated (the -descr option).
+	* The README has been updated.
+
 Version 3.20.3
 2016-May-04
 
