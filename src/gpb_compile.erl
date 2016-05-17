@@ -842,7 +842,7 @@ opt_specs() ->
       "       Specify how the generated encoder should\n"
       "       verify the message to be encoded.\n"},
      {"c", {true, false, auto, 'number()'}, copy_bytes,
-      " true | false | auto | number() \n"
+      " true | false | auto | number()\n"
       "       Specify how or when the generated decoder should\n"
       "       copy fields of type bytes.\n"},
      {"strbin", undefined, strings_as_binaries, "\n"
@@ -879,11 +879,10 @@ opt_specs() ->
       "       Generate code that will accept and produce maps instead of\n"
       "       records.\n"},
      {"maps_unset_optional", {omitted, present_undefined}, maps_unset_optional,
-      "\n"
+      "omitted | present_undefined\n"
       "       Specifies the internal format for optional fields\n"
       "       that are unset.\n"},
-     {"erlc_compile_options", 'string()', erlc_compile_options,
-      "\n"
+     {"erlc_compile_options", 'string()', erlc_compile_options, "String\n"
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
