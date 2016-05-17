@@ -4331,7 +4331,7 @@ format_nif_cc_map_api_check_if_needed(Opts) ->
             %% but those are not needed.
             ["#if (!(", format_nif_check_version_or_later(2, 6), "))\n"
              "#error \"Maps was specified. The needed nif interface for\"\n"
-             "#error \"maps appeared in version 2.6 (Erlang 17), but\" \n"
+             "#error \"maps appeared in version 2.6 (Erlang 17), but\"\n"
              "#error \"it appears your erl_nif version is older.  Please\"\n"
              "#error \"update Erlang.\"\n"
              "#endif\n"
