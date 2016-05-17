@@ -229,7 +229,7 @@ matching N.M where N and M are integers.  This version is
 inserted into the gpb.app file as well as into the
 include/gpb_version.hrl.  The version is the result of the command
 
-  git describe --always --tags --match '[0-9]*.[0-9]*'
+    git describe --always --tags --match '[0-9]*.[0-9]*'
 
 Thus, to create a new version of gpb, the single source from where
 this version is fetched, is the git tag.   (If you are importing
@@ -237,13 +237,14 @@ gpb into another version control system than git, or using another
 build tool than rebar, you might have to adapt rebar.config and
 src/gpb.app.src accordingly.)
 
-The version number of the gpb on github is intended to always be only
-integers with dots, in order to be compatible with reltool.  In other
-words, each push to github is considered a release, and the version
-number is bumped.  To ensure this, there is a `pre-push` git hook and
-two scripts, `install-git-hooks` and `tag-next-minor-vsn`, in the
-helpers subdirectory. The ChangeLog file will not necessarily reflect
-all minor version bumps, only important updates.
+The version number on the master branch of the gpb on github is
+intended to always be only integers with dots, in order to be
+compatible with reltool.  In other words, each push to github is
+considered a release, and the version number is bumped.  To ensure
+this, there is a `pre-push` git hook and two scripts,
+`install-git-hooks` and `tag-next-minor-vsn`, in the helpers
+subdirectory. The ChangeLog file will not necessarily reflect all
+minor version bumps, only important updates.
 
 Places to update when making a new version:
 * Write about the changes in the ChangeLog file,
