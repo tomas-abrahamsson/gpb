@@ -3284,19 +3284,21 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
     FNames = get_field_names(MsgDef),
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
     MsgVar = ?expr(M),
-    FieldMatching =
+    {FieldMatching, NonOptKeys} =
         case get_mapping_and_unset_by_opts(Opts) of
             X when X == records;
                    X == {maps, present_undefined} ->
-                mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
+                {mapping_match(MsgName, lists:zip(FNames, FVars), Opts),
+                 FNames};
             {maps, omitted} ->
                 FMap = zip_for_non_opt_fields(MsgDef, FVars),
                 if length(FMap) == length(FNames) ->
-                        map_match(FMap);
+                        {map_match(FMap), FNames};
                    length(FMap) < length(FNames) ->
-                        ?expr('mapmatch' = 'M',
-                              [replace_tree('mapmatch', map_match(FMap)),
-                               replace_tree('M', MsgVar)])
+                        {?expr('mapmatch' = 'M',
+                               [replace_tree('mapmatch', map_match(FMap)),
+                                replace_tree('M', MsgVar)]),
+                         [K || {K, _} <- FMap]}
                 end
         end,
     NeedsMatchOther = case get_records_or_maps_by_opts(Opts) of
@@ -3308,6 +3310,10 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
       fun('<msg-match>', '<Path>') ->
               '<verify-fields>',
               ok;
+         ('<M>', Path) when is_map('<M>') ->
+              mk_type_error(
+                {missing_fields, 'NonOptKeys' -- maps:keys('<M>'), '<MsgName>'},
+                '<M>', Path);
          ('<X>', Path) ->
               mk_type_error({expected_msg,'<MsgName>'}, X, Path)
       end,
@@ -3321,6 +3327,14 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                  true  -> [[replace_tree('<X>', ?expr(X))]];
                                  false -> [] %% omit the else clause
                              end),
+       repeat_clauses('<M>',
+                      case get_records_or_maps_by_opts(Opts) of
+                          records ->
+                              []; % omit this clause
+                          maps ->
+                              [[replace_tree('<M>', ?expr(M)),
+                                replace_term('NonOptKeys', NonOptKeys)]]
+                      end),
        replace_term('<MsgName>', MsgName)]).
 
 field_verifiers(Fields, FVars, MsgVar, Opts) ->
