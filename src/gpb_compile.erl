@@ -5015,7 +5015,7 @@ format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs, Opts) ->
              "        ERL_NIF_TERM head, tail;\n"
              "\n"
              "        if (!enif_get_list_cell(env, l, &head, &tail))\n"
-             "            return -1;\n",
+             "            return 0;\n",
              [SrcVar]),
           "\n",
           split_indent_iolist(4, format_nif_cc_field_packer_single(
