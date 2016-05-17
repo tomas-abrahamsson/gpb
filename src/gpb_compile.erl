@@ -842,7 +842,7 @@ opt_specs() ->
       "       Specify how the generated encoder should\n"
       "       verify the message to be encoded.\n"},
      {"c", {true, false, auto, 'number()'}, copy_bytes,
-      " true | false | auto | number() \n"
+      " true | false | auto | number()\n"
       "       Specify how or when the generated decoder should\n"
       "       copy fields of type bytes.\n"},
      {"strbin", undefined, strings_as_binaries, "\n"
@@ -879,11 +879,10 @@ opt_specs() ->
       "       Generate code that will accept and produce maps instead of\n"
       "       records.\n"},
      {"maps_unset_optional", {omitted, present_undefined}, maps_unset_optional,
-      "\n"
+      "omitted | present_undefined\n"
       "       Specifies the internal format for optional fields\n"
       "       that are unset.\n"},
-     {"erlc_compile_options", 'string()', erlc_compile_options,
-      "\n"
+     {"erlc_compile_options", 'string()', erlc_compile_options, "String\n"
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
@@ -3291,19 +3290,21 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
     FNames = get_field_names(MsgDef),
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
     MsgVar = ?expr(M),
-    FieldMatching =
+    {FieldMatching, NonOptKeys} =
         case get_mapping_and_unset_by_opts(Opts) of
             X when X == records;
                    X == {maps, present_undefined} ->
-                mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
+                {mapping_match(MsgName, lists:zip(FNames, FVars), Opts),
+                 FNames};
             {maps, omitted} ->
                 FMap = zip_for_non_opt_fields(MsgDef, FVars),
                 if length(FMap) == length(FNames) ->
-                        map_match(FMap);
+                        {map_match(FMap), FNames};
                    length(FMap) < length(FNames) ->
-                        ?expr('mapmatch' = 'M',
-                              [replace_tree('mapmatch', map_match(FMap)),
-                               replace_tree('M', MsgVar)])
+                        {?expr('mapmatch' = 'M',
+                               [replace_tree('mapmatch', map_match(FMap)),
+                                replace_tree('M', MsgVar)]),
+                         [K || {K, _} <- FMap]}
                 end
         end,
     NeedsMatchOther = case get_records_or_maps_by_opts(Opts) of
@@ -3315,6 +3316,10 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
       fun('<msg-match>', '<Path>') ->
               '<verify-fields>',
               ok;
+         ('<M>', Path) when is_map('<M>') ->
+              mk_type_error(
+                {missing_fields, 'NonOptKeys' -- maps:keys('<M>'), '<MsgName>'},
+                '<M>', Path);
          ('<X>', Path) ->
               mk_type_error({expected_msg,'<MsgName>'}, X, Path)
       end,
@@ -3328,6 +3333,14 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                  true  -> [[replace_tree('<X>', ?expr(X))]];
                                  false -> [] %% omit the else clause
                              end),
+       repeat_clauses('<M>',
+                      case get_records_or_maps_by_opts(Opts) of
+                          records ->
+                              []; % omit this clause
+                          maps ->
+                              [[replace_tree('<M>', ?expr(M)),
+                                replace_term('NonOptKeys', NonOptKeys)]]
+                      end),
        replace_term('<MsgName>', MsgName)]).
 
 field_verifiers(Fields, FVars, MsgVar, Opts) ->
@@ -5022,7 +5035,7 @@ format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs, Opts) ->
              "        ERL_NIF_TERM head, tail;\n"
              "\n"
              "        if (!enif_get_list_cell(env, l, &head, &tail))\n"
-             "            return -1;\n",
+             "            return 0;\n",
              [SrcVar]),
           "\n",
           split_indent_iolist(4, format_nif_cc_field_packer_single(
