@@ -200,6 +200,16 @@ Mapping of protocol buffer datatypes to erlang
 Interaction with rebar
 ----------------------
 
+For info on how to use gpb with rebar3, see
+https://www.rebar3.org/docs/using-available-plugins#section-using-gpb
+
+In rebar there is support for gpb since version 2.6.0. See the
+proto compiler section of rebar.sample.config file at
+https://github.com/rebar/rebar/blob/master/rebar.config.sample
+
+For older versions of rebar---prior to 2.6.0---the text below outlines
+how to proceed:
+
 Place the .proto files for instance in a `proto/` subdirectory.
 Any subdirectory, other than src/, is fine, since rebar will try to
 use another protobuf compiler for any .proto it finds in the src/
@@ -233,7 +243,7 @@ matching N.M where N and M are integers.  This version is
 inserted into the gpb.app file as well as into the
 include/gpb_version.hrl.  The version is the result of the command
 
-  git describe --always --tags --match '[0-9]*.[0-9]*'
+    git describe --always --tags --match '[0-9]*.[0-9]*'
 
 Thus, to create a new version of gpb, the single source from where
 this version is fetched, is the git tag.   (If you are importing
@@ -241,13 +251,14 @@ gpb into another version control system than git, or using another
 build tool than rebar, you might have to adapt rebar.config and
 src/gpb.app.src accordingly.)
 
-The version number of the gpb on github is intended to always be only
-integers with dots, in order to be compatible with reltool.  In other
-words, each push to github is considered a release, and the version
-number is bumped.  To ensure this, there is a `pre-push` git hook and
-two scripts, `install-git-hooks` and `tag-next-minor-vsn`, in the
-helpers subdirectory. The ChangeLog file will not necessarily reflect
-all minor version bumps, only important updates.
+The version number on the master branch of the gpb on github is
+intended to always be only integers with dots, in order to be
+compatible with reltool.  In other words, each push to github is
+considered a release, and the version number is bumped.  To ensure
+this, there is a `pre-push` git hook and two scripts,
+`install-git-hooks` and `tag-next-minor-vsn`, in the helpers
+subdirectory. The ChangeLog file will not necessarily reflect all
+minor version bumps, only important updates.
 
 Places to update when making a new version:
 * Write about the changes in the ChangeLog file,
