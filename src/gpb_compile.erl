@@ -41,8 +41,11 @@
           fixlen_types,       % :: sets:set(#ft{}),
           num_packed_fields,  % :: integer(),
           num_fields,         % :: dict:dict(), %% MsgName -> integer()
-          d_field_pass_method % :: dict:dict()  %% MsgName -> pass_as_record |
+          d_field_pass_method,% :: dict:dict()  %% MsgName -> pass_as_record |
                               %                 %%            pass_as_params
+          maps_as_msgs,       % :: list() % same format as `Defs'
+          map_translations,   % :: [translation()]
+          map_types           % :: sets:set({map,_,_})
         }).
 
 -define(f(Fmt),        io_lib:format(Fmt, [])).
@@ -1085,20 +1088,53 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 %% -- analysis -----------------------------------------------------
 
 analyze_defs(Defs, Opts) ->
+    MapTypes = find_map_types(Defs),
+    MapsAsMsgs = map_types_to_msgs(sets:to_list(MapTypes)),
     #anres{used_types          = find_used_types(Defs),
-           known_msg_size      = find_msgsizes_known_at_compile_time(Defs),
-           msg_occurrences     = find_msg_occurrences(Defs),
-           fixlen_types        = find_fixlen_types(Defs),
-           num_packed_fields   = find_num_packed_fields(Defs),
-           num_fields          = find_num_fields(Defs),
-           d_field_pass_method = compute_decode_field_pass_methods(Defs, Opts)}.
+           known_msg_size      = find_msgsizes_known_at_compile_time(
+                                   MapsAsMsgs ++ Defs),
+           msg_occurrences     = find_msg_occurrences(MapsAsMsgs ++ Defs),
+           fixlen_types        = find_fixlen_types(MapsAsMsgs ++ Defs),
+           num_packed_fields   = find_num_packed_fields(MapsAsMsgs ++ Defs),
+           num_fields          = find_num_fields(MapsAsMsgs ++ Defs),
+           d_field_pass_method = compute_decode_field_pass_methods(
+                                   MapsAsMsgs ++ Defs, Opts),
+           maps_as_msgs        = MapsAsMsgs,
+           map_translations    = compute_map_translations(Defs, Opts),
+           map_types           = MapTypes}.
+
+find_map_types(Defs) ->
+    fold_msg_fields(
+      fun(_MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
+              sets:add_element({KeyType,ValueType}, Acc);
+         (_MsgName, _Field, Acc) ->
+              Acc
+      end,
+      sets:new(),
+      Defs).
+
+map_types_to_msgs(MapTypes) ->
+    [{{msg, map_type_to_msg_name(KeyType,ValueType)},
+      gpb:map_item_pseudo_fields(KeyType, ValueType)}
+     || {KeyType,ValueType} <- MapTypes].
+
+map_type_to_msg_name(KeyType, {msg,MsgName}) ->
+    list_to_atom(?ff("map<~s,~s>", [KeyType, MsgName]));
+map_type_to_msg_name(KeyType, {enum,EnumName}) ->
+    list_to_atom(?ff("map<~s,~s>", [KeyType, EnumName]));
+map_type_to_msg_name(KeyType, ValueType) ->
+    list_to_atom(?ff("map<~s,~s>", [KeyType, ValueType])).
 
 find_used_types(Defs) ->
-    fold_msg_fields(fun(_MsgName, #?gpb_field{type=Type}, Acc) ->
-                            sets:add_element(Type, Acc)
-                    end,
-                    sets:new(),
-                    Defs).
+    fold_msg_fields(
+      fun(_MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
+              Acc1 = sets:add_element(KeyType, Acc),
+              sets:add_element(ValueType, Acc1);
+         (_MsgName, #?gpb_field{type=Type}, Acc) ->
+              sets:add_element(Type, Acc)
+      end,
+      sets:new(),
+      Defs).
 
 find_msg_occurrences(Defs) ->
     fold_msg_fields(fun(_MsgName, #?gpb_field{type=Type, occurrence=Occ}, Acc) ->
@@ -1319,8 +1355,10 @@ d_field_pass_method(MsgDef) ->
             pass_as_params;
        true ->
             NumSubMsgFields = count_submsg_fields(MsgDef),
-            IsMsgDominatedBySubMsgs = NumSubMsgFields / NF > 0.5,
-            if IsMsgDominatedBySubMsgs, NF >= 100 ->
+            NumMapFields = count_map_fields(MsgDef),
+            IsMsgDominatedBySubMsgsOrMaps =
+                (NumSubMsgFields + NumMapFields) / NF > 0.5,
+            if IsMsgDominatedBySubMsgsOrMaps, NF >= 100 ->
                     pass_as_record;
                true ->
                     pass_as_params
@@ -1334,9 +1372,54 @@ count_submsg_fields(MsgDef) ->
                        0,
                        MsgDef).
 
+count_map_fields(MsgDef) ->
+    fold_msgdef_fields(fun(#?gpb_field{type={map,_,_}}, N) -> N+1;
+                          (#?gpb_field{}, N)               -> N
+                       end,
+                       0,
+                       MsgDef).
+
+compute_map_translations(Defs, Opts) ->
+    MapInfos =
+        fold_msg_fields(
+          fun(MsgName, #?gpb_field{name=FName, type={map,KType,VType}}, Acc) ->
+                  [{{MsgName, FName}, {KType, VType}} | Acc];
+             (_MsgName, _Field, Acc) ->
+                  Acc
+          end,
+          [],
+          Defs),
+    MapsOrRecords = get_records_or_maps_by_opts(Opts),
+    dict:from_list(
+      lists:append(
+        [begin
+             MapAsMsgName = map_type_to_msg_name(KeyType, ValueType),
+             case MapsOrRecords of
+                 records ->
+                     [{[MsgName,FName,elem],
+                       [{encode, {mt_maptuple_to_pseudomsg_r,
+                                  ['$1',MapAsMsgName]}}]},
+                      {[MsgName,FName],
+                       [{decode_init_default, {mt_empty_map_r,[]}},
+                        {decode_repeated_add_elem,{mt_add_item_r,['$1','$2']}},
+                        {decode_repeated_finalize,{mt_finalize_items_r,['$1']}},
+                        {merge, {mt_merge_maptuples_r,['$1','$2']}}]}];
+                 maps ->
+                     [{[MsgName,FName,elem],
+                       [{encode, {mt_maptuple_to_pseudomsg_m, ['$1']}}]},
+                      {[MsgName,FName],
+                       [{encode, {mt_map_to_list_m,['$1']}},
+                        {decode_init_default, {mt_empty_map_m,[]}},
+                        {decode_repeated_add_elem,{mt_add_item_m,['$1','$2']}},
+                        {decode_repeated_finalize,{id,['$1']}},
+                        {merge, {mt_merge_maps_m,['$1','$2']}}]}]
+             end
+         end
+         || {{MsgName, FName}, {KeyType, ValueType}} <- MapInfos])).
+
 %% -- generating code ----------------------------------------------
 
-format_erl(Mod, Defs, AnRes, Opts) ->
+format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     AsLib = proplists:get_bool(include_as_lib, Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
@@ -1400,6 +1483,16 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        "\n",
        format_export_types(Defs, Opts),
        "\n",
+       if not DoNif ->
+               case get_records_or_maps_by_opts(Opts) of
+                   records ->
+                       ?f("~s~n", [fmt_maps_as_msgs_record_defs(AnRes)]);
+                   maps ->
+                       ""
+               end;
+          DoNif ->
+               ""
+       end,
        [[?f("~s~n", [format_load_nif(Mod, Opts)]),
          "\n"]
         || DoNif],
@@ -1414,7 +1507,9 @@ format_erl(Mod, Defs, AnRes, Opts) ->
                ?f("~s~n", [format_nif_encoder_error_wrappers(
                              Defs, AnRes, Opts)]);
           not DoNif ->
-               ?f("~s~n", [format_encoders(Defs, AnRes, Opts)])
+               [?f("~s~n", [format_msg_encoders(Defs, AnRes, Opts, true)]),
+                ?f("~s~n", [format_msg_encoders(MapsAsMsgs,AnRes,Opts,false)]),
+                ?f("~s~n", [format_aux_encoders(Defs, AnRes, Opts)])]
        end,
        "\n",
        format_decoders_top_function(Defs),
@@ -1423,7 +1518,9 @@ format_erl(Mod, Defs, AnRes, Opts) ->
                ?f("~s~n", [format_nif_decoder_error_wrappers(
                              Defs, AnRes, Opts)]);
           not DoNif ->
-               ?f("~s~n", [format_decoders(Defs, AnRes, Opts)])
+               [?f("~s~n", [format_msg_decoders(Defs, AnRes, Opts)]),
+                ?f("~s~n", [format_msg_decoders(MapsAsMsgs, AnRes, Opts)]),
+                ?f("~s~n", [format_aux_decoders(Defs, AnRes, Opts)])]
        end,
        "\n",
        ?f("~s~n", [format_msg_merge_code(Defs, AnRes, Opts)]),
@@ -1431,6 +1528,15 @@ format_erl(Mod, Defs, AnRes, Opts) ->
        format_verifiers_top_function(Defs, Opts),
        "\n",
        ?f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
+       "\n",
+       if not DoNif ->
+               [?f("~s~n", [format_aux_transl_helpers()]),
+                ?f("~s~n", [format_aux_transl_helpers_used_also_with_nifs()]),
+                ?f("~s~n", [format_translators(Defs, AnRes, Opts)])];
+          DoNif ->
+               [?f("~s~n", [format_aux_transl_helpers_used_also_with_nifs()]),
+                ?f("~s~n", [format_merge_translators(Defs, AnRes, Opts)])]
+       end,
        "\n",
        format_introspection(Defs, Opts),
        "\n",
@@ -1544,10 +1650,8 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                                        end),
         splice_trees('<MsgName>', MsgNameVars)])].
 
-format_encoders(Defs, AnRes, Opts) ->
+format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
-     format_msg_encoders(Defs, Opts),
-     format_special_field_encoders(Defs, AnRes),
      format_type_encoders(AnRes)
     ].
 
@@ -1565,17 +1669,18 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
      || {{enum, EnumName}, EnumDef} <- Defs,
         smember({enum,EnumName}, UsedTypes)].
 
-format_msg_encoders(Defs, Opts) ->
-    [format_msg_encoder(MsgName, MsgDef, Opts)
-     || {{msg, MsgName}, MsgDef} <- Defs].
+format_msg_encoders(Defs, AnRes, Opts, IncludeStarter) ->
+    [[format_msg_encoder(MsgName, MsgDef, AnRes, Opts, IncludeStarter)
+      || {{msg, MsgName}, MsgDef} <- Defs],
+     format_special_field_encoders(Defs, AnRes)].
 
-format_msg_encoder(MsgName, [], _Opts) ->
+format_msg_encoder(MsgName, [], _AnRes, _Opts, _IncludeStarter) ->
     gpb_codegen:format_fn(
       mk_fn(e_msg_, MsgName),
       fun(_Msg) ->
               <<>>
       end);
-format_msg_encoder(MsgName, MsgDef, Opts) ->
+format_msg_encoder(MsgName, MsgDef, AnRes, Opts, IncludeStarter) ->
     FNames = get_field_names(MsgDef),
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
     BVars = [var_b_n(I) || I <- lists:seq(1, length(FNames)-1)] ++ [last],
@@ -1584,14 +1689,14 @@ format_msg_encoder(MsgName, MsgDef, Opts) ->
         lists:mapfoldl(
           fun({NewBVar, Field, FVar}, PrevBVar) when NewBVar /= last ->
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
-                                              PrevBVar, Opts),
+                                              PrevBVar, AnRes, Opts),
                   E = ?expr('<NewB>' = '<encode-expr>',
                             [replace_tree('<NewB>', NewBVar),
                              replace_tree('<encode-expr>', EncExpr)]),
                   {E, NewBVar};
              ({last, Field, FVar}, PrevBVar) ->
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
-                                              PrevBVar, Opts),
+                                              PrevBVar, AnRes, Opts),
                   {EncExpr, dummy}
           end,
           ?expr(Bin),
@@ -1612,12 +1717,12 @@ format_msg_encoder(MsgName, MsgDef, Opts) ->
                                replace_tree('M', MsgVar)])
                 end
         end,
-    [gpb_codegen:format_fn(
-       FnName,
-       fun(Msg) ->
-               call_self(Msg, <<>>)
-       end),
-     "\n",
+    [[[gpb_codegen:format_fn(
+         FnName,
+         fun(Msg) ->
+                 call_self(Msg, <<>>)
+         end),
+       "\n"] || IncludeStarter],
      gpb_codegen:format_fn(
        FnName,
        fun('<msg-matching>', Bin) ->
@@ -1646,11 +1751,16 @@ zip_for_non_opt_fields([], []) ->
     [].
 
 field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field, FVar,
-                  PrevBVar, Opts)->
+                  PrevBVar, AnRes, Opts)->
     FEncoder = mk_field_encode_fn_name(MsgName, Field),
-    #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum}=Field,
+    #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum, name=FName}=Field,
+    TrFVar = prefix_var("Tr", FVar),
+    ElemPath = [MsgName, FName],
+    TranslFn = find_translation(ElemPath, encode, AnRes),
     Transforms = [replace_term('fieldname', FName),
                   replace_tree('<F>', FVar),
+                  replace_tree('TrF', TrFVar),
+                  replace_term('Tr', TranslFn),
                   replace_term('<enc>', FEncoder),
                   replace_tree('<Bin>', PrevBVar),
                   splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
@@ -1676,8 +1786,11 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field, FVar,
             end;
         repeated ->
             ?expr(
-               if '<F>' == [] -> '<Bin>';
-                  true -> '<enc>'('<F>', '<Bin>')
+               begin
+                   'TrF' = 'Tr'('<F>'),
+                   if 'TrF' == [] -> '<Bin>';
+                      true -> '<enc>'('TrF', '<Bin>')
+                   end
                end,
                Transforms);
         required ->
@@ -1686,7 +1799,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field, FVar,
                Transforms)
     end;
 field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields}, FVar,
-                  PrevBVar, Opts) ->
+                  PrevBVar, AnRes, Opts) ->
     OFVar = prefix_var("O", FVar),
     OneofClauseTransform =
         repeat_clauses(
@@ -1708,7 +1821,7 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields}, FVar,
                %% the field occurs, as if it had been required
                OField2 = OField#?gpb_field{occurrence=required},
                EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
-                                           PrevBVar, Opts),
+                                           PrevBVar, AnRes, Opts),
                [replace_tree('<oneof...>', MatchPattern),
                 replace_tree('<expr>', EncExpr)]
            end
@@ -1734,7 +1847,7 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields}, FVar,
                    OneofClauseTransform])
     end.
 
-mk_field_encode_fn_name(MsgName, #?gpb_field{occurrence=repeated, name=FName}) ->
+mk_field_encode_fn_name(MsgName, #?gpb_field{occurrence=repeated, name=FName})->
     mk_fn(e_field_, MsgName, FName);
 mk_field_encode_fn_name(MsgName, #?gpb_field{type={msg,_Msg}, name=FName}) ->
     mk_fn(e_mfield_, MsgName, FName);
@@ -1748,8 +1861,15 @@ mk_field_encode_fn_name(_MsgName, #?gpb_field{type=uint32}) ->
     e_varint;
 mk_field_encode_fn_name(_MsgName, #?gpb_field{type=uint64}) ->
     e_varint;
-mk_field_encode_fn_name(_MsgName, #?gpb_field{type=Type}) ->
-    mk_fn(e_type_, Type).
+mk_field_encode_fn_name(MsgName,  #?gpb_field{type=Type}=F) ->
+    case Type of
+        {map,KeyType,ValueType} ->
+            MapAsMsgMame = map_type_to_msg_name(KeyType, ValueType),
+            F2 = F#?gpb_field{type = {msg,MapAsMsgMame}},
+            mk_field_encode_fn_name(MsgName, F2);
+        _ ->
+            mk_fn(e_type_, Type)
+    end.
 
 format_special_field_encoders(Defs, AnRes) ->
     lists:reverse( %% so generated auxiliary functions come in logical order
@@ -1769,10 +1889,14 @@ format_field_encoder(MsgName, FieldDef, AnRes) ->
     RFieldDef = FieldDef#?gpb_field{occurrence=required},
     [possibly_format_mfield_encoder(MsgName, RFieldDef, AnRes),
      case {Occurrence, is_packed(FieldDef)} of
-         {repeated, false} -> format_repeated_field_encoder2(MsgName, FieldDef);
-         {repeated, true}  -> format_packed_field_encoder2(MsgName, FieldDef);
-         {optional, false} -> [];
-         {required, false} -> []
+         {repeated, false} ->
+             format_repeated_field_encoder2(MsgName, FieldDef, AnRes);
+         {repeated, true} ->
+             format_packed_field_encoder2(MsgName, FieldDef);
+         {optional, false} ->
+             [];
+         {required, false} ->
+             []
      end].
 
 possibly_format_mfield_encoder(MsgName, #?gpb_field{type={msg,SubMsg}}=FieldDef,
@@ -1805,6 +1929,12 @@ possibly_format_mfield_encoder(MsgName, #?gpb_field{type={msg,SubMsg}}=FieldDef,
               FnName,
               fun(_Msg, Bin) -> <<Bin/binary, 0>> end)
     end;
+possibly_format_mfield_encoder(MsgName,
+                               #?gpb_field{type={map,KType,VType}}=FieldDef,
+                               AnRes) ->
+    MapAsMsgName = map_type_to_msg_name(KType, VType),
+    FieldDef2 = FieldDef#?gpb_field{type = {msg,MapAsMsgName}},
+    possibly_format_mfield_encoder(MsgName, FieldDef2, AnRes);
 possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].
 
@@ -1816,23 +1946,26 @@ is_msgsize_known_at_generationtime(MsgName, #anres{known_msg_size=MsgSizes}) ->
             no
     end.
 
-format_repeated_field_encoder2(MsgName, FDef) ->
-    #?gpb_field{fnum=FNum, type=Type} = FDef,
+format_repeated_field_encoder2(MsgName, FDef, AnRes) ->
+    #?gpb_field{fnum=FNum, type=Type, name=FName} = FDef,
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     ElemEncoderFn = mk_field_encode_fn_name(
                       MsgName, FDef#?gpb_field{occurrence=required}),
     KeyBytes = key_to_binary_fields(FNum, Type),
+    ElemPath = [MsgName,FName,elem],
+    Transl = find_translation(ElemPath, encode, AnRes),
     gpb_codegen:format_fn(
       FnName,
       fun([Elem | Rest], Bin) ->
               Bin2 = <<Bin/binary, '<KeyBytes>'>>,
-              Bin3 = '<encode-elem>'(Elem, Bin2),
+              Bin3 = '<encode-elem>'('Tr'(Elem), Bin2),
               call_self(Rest, Bin3);
          ([], Bin) ->
               Bin
       end,
       [splice_trees('<KeyBytes>', KeyBytes),
-       replace_term('<encode-elem>', ElemEncoderFn)]).
+       replace_term('<encode-elem>', ElemEncoderFn),
+       replace_term('Tr', Transl)]).
 
 format_packed_field_encoder2(MsgName, #?gpb_field{type=Type}=FDef) ->
     case packed_byte_size_can_be_computed(Type) of
@@ -2070,9 +2203,8 @@ format_decoders_top_function_msgs(Defs) ->
                         replace_term('<decode-call>', mk_fn(d_msg_, MsgName))]
                        || {{msg,MsgName}, _Fields} <- Defs])]).
 
-format_decoders(Defs, AnRes, Opts) ->
-    [format_enum_decoders(Defs, AnRes),
-     format_msg_decoders(Defs, AnRes, Opts)].
+format_aux_decoders(Defs, AnRes, _Opts) ->
+    format_enum_decoders(Defs, AnRes).
 
 format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
@@ -2176,7 +2308,7 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
                                             MsgName, MsgDef, AnRes, Opts))]).
 
 msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
-    ExprInfos =
+    ExprInfos1 =
         [case Field of
              #?gpb_field{name=FName, occurrence=Occurrence} ->
                  case Occurrence of
@@ -2188,28 +2320,41 @@ msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
                  {FName, o, ?expr(undefined), ?expr('$undef')}
          end
          || Field <- MsgDef],
+    ExprInfos2 =
+        [begin
+             ElemPath = [MsgName, FName],
+             TranslFn = find_translation(ElemPath, decode_init_default, AnRes),
+             TrInitExpr = ?expr('Tr'('InitExpr'),
+                                [replace_tree('InitExpr', InitExpr),
+                                 replace_term('Tr', TranslFn)]),
+             TrMOExpr = ?expr('Tr'('MOExpr'),
+                              [replace_tree('MOExpr', MOExpr),
+                               replace_term('Tr', TranslFn)]),
+             {FName, Presence, TrInitExpr, TrMOExpr}
+         end
+         || {FName, Presence, InitExpr, MOExpr} <- ExprInfos1],
     case get_field_pass(MsgName, AnRes) of
         pass_as_params ->
             case get_mapping_and_unset_by_opts(Opts) of
                 X when X == records;
                        X == {maps, present_undefined} ->
-                    [Expr || {_FName, _, Expr, _MOExpr} <- ExprInfos];
+                    [Expr || {_FName, _, Expr, _MOExpr} <- ExprInfos2];
                 {maps, omitted} ->
                     [MapsOmittedExpr
-                     || {_FName, _, _Expr, MapsOmittedExpr} <- ExprInfos]
+                     || {_FName, _, _Expr, MapsOmittedExpr} <- ExprInfos2]
             end;
         pass_as_record ->
             case get_mapping_and_unset_by_opts(Opts) of
                 records ->
                     [record_create(
                        MsgName,
-                       [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos])];
+                       [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos2])];
                 {maps, present_undefined} ->
                     [map_create(
-                       [{FName, Expr} || {FName, _, Expr, _} <- ExprInfos])];
+                       [{FName, Expr} || {FName, _, Expr, _} <- ExprInfos2])];
                 {maps, omitted} ->
                     [map_create(
-                       [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos])]
+                       [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos2])]
             end
     end.
 
@@ -2349,29 +2494,36 @@ decoder_finalize_result(Params, FFields, MsgName, MsgDef, AnRes, Opts) ->
                MsgVar,
                MsgName,
                [begin
-                    FValueExpr = ?expr(lists:reverse('<FVar>'),
-                                       [replace_tree('<FVar>', FVar)]),
+                    ElemPath = [MsgName, FName],
+                    Finalizer = find_translation(ElemPath,
+                                                 decode_repeated_finalize,
+                                                 AnRes),
+                    FValueExpr = ?expr('lists:reverse'('<FVar>'),
+                                       [replace_term('lists:reverse',Finalizer),
+                                        replace_tree('<FVar>', FVar)]),
                     {FName, FValueExpr}
                 end
                 || {FName, FVar} <- FFields],
                Opts)]
     end.
 
-decoder_finalize_params_all_present(Params, MsgName, MsgDef, _AnRes, Opts) ->
+decoder_finalize_params_all_present(Params, MsgName, MsgDef, AnRes, Opts) ->
     [mapping_create(
        MsgName,
-       [decoder_finalize_param_for_mapping(Field, Param)
+       [decoder_finalize_param_for_mapping(Field, Param, MsgName, AnRes)
         || {Field, Param} <- lists:zip(MsgDef, Params)],
        Opts)].
 
-decoder_finalize_params_opt_omitted(Params, _MsgName, MsgDef, _AnRes, _Opts) ->
+decoder_finalize_params_opt_omitted(Params, MsgName, MsgDef, AnRes, _Opts) ->
     {Optionals, NonOptionals} = key_partition_on_optionality(
                                   1, lists:zip(MsgDef, Params)),
     NonOptionalsMap = map_create(
-                        [decoder_finalize_param_for_mapping(Field, Param)
+                        [decoder_finalize_param_for_mapping(
+                           Field, Param, MsgName, AnRes)
                          || {Field, Param} <- NonOptionals]),
     do_exprs(fun({Field, Param}, Var) ->
-                     FV = decoder_finalize_param_for_mapping(Field, Param),
+                     FV = decoder_finalize_param_for_mapping(
+                            Field, Param, MsgName, AnRes),
                      ?expr(if 'Param' == '$undef' -> 'Var';
                               true -> 'Var#{field => Param}'
                            end,
@@ -2383,13 +2535,16 @@ decoder_finalize_params_opt_omitted(Params, _MsgName, MsgDef, _AnRes, _Opts) ->
              NonOptionalsMap,
              Optionals).
 
-decoder_finalize_param_for_mapping(Field, Param) ->
+decoder_finalize_param_for_mapping(Field, Param, MsgName, AnRes) ->
     FName = get_field_name(Field),
+    ElemPath = [MsgName, FName],
+    Finalizer = find_translation(ElemPath, decode_repeated_finalize, AnRes),
     FValueExpr = case get_field_occurrence(Field) of
                      required -> Param;
                      optional -> Param;
-                     repeated -> ?expr(lists:reverse('Param'),
-                                       [replace_tree('Param', Param)])
+                     repeated -> ?expr('lists:reverse'('Param'),
+                                       [replace_term('lists:reverse',Finalizer),
+                                        replace_tree('Param', Param)])
                  end,
     {FName, FValueExpr}.
 
@@ -2429,7 +2584,8 @@ format_non_packed_field_decoder(MsgName, XField, AnRes, Opts) ->
         double   -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
         string   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         bytes    -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        {msg,_}  -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts)
+        {msg,_}  -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
+        {map,_,_}-> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts)
     end.
 
 format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
@@ -2560,7 +2716,7 @@ format_vi_based_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
 
 %% -> {[Expr], Rest2VarExpr}
 %% where [Expr] is a list of exprs to calculate the resulting decoded value
-decode_int_value(ResVar, Bindings, #?gpb_field{type=Type}, Opts, TailFn) ->
+decode_int_value(ResVar, Bindings, #?gpb_field{type=Type}=F, Opts, TailFn) ->
     Value = fetch_binding('<Value>', Bindings),
     Rest = fetch_binding('<Rest>', Bindings),
     StringsAsBinaries = get_strings_as_binaries_by_opts(Opts),
@@ -2611,12 +2767,16 @@ decode_int_value(ResVar, Bindings, #?gpb_field{type=Type}, Opts, TailFn) ->
             Rest2 = ?expr(Rest2),
             TailFn(?exprs(Len = '<Value>',
                           <<Bs:Len/binary, Rest2/binary>> = '<Rest>',
-                          '<Res>' = decode_msg(Bs, '<sub-msg-name>'),
+                          '<Res>' = 'd_msg_X'(Bs),
                           [replace_tree('<Value>', Value),
                            replace_tree('<Rest>', Rest),
                            replace_tree('<Res>', ResVar),
-                           replace_term('<sub-msg-name>', Msg2Name)]),
-                   Rest2)
+                           replace_term('d_msg_X', mk_fn(d_msg_, Msg2Name))]),
+                   Rest2);
+        {map, KeyType, ValueType} ->
+            MapAsMsgMame = map_type_to_msg_name(KeyType, ValueType),
+            F2 = F#?gpb_field{type={msg,MapAsMsgMame}},
+            decode_int_value(ResVar, Bindings, F2, Opts, TailFn)
     end.
 
 unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
@@ -2679,8 +2839,11 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue, MsgName, AnRes, Opts) -
         overwrite ->
             NewValue;
         seqadd ->
-            ?expr(['<New>' | '<Acc>'],
-                  [replace_tree('<New>', NewValue),
+            ElemPath = [MsgName, get_field_name(FieldDef)],
+            Cons = find_translation(ElemPath, decode_repeated_add_elem, AnRes),
+            ?expr('[New|Acc]'('<New>', '<Acc>'),
+                  [replace_term('[New|Acc]', Cons),
+                   replace_tree('<New>', NewValue),
                    replace_tree('<Acc>', PrevValue)]);
         msgmerge ->
             #?gpb_field{type={msg,FMsgName}} = FieldDef,
@@ -2973,7 +3136,8 @@ format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
     MsgUndefFnClauses = compute_msg_merger_undef_clauses(MsgName, AnRes, Opts),
     {PrevMatch, NewMatch, ExtraInfo} =
         format_msg_merger_fnclause_match(MsgName, MsgDef, Opts),
-    {MandatoryMergings, OptMergings} = compute_msg_field_mergers(ExtraInfo),
+    {MandatoryMergings, OptMergings} = compute_msg_field_mergers(
+                                         ExtraInfo, MsgName, AnRes),
     gpb_codegen:format_fn(
       mk_fn(merge_msg_, MsgName),
       fun('<msg-undefined-handling>', _) -> '<return-the-defined-msg>';
@@ -3041,28 +3205,35 @@ format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
             end
     end.
 
-compute_msg_field_mergers({pr, XInfo}) ->
-    Merges = [{FName, format_field_merge_expr(Field, PFVar, NFVar)}
-              || {FName, PFVar, NFVar, Field} <- XInfo],
+compute_msg_field_mergers({pr, XInfo}, MsgName, AnRes) ->
+    Merges =
+        [{FName, format_field_merge_expr(Field, PFVar, NFVar, MsgName, AnRes)}
+         || {FName, PFVar, NFVar, Field} <- XInfo],
     {Merges, []};
-compute_msg_field_mergers({om, {MandXInfo, OptXInfo, PMsg, NMsg}}) ->
-    {MandMergs, []} = compute_msg_field_mergers({pr, MandXInfo}),
-    {OptMergs, []} = compute_msg_field_mergers({pr, OptXInfo}),
+compute_msg_field_mergers({om, {MandXInfo, OptXInfo, PMsg, NMsg}},
+                          MsgName, AnRes) ->
+    {MandMergs, []} = compute_msg_field_mergers({pr, MandXInfo},
+                                                MsgName, AnRes),
+    {OptMergs, []} = compute_msg_field_mergers({pr, OptXInfo},
+                                               MsgName, AnRes),
     {MandMergs, reshape_cases_for_maps_find(OptMergs, PMsg, NMsg)}.
 
-format_field_merge_expr(#?gpb_field{}=Field, PF, NF)->
+format_field_merge_expr(#?gpb_field{name=FName}=Field, PF, NF, MsgName, AnRes)->
     Transforms = [replace_tree('PF', PF),
                   replace_tree('NF', NF)],
     case classify_field_merge_action(Field) of
         overwrite ->
             {overwrite, {PF, NF}};
         seqadd ->
-            {expr, ?expr('PF' ++ 'NF', Transforms)};
+            ElemPath = [MsgName, FName],
+            Append = find_translation(ElemPath, merge, AnRes, 'erlang_++'),
+            {expr, ?expr('PF++NF'('PF', 'NF'),
+                         Transforms ++ [replace_term('PF++NF',Append)])};
         msgmerge ->
             #?gpb_field{type={msg,SubMsgName}}=Field,
             {merge, {{PF, NF}, mk_fn(merge_msg_, SubMsgName)}}
     end;
-format_field_merge_expr(#gpb_oneof{fields=OFields}, PF, NF) ->
+format_field_merge_expr(#gpb_oneof{fields=OFields}, PF, NF, _MsgName, _AnRes) ->
     case [OField || #?gpb_field{type={msg,_}}=OField <- OFields] of
         [] ->
             {overwrite, {PF, NF}};
@@ -3279,6 +3450,7 @@ format_verifiers(Defs, AnRes, Opts) ->
     [format_msg_verifiers(Defs, AnRes, Opts),
      format_enum_verifiers(Defs, AnRes),
      format_type_verifiers(AnRes),
+     format_map_verifiers(AnRes, Opts),
      format_verifier_auxiliaries()
     ].
 
@@ -3352,12 +3524,17 @@ field_verifier(#?gpb_field{name=FName, type=Type, occurrence=Occurrence},
     FVerifierFn = case Type of
                       {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
                       {enum,EnumName} -> mk_fn(v_enum_, EnumName);
+                      {map,KT,VT}     -> mk_fn(v_, map_type_to_msg_name(KT,VT));
                       Type            -> mk_fn(v_type_, Type)
                   end,
     Replacements = [replace_term('<verify-fn>', FVerifierFn),
                     replace_tree('<F>', FVar),
                     replace_term('<FName>', FName),
                     replace_term('<Type>', Type)],
+    IsMapField = case Type of
+                     {map,_,_} -> true;
+                     _ -> false
+                 end,
     case Occurrence of
         required ->
             %% FIXME: check especially for `undefined'
@@ -3365,7 +3542,7 @@ field_verifier(#?gpb_field{name=FName, type=Type, occurrence=Occurrence},
             %% specifying expected type
             ?expr('<verify-fn>'('<F>', ['<FName>' | Path]),
                   Replacements);
-        repeated ->
+        repeated when not IsMapField ->
             ?expr(if is_list('<F>') ->
                           ['<verify-fn>'(Elem, ['<FName>' | Path])
                            || Elem <- '<F>'];
@@ -3373,6 +3550,9 @@ field_verifier(#?gpb_field{name=FName, type=Type, occurrence=Occurrence},
                           mk_type_error(
                             {invalid_list_of, '<Type>'}, '<F>', Path)
                   end,
+                  Replacements);
+        repeated when IsMapField ->
+            ?expr('<verify-fn>'('<F>', ['<FName>' | Path]),
                   Replacements);
         optional ->
             case get_mapping_and_unset_by_opts(Opts) of
@@ -3564,6 +3744,55 @@ format_bytes_verifier() ->
               mk_type_error(bad_binary_value, X, Path)
       end).
 
+format_map_verifiers(#anres{map_types=MapTypes}, Opts) ->
+    RecordsOrMaps = get_records_or_maps_by_opts(Opts),
+    [format_map_verifier(KeyType, ValueType, RecordsOrMaps)
+     || {KeyType,ValueType} <- sets:to_list(MapTypes)].
+
+format_map_verifier(KeyType, ValueType, RecordsOrMaps) ->
+    FnName = mk_fn(v_, map_type_to_msg_name(KeyType, ValueType)),
+    KeyVerifierFn = mk_fn(v_type_, KeyType),
+    ValueVerifierFn = case ValueType of
+                          {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
+                          {enum,EnumName} -> mk_fn(v_enum_, EnumName);
+                          Type            -> mk_fn(v_type_, Type)
+                      end,
+    case RecordsOrMaps of
+        records ->
+            gpb_codegen:format_fn(
+              FnName,
+              fun(KVs, Path) when is_list(KVs) ->
+                      [case X of
+                           {Key, Value} ->
+                               'VerifyKey'(Key, ['key' | Path]),
+                               'VerifyValue'(Value, ['value' | Path]);
+                           _ ->
+                               mk_type_error(invalid_key_value_tuple, X, Path)
+                       end
+                       || X <- KVs],
+                      ok;
+                 (X, Path) ->
+                      mk_type_error(invalid_list_of_key_value_tuples, X, Path)
+              end,
+              [replace_term('VerifyKey', KeyVerifierFn),
+               replace_term('VerifyValue', ValueVerifierFn)]);
+        maps ->
+            gpb_codegen:format_fn(
+              FnName,
+              fun(M, Path) when is_map(M) ->
+                      [begin
+                           'VerifyKey'(Key, ['key' | Path]),
+                           'VerifyValue'(Value, ['value' | Path])
+                       end
+                       || {Key, Value} <- maps:to_list(M)],
+                      ok;
+                 (X, Path) ->
+                      mk_type_error(invalid_map, X, Path)
+              end,
+              [replace_term('VerifyKey', KeyVerifierFn),
+               replace_term('VerifyValue', ValueVerifierFn)])
+    end.
+
 format_verifier_auxiliaries() ->
     [gpb_codegen:format_fn(
        mk_type_error,
@@ -3583,6 +3812,164 @@ format_verifier_auxiliaries() ->
                    lists:map(fun atom_to_list/1, lists:reverse(PathR)),
                    "."))
        end)].
+
+%% -- translators ------------------------------------------------------
+
+format_translators(_Defs, #anres{map_translations=Ts}=AnRes, Opts) ->
+    [[[format_field_op_translator(ElemPath, Op, Fn, ArgTemplate)
+       || {Op, {Fn, ArgTemplate}} <- OpTransls]
+      || {ElemPath, OpTransls} <- dict:to_list(Ts)],
+     format_default_translators(AnRes, Opts)].
+
+format_merge_translators(_Defs, #anres{map_translations=Ts}=AnRes, Opts) ->
+    [[[format_field_op_translator(ElemPath, Op, Fn, ArgTemplate)
+       || {Op, {Fn, ArgTemplate}} <- OpTransls,
+          Op == merge]
+      || {ElemPath, OpTransls} <- dict:to_list(Ts)],
+     format_default_merge_translators(AnRes, Opts)].
+
+format_field_op_translator(ElemPath, Op, Fn, ArgTemplate) ->
+    FnName = mk_tr_fn_name(ElemPath, Op),
+    InArgs = underscore_unused_args(args_by_op(Op), ArgTemplate),
+    TrArgs = [case Term of
+                  '$1' -> lists:nth(1, InArgs);
+                  '$2' -> lists:nth(2, InArgs);
+                  _ -> erl_parse:abstract(Term)
+              end
+              || Term <- ArgTemplate],
+    [inline_attr(FnName,length(InArgs)),
+     gpb_codegen:format_fn(
+       FnName,
+       fun('InArgs') ->
+               'Fn'('TrArgs')
+       end,
+       [replace_term('Fn', Fn),
+        splice_trees('InArgs', InArgs),
+        splice_trees('TrArgs', TrArgs)])].
+
+underscore_unused_args(Args, Templ) ->
+    [case is_arg_used(I, Templ) of
+         true  -> Arg;
+         false -> ?expr(_)
+     end
+     || {I, Arg} <- index_seq(Args)].
+
+is_arg_used(I, Templ) ->
+    lists:member(dollar_i(I), Templ).
+
+dollar_i(I) ->
+    list_to_atom(?ff("$~w", [I])).
+
+args_by_op(encode)                   -> [?expr(X)];
+args_by_op(decode)                   -> [?expr(X)];
+args_by_op(decode_init_default)      -> [?expr(InitialValue)];
+args_by_op(decode_repeated_add_elem) -> [?expr(Elem), ?expr(L)];
+args_by_op(decode_repeated_finalize) -> [?expr(L)];
+args_by_op(merge)                    -> [?expr(X1), ?expr(X2)].
+
+format_aux_transl_helpers() ->
+    [nowarn_attrs(id,1),
+     inline_attr(id,1),
+     "id(X) -> X.\n",
+     "\n",
+     nowarn_attrs(cons,2),
+     inline_attr(cons,2),
+     "cons(Elem, Acc) -> [Elem | Acc].\n",
+     "\n",
+     nowarn_attrs('lists_reverse',1),
+     inline_attr('lists_reverse',1),
+     "'lists_reverse'(L) -> lists:reverse(L).\n"].
+
+format_aux_transl_helpers_used_also_with_nifs() ->
+    [nowarn_attrs('erlang_++',2),
+     inline_attr('erlang_++',2),
+     "'erlang_++'(A, B) -> A ++ B.\n"].
+
+format_default_translators(#anres{map_types=MapTypes}=AnRes, Opts) ->
+    HaveMaps = sets:size(MapTypes) > 0,
+    [%% Auxiliary helpers in case of fields of type map<_,_>
+     [case get_records_or_maps_by_opts(Opts) of
+          records ->
+              [inline_attr(mt_maptuple_to_pseudomsg_r,2),
+               gpb_codegen:format_fn(
+                 mt_maptuple_to_pseudomsg_r,
+                 fun({K,V},RName) -> {RName,K,V} end),
+               "\n",
+               inline_attr(mt_empty_map_r,0),
+               gpb_codegen:format_fn(
+                 mt_empty_map_r,
+                 fun() -> dict:new() end),
+               inline_attr(mt_add_item_r,2),
+               gpb_codegen:format_fn(
+                 mt_add_item_r,
+                 fun({_RName,K,V}, D) -> dict:store(K,V,D) end),
+               "\n",
+               inline_attr(mt_finalize_items_r,1),
+               gpb_codegen:format_fn(
+                 mt_finalize_items_r,
+                 fun(D) -> dict:to_list(D) end),
+               "\n"];
+          maps ->
+              {M,K,V} = {?expr(M), ?expr(K), ?expr(V)},
+              [inline_attr(mt_maptuple_to_pseudomsg_m,1),
+               gpb_codegen:format_fn(
+                 mt_maptuple_to_pseudomsg_m,
+                 fun({K,V}) -> '#{key => K, value => V}' end,
+                 [replace_tree('#{key => K, value => V}',
+                               map_create([{key,K}, {value,V}]))]),
+               "\n",
+               inline_attr(mt_map_to_list_m,1),
+               gpb_codegen:format_fn(
+                 mt_map_to_list_m,
+                 fun(M) -> maps:to_list(M) end),
+               "\n",
+               inline_attr(mt_empty_map_m,0),
+               gpb_codegen:format_fn(
+                 mt_empty_map_m,
+                 fun() -> '#{}' end,
+                 [replace_tree('#{}', map_create([]))]),
+               "\n",
+               inline_attr(mt_add_item_m,2),
+               gpb_codegen:format_fn(
+                 mt_add_item_m,
+                 fun('#{key := K,value := V}', M) -> 'M#{K => V}' end,
+                 [replace_tree('#{key := K,value := V}',
+                               map_match([{key,K}, {value,V}])),
+                  replace_tree('M#{K => V}',
+                               map_set(M, [{K,V}]))]),
+               "\n"]
+      end,
+      format_default_merge_translators(AnRes, Opts)]
+     || HaveMaps].
+
+format_default_merge_translators(#anres{map_types=MapTypes}, Opts) ->
+    HaveMaps = sets:size(MapTypes) > 0,
+    [%% Auxiliary helpers in case of fields of type map<_,_>
+     case get_records_or_maps_by_opts(Opts) of
+         records ->
+             [inline_attr(mt_merge_maptuples_r,2),
+              gpb_codegen:format_fn(
+                mt_merge_maptuples_r,
+                fun(L1, L2) ->
+                        dict:to_list(dict:merge(fun(_Key, _V1, V2) -> V2 end,
+                                                dict:from_list(L1),
+                                                dict:from_list(L2)))
+                end),
+              "\n"];
+         maps ->
+             [inline_attr(mt_merge_maps_m,2),
+              gpb_codegen:format_fn(
+                mt_merge_maps_m,
+                fun(M1, M2) -> maps:merge(M1,M2) end),
+              "\n"]
+     end
+     || HaveMaps].
+
+nowarn_attrs(FnName,Arity) ->
+    ?f("-compile({nowarn_unused_function,~p/~w}).~n", [FnName,Arity]).
+
+inline_attr(FnName,Arity) ->
+    ?f("-compile({inline,~p/~w}).~n", [FnName,Arity]).
 
 %% -- message defs -----------------------------------------------------
 
@@ -4124,9 +4511,15 @@ type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs, Opts) ->
                       {maps, omitted}           -> ""
                   end,
     case Occurrence of
-        required -> type_to_typestr_2(Type, Defs, Opts);
-        repeated -> "[" ++ type_to_typestr_2(Type, Defs, Opts) ++ "]";
-        optional -> type_to_typestr_2(Type, Defs, Opts) ++ OrUndefined
+        required ->
+            type_to_typestr_2(Type, Defs, Opts);
+        repeated ->
+            case Type of
+                {map,_,_} -> type_to_typestr_2(Type, Defs, Opts);
+                _         -> "[" ++ type_to_typestr_2(Type, Defs, Opts) ++ "]"
+            end;
+        optional ->
+            type_to_typestr_2(Type, Defs, Opts) ++ OrUndefined
     end;
 type_to_typestr(#gpb_oneof{fields=OFields}, Defs, Opts) ->
     OrUndefined = case get_mapping_and_unset_by_opts(Opts) of
@@ -4157,7 +4550,14 @@ type_to_typestr_2(string, _Defs, Opts)    ->
   string_to_typestr(get_strings_as_binaries_by_opts(Opts));
 type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
 type_to_typestr_2({enum,E}, Defs, _Opts)  -> enum_typestr(E, Defs);
-type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts).
+type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts);
+type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
+    KTStr = type_to_typestr_2(KT, Defs, Opts),
+    VTStr = type_to_typestr_2(VT, Defs, Opts),
+    case get_records_or_maps_by_opts(Opts) of
+        records -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
+        maps    -> ?f("#{~s => ~s}", [KTStr, VTStr])
+    end.
 
 msg_to_typestr(M, Opts) ->
   case get_records_or_maps_by_opts(Opts) of
@@ -4252,6 +4652,13 @@ d_r("", _New)       -> "".
 is_dotted(S) when is_list(S) -> string:str(S, ".") > 0;
 is_dotted(S) when is_atom(S) -> is_dotted(atom_to_list(S)).
 
+fmt_maps_as_msgs_record_defs(#anres{maps_as_msgs=MapsAsMsgs}) ->
+    [begin
+         FNames = [atom_to_list(FName) || #?gpb_field{name=FName} <- Fields],
+         ?f("-record(~p,{~s}).~n", [MsgName, string:join(FNames,", ")])
+     end
+     || {{msg,MsgName},Fields} <- MapsAsMsgs].
+
 %% -- nif c++ code -----------------------------------------------------
 
 possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
@@ -4264,6 +4671,7 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
     iolist_to_binary(
       [format_nif_cc_includes(Mod, Defs, Opts),
        format_nif_cc_oneof_version_check_if_present(Defs),
+       format_nif_cc_maptype_version_check_if_present(Defs),
        format_nif_cc_map_api_check_if_needed(Opts),
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
@@ -4319,6 +4727,33 @@ contains_oneof([_ | Rest]) ->
     contains_oneof(Rest);
 contains_oneof([]) ->
     false.
+
+format_nif_cc_maptype_version_check_if_present(Defs) ->
+    case contains_maptype_field(Defs) of
+        true ->
+            ["#if GOOGLE_PROTOBUF_VERSION < 3000000\n"
+             "#error \"The proto definitions contain 'map' fields.\"\n"
+             "#error \"This feature appeared in protobuf 3, but\"\n"
+             "#error \"it appears your protobuf is older.  Please\"\n"
+             "#error \"update protobuf.\"\n"
+             "#endif\n"
+             "\n"];
+        false ->
+            ""
+    end.
+
+contains_maptype_field([{{msg,_}, Fields} | Rest]) ->
+    case lists:any(fun  is_maptype_field/1, Fields) of
+        false -> contains_maptype_field(Rest);
+        true  -> true
+    end;
+contains_maptype_field([_ | Rest]) ->
+    contains_maptype_field(Rest);
+contains_maptype_field([]) ->
+    false.
+
+is_maptype_field(#?gpb_field{type={map,_,_}}) -> true;
+is_maptype_field(_) -> false.
 
 format_nif_cc_map_api_check_if_needed(Opts) ->
     case get_records_or_maps_by_opts(Opts) of
@@ -4830,7 +5265,7 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
      "\n"].
 
 format_nif_cc_field_packer(SrcVar, MsgVar, #?gpb_field{}=Field, Defs, Opts) ->
-    #?gpb_field{occurrence=Occurrence}=Field,
+    #?gpb_field{occurrence=Occurrence, type=Type}=Field,
     case Occurrence of
         required ->
             format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs,
@@ -4839,8 +5274,14 @@ format_nif_cc_field_packer(SrcVar, MsgVar, #?gpb_field{}=Field, Defs, Opts) ->
             format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs,
                                                 Opts);
         repeated ->
-            format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs,
-                                                Opts)
+            case Type of
+                {map,_,_} ->
+                    format_nif_cc_field_packer_maptype(SrcVar, MsgVar, Field,
+                                                       Defs, Opts);
+                _ ->
+                    format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field,
+                                                        Defs, Opts)
+            end
     end;
 format_nif_cc_field_packer(SrcVar, MsgVar, #gpb_oneof{}=Field, Defs, Opts) ->
     #gpb_oneof{fields=OFields} = Field,
@@ -4885,10 +5326,21 @@ format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs, Opts) ->
 format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
     #?gpb_field{name=FName, type=FType} = Field,
     LCFName = to_lower(FName),
-    SetterFnName = case Setter of
-                       set -> ?f("set_~s", [LCFName]);
-                       add -> ?f("add_~s", [LCFName])
-                   end,
+    SetFn = fun(Exprs) ->
+                    case Setter of
+                        set ->
+                            ?f("~s->set_~s(~s);",
+                               [MsgVar, LCFName, string:join(Exprs, ", ")]);
+                        add ->
+                            ?f("~s->add_~s(~s);",
+                               [MsgVar, LCFName, string:join(Exprs, ", ")]);
+                        {set_var, V} ->
+                            case Exprs of
+                                [Val] -> ?f("~s = ~s;", [V, Val]);
+                                [S,N] -> ?f("~s.assign(~s, ~s);", [V, S, N])
+                            end
+                    end
+            end,
     [split_indent_iolist(
        4,
        case FType of
@@ -4897,17 +5349,17 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                   "    double v;\n"
                   "    if (!enif_get_double(env, ~s, &v))\n"
                   "        return 0;\n"
-                  "    ~s->~s((float)v);\n"
+                  "    ~s\n"
                   "}\n",
-                  [SrcVar, MsgVar, SetterFnName]);
+                  [SrcVar, SetFn(["(float)v"])]);
            double ->
                ?f("{\n"
                   "    double v;\n"
                   "    if (!enif_get_double(env, ~s, &v))\n"
                   "        return 0;\n"
-                  "    ~s->~s(v);\n"
+                  "    ~s\n"
                   "}\n",
-                  [SrcVar, MsgVar, SetterFnName]);
+                  [SrcVar, SetFn(["v"])]);
            _S32 when FType == sint32;
                      FType == int32;
                      FType == sfixed32 ->
@@ -4915,9 +5367,9 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                   "    int v;\n"
                   "    if (!enif_get_int(env, ~s, &v))\n"
                   "        return 0;\n"
-                  "    ~s->~s(v);\n"
+                  "    ~s\n"
                   "}\n",
-                  [SrcVar, MsgVar, SetterFnName]);
+                  [SrcVar, SetFn(["v"])]);
            _S64 when FType == sint64;
                      FType == int64;
                      FType == sfixed64 ->
@@ -4925,35 +5377,35 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                   "    ErlNifSInt64 v;\n"
                   "    if (!enif_get_int64(env, ~s, &v))\n"
                   "        return 0;\n"
-                  "    ~s->~s(v);\n"
+                  "    ~s\n"
                   "}\n",
-                  [SrcVar, MsgVar, SetterFnName]);
+                  [SrcVar, SetFn(["v"])]);
            _U32 when FType == uint32;
                      FType == fixed32 ->
                ?f("{\n"
                   "    unsigned int v;\n"
                   "    if (!enif_get_uint(env, ~s, &v))\n"
                   "        return 0;\n"
-                  "    ~s->~s(v);\n"
+                  "    ~s\n"
                   "}\n",
-                  [SrcVar, MsgVar, SetterFnName]);
+                  [SrcVar, SetFn(["v"])]);
            _U64 when FType == uint64;
                      FType == fixed64 ->
                ?f("{\n"
                   "    ErlNifUInt64 v;\n"
                   "    if (!enif_get_uint64(env, ~s, &v))\n"
                   "        return 0;\n"
-                  "    ~s->~s(v);\n"
+                  "    ~s\n"
                   "}\n",
-                  [SrcVar, MsgVar, SetterFnName]);
+                  [SrcVar, SetFn(["v"])]);
            bool ->
                ?f("{\n"
                   "    if (enif_is_identical(~s, gpb_aa_true))\n"
-                  "        ~s->~s(1);\n"
+                  "        ~s\n"
                   "    else\n"
-                  "        ~s->~s(0);\n"
+                  "        ~s\n"
                   "}\n",
-                  [SrcVar, MsgVar, SetterFnName, MsgVar, SetterFnName]);
+                  [SrcVar, SetFn(["1"]), SetFn(["0"])]);
            {enum, EnumName} ->
                EPrefix = case is_dotted(EnumName) of
                              false -> "";
@@ -4964,12 +5416,12 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                    lists:keysearch({enum,EnumName}, 1, Defs),
                ["{\n",
                 [?f("    ~sif (enif_is_identical(~s, ~s))\n"
-                    "        ~s->~s(~s::~s~s);\n",
+                    "        ~s\n",
                     [if I == 1 -> "";
                         I >  1 -> "else "
                      end,
                      SrcVar, mk_c_var(gpb_aa_, Sym),
-                     MsgVar, SetterFnName, CPkg, EPrefix, Sym])
+                     SetFn([?f("~s::~s~s", [CPkg, EPrefix, Sym])])])
                  || {I, {Sym, _Val}} <- index_seq(Enumerations)],
                 "    else\n"
                 "        return 0;\n"
@@ -4981,13 +5433,14 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                           "    ErlNifBinary b;\n"
                           "    if (!enif_inspect_binary(env, ~s, &b))\n"
                           "        return 0;\n"
-                          "    ~s->~s(reinterpret_cast<const char *>(b.data),\n"
-                          "           b.size);\n"
+                          "    ~s\n"
                           "}\n",
-                          [SrcVar, MsgVar, SetterFnName]);
+                          [SrcVar,
+                           SetFn(["reinterpret_cast<char *>(b.data)",
+                                  "b.size"])]);
                    false ->
                        ?f("{\n"
-                          "    int num_octs = utf8_count_octets(env, ~s);\n"
+                          "    size_t num_octs = utf8_count_octets(env, ~s);\n"
                           "\n"
                           "    if (num_octs < 0)\n"
                           "        return 0;\n"
@@ -4995,33 +5448,65 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                           "    {\n"
                           "         char s[num_octs];\n"
                           "         utf8_to_octets(env, ~s, s);\n"
-                          "         ~s->~s(s, num_octs);\n"
+                          "         ~s\n"
                           "    }\n"
                           "}\n",
-                          [SrcVar, SrcVar, MsgVar, SetterFnName])
+                          [SrcVar, SrcVar, SetFn(["s", "num_octs"])])
                end;
            bytes ->
                ?f("{\n"
                   "    ErlNifBinary b;\n"
                   "    if (!enif_inspect_binary(env, ~s, &b))\n"
                   "        return 0;\n"
-                  "    ~s->~s(b.data, b.size);\n"
+                  "    ~s\n"
                   "}\n",
-                  [SrcVar, MsgVar, SetterFnName]);
+                  [SrcVar,
+                   SetFn(["reinterpret_cast<char *>(b.data)", "b.size"])]);
            {msg, Msg2Name} ->
+               CMsg2Type = mk_cctype_name(FType, Defs),
                PackFnName = mk_c_fn(p_msg_, Msg2Name),
-               CPkg = get_cc_pkg(Defs),
-               CMsg2Type = CPkg ++ "::" ++ dot_replace_s(Msg2Name, "::"),
-               NewFnName = case Setter of
-                               set -> ?f("mutable_~s", [LCFName]);
-                               add -> ?f("add_~s", [LCFName])
-                           end,
+               NewMsg2 = case Setter of
+                             set -> ?f("~s->mutable_~s()", [MsgVar, LCFName]);
+                             add -> ?f("~s->add_~s()", [MsgVar, LCFName]);
+                             {set_var, V} ->
+                                 ?f("~s = new ~s()", [V, CMsg2Type])
+                         end,
                ?f("{\n"
-                  "    ~s *m2 = ~s->~s();\n"
+                  "    ~s *m2 = ~s;\n"
                   "    if (!~s(env, ~s, m2))\n"
                   "        return 0;\n"
                   "}\n",
-                  [CMsg2Type, MsgVar, NewFnName, PackFnName, SrcVar])
+                  [CMsg2Type, NewMsg2, PackFnName, SrcVar]);
+           {map, KeyType, ValueType} ->
+               CMapType = mk_cctype_name(FType, Defs),
+               {KeyVar, ValueVar} = SrcVar,
+               PtrDeref = case ValueType of
+                           {msg,_} -> "*";
+                           _       -> ""
+                       end,
+               KeyDecl = ?f("~s m2k;", [mk_cctype_name(KeyType, Defs)]),
+               ValueDecl = ?f("~s ~sm2v;", [mk_cctype_name(ValueType, Defs),
+                                            PtrDeref]),
+               SetKey = format_nif_cc_field_packer_single(
+                          KeyVar, MsgVar, Field#?gpb_field{type=KeyType},
+                          Defs, Opts,
+                          {set_var, "m2k"}),
+               SetValue = format_nif_cc_field_packer_single(
+                            ValueVar, MsgVar, Field#?gpb_field{type=ValueType},
+                            Defs, Opts,
+                            {set_var, "m2v"}),
+               ["{\n",
+                ?f("    ~s *map = ~s->mutable_~s();\n"
+                   "    ~s\n"  % decl of m2k
+                   "    ~s\n"  % decl of m2v
+                   "\n",
+                   [CMapType, MsgVar, LCFName,
+                    KeyDecl, ValueDecl]),
+                %% Set values for m2k and m2v
+                SetKey,
+                SetValue,
+                ?f("    (*map)[m2k] = ~sm2v;\n", [PtrDeref]),
+                "}\n"]
        end),
      "\n"].
 
@@ -5044,6 +5529,69 @@ format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs, Opts) ->
              "    }\n"
              "}\n",
              [])]).
+
+format_nif_cc_field_packer_maptype(SrcVar, MsgVar, Field, Defs, Opts) ->
+    case get_records_or_maps_by_opts(Opts) of
+        records ->
+            format_nif_cc_field_packer_maptype_r(SrcVar, MsgVar, Field, Defs,
+                                                 Opts);
+        maps ->
+            format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field, Defs,
+                                                 Opts)
+    end.
+
+format_nif_cc_field_packer_maptype_r(SrcVar, MsgVar, Field, Defs, Opts) ->
+    split_indent_iolist(
+      4, [?f("{\n"
+             "    ERL_NIF_TERM l = ~s;\n"
+             "\n"
+             "    while (!enif_is_empty_list(env, l))\n"
+             "    {\n"
+             "        ERL_NIF_TERM head, tail;\n"
+             "\n"
+             "        if (!enif_get_list_cell(env, l, &head, &tail))\n"
+             "            return 0;\n",
+             [SrcVar]),
+          ?f("        int arity;\n"
+             "        const ERL_NIF_TERM *tuple;\n"
+             "        if (!enif_get_tuple(env, head, &arity, &tuple))\n"
+             "            return 0;\n"
+             "        if (arity != 2)\n"
+             "            return 0;\n",
+             []),
+          split_indent_iolist(
+            4, format_nif_cc_field_packer_single(
+                 {"tuple[0]", "tuple[1]"}, MsgVar, Field, Defs, Opts, add)),
+          ?f("        l = tail;\n"
+             "    }\n"
+             "}\n",
+             [])]).
+
+format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field, Defs, Opts) ->
+    split_indent_iolist(
+      4, ["{\n"
+          "    ERL_NIF_TERM ik, iv;\n",
+          "    ErlNifMapIterator iter;\n",
+          "    ErlNifMapIteratorEntry first;\n",
+          "\n"
+          "#if ",format_nif_check_version_or_later(2, 8),"\n",
+          "    first = ERL_NIF_MAP_ITERATOR_FIRST;\n",
+          "#else /* before 2.8 which appeared in 18.0 */\n",
+          "    first = ERL_NIF_MAP_ITERATOR_HEAD;\n",
+          "#endif\n",
+          ?f("    if (!enif_map_iterator_create(env, ~s, &iter, first))\n"
+             "        return 0;\n"
+             "\n",
+             [SrcVar]),
+          "    while (enif_map_iterator_get_pair(env, &iter, &ik, &iv))\n",
+          "    {\n",
+          split_indent_iolist(
+            4, format_nif_cc_field_packer_single(
+                 {"ik", "iv"}, MsgVar, Field, Defs, Opts, add)),
+          "        enif_map_iterator_next(env, &iter);\n",
+          "    }\n",
+          "    enif_map_iterator_destroy(env, &iter);\n",
+          "}\n"]).
 
 format_nif_cc_decoders(Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
@@ -5111,7 +5659,7 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
      "\n",
      [begin
           DestVar = ?f("elem~w",[I]),
-          format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field, Defs)
+          format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field, Defs, Opts)
       end
       || {I, Field} <- index_seq(Fields)],
      "\n",
@@ -5148,18 +5696,25 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
      "\n"].
 
 format_nif_cc_field_unpacker(DestVar, MsgVar, _MsgName, #?gpb_field{}=Field,
-                             Defs) ->
-    #?gpb_field{occurrence=Occurrence}=Field,
+                             Defs, Opts) ->
+    #?gpb_field{occurrence=Occurrence, type=Type}=Field,
     case Occurrence of
         required ->
             format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs);
         optional ->
             format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs);
         repeated ->
-            format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs)
+            case Type of
+                {map,_,_} ->
+                    format_nif_cc_field_unpacker_maptype(DestVar, MsgVar,
+                                                         Field, Defs, Opts);
+                _ ->
+                    format_nif_cc_field_unpacker_repeated(DestVar, MsgVar,
+                                                          Field, Defs)
+            end
     end;
 format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
-                             Defs) ->
+                             Defs, _Opts) ->
     #gpb_oneof{name=OFName, fields=OFields} = Field,
     CPkg = get_cc_pkg(Defs),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
@@ -5179,8 +5734,8 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
                 ?f("        ERL_NIF_TERM ores;\n"),
                 split_indent_iolist(
                   8,
-                  format_nif_cc_field_unpacker_by_type("ores", MsgVar,
-                                                       OField, Defs)),
+                  format_nif_cc_field_unpacker_by_field("ores", MsgVar,
+                                                        OField, Defs)),
                 ?f("        ~s = enif_make_tuple2(env, ~s, ores);\n",
                    [DestVar, AtomVar]),
                 ?f("    }\n"),
@@ -5202,39 +5757,43 @@ format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs) ->
      ?f("        ~s = gpb_x_no_value;\n", [DestVar]),
      ?f("    else\n"),
      indent_lines(
-       8, format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs)),
+       8, format_nif_cc_field_unpacker_by_field(DestVar, MsgVar, Field, Defs)),
      "\n"].
 
-format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs) ->
+format_nif_cc_field_unpacker_by_field(DestVar, MsgVar, Field, Defs) ->
     #?gpb_field{name=FName, type=FType} = Field,
     LCFName = to_lower(FName),
+    SrcExpr = ?f("~s->~s()", [MsgVar, LCFName]),
+    format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs).
+
+format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs) ->
     case FType of
         float ->
-            [?f("~s = enif_make_double(env, (double)~s->~s());\n",
-                [DestVar, MsgVar, LCFName])];
+            [?f("~s = enif_make_double(env, (double)~s);\n",
+                [DestVar, SrcExpr])];
         double ->
-            [?f("~s = enif_make_double(env, ~s->~s());\n",
-                [DestVar, MsgVar, LCFName])];
+            [?f("~s = enif_make_double(env, ~s);\n",
+                [DestVar, SrcExpr])];
         _S32 when FType == sint32;
                   FType == int32;
                   FType == sfixed32 ->
-            [?f("~s = enif_make_int(env, ~s->~s());\n",
-                [DestVar, MsgVar, LCFName])];
+            [?f("~s = enif_make_int(env, ~s);\n",
+                [DestVar, SrcExpr])];
         _S64 when FType == sint64;
                   FType == int64;
                   FType == sfixed64 ->
-            [?f("~s = enif_make_int64(env, (ErlNifSInt64)~s->~s());\n",
-                [DestVar, MsgVar, LCFName])];
+            [?f("~s = enif_make_int64(env, (ErlNifSInt64)~s);\n",
+                [DestVar, SrcExpr])];
         _U32 when FType == uint32;
                   FType == fixed32 ->
-            [?f("~s = enif_make_uint(env, ~s->~s());\n",
-                [DestVar, MsgVar, LCFName])];
+            [?f("~s = enif_make_uint(env, ~s);\n",
+                [DestVar, SrcExpr])];
         _U64 when FType == uint64;
                   FType == fixed64 ->
-            [?f("~s = enif_make_uint64(env, (ErlNifUInt64)~s->~s());\n",
-                [DestVar, MsgVar, LCFName])];
+            [?f("~s = enif_make_uint64(env, (ErlNifUInt64)~s);\n",
+                [DestVar, SrcExpr])];
         bool ->
-            [?f("if (~s->~s())\n", [MsgVar, LCFName]),
+            [?f("if (~s)\n", [SrcExpr]),
              ?f("    ~s = gpb_aa_true;\n", [DestVar]),
              ?f("else\n"),
              ?f("    ~s = gpb_aa_false;\n", [DestVar])];
@@ -5247,7 +5806,7 @@ format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs) ->
             {value, {{enum,EnumName}, Enumerations}} =
                 lists:keysearch({enum,EnumName}, 1, Defs),
             [] ++
-                [?f("switch (~s->~s()) {\n", [MsgVar, LCFName])] ++
+                [?f("switch (~s) {\n", [SrcExpr])] ++
                 [?f("    case ~s::~s~s: ~s = ~s; break;\n",
                     [CPkg, EPrefix, Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
                  || {Sym, _Value} <- Enumerations] ++
@@ -5255,20 +5814,15 @@ format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs) ->
                 [?f("}\n")];
         string ->
             [?f("{\n"),
-             ?f("    const char    *sData = ~s->~s().data();\n",
-                [    MsgVar, LCFName]),
-             ?f("    unsigned int   sSize = ~s->~s().size();\n",
-                [    MsgVar, LCFName]),
-             ?f("    ~s = utf8_to_erl_string(env, sData, sSize);\n",
-                [    DestVar]),
+             ?f("    const char    *sData = ~s.data();\n", [SrcExpr]),
+             ?f("    unsigned int   sSize = ~s.size();\n", [SrcExpr]),
+             ?f("    ~s = utf8_to_erl_string(env, sData, sSize);\n", [DestVar]),
              ?f("}\n")];
         bytes ->
             [?f("{\n"),
              ?f("    unsigned char *data;\n"),
-             ?f("    unsigned int   bSize = ~s->~s().size();\n",
-                [    MsgVar, LCFName]),
-             ?f("    const char    *bData = ~s->~s().data();\n",
-                [    MsgVar, LCFName]),
+             ?f("    unsigned int   bSize = ~s.size();\n", [SrcExpr]),
+             ?f("    const char    *bData = ~s.data();\n", [SrcExpr]),
              ?f("    data = enif_make_new_binary(\n"), %% can data be NULL??
              ?f("               env,\n"),
              ?f("               bSize,\n"),
@@ -5277,8 +5831,15 @@ format_nif_cc_field_unpacker_by_type(DestVar, MsgVar, Field, Defs) ->
              ?f("}\n")];
         {msg, Msg2Name} ->
             UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
-            [?f("~s = ~s(env, &~s->~s());\n",
-                [DestVar, UnpackFnName, MsgVar, LCFName])]
+            [?f("~s = ~s(env, &~s);\n",
+                [DestVar, UnpackFnName, SrcExpr])];
+        {map, KeyType, ValueType} ->
+            {KeyDest, ValueDest} = DestVar,
+            {KeyExpr, ValueExpr} = SrcExpr,
+            [format_nif_cc_field_unpacker_by_type(KeyDest, KeyExpr,
+                                                  KeyType, Defs),
+             format_nif_cc_field_unpacker_by_type(ValueDest, ValueExpr,
+                                                  ValueType, Defs)]
     end.
 
 format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
@@ -5292,81 +5853,91 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
      ?f("        for (i = 0; i < numElems; i++)\n"),
      indent_lines(
        12,
-       case FType of
-           float ->
-               [?f("relem[i] = enif_make_double(env, (double)~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           double ->
-               [?f("relem[i] = enif_make_double(env, ~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           _S32 when FType == sint32;
-                     FType == int32;
-                     FType == sfixed32 ->
-               [?f("relem[i] = enif_make_int(env, ~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           _S64 when FType == sint64;
-                     FType == int64;
-                     FType == sfixed64 ->
-               [?f("relem[i] = enif_make_int64(env, (ErlNifSInt64)~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           _U32 when FType == uint32;
-                     FType == fixed32 ->
-               [?f("relem[i] = enif_make_uint(env, ~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           _U64 when FType == uint64;
-                     FType == fixed64 ->
-               [?f("relem[i] = enif_make_uint64(env,\n"
-                   "                            (ErlNifUInt64)~s->~s(i));\n",
-                   [MsgVar, LCFName])];
-           bool ->
-               [?f("if (~s->~s(i))\n", [MsgVar, LCFName]),
-                ?f("    relem[i] = gpb_aa_true;\n"),
-                ?f("else\n"),
-                ?f("    relem[i] = gpb_aa_false;\n")];
-           {enum, EnumName} ->
-               EPrefix = case is_dotted(EnumName) of
-                             false -> "";
-                             true  -> dot_replace_s(EnumName, "_") ++ "_"
-                         end,
-               {value, {{enum,EnumName}, Enumerations}} =
-                   lists:keysearch({enum,EnumName}, 1, Defs),
-               [] ++
-                   [?f("switch (~s->~s(i)) {\n", [MsgVar, LCFName])] ++
-                   [?f("    case ~s~s: relem[i] = ~s; break;\n",
-                       [EPrefix, Sym, mk_c_var(gpb_aa_, Sym)])
-                    || {Sym, _Value} <- Enumerations] ++
-                   [?f("    default: relem[i] = gpb_aa_undefined;\n")] ++
-                   [?f("}\n")];
-           string ->
-               [?f("{\n"),
-                ?f("    const char    *sData = ~s->~s(i).data();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    unsigned int   sSize = ~s->~s(i).size();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    relem[i] = utf8_to_erl_string(env, sData, sSize);\n"),
-                ?f("}\n")];
-           bytes ->
-               [?f("{\n"),
-                ?f("    unsigned char *data;\n"),
-                ?f("    unsigned int   bSize = ~s->~s(i).size();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    const char    *bData = ~s->~s(i).data();\n",
-                   [    MsgVar, LCFName]),
-                ?f("    data = enif_make_new_binary(\n"), %% can data be NULL??
-                ?f("               env,\n"),
-                ?f("               bSize,\n"),
-                ?f("               &relem[i]);\n"),
-                ?f("    memmove(data, bData, bSize);\n"),
-                ?f("}\n")];
-           {msg, Msg2Name} ->
-               UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
-               [?f("relem[i] = ~s(env, &~s->~s(i));\n",
-                   [UnpackFnName, MsgVar, LCFName])]
-       end),
+       format_nif_cc_field_unpacker_by_type(
+         "relem[i]", ?f("~s->~s(i)", [MsgVar, LCFName]),
+         FType, Defs)),
      ?f("        ~s = enif_make_list_from_array(env, relem, numElems);\n",
         [DestVar]),
      "    }\n",
      "\n"].
+
+format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field, Defs, Opts) ->
+    #?gpb_field{name=FName, type={map, KeyType, ValueType}=Type} = Field,
+    LCFName = to_lower(FName),
+    ItType = mk_cctype_name(Type, Defs) ++ "::const_iterator",
+    MapsOrRecords = get_records_or_maps_by_opts(Opts),
+    split_indent_iolist(
+      4,
+      ["{\n",
+       split_indent_iolist(
+         4,
+         case MapsOrRecords of
+             records ->
+                 [?f("~s = enif_make_list(env, 0);\n", [DestVar]),
+                  ?f("int i = 0;\n", [])];
+             maps ->
+                 ?f("~s = enif_make_new_map(env);\n", [DestVar])
+         end),
+       %% Iterate
+       ?f("    for (~s it = ~s->~s().begin();\n"
+          "         it != ~s->~s().end();\n"
+          "         ++it)\n",
+          [ItType, MsgVar, LCFName, MsgVar, LCFName]),
+       "    {\n",
+       "        ERL_NIF_TERM ek, ev;\n",
+       %% FIXME
+       split_indent_iolist(
+         8,
+         [format_nif_cc_field_unpacker_by_type("ek", "it->first", KeyType,
+                                               Defs),
+          format_nif_cc_field_unpacker_by_type("ev", "it->second", ValueType,
+                                               Defs),
+          case MapsOrRecords of
+              records ->
+                  ["ERL_NIF_TERM eitem = enif_make_tuple2(env, ek, ev);\n",
+                   ?f("~s = enif_make_list_cell(env, eitem, ~s);\n",
+                      [DestVar, DestVar]),
+                   "++i;\n"];
+              maps ->
+                  [?f("enif_make_map_put(env, ~s, ek, ev, &~s);\n",
+                      [DestVar, DestVar])]
+          end]),
+       "    }\n",
+       "}\n"]).
+
+
+mk_cctype_name({enum,EnumName}, Defs) ->
+    EPrefix = case is_dotted(EnumName) of
+                  false -> atom_to_list(EnumName);
+                  true  -> dot_replace_s(EnumName, "_")
+              end,
+    CPkg = get_cc_pkg(Defs),
+    CPkg ++ "::" ++ EPrefix;
+mk_cctype_name({msg,MsgName}, Defs) ->
+    CPkg = get_cc_pkg(Defs),
+    CPkg ++ "::" ++ dot_replace_s(MsgName, "::");
+mk_cctype_name({map,KeyType,ValueType}, Defs) ->
+    CKeyType = mk_cctype_name(KeyType, Defs),
+    CValueType = mk_cctype_name(ValueType, Defs),
+    "::google::protobuf::Map< " ++ CKeyType ++ ", " ++ CValueType ++ " >";
+mk_cctype_name(Type, _Defs) ->
+    case Type of
+        sint32   -> "::google::protobuf::int32";
+        sint64   -> "::google::protobuf::int64";
+        int32    -> "::google::protobuf::int32";
+        int64    -> "::google::protobuf::int64";
+        uint32   -> "::google::protobuf::uint32";
+        uint64   -> "::google::protobuf::uint64";
+        bool     -> "bool";
+        fixed64  -> "::google::protobuf::uint64";
+        sfixed64 -> "::google::protobuf::int64";
+        double   -> "double";
+        string   -> "::std::string";
+        bytes    -> "::std::string";
+        fixed32  -> "::google::protobuf::uint32";
+        sfixed32 -> "::google::protobuf::int32";
+        float    -> "float"
+    end.
 
 format_load_nif(Mod, Opts) ->
     VsnAsList = gpb:version_as_list(),
@@ -5633,7 +6204,11 @@ map_set(Var, []) when Var /= none ->
 map_set(Var, FieldsValueTrees) ->
     erl_syntax:map_expr(
       Var,
-      [erl_syntax:map_field_assoc(erl_syntax:atom(FName), Expr)
+      [if is_atom(FName) ->
+               erl_syntax:map_field_assoc(erl_syntax:atom(FName), Expr);
+          true -> % Key can be a variable or other type too.
+               erl_syntax:map_field_assoc(FName, Expr)
+       end
        || {FName, Expr} <- FieldsValueTrees]).
 
 -else. %% on a pre Erlang 17 system
@@ -5690,6 +6265,34 @@ map_kvalues(KVars) ->
 
 -endif. %% NO_HAVE_MAPS
 
+find_translation(ElemPath, Op, AnRes) ->
+    find_translation(ElemPath, Op, AnRes, undefined).
+find_translation(ElemPath, Op, #anres{map_translations=Ts}, Default) ->
+    case dict:find(ElemPath, Ts) of
+        {ok, OpTransls} ->
+            case lists:keyfind(Op, 1, OpTransls) of
+                {Op, _Fn} ->
+                    mk_tr_fn_name(ElemPath, Op);
+                false ->
+                    default_fn_by_op(Op, Default)
+            end;
+        error ->
+            default_fn_by_op(Op, Default)
+    end.
+
+mk_tr_fn_name([MsgName,FieldName,elem], Op) ->
+    list_to_atom(?ff("tr_~s_~s.~s.[elem]", [Op, MsgName,FieldName]));
+mk_tr_fn_name([MsgName,FieldName], Op) ->
+    list_to_atom(?ff("tr_~s_~s.~s", [Op, MsgName,FieldName])).
+
+default_fn_by_op(decode_repeated_add_elem, undefined) ->
+    cons;
+default_fn_by_op(decode_repeated_finalize, undefined) ->
+    lists_reverse;
+default_fn_by_op(_, undefined) ->
+    id;
+default_fn_by_op(_, Fn) ->
+    Fn.
 
 %% The "option allow_alias = true;" inside an enum X { ... }
 %% says it is ok to have multiple symbols that map to the same numeric value.

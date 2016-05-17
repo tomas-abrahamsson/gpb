@@ -36,11 +36,14 @@ no_maps_tests__test() ->
 -import(gpb_compile_tests, [unload_code/1]).
 
 -import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
+-import(gpb_compile_tests, [nif_mapfield_tests_check_prerequisites/1]).
+-import(gpb_compile_tests, [increase_timeouts/1]).
 -import(gpb_compile_tests, [with_tmpdir/1]).
 -import(gpb_compile_tests, [in_separate_vm/4]).
 -import(gpb_compile_tests, [compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
 -import(gpb_compile_tests, [check_protoc_can_do_oneof/0]).
 
+-define(verify_gpb_err(Expr), ?assertError({gpb_type_error, _}, Expr)).
 
 simple_maps_test() ->
     M = compile_iolist(["message m1 {"
@@ -126,6 +129,52 @@ maps_with_defaults_test() ->
     M = compile_iolist(["message t1 { optional uint32 f = 2 [default=2];};"],
                        [maps, type_specs, {maps_unset_optional, omitted}]),
     ?assertEqual(#{}, M:decode_msg(<<>>, t1)),
+    unload_code(M).
+
+-define(matches_either_or(ExpectedAlt1, ExpectedAlt2, Expr),
+        begin
+            Actual = Expr,
+            try ExpectedAlt1 = Actual
+            catch error:badmatch ->
+                    try ExpectedAlt2 = Actual
+                    catch error:badmatch ->
+                            error({neither,
+                                   ??ExpectedAlt1, 'nor', ??ExpectedAlt2,
+                                   matched,Actual})
+                    end
+            end
+        end).
+
+map_type_test() ->
+    M = compile_iolist(["message m1 { map<string,fixed32> a = 1; };"],
+                       [maps, type_specs]),
+    ?matches_either_or( % order of maps:to_list(#{x=>_,y=>_}) undefined
+       <<10,8,10,1,"x", 21,17:32/little,
+         10,8,10,1,"y", 21,18:32/little>>,
+       <<10,8,10,1,"x", 21,18:32/little,
+         10,8,10,1,"y", 21,17:32/little>>,
+       M:encode_msg(#{a => #{"x" => 17,"y" => 18}}, m1)),
+
+    #{a := #{"x" := 17,"y" := 18}} =
+        M:decode_msg(
+          %% A map with "x" => 16, (not to be included)
+          %%            "x" => 17  (overrides "x" => 16)
+          %%        and "y" => 18
+          <<10,8,10,1,"x", 21,16:32/little,
+            10,8,10,1,"x", 21,17:32/little,
+            10,8,10,1,"y", 21,18:32/little>>,
+          m1),
+
+    #{a := #{"x" := 17, "y" := 18, "z" := 19}} =
+        M:merge_msgs(#{a => #{"x" => 16, "y" => 18}},
+                     #{a => #{"x" => 17, "z" => 19}},
+                     m1),
+
+    ok = M:verify_msg(#{a => #{"x" => 17, "y" => 18}}, m1),
+    ?verify_gpb_err(M:verify_msg(#{a => not_a_map}, m1)),
+    ?verify_gpb_err(M:verify_msg(#{a => #{16 => "x"}}, m1)), %% wrong key type
+    ?verify_gpb_err(M:verify_msg(#{a => #{"x" => "wrong value type"}}, m1)),
+
     unload_code(M).
 
 %% merge ------------------------------------------------
@@ -267,11 +316,15 @@ verify_maps_with_opts_omitted_test() ->
 %% verify ------------------------------------------------
 
 nif_test_() ->
-    nif_tests_check_prerequisites(
-      [{"Nif encode decode with unset optionals present_undefined",
-        fun nif_encode_decode_present_undefined/0},
-       {"Nif encode decode with unset optionals omitted",
-        fun nif_encode_decode_omitted/0}]).
+    increase_timeouts(
+      nif_tests_check_prerequisites(
+        [{"Nif encode decode with unset optionals present_undefined",
+          fun nif_encode_decode_present_undefined/0},
+         {"Nif encode decode with unset optionals omitted",
+          fun nif_encode_decode_omitted/0},
+         increase_timeouts(
+           nif_mapfield_tests_check_prerequisites(
+             [{"Encode decode", fun nif_encode_decode_mapfields/0}]))])).
 
 nif_encode_decode_present_undefined() ->
     ProtocCanOneof = check_protoc_can_do_oneof(),
@@ -337,6 +390,35 @@ nif_encode_decode_omitted() ->
                                end,
                         Bin1 = M:encode_msg(Msg1, x_mo),
                         Msg1 = M:decode_msg(Bin1, x_mo),
+                        ok
+                end)
+      end).
+
+nif_encode_decode_mapfields() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_maps_with_mapfields_ed1,
+              %% No need to test all types of keys/values, since that
+              %% is already done in gpb_compile_tests.  Test only the
+              %% map mechanism (as opposed to list of 2-tuples) here.
+              Defs = ["message x {\n",
+                      "   map<fixed32,string> i2s = 1;\n"
+                      "}"],
+              Opts = [maps],
+              {ok, Code} = compile_nif_msg_defs(M, Defs, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Msg1 = #{i2s => #{11 => "aa",
+                                          22 => "bb",
+                                          33 => "cc"}},
+                        Bin1 = M:encode_msg(Msg1, x),
+                        Msg1 = M:decode_msg(Bin1, x),
+
+                        Msg2 = #{i2s => #{}},
+                        Bin2 = M:encode_msg(Msg2, x),
+                        Msg2 = M:decode_msg(Bin2, x),
+
                         ok
                 end)
       end).

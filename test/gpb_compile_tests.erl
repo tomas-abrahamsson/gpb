@@ -30,10 +30,13 @@
 
 %% NIF related
 -export([nif_tests_check_prerequisites/1]).
+-export([nif_mapfield_tests_check_prerequisites/1]).
+-export([increase_timeouts/1]).
 -export([with_tmpdir/1]).
 -export([in_separate_vm/4]).
 -export([compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
 -export([check_protoc_can_do_oneof/0]).
+-export([check_protoc_can_do_mapfields/0]).
 
 %% internally used
 -export([main_in_separate_vm/1]).
@@ -1081,28 +1084,48 @@ generates_nif_as_binary_and_file_test() ->
     ?assertMatch(Nif1, Nif2).
 
 nif_code_test_() ->
-    nif_tests_check_prerequisites(
-      [{"Nif compiles", fun nif_compiles/0},
-       {"Nif encode decode", fun nif_encode_decode/0},
-       {"Nif enums in msgs", fun nif_enum_in_msg/0},
-       {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
-       {"Nif with strbin", fun nif_with_strbin/0}]).
+    increase_timeouts(
+      nif_tests_check_prerequisites(
+        [{"Nif compiles", fun nif_compiles/0},
+         {"Nif encode decode", fun nif_encode_decode/0},
+         increase_timeouts(
+           nif_oneof_tests_check_prerequisites(
+             [{"encode decode", fun nif_encode_decode_oneof/0}])),
+         increase_timeouts(
+           nif_mapfield_tests_check_prerequisites(
+             [{"encode decode", fun nif_encode_decode_maps/0}])),
+         {"Nif enums in msgs", fun nif_enum_in_msg/0},
+         {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
+         {"Nif with strbin", fun nif_with_strbin/0}])).
 
-nif_tests_check_prerequisites(Tests) ->
-    {Descr, Tests1} =
-        case {want_nif_tests(), find_protoc(), find_cplusplus_compiler()} of
-            {false,_,_} -> {"NIF tests not wanted", []};
-            {_,false,_} -> {"Protoc not found, not trying to compile", []};
-            {_,_,false} -> {"No C++ compiler found, not trying to compile", []};
-            {_,_,_}     -> {"nif tests", Tests}
-        end,
+increase_timeouts({Descr, Tests}) ->
     %% Without increased timeout, the nif test frequently times
     %% out on my slow laptop (1.6 GHz Atom N270)
     {Descr,
      {timeout, 300,  %% timeout for all tests
       [{timeout, 100, %% timeout for each test
         [{TestDescr, TestFun}]}
-       || {TestDescr, TestFun} <- Tests1]}}.
+       || {TestDescr, TestFun} <- Tests]}}.
+
+nif_tests_check_prerequisites(Tests) ->
+    case {want_nif_tests(), find_protoc(), find_cplusplus_compiler()} of
+        {false,_,_} -> {"Nif tests not wanted", []};
+        {_,false,_} -> {"Protoc not found, not trying to compile", []};
+        {_,_,false} -> {"No C++ compiler found, not trying to compile", []};
+        {_,_,_}     -> {"nif tests", Tests}
+    end.
+
+nif_oneof_tests_check_prerequisites(Tests) ->
+    case check_protoc_can_do_oneof() of
+        true  -> {"Nif with oneof fields", Tests};
+        false -> {"Protoc < 2.6.0, not testing nifs with oneof", []}
+    end.
+
+nif_mapfield_tests_check_prerequisites(Tests) ->
+    case check_protoc_can_do_mapfields() of
+        true  -> {"Nif with map fields", Tests};
+        false -> {"Protoc < 3.0.0, not testing nifs with map fields", []}
+    end.
 
 nif_compiles() ->
     with_tmpdir(
@@ -1113,7 +1136,6 @@ nif_compiles() ->
       end).
 
 nif_encode_decode() ->
-    ProtocCanOneof = check_protoc_can_do_oneof(),
     with_tmpdir(
       fun(TmpDir) ->
               NEDM = gpb_nif_test_ed1,
@@ -1124,7 +1146,6 @@ nif_encode_decode() ->
                 fun() ->
                         nif_encode_decode_test_it(NEDM, Defs),
                         nif_encode_decode_strings(NEDM, Defs),
-                        [nif_encode_decode_oneof(NEDM, Defs) || ProtocCanOneof],
                         ok
                 end)
       end).
@@ -1178,6 +1199,21 @@ nif_encode_decode_strings(NEDM, Defs) ->
                   end,
                   CodePoints).
 
+nif_encode_decode_oneof() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              NEDM = gpb_nif_test_ed_oneof1,
+              Defs = mk_one_oneof_field_of_each_type(),
+              {ok, Code} = compile_nif_msg_defs(NEDM, Defs, TmpDir),
+              in_separate_vm(
+                TmpDir, NEDM, Code,
+                fun() ->
+                        nif_encode_decode_oneof(NEDM, Defs),
+                        ok
+                end)
+      end).
+
+
 nif_encode_decode_oneof(NEDM, Defs) ->
     [#gpb_oneof{fields=OFields}] = [O || {{msg, oneof1}, [O]} <- Defs],
     Alts = [{Name, mk_field_value(OF, Defs, small)}
@@ -1198,6 +1234,39 @@ nif_encode_decode_oneof(NEDM, Defs) ->
                   end,
                   Alts).
 
+nif_encode_decode_maps() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              NEDM = gpb_nif_test_ed_mapfields1,
+              Defs = mk_one_map_field_of_each_type(),
+              {ok, Code} = compile_nif_msg_defs(NEDM, Defs, TmpDir),
+              in_separate_vm(
+                TmpDir, NEDM, Code,
+                fun() ->
+                        nif_encode_decode_mapfields(NEDM, Defs),
+                        ok
+                end)
+      end).
+
+nif_encode_decode_mapfields(NEDM, Defs) ->
+    OrigMsg = usort_all_fields(mk_msg(map1, Defs, small_random)),
+    %% cross-check with gpb:encode/decode_msg to avoid errors cancelling out
+    MEncoded  = NEDM:encode_msg(OrigMsg),
+    GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+    MMDecoded = NEDM:decode_msg(MEncoded, map1),
+    GMDecoded = gpb:decode_msg(MEncoded, map1, Defs),
+    MGDecoded = NEDM:decode_msg(GEncoded, map1),
+    ?assertEqual(OrigMsg, sort_all_fields(MMDecoded)),
+    ?assertEqual(OrigMsg, sort_all_fields(GMDecoded)),
+    ?assertEqual(OrigMsg, sort_all_fields(MGDecoded)).
+
+usort_all_fields(R) -> map_all_fields(R, fun list:usort/1).
+
+sort_all_fields(R) -> map_all_fields(R, fun list:sort/1).
+
+map_all_fields(R, Fn) ->
+    [RName | Fields] = tuple_to_list(R),
+    list_to_tuple([RName | [Fn(Field) || Field <- Fields]]).
 
 nif_enum_in_msg() ->
     with_tmpdir(
@@ -1558,6 +1627,23 @@ check_protoc_can_do_oneof() ->
             CanIt
     end.
 
+check_protoc_can_do_mapfields() ->
+    case get('$cached_check_protoc_can_do_mapfields') of
+        undefined ->
+            CanIt =
+                case find_protoc_version() of
+                    {ok, Vsn} ->
+                        Vsn >= [3,0];  %% map<_,_> appeared in 3.0.0
+                    {error, X} ->
+                        ?debugFmt("Trouble finding protoc version in ~s~n", [X]),
+                        false
+                end,
+            put('$cached_check_protoc_can_do_mapfields', CanIt),
+            CanIt;
+        CanIt ->
+            CanIt
+    end.
+
 find_protoc_version() ->
     Output = os:cmd(find_protoc() ++ " --version"),
     find_protoc_version_aux(string:tokens(Output, " \t\r\n"), Output).
@@ -1594,7 +1680,23 @@ get_ldflags() ->
     end ++ platform_ldflags(os:type()).
 
 msg_defs_to_proto(MsgDefs) ->
-    iolist_to_binary(lists:map(fun msg_def_to_proto/1, MsgDefs)).
+    iolist_to_binary([maybe_syntaxdef(MsgDefs),
+                      lists:map(fun msg_def_to_proto/1, MsgDefs)]).
+
+maybe_syntaxdef(MsgDefs) ->
+    case contains_any_maptype_field(MsgDefs) of
+        true  -> "syntax = \"proto2\";\n";
+        false -> ""
+    end.
+
+contains_any_maptype_field(MsgDefs) ->
+    lists:any(fun(Fields) ->
+                      lists:any(fun(#?gpb_field{type={map,_,_}}) -> true; 
+                                   (_) -> false
+                                end,
+                                Fields)
+              end,
+              [Fields || {{msg,_}, Fields} <- MsgDefs]).
 
 msg_def_to_proto({{enum, Name}, EnumValues}) ->
     f("enum ~s {~n~s}~n~n",
@@ -1608,7 +1710,13 @@ format_enumerator({N,V}) ->
 
 format_field(#?gpb_field{name=FName, fnum=FNum, type=Type,
                          occurrence=Occurrence}) ->
-    f("  ~s ~s ~s = ~w;~n", [Occurrence, format_type(Type), FName, FNum]);
+    case Type of
+        {map,_,_} ->
+            f("  ~s ~s = ~w;~n", [format_type(Type), FName, FNum]);
+        _ ->
+            f("  ~s ~s ~s = ~w;~n",
+              [Occurrence, format_type(Type), FName, FNum])
+    end;
 format_field(#gpb_oneof{name=FName, fields=Fields}) ->
     f("  oneof ~s {~n"
       "~s"
@@ -1619,7 +1727,10 @@ format_field(#gpb_oneof{name=FName, fields=Fields}) ->
 
 format_type({msg,Name})  -> Name;
 format_type({enum,Name}) -> Name;
-format_type(Type)        -> Type.
+format_type({map,KeyType,ValueType}) ->
+    f("map<~s,~s>", [format_type(KeyType), format_type(ValueType)]);
+format_type(Type) ->
+    Type.
 
 ccompile(F, A) ->
     Cmd = f(F, A),
@@ -1646,10 +1757,32 @@ mk_one_msg_field_of_each_type() ->
     TopMsgDef1 = {{msg, topmsg1}, mk_fields_of_type(EachType, required)},
     TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(EachType, repeated)},
     TopMsgDef3 = {{msg, topmsg3}, mk_fields_of_type(EachType, optional)},
-    OneofMsg1  = {{msg, oneof1},  mk_oneof_fields_of_type(EachType, 1)},
     StringMsg = {{msg,strmsg}, mk_fields_of_type([string], required)},
-    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3, StringMsg] ++
-     [OneofMsg1 || check_protoc_can_do_oneof()].
+    [EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, TopMsgDef3, StringMsg].
+
+mk_one_oneof_field_of_each_type() ->
+    EachType   = [sint32, sint64, int32, int64, uint32,
+                  uint64, bool, fixed64, sfixed64,
+                  double, string, bytes, fixed32, sfixed32,
+                  float, {enum, ee}, {msg, submsg1}],
+    EnumDef    = {{enum, ee}, [{en1, 1}, {en2, 2}]},
+    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], required)},
+    OneofMsg1  = {{msg, oneof1},  mk_oneof_fields_of_type(EachType, 1)},
+    [EnumDef, SubMsgDef, OneofMsg1].
+
+mk_one_map_field_of_each_type() ->
+    %% Reduced set of int types to shorten compilation times,
+    %% while still cover all code paths.
+    ValueTypes = [sint32, sint64, uint32, uint64,
+                  bool,
+                  double, string, bytes,
+                  float, {enum, ee}, {msg, submsg1}],
+    KeyTypes   = [T || T <- ValueTypes, gpb:is_allowed_as_key_type(T)],
+    %% Enum value in map must define 0 as the first value.
+    EnumDef    = {{enum, ee}, [{en0, 0}, {en1, 1}, {en2, 2}]},
+    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], required)},
+    MapMsg1    = {{msg, map1},  mk_map_fields_of_type(KeyTypes, ValueTypes)},
+    [EnumDef, SubMsgDef, MapMsg1].
 
 mk_fields_of_type(Types, Occurrence) ->
     Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
@@ -1673,6 +1806,16 @@ mk_oneof_fields_of_type(Types, Pos) ->
                               occurrence=optional,
                               opts=[]}
                   || {I, Type} <- index_seq(Types1)]}].
+
+mk_map_fields_of_type(KeyTypes, ValueTypes) ->
+    KeyTypes1 = [KT1 | _] = [T || T <- KeyTypes, can_do_nif_type(T)],
+    ValueTypes1 = [VT1 | _] = [T || T <- ValueTypes, can_do_nif_type(T)],
+    Fs1 = [#?gpb_field{type={map,KT1,VT}, occurrence=repeated, opts=[]}
+           || VT <- ValueTypes1],
+    Fs2 = [#?gpb_field{type={map,KT,VT1}, occurrence=repeated, opts=[]}
+           || KT <- KeyTypes1],
+    [F#?gpb_field{name=list_to_atom(lists:concat([f,I])), rnum=I+1, fnum=I}
+     || {I, F} <- index_seq(Fs1 ++ Fs2)].
 
 index_seq(L) -> lists:zip(lists:seq(1, length(L)), L).
 
@@ -1723,8 +1866,20 @@ mk_msg(MsgName, Defs, Variant) ->
 
 mk_field_value(#?gpb_field{occurrence=repeated}, _Defs, short) ->
     [];
-mk_field_value(#?gpb_field{occurrence=repeated}=F, Defs, Variant) ->
-    [mk_field_value(F#?gpb_field{occurrence=required}, Defs, Variant)];
+mk_field_value(#?gpb_field{occurrence=repeated, type=T}=F, Defs, Variant) ->
+    case T of
+        {map, KeyType, ValueType} ->
+            KF = F#?gpb_field{type=KeyType, occurrence=required},
+            VF = F#?gpb_field{type=ValueType, occurrence=required},
+            [begin
+                 K = mk_field_value(KF, Defs, Variant),
+                 V = mk_field_value(VF, Defs, Variant),
+                 {K, V}
+             end
+             || _ <- lists:seq(1,10)];
+        _ ->
+            [mk_field_value(F#?gpb_field{occurrence=required}, Defs, Variant)]
+    end;
 mk_field_value(#?gpb_field{type=sint32}, _Defs, Vnt)   -> mk_sint(32, Vnt);
 mk_field_value(#?gpb_field{type=sint64}, _Defs, Vnt)   -> mk_sint(64, Vnt);
 mk_field_value(#?gpb_field{type=int32}, _Defs, Vnt)    -> mk_sint(32, Vnt);
@@ -1740,33 +1895,57 @@ mk_field_value(#?gpb_field{type=bytes}, _Defs, Vnt)    -> mk_bytes(Vnt);
 mk_field_value(#?gpb_field{type=fixed32}, _Defs, Vnt)  -> mk_uint(32, Vnt);
 mk_field_value(#?gpb_field{type=sfixed32}, _Defs, Vnt) -> mk_sint(32, Vnt);
 mk_field_value(#?gpb_field{type=float}, _Defs, Vnt)    -> mk_float(32, Vnt);
-mk_field_value(#?gpb_field{type={enum, E}}, Defs, _Vnt) ->
-    {{enum, E}, [{E1 , _V1} | _Rest]} = lists:keyfind({enum, E}, 1, Defs),
-    E1;
+mk_field_value(#?gpb_field{type={enum, E}}, Defs, Variant) ->
+    {{enum, E}, [{E1 , _V1} | _Rest]=Es} = lists:keyfind({enum, E}, 1, Defs),
+    case Variant of
+        small_random ->
+            element(1,random_nth(Es));
+        _ ->
+            E1
+    end;
 mk_field_value(#?gpb_field{type={msg, SubMsgName}}, Defs, Vnt) ->
     mk_msg(SubMsgName, Defs, Vnt).
 
-mk_sint(32, small) -> - (1 bsl 31);
-mk_sint(32, big)   -> (1 bsl 31) - 1;
-mk_sint(64, small) -> - (1 bsl 63);
-mk_sint(64, big)   -> (1 bsl 63) - 1;
-mk_sint(_,  _)     -> 0.
+mk_sint(32, small)        -> - (1 bsl 31);
+mk_sint(32, big)          -> (1 bsl 31) - 1;
+mk_sint(64, small)        -> - (1 bsl 63);
+mk_sint(64, big)          -> (1 bsl 63) - 1;
+mk_sint(_,  small_random) -> random_int(-100, 100);
+mk_sint(_,  _)            -> 0.
 
-mk_uint(32, big)   -> (1 bsl 32) - 1;
-mk_uint(64, big)   -> (1 bsl 64) - 1;
-mk_uint(_,  _)     -> 0.
+mk_uint(32, big)          -> (1 bsl 32) - 1;
+mk_uint(64, big)          -> (1 bsl 64) - 1;
+mk_uint(_,  small_random) -> random_int(0, 100);
+mk_uint(_,  _)            -> 0.
 
-mk_bool(small) -> false;
-mk_bool(_)     -> true.
+mk_bool(small)        -> false;
+mk_bool(small_random) -> case random_int(0,1) of
+                             0 -> false;
+                             1 -> true
+                         end;
+mk_bool(_)            -> true.
 
-mk_string(short) -> "";
-mk_string(big)   -> [16#10ffff];
-mk_string(_)     -> "a".
+mk_string(short)        -> "";
+mk_string(big)          -> [16#10ffff];
+mk_string(small_random) -> [random_int($a, $z) || _ <- lists:seq(1,10)];
+mk_string(_)            -> "a".
 
-mk_bytes(short) -> <<>>;
-mk_bytes(_)     -> <<"b">>.
+mk_bytes(short)        -> <<>>;
+mk_bytes(small_random) -> list_to_binary(mk_string(small_random));
+mk_bytes(_)            -> <<"b">>.
 
-mk_float(_, _) -> 1.0.
+mk_float(_, small_random) -> float(random_int(-10, 10));
+mk_float(_, _)            -> 1.0.
+
+random_nth(Seq) ->
+    lists:nth(random_int(1, length(Seq)), Seq).
+
+random_int(LowerLim, UpperLim) ->
+    ensure_seeded(),
+    random:uniform(UpperLim - LowerLim + 1) + LowerLim - 1.
+
+ensure_seeded() ->
+    random:seed(os:timestamp()).
 
 %% --- command line options tests -----------------
 

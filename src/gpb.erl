@@ -23,6 +23,8 @@
 -export([encode_msg/2]).
 -export([merge_msgs/3]).
 -export([verify_msg/2, check_scalar/2]).
+-export([map_item_pseudo_fields/2]).
+-export([is_allowed_as_key_type/1]).
 -export([encode_varint/1, decode_varint/1, decode_varint/2]).
 -export([encode_wiretype/1, decode_wiretype/1]).
 -export([version_as_string/0, version_as_list/0]).
@@ -305,8 +307,14 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {N, Rest};
         float ->
             <<N:32/little-float, Rest/binary>> = Bin,
-            {N, Rest}
-    end.
+            {N, Rest};
+        {map,KeyType,ValueType} ->
+            MsgDefs1 = [map_item_tmp_def(KeyType, ValueType) | MsgDefs],
+            MsgName = map_item_tmp_name(),
+            {{MsgName,Key,Value}, Rest2} =
+                decode_type({msg, MsgName}, Bin, MsgDefs1),
+            {{Key,Value}, Rest2}
+        end.
 
 add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
@@ -323,6 +331,8 @@ add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
             setelement(RNum, Record, Value);
         #?gpb_field{rnum = RNum, occurrence = optional}->
             setelement(RNum, Record, Value);
+        #?gpb_field{rnum = RNum, occurrence = repeated, type={map,_,_}} ->
+            append_to_map(RNum, Value, Record);
         #?gpb_field{rnum = RNum, occurrence = repeated} ->
             append_to_element(RNum, Value, Record)
     end;
@@ -354,15 +364,29 @@ append_to_element(RNum, NewElem, Record) ->
     PrevElems = element(RNum, Record),
     setelement(RNum, Record, [NewElem | PrevElems]).
 
+append_to_map(RNum, {Key, _Value}=NewItem, Record) ->
+    PrevElems = element(RNum, Record),
+    NewElems = lists:keystore(Key, 1, PrevElems, NewItem),
+    setelement(RNum, Record, NewElems).
+
 merge_msgs(PrevMsg, NewMsg, MsgDefs)
   when element(1,PrevMsg) == element(1,NewMsg) ->
     MsgName = element(1, NewMsg),
     MsgDef = keyfetch({msg,MsgName}, MsgDefs),
     lists:foldl(
-      fun(#?gpb_field{rnum=RNum, occurrence=repeated}, AccRecord) ->
-              PrevSeq = element(RNum, AccRecord),
-              NewSeq  = element(RNum, NewMsg),
-              setelement(RNum, AccRecord, PrevSeq ++ NewSeq);
+      fun(#?gpb_field{rnum=RNum, occurrence=repeated, type=Type}, AccRecord) ->
+              case Type of
+                  {map,_,_} ->
+                      NewMap  = element(RNum, NewMsg),
+                      lists:foldl(
+                        fun(NewItem, R) -> append_to_map(RNum, NewItem, R) end,
+                        AccRecord,
+                        NewMap);
+                  _ ->
+                      PrevSeq = element(RNum, AccRecord),
+                      NewSeq  = element(RNum, NewMsg),
+                      setelement(RNum, AccRecord, PrevSeq ++ NewSeq)
+              end;
          (#?gpb_field{rnum=RNum, type={msg,_FieldMsgName}}, AccRecord) ->
               case {element(RNum, AccRecord), element(RNum, NewMsg)} of
                   {undefined, undefined} ->
@@ -539,7 +563,12 @@ encode_value(Value, Type, MsgDefs) ->
         sfixed32 ->
             <<Value:32/signed-little>>;
         float ->
-            <<Value:32/float-little>>
+            <<Value:32/float-little>>;
+        {map,KeyType,ValueType} ->
+            {Key,Value1} = Value,
+            MsgName = map_item_tmp_name(),
+            MsgDefs1 = [map_item_tmp_def(KeyType, ValueType) | MsgDefs],
+            encode_value({MsgName,Key,Value1}, {msg,MsgName}, MsgDefs1)
     end.
 
 
@@ -559,7 +588,8 @@ encode_wiretype(bytes)             -> 2;
 encode_wiretype({msg,_MsgName})    -> 2;
 encode_wiretype(fixed32)           -> 5;
 encode_wiretype(sfixed32)          -> 5;
-encode_wiretype(float)             -> 5.
+encode_wiretype(float)             -> 5;
+encode_wiretype({map,_KT,_VT}) -> encode_wiretype({msg,map_item_tmp_name()}).
 
 
 decode_varint(Bin) -> decode_varint(Bin, 64).
@@ -668,7 +698,8 @@ verify_value_2(V, double, Path, _MsgDefs)   -> verify_float(V, Path);
 verify_value_2(V, string, Path, _MsgDefs)   -> verify_string(V, Path);
 verify_value_2(V, bytes, Path, _MsgDefs)    -> verify_bytes(V, Path);
 verify_value_2(V, {enum,E}, Path, MsgDefs)  -> verify_enum(V, E, MsgDefs, Path);
-verify_value_2(V, {msg,M}, Path, MsgDefs)   -> verify_msg2(V, M, MsgDefs, Path).
+verify_value_2(V, {msg,M}, Path, MsgDefs)   -> verify_msg2(V, M, MsgDefs, Path);
+verify_value_2(V, {map,_,_}=M, Path, MsgDefs) -> verify_map(V, M, MsgDefs,Path).
 
 verify_int(V, {i,32}, _) when -(1 bsl 31) =< V, V =< (1 bsl 31 - 1) -> ok;
 verify_int(V, {i,64}, _) when -(1 bsl 63) =< V, V =< (1 bsl 63 - 1) -> ok;
@@ -717,6 +748,14 @@ verify_enum(V, EnumName, MsgDefs, Path) ->
         true  -> ok;
         false -> mk_type_error(bad_enum_value, V, Path)
     end.
+
+verify_map({Key,Value}, {map, KeyType, ValueType}, MsgDefs, Path) ->
+    MsgName = map_item_tmp_name(),
+    MsgDefs1 = [map_item_tmp_def(KeyType, ValueType) | MsgDefs],
+    MapAsMsg = {MsgName, Key, Value},
+    verify_msg2(MapAsMsg, MsgName, MsgDefs1, [mapitem | Path]);
+verify_map(V, _, _, Path) ->
+    mk_type_error(bad_map_item_value, V, Path).
 
 verify_list(Elems, Type, Path, MsgDefs) when is_list(Elems) ->
     lists:foreach(fun(Elem) -> verify_value_2(Elem, Type, Path, MsgDefs) end,
@@ -820,6 +859,25 @@ proplist_to_rpc_record(PL) when is_list(PL) ->
     Names = record_info(fields, ?gpb_rpc),
     RFields = [proplists:get_value(Name, PL) || Name <- Names],
     list_to_tuple([?gpb_rpc | RFields]).
+
+map_item_tmp_def(KeyType, ValueType) ->
+    {{msg, map_item_tmp_name()}, map_item_pseudo_fields(KeyType, ValueType)}.
+
+map_item_tmp_name() ->
+    '$mapitem'.
+
+map_item_pseudo_fields(KeyType, ValueType) ->
+    [#?gpb_field{name=key, fnum=1, rnum=2,
+                 occurrence=required, type=KeyType},
+     #?gpb_field{name=value, fnum=2, rnum=3,
+                 occurrence=required, type=ValueType}].
+
+is_allowed_as_key_type({enum,_}) -> false;
+is_allowed_as_key_type({msg,_}) -> false;
+is_allowed_as_key_type(double) -> false;
+is_allowed_as_key_type(float) -> false;
+is_allowed_as_key_type(bytes) -> false;
+is_allowed_as_key_type(_) -> true.
 
 %% --
 

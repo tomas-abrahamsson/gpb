@@ -260,6 +260,26 @@ resolve_refs_test() ->
      {{msg,m3},       [#?gpb_field{name=b, type={msg,'m1.m2'}}]}] =
         do_process_sort_defs(Elems).
 
+resolve_map_valuetype_refs_test() ->
+    {ok, Elems} = parse_lines(["message m1 {",
+                               "  message m2 { required uint32 x = 1; }",
+                               "  map<string, m2> b = 1;",
+                               "}"]),
+    [{{msg,m1},       [#?gpb_field{name=b, type={map,string,{msg,'m1.m2'}}}]},
+     {{msg,'m1.m2'},  [#?gpb_field{name=x}]}] =
+        do_process_sort_defs(Elems).
+
+error_for_map_in_oneof_test() ->
+    %% map<_,_> is encoded as if had it been a repeated (sub) message field,
+    %% but inside a oneof, "optional" is implicit for all fields,
+    %% so there cannot be a repeated field (such as a map<_,_>) inside
+    %% the oneof.
+    ?assertError(_, parse_lines(["message m1 {",
+                                 "  oneof x {",
+                                 "    map<string, m2> b = 1;",
+                                 "  };",
+                                 "}"])).
+
 resolve_refs_with_packages_test() ->
     {ok, Elems} = parse_lines(["package p1;"
                                "import \"a/b/c.proto\";",

@@ -27,6 +27,7 @@ Nonterminals
         opt_enum_opts enum_opts enum_opt
         message_def msg_elems msg_elem
         opt_field_opts field_opts field_opt occurrence type
+        map_type map_key_type
         package_def
         import_def
         identifiers
@@ -47,7 +48,7 @@ Terminals
         required optional repeated
         double float int32 int64 uint32
         uint64 sint32 sint64 fixed32 fixed64
-        sfixed32 sfixed64 bool string bytes
+        sfixed32 sfixed64 bool string bytes map
         identifier str_lit dec_lit oct_lit hex_lit float_lit bool_lit
         default
         import
@@ -57,7 +58,7 @@ Terminals
         service rpc returns
         packed deprecated
         syntax
-        '.' ';' '(' ')' '{' '}' '[' ']' '=' ','
+        '.' ';' '(' ')' '{' '}' '[' ']' '=' ',' '<' '>'
         .
 
 Rootsymbol
@@ -141,6 +142,18 @@ msg_elem -> occurrence type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
                                                     name=identifier_name('$3'),
                                                     fnum=literal_value('$5'),
                                                     opts='$7'}.
+msg_elem -> map_type fidentifier '=' dec_lit ';':
+                                        #?gpb_field{occurrence=repeated,
+                                                    type='$1',
+                                                    name=identifier_name('$2'),
+                                                    fnum=literal_value('$4')}.
+msg_elem -> map_type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
+                                        #?gpb_field{occurrence=repeated,
+                                                    type='$1',
+                                                    name=identifier_name('$2'),
+                                                    fnum=literal_value('$4'),
+                                                    opts='$6'}.
+
 msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
 msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
@@ -183,6 +196,8 @@ fidentifier -> rpc:                     kw_to_identifier('$1').
 fidentifier -> returns:                 kw_to_identifier('$1').
 fidentifier -> packed:                  kw_to_identifier('$1').
 fidentifier -> deprecated:              kw_to_identifier('$1').
+fidentifier -> syntax:                  kw_to_identifier('$1').
+fidentifier -> map:                     kw_to_identifier('$1').
 
 opt_field_opts -> field_opts:           '$1'.
 opt_field_opts -> '$empty':             [].
@@ -219,6 +234,22 @@ type -> bool:                           bool.
 type -> string:                         string.
 type -> bytes:                          bytes.
 type -> name:                           {ref, '$1'}.
+
+map_type -> map '<' map_key_type ',' type '>': {map,'$3','$5'}.
+
+map_key_type -> int32:                  int32.
+map_key_type -> int64:                  int64.
+map_key_type -> uint32:                 uint32.
+map_key_type -> uint64:                 uint64.
+map_key_type -> sint32:                 sint32.
+map_key_type -> sint64:                 sint64.
+map_key_type -> fixed32:                fixed32.
+map_key_type -> fixed64:                fixed64.
+map_key_type -> sfixed32:               sfixed32.
+map_key_type -> sfixed64:               sfixed64.
+map_key_type -> bool:                   bool.
+map_key_type -> string:                 string.
+%% missing from type: double | float | bytes | message name | enum name
 
 constant -> identifier:                 identifier_name('$1').
 constant -> integer:                    '$1'.
@@ -463,6 +494,15 @@ resolve_field_refs(Fields, Defs, Root, FullName, Reasons) ->
               case resolve_ref(Defs, Ref, Root, FullName) of
                   {found, TypeName} ->
                       {Field#?gpb_field{type=TypeName}, Acc};
+                  not_found ->
+                      Reason = {ref_to_undefined_msg_or_enum,
+                                {{FullName, FName}, Ref}},
+                      {Field, [Reason | Acc]}
+              end;
+         (#?gpb_field{name=FName, type={map,KeyType,{ref,Ref}}}=Field, Acc) ->
+              case resolve_ref(Defs, Ref, Root, FullName) of
+                  {found, TypeName} ->
+                      {Field#?gpb_field{type={map,KeyType,TypeName}}, Acc};
                   not_found ->
                       Reason = {ref_to_undefined_msg_or_enum,
                                 {{FullName, FName}, Ref}},
@@ -747,6 +787,8 @@ reformat_fields(Fields) ->
     lists:map(
       fun(#?gpb_field{type={T,Nm}}=F) ->
               F#?gpb_field{type={T,reformat_name(Nm)}};
+         (#?gpb_field{type={map,KeyType,{T,Nm}}}=F) ->
+              F#?gpb_field{type={map,KeyType,{T,reformat_name(Nm)}}};
          (#?gpb_field{}=F) ->
               F;
          (#gpb_oneof{fields=Fs}=O) ->
@@ -826,7 +868,11 @@ normalize_msg_field_options(Defs) ->
               Defs).
 
 normalize_field_options(Fields) ->
-    lists:map(fun(#?gpb_field{opts=Opts}=F) ->
+    lists:map(fun(#?gpb_field{type={map,_KeyType,_ValueType}, opts=Opts}=F) ->
+                      Opts1    = normalize_field_options_2(Opts),
+                      Opts2    = Opts1 -- [packed],
+                      F#?gpb_field{opts = Opts2};
+                 (#?gpb_field{opts=Opts}=F) ->
                       Opts1    = normalize_field_options_2(Opts),
                       F#?gpb_field{opts = Opts1};
                  (#gpb_oneof{fields=Fs}=O) ->
