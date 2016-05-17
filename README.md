@@ -196,6 +196,16 @@ Mapping of protocol buffer datatypes to erlang
 Interaction with rebar
 ----------------------
 
+For info on how to use gpb with rebar3, see
+https://www.rebar3.org/docs/using-available-plugins#section-using-gpb
+
+In rebar there is support for gpb since version 2.6.0. See the
+proto compiler section of rebar.sample.config file at
+https://github.com/rebar/rebar/blob/master/rebar.config.sample
+
+For older versions of rebar---prior to 2.6.0---the text below outlines
+how to proceed:
+
 Place the .proto files for instance in a `proto/` subdirectory.
 Any subdirectory, other than src/, is fine, since rebar will try to
 use another protobuf compiler for any .proto it finds in the src/
