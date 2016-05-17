@@ -122,12 +122,12 @@ the C++, Python and Java serializers/deserializers of protobuf-2.6.1rc1
                   |       |(speed)|(size) | (lite) |       |(size) | (speed)|
     --------------+-------+-------+-------+--------+-------+-------+--------+
     small msgs    |       |       |       |        |       |       |        |
-      serialize   | 44.32 | 1240  |   85  |   750  |  6.5  |   68  |  1290  |
-      deserialize | 59.62 |  880  |   85  |   950  |  5.5  |   90  |   450  |
+      serialize   |   52  | 1240  |   85  |   750  |  6.5  |   68  |  1290  |
+      deserialize |   69  |  880  |   85  |   950  |  5.5  |   90  |   450  |
     --------------+-------+-------+-------+--------+-------+-------+--------+
     large msgs    |       |       |       |        |       |       |        |
-      serialize   | 28.76 |  950  |   72  |   670  |  4.5  |   55  |   670  |
-      deserialize | 37.01 |  620  |   71  |   480  |  4.0  |   60  |   360  |
+      serialize   |   36  |  950  |   72  |   670  |  4.5  |   55  |   670  |
+      deserialize |   45  |  620  |   71  |   480  |  4.0  |   60  |   360  |
     --------------+-------+-------+-------+--------+-------+-------+--------+
 
 The performances are measured as number of processed MB/s,
@@ -139,7 +139,7 @@ bytes, respectively, in serialized form)
 The Java benchmark is run with optimization both for code size and for
 speed. The Python implementation cannot optimize for speed.
 
-    SW: Python 2.7.11, Java 1.8.0_77 (Oracle JDK), Erlang/OTP 17.3, g++ 5.3.1
+    SW: Python 2.7.11, Java 1.8.0_77 (Oracle JDK), Erlang/OTP 18.3, g++ 5.3.1
         Linux kernel 4.4, Debian (in 64 bit mode), protobuf-2.6.1rc1
     HW: Intel Core i7 5820k, 3.3GHz, 6x256 kB L2 cache, 15MB L3 cache
         (CPU frequency pinned to 3.3 GHz)
