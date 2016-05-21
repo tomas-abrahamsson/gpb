@@ -28,6 +28,9 @@
 main(Args) ->
     run_tests(Args).
 
+run_tests(["--echo", Str | Rest]) ->
+    io:format("~s~n", [Str]),
+    run_tests(Rest);
 run_tests([MsgModuleStr, MsgNameStr | MsgFileAndRest]) ->
     MsgModule = list_to_atom(MsgModuleStr),
     MsgName = list_to_atom(MsgNameStr),
