@@ -1776,13 +1776,16 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field, FVar,
                        Transforms);
                 {maps, omitted} ->
                     ?expr(
-                       case maps:find('fieldname', 'M') of
-                           error ->
-                               '<Bin>';
-                           {ok, '<F>'} ->
-                               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+                       case 'M' of
+                           '#{fieldname := <F>}' ->
+                               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>);
+                           _ ->
+                               '<Bin>'
                        end,
-                       [replace_tree('M', MsgVar) | Transforms])
+                       [replace_tree('M', MsgVar),
+                        replace_tree('#{fieldname := <F>}',
+                                     map_match([{FName,FVar}]))
+                        | Transforms])
             end;
         repeated ->
             ?expr(
@@ -1798,34 +1801,31 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field, FVar,
                '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>),
                Transforms)
     end;
-field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields}, FVar,
-                  PrevBVar, AnRes, Opts) ->
+field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
+                  FVar, PrevBVar, AnRes, Opts) ->
     OFVar = prefix_var("O", FVar),
-    OneofClauseTransform =
-        repeat_clauses(
-          '<oneof...>',
-          [begin
-               MatchPattern =
-                   case get_mapping_and_unset_by_opts(Opts) of
-                       X when X == records;
-                              X == {maps, present_undefined} ->
-                           ?expr({'<oneof-name>', '<OF>'},
-                                 [replace_term('<oneof-name>', Name),
-                                  replace_tree('<OF>', OFVar)]);
-                       {maps, omitted} ->
-                           ?expr({ok, {'<oneof-name>', '<OF>'}},
-                                 [replace_term('<oneof-name>', Name),
-                                  replace_tree('<OF>', OFVar)])
-                   end,
-               %% undefined is already handled, we have a match,
-               %% the field occurs, as if it had been required
-               OField2 = OField#?gpb_field{occurrence=required},
-               EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
-                                           PrevBVar, AnRes, Opts),
-               [replace_tree('<oneof...>', MatchPattern),
-                replace_tree('<expr>', EncExpr)]
+    OneofClauseTransforms =
+        [begin
+             OFVal = ?expr({'<oneof-name>', '<OF>'},
+                           [replace_term('<oneof-name>', Name),
+                            replace_tree('<OF>', OFVar)]),
+             MatchPattern =
+                 case get_mapping_and_unset_by_opts(Opts) of
+                     X when X == records;
+                            X == {maps, present_undefined} ->
+                         OFVal;
+                     {maps, omitted} ->
+                         map_match([{FName, OFVal}])
+                 end,
+             %% undefined is already handled, we have a match,
+             %% the field occurs, as if it had been required
+             OField2 = OField#?gpb_field{occurrence=required},
+             EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
+                                         PrevBVar, AnRes, Opts),
+             [replace_tree('<oneof...>', MatchPattern),
+              replace_tree('<expr>', EncExpr)]
            end
-           || #?gpb_field{name=Name}=OField <- OFields]),
+           || #?gpb_field{name=Name}=OField <- OFields],
     case get_mapping_and_unset_by_opts(Opts) of
         X when X == records;
                X == {maps, present_undefined} ->
@@ -1835,16 +1835,16 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields}, FVar,
                   end,
                   [replace_tree('<F>', FVar),
                    replace_tree('<Bin>', PrevBVar),
-                   OneofClauseTransform]);
+                   repeat_clauses('<oneof...>', OneofClauseTransforms)]);
         {maps, omitted} ->
-            ?expr(case maps:find('fieldname', 'M') of
-                      error        -> '<Bin>';
-                      '<oneof...>' -> '<expr>'
+            ?expr(case 'M' of
+                      '<oneof...>' -> '<expr>';
+                      _ -> '<Bin>'
                   end,
                   [replace_term('fieldname', FName),
                    replace_tree('M', MsgVar),
                    replace_tree('<Bin>', PrevBVar),
-                   OneofClauseTransform])
+                   repeat_clauses('<oneof...>', OneofClauseTransforms)])
     end.
 
 mk_field_encode_fn_name(MsgName, #?gpb_field{occurrence=repeated, name=FName})->
@@ -2867,12 +2867,16 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue, MsgName, AnRes, Opts) -
                                    replace_term('merge_msg_X', MergeFn),
                                    replace_tree('New', NewValue)]);
                         pass_as_record ->
-                            ?expr(case maps:find('fieldname', 'Msg') of
-                                      error -> 'New';
-                                      {ok, Prev} -> 'merge_msg_X'(Prev, 'New')
+                            FName = get_field_name(FieldDef),
+                            ?expr(case 'Msg' of
+                                      '#{fieldname := Prev}' ->
+                                          'merge_msg_X'(Prev, 'New');
+                                      _ ->
+                                          'New'
                                   end,
-                                  [replace_term('fieldname',
-                                                get_field_name(FieldDef)),
+                                  [replace_tree(
+                                     '#{fieldname := Prev}',
+                                     map_match([{FName, ?expr(Prev)}])),
                                    replace_tree('Msg', PrevValue),
                                    replace_term('merge_msg_X', MergeFn),
                                    replace_tree('New', NewValue)])
@@ -2919,15 +2923,16 @@ merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                                    replace_term('merge_msg_X', MergeFn),
                                    replace_tree('New', NewValue)]);
                         pass_as_record ->
-                            ?expr(case maps:find('fieldname', 'Msg') of
-                                      error ->
-                                          {'tag', 'New'};
-                                      {ok, {'tag', MVPrev}} ->
-                                          {'tag', 'merge_msg_X'(MVPrev, 'New')};
+                            OFVal = ?expr({tag, MVPrev},
+                                          [replace_term(tag, FName)]),
+                            ?expr(case 'Msg' of
+                                      '#{fieldname := {tag,MVPrev}}' ->
+                                          {'tag', 'merge_msg_X'(MVPrev,'New')};
                                       _ ->
                                           {'tag', 'New'}
                                   end,
-                                  [replace_term('fieldname', CFName),
+                                  [replace_tree('#{fieldname := {tag,MVPrev}}',
+                                                map_match([{CFName, OFVal}])),
                                    replace_term('tag', FName),
                                    replace_tree('Msg', MsgVar),
                                    replace_term('merge_msg_X', MergeFn),
@@ -3293,46 +3298,57 @@ render_field_merger({oneof, {{PF, NF}, OFMerges}}) ->
            | Transforms]).
 
 render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var) ->
-    ?expr(case {maps:find('fname', 'PMsg'), maps:find('fname', 'NMsg')} of
-              {error, error}  -> 'Var';
-              {_, {ok, 'NF'}} -> 'Var#{fname=>NF}';
-              {{ok, 'PF'}, _} -> 'Var#{fname=>PF}'
+    ?expr(case {'PMsg', 'NMsg'} of
+              {_, '#{fname := NF}'} -> 'Var#{fname=>NF}';
+              {'#{fname := PF}', _} -> 'Var#{fname=>PF}';
+              _                     -> 'Var'
           end,
           std_omitable_merge_transforms(PMsg, NMsg, FName, Var));
 render_omissible_merger({FName, {merge, {{PMsg, NMsg}, MergeFn}}}, Var) ->
     Trs = std_omitable_merge_transforms(PMsg, NMsg, FName, Var),
     MergeCall = ?expr('merge'('PF','NF'), [replace_term(merge,MergeFn) | Trs]),
-    ?expr(case {maps:find('fname', 'PMsg'), maps:find('fname', 'NMsg')} of
-              {error, error}           -> 'Var';
-              {error, {ok, 'NF'}}      -> 'Var#{fname=>NF}';
-              {{ok, 'PF'}, error}      -> 'Var#{fname=>PF}';
-              {{ok, 'PF'}, {ok, 'NF'}} -> 'Var#{fname=>merge(PF,NF)}'
+    ?expr(case {'PMsg', 'NMsg'} of
+              {'#{fname := PF}', '#{fname := NF}'} ->
+                  'Var#{fname=>merge(PF,NF)}';
+              {_, '#{fname := NF}'} ->
+                  'Var#{fname=>NF}';
+              {'#{fname := PF}', _} ->
+                  'Var#{fname=>PF}';
+              {_, _} ->
+                  'Var'
           end,
           [replace_term('merge', MergeFn),
            replace_tree('Var#{fname=>merge(PF,NF)}',
                         map_set(Var, [{FName,MergeCall}]))
            | Trs]);
 render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
-    OneofTransforms = [replace_tree('OPF', var("OPF~s", [FName])),
-                       replace_tree('ONF', var("ONF~s", [FName]))],
-    ?expr(case {maps:find('fname', 'PMsg'), maps:find('fname', 'NMsg')} of
-              {error, error} ->
-                  'Var';
-              '{{ok,{tag,OPF}},{ok,{tag,ONF}}}' ->
+    OPF = var("OPF~s", [FName]),
+    ONF = var("ONF~s", [FName]),
+    OneofTransforms = [replace_tree('OPF', OPF),
+                       replace_tree('ONF', ONF)],
+    ?expr(case {'PMsg', 'NMsg'} of
+              '{#{fname := {tag,OPF}}, #{fname := {tag,ONF}}}' ->
                   'Var#{fname=>{tag,merge(OPF,ONF)}}';
-              {_, {ok, 'NF'}} ->
+              {_, '#{fname := NF}'} ->
                   'Var#{fname=>NF}';
-              {{ok, 'PF'}, _} ->
-                  'Var#{fname=>PF}'
+              {'#{fname := PF}', _} ->
+                  'Var#{fname=>PF}';
+              {_, _} ->
+                  'Var'
           end,
           [repeat_clauses(
-             '{{ok,{tag,OPF}},{ok,{tag,ONF}}}',
+             '{#{fname := {tag,OPF}}, #{fname := {tag,ONF}}}',
              [begin
                   Trs2 = [replace_term('tag', OFName),
                           replace_term('merge', OFMergeFn)] ++ OneofTransforms,
+                  MmO = map_match([{FName, ?expr({'tag', 'OPF'}, Trs2)}]),
+                  MmN = map_match([{FName, ?expr({'tag', 'ONF'}, Trs2)}]),
                   MergeCall = ?expr({'tag','merge'('OPF','ONF')}, Trs2),
-                  [replace_tree('{{ok,{tag,OPF}},{ok,{tag,ONF}}}',
-                                ?expr({{ok,{'tag','OPF'}},{ok,{'tag','ONF'}}})),
+                  [replace_tree(
+                     '{#{fname := {tag,OPF}}, #{fname := {tag,ONF}}}',
+                     ?expr({'#{fname := {tag,OPF}}', '#{fname := {tag,ONF}}'},
+                           [replace_tree('#{fname := {tag,OPF}}', MmO),
+                            replace_tree('#{fname := {tag,ONF}}', MmN)])),
                    replace_tree('Var#{fname=>{tag,merge(OPF,ONF)}}',
                                 map_set(Var, [{FName,MergeCall}]))
                    | Trs2]
@@ -3350,7 +3366,9 @@ std_omitable_merge_transforms(PMsg, NMsg, FName, Var) ->
      replace_tree('NF', NF),
      replace_tree('Var', Var),
      replace_tree('Var#{fname=>NF}', map_set(Var, [{FName, NF}])),
-     replace_tree('Var#{fname=>PF}', map_set(Var, [{FName, PF}]))].
+     replace_tree('Var#{fname=>PF}', map_set(Var, [{FName, PF}])),
+     replace_tree('#{fname := NF}', map_match([{FName, NF}])),
+     replace_tree('#{fname := PF}', map_match([{FName, PF}]))].
 
 occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
     %% Note: order of evaluation below is important (the exprs of `andalso'):
@@ -3563,13 +3581,15 @@ field_verifier(#?gpb_field{name=FName, type=Type, occurrence=Occurrence},
                           end,
                           Replacements);
                 {maps, omitted} ->
-                    ?expr(case maps:find('<FName>', 'M') of
-                              error ->
-                                  ok;
-                              {ok, '<F>'} ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path])
+                    ?expr(case 'M' of
+                              '#{<FName> := <F>}' ->
+                                  '<verify-fn>'('<F>', ['<FName>' | Path]);
+                              _ ->
+                                  ok
                           end,
-                          [replace_tree('M', MsgVar) | Replacements])
+                          [replace_tree('#{<FName> := <F>}',
+                                        map_match([{FName, FVar}])),
+                           replace_tree('M', MsgVar) | Replacements])
             end
     end;
 field_verifier(#gpb_oneof{name=FName, fields=OFields}, FVar, MsgVar, Opts) ->
@@ -3607,17 +3627,18 @@ field_verifier(#gpb_oneof{name=FName, fields=OFields}, FVar, MsgVar, Opts) ->
                    || #?gpb_field{name=OFName, type=Type} <- OFields])]);
         {maps, omitted} ->
             ?expr(
-               case maps:find('<FName>', 'M') of
-                   error ->
-                       ok;
+               case 'M' of
                    '<oneof-pattern>' ->
                        '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path]);
-                   {ok, '<F>'} ->
-                       mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
+                   '#{<FName> := <F>}' ->
+                       mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path]);
+                   _ ->
+                       ok
                end,
                [replace_tree('<F>', FVar),
                 replace_term('<FName>', FName),
                 replace_tree('M', MsgVar),
+                replace_tree('#{<FName> := <F>}', map_match([{FName, FVar}])),
                 repeat_clauses(
                   '<oneof-pattern>',
                   [begin
@@ -3628,11 +3649,13 @@ field_verifier(#gpb_oneof{name=FName, fields=OFields}, FVar, MsgVar, Opts) ->
                                Type            -> mk_fn(v_type_, Type)
                            end,
                        OFVar = prefix_var("O", FVar),
+                       Trs1 = [replace_tree('<OFVar>', OFVar),
+                               replace_term('<OFName>', OFName)],
+                       OFPat = ?expr({'<OFName>','<OFVar>'}, Trs1),
                        [replace_tree('<oneof-pattern>',
-                                     ?expr({ok, {'<OFName>','<OFVar>'}})),
-                        replace_term('<verify-fn>', FVerifierFn),
-                        replace_tree('<OFVar>', OFVar),
-                        replace_term('<OFName>', OFName)]
+                                     map_match([{FName, OFPat}])),
+                        replace_term('<verify-fn>', FVerifierFn)
+                        | Trs1]
                    end
                    || #?gpb_field{name=OFName, type=Type} <- OFields])])
     end.
