@@ -26,18 +26,22 @@ ifdef NIFS
   nif_opt = -nif
   tmp/msg.beam: tmp/msg.nif.so
   tmp/d.beam: tmp/d.nif.so
+  PROTOBUF_CFLAGS ?= $(shell pkg-config --cflags protobuf)
+  PROTOBUF_LDFLAGS ?= $(shell pkg-config --libs protobuf)
+  PROTOC ?= $(shell which protoc)
 ifdef PROTOHOME
-  protohome = $(PROTOHOME)
+  PROTOBUF_CFLAGS := "-I$(PROTOHOME)/src"
+  PROTOBUF_LDFLAGS := "-L$(PROTOHOME)/src/.libs"
+  PROTOC ?= "$(PROTOHOME)/src/protoc"
 else
-  protohome = /usr/local/src/protobuf
-endif
-ifdef PROTOC
-  protoc = $(PROTOC)
-else
-  protoc = $(protohome)/src/protoc
+  PROTOBUF_CFLAGS ?= "-I/usr/local/src/protobuf/src"
+  PROTOBUF_LDFLAGS ?= "-L/usr/local/src/protobuf/src/.libs -lprotobuf -pthread -lpthread"
 endif
 else
   nif_opt =
+  undefine PROTOBUF_CFLAGS
+  undefine PROTOBUF_LDFLAGS
+  undefine PROTOC
 endif
 
 ifdef MAPS
@@ -46,9 +50,7 @@ else
   maps_opt =
 endif
 
-get_protolib = $(if $(shell grep 'option.*optimize_for.*LITE_RUNTIME' $(1)),protobuf-lite,protobuf)
-
-all:	benchmarks-code
+all: benchmarks-code
 
 benchmarks-code: tmp/msg.beam tmp/d.beam
 
@@ -69,14 +71,12 @@ tmp/%.beam: tmp/%.erl
 		$(patsubst tmp/%,%,$<)
 
 tmp/%.nif.so: %.proto
-	$(protoc) --cpp_out=tmp/ $*.proto
-	$(CXX) -g -fPIC -O3 -I$(protohome)/src -o tmp/$*.pb.o -c tmp/$*.pb.cc
-	$(CXX) -g -fPIC -Wall -O3 -I$(protohome)/src \
+	$(PROTOC) --cpp_out=tmp/ $*.proto
+	$(CXX) -g -fPIC -O3 $(PROTOBUF_CFLAGS) $(CXXFLAGS) -o tmp/$*.pb.o -c tmp/$*.pb.cc
+	$(CXX) -g -fPIC -Wall -O3 $(PROTOBUF_CFLAGS) $(CXXFLAGS) \
 	  -o tmp/$*.nif.o -c tmp/$*.nif.cc
-	$(CXX) -g -fPIC -shared -O3 -Wall -I$(protohome)/src -o $@ \
-	  tmp/$*.nif.o tmp/$*.pb.o \
-	  -L$(protohome)/src/.libs -l$(call get_protolib,$*.proto) \
-	  -Wl,-rpath=$(protohome)/src/.libs
+	$(CXX) -g -fPIC -shared -O3 -Wall $(PROTOBUF_CFLAGS) $(CXXFLAGS) -o $@ \
+	  tmp/$*.nif.o tmp/$*.pb.o $(PROTOBUF_LDFLAGS)
 clean:
 	$(RM) -r tmp
 
