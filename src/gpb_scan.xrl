@@ -120,6 +120,11 @@ Erlang code.
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% Eliminate a dialyzer warning like below:
+%% /usr/lib/erlang/lib/parsetools-2.1.1/include/leexinc.hrl:268:
+%%  Function yyrev/2 will never be called
+-dialyzer({nowarn_function, yyrev/2}).
+
 string_value(S) -> % S is with start+end quote
     %% Strip quotes.
     string_val_2(lists:sublist(S, 2, length(S) - 2)).
