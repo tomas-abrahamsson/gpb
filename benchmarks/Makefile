@@ -5,33 +5,20 @@ escript ?= escript
 # "HIPE_ERLC_OPTS=+'native' +'{hipe,[o3]}'"
 HIPE_ERLC_OPTS ?=
 
-# Example overrides if running with a cloned protobuf git repo:
-#
-#protohome ?= /usr/local/src/protobuf
-#protoinc  ?= $(protohome)/src
-#protolibs ?= $(protohome)/src/.libs
-#protoc    ?= $(protohome)/src/protoc
-
-protoc     ?= protoc
-protoinc   ?=
-protolibs  ?=
-
-ifeq ($(protoinc),)
-  protoinc_flags=
+PROTOBUF_CFLAGS  ?= $(shell pkg-config --cflags protobuf)
+PROTOBUF_LDFLAGS ?= $(shell pkg-config --libs protobuf)
+PROTOC           ?= $(shell which protoc)
+ifdef PROTOHOME
+  PROTOBUF_CFLAGS  := "-I$(PROTOHOME)/src"
+  PROTOBUF_LIBS    := $(PROTOHOME)/src/.libs
+  PROTOBUF_LDFLAGS := "-Wl,-rpath=$(PROTOBUF_LIBS)" "-L$(PROTOBUF_LIBS)" -lprotobuf -pthread -lpthread
+  PROTOC := "$(PROTOHOME)/src/protoc"
 else
-  protoinc_flags=-I$(protoinc)
+  PROTOBUF_CFLAGS  ?= "-I/usr/local/src/protobuf/src"
+  PROTOBUF_LIBS    ?= /usr/local/src/protobuf/src/.libs
+  PROTOBUF_LDFLAGS ?= "-Wl,-rpath=$(PROTOBUF_LIBS)" "-L$(PROTOBUF_LIBS)" -lprotobuf -pthread -lpthread
 endif
 
-ifeq ($(protolibs),)
-  protolibs_flags=
-  protolibs_ldflags=
-else
-  protolibs_flags=-L$(protolibs)
-  protolibs_ldflags=-Wl,-rpath=$(protolibs)
-endif
-
-
-get_protolib = $(if $(shell grep 'option.*optimize_for.*LITE_RUNTIME' $(1)),protobuf-lite,protobuf)
 
 all:	benchmarks-erl-code
 
@@ -83,16 +70,13 @@ tmp/%_mp.erl: %.proto
 		$(patsubst tmp/%,%,$<)
 
 tmp/%.nif.so: %.proto
-	$(protoc) --cpp_out=tmp/ $<
-	$(CXX) -g -fPIC -O3 $(protoinc_flags) \
-	       -o tmp/$*.pb.o \
-	       -c tmp/$*.pb.cc
-	$(CXX) -g -fPIC -Wall -O3 $(protoinc_flags) \
-	       -o tmp/$*.nif.o -c tmp/$*.nif.cc
-	$(CXX) -g -fPIC -shared -O3 -Wall $(protoinc_flags) -o tmp/$*.nif.so \
-	       tmp/$*.nif.o tmp/$*.pb.o \
-	       $(protolibs_flags) -l$(call get_protolib,$<) \
-	       $(protolibs_ldflags)
+	$(PROTOC) --cpp_out=tmp/ $*.proto
+	$(CXX) -g -fPIC -O3 $(PROTOBUF_CFLAGS) $(CXXFLAGS) \
+	  -o tmp/$*.pb.o -c tmp/$*.pb.cc
+	$(CXX) -g -fPIC -Wall -O3 $(PROTOBUF_CFLAGS) $(CXXFLAGS) \
+	  -o tmp/$*.nif.o -c tmp/$*.nif.cc
+	$(CXX) -g -fPIC -shared -O3 -Wall $(PROTOBUF_CFLAGS) $(CXXFLAGS) \
+	  -o $@ tmp/$*.nif.o tmp/$*.pb.o $(PROTOBUF_LDFLAGS)
 
 tmp/%.erl: %.proto
 	[ -d tmp ] || mkdir tmp
