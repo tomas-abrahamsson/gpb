@@ -29,7 +29,7 @@ Running a benchmark
    $ make HIPE=true
 
 3. Run the benchmarks:
-   $ make benchmark
+   $ make benchmarks
 
    This will call the proto-bench escript. Arguments are given in
    triples - the first is the module name; the second is the message
