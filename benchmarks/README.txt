@@ -25,8 +25,6 @@ Running a benchmark
 
 2. Build the benchmarking code (in this benchmarks directory)
    $ make
-   Alternatively, build with HiPE:
-   $ make HIPE=true
 
 3. Run the benchmarks:
    $ make benchmarks
@@ -36,6 +34,29 @@ Running a benchmark
    name, the third is the filename. For example:
    $ ./proto-bench \ msg Message1 google_message1.dat \
                      msg Message2 google_message2.dat
+
+   There are currently some alternative benchmarks one can run:
+
+   - make maps-benchmarks
+
+     This runs the same benchmarks (the google messages) with code
+     compiled for maps with maps_unset_optional = omitted
+
+   - make erl-benchamrks
+
+     Benchmark the google messages using records (suffix = _r), and
+     twice with maps; once with maps_unset_optional = omitted
+     (suffix = _mo) once with maps_unset_optional = present_undefined
+     (suffix = _mp) thus, the target "benchmarks" and "maps-benchmarks"
+     run subsets of this target.
+
+   - make nif-benchmarks
+
+     Benchmark the google messages using the nif bindings to Google's
+     libprotobuf
+
+   Please note that things here might change as development shifts,
+   for instance target names and variables, these names are super stable.
 
 4. Wait! Each test runs for around 30--35 seconds, and there are 2 tests
    per msg/data combination. The above command will take about
