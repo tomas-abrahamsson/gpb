@@ -398,15 +398,17 @@ proto_defs(Mod, Defs0, Opts0) ->
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs, Opts2),
-    case verify_opts(Opts2) of
-        ok ->
-            Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
-            return_or_report_warnings_or_errors(Res1, Warns, Opts2,
-                                                get_output_format(Opts2));
-        {error, OptError} ->
-            return_or_report_warnings_or_errors({error, OptError}, [], Opts2,
-                                                get_output_format(Opts2))
-    end.
+    %% In case verification of options might be necessary,
+    %% consider doing something like this or similar:
+    %%   case verify_opts(Opts2) of
+    %%       ok -> ...;
+    %%       {error, OptError} ->
+    %%           return_or_report_warnings_or_errors(
+    %%             {error, OptError}, [], Opts2, get_output_format(Opts2))
+    %%   end
+    Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
+    return_or_report_warnings_or_errors(Res1, Warns, Opts2,
+                                        get_output_format(Opts2)).
 
 
 %% @spec msg_defs(Mod, Defs) -> CompRet
@@ -448,10 +450,6 @@ do_proto_defs(Defs, Mod, AnRes, Opts) ->
                 {_, _, {error, R}} -> {error, {write_failed, NifCc,  R}}
             end
     end.
-
-verify_opts(_Opts) ->
-    %% placeholder for verifications
-    ok.
 
 return_or_report_warnings_or_errors(Res, ExtraWarns, Opts, OutFormat) ->
     Res2 = merge_warns(Res, ExtraWarns, OutFormat),
@@ -4308,9 +4306,7 @@ service_def_tree({{service, ServiceName}, Rpcs}, Opts) ->
     erl_syntax:tuple(
       [erl_syntax:tuple([erl_syntax:atom(service),
                          erl_syntax:atom(ServiceName)]),
-       rpcs_def_tree(Rpcs, Opts)]);
-service_def_tree(undefined, _) ->
-    erl_syntax:list([]).
+       rpcs_def_tree(Rpcs, Opts)]).
 
 get_rpc_format_by_opts(Opts) ->
     case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
@@ -5855,14 +5851,7 @@ format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs) ->
         {msg, Msg2Name} ->
             UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
             [?f("~s = ~s(env, &~s);\n",
-                [DestVar, UnpackFnName, SrcExpr])];
-        {map, KeyType, ValueType} ->
-            {KeyDest, ValueDest} = DestVar,
-            {KeyExpr, ValueExpr} = SrcExpr,
-            [format_nif_cc_field_unpacker_by_type(KeyDest, KeyExpr,
-                                                  KeyType, Defs),
-             format_nif_cc_field_unpacker_by_type(ValueDest, ValueExpr,
-                                                  ValueType, Defs)]
+                [DestVar, UnpackFnName, SrcExpr])]
     end.
 
 format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
