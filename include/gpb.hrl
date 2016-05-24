@@ -1,28 +1,52 @@
 -ifndef(gpb_hrl).
 -define(gpb_hrl, true).
 
--type gpb_map_key_type() ::
-        int32 | int64
-        | uint32 | uint64
-        | sint32 | sint64
-        | fixed32 | fixed64
-        | sfixed32 | sfixed64
+-type gpb_scalar() ::
+        int32 | int64 | uint32 | uint64 | sint32 | sint64
+        | fixed32 | fixed64 | sfixed32 | sfixed64
+        | bool
+        | float | double
+        | string
+        | bytes.
+
+-type gpb_map_key() :: % "any scalar type except floating point types and bytes"
+        int32 | int64 | uint32 | uint64 | sint32 | sint64
+        | fixed32 | fixed64 | sfixed32 | sfixed64
         | bool
         | string.
 
--type gpb_field_type() ::        %% Erlang type  Comment
-        'int32' | 'int64'         % integer()    variable-length encoded
-        | 'uint32' | 'uint64'     % integer()    variable-length encoded
-        | 'sint32' | 'sint64'     % integer()    variable-length zig-zag encoded
-        | 'fixed32' | 'fixed64'   % integer()    always 4 | 8 bytes on wire
-        | 'sfixed32' | 'sfixed64' % integer()    always 4 | 8 bytes on wire
-        | 'bool'                  % true | false
-        | 'float' | 'double'      % float()
-        | 'string'                % string()     UTF-8 encoded
-        | 'bytes'                 % binary()
-        | {'enum',atom()}         % atom()       the enum literal is the atom
-        | {'msg',atom()}          % record()     the msg name is record name
-        | {'map',gpb_map_key_type(), gpb_field_type()}. % [{K,V}] or map()
+%% It is not possible to have maps in maps directly,
+%% so this type is any gpb_field_type() except {map,K,V}.
+-type gpb_map_value() ::
+        gpb_scalar()
+        | {enum,atom()}
+        | {msg,atom()}.
+
+-type gpb_field_type() ::     %% Erlang type  Comment
+        int32 | int64         % integer()    variable-length encoded
+        | uint32 | uint64     % integer()    variable-length encoded
+        | sint32 | sint64     % integer()    variable-length zig-zag encoded
+        | fixed32 | fixed64   % integer()    always 4 | 8 bytes on wire
+        | sfixed32 | sfixed64 % integer()    always 4 | 8 bytes on wire
+        | bool                % true | false
+        | float | double      % float()
+        | string              % string()     UTF-8 encoded
+                              % | binary()   iff option `strings_as_binaries'
+        | bytes               % binary()
+        | {enum,atom()}       % atom()       the enum literal is the atom
+        | {msg,atom()}        % record()     the message name is record name
+                              % | map()      iff option `maps'
+        | {map,gpb_map_key(),gpb_map_value()}. % [{K,V}] | map()
+
+%% An intermediary type temporarily used internally within gpb during parsing,
+%% neither returned from gpb, nor accepted as input go gpb.
+-type gpb_internal_intermediary_ref() ::
+        {ref, term()} |
+        {msg, list()} |
+        {enum, list()}.
+
+-type gpb_internal_intermediary_map_ref() ::
+        {map, gpb_map_key(), gpb_map_value() | gpb_internal_intermediary_ref()}.
 
 %% The following two definitions (`gpb_field' and `gpb_rpc') are to
 %% avoid clashes with other code, since the `field' and `rpc' are
@@ -52,11 +76,10 @@
 -record(?gpb_field, % NB: record name is (currently) `field' (not `gpb_field')!
         {name               :: atom(),
          fnum               :: integer(),
-         rnum               :: pos_integer(), %% field number in the record
+         rnum               :: pos_integer(), % field number in the record
          type               :: gpb_field_type() |
-                               {ref,  term()} | %% intermediary, during parsing
-                               {msg,  list()} | %% intermediary, during parsing
-                               {enum, list()},  %% intermediary, during parsing
+                               gpb_internal_intermediary_ref() |
+                               gpb_internal_intermediary_map_ref(),
          occurrence         :: 'required' | 'optional' | 'repeated',
          opts      = []     :: [term()]
         }).
