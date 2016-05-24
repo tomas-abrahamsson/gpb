@@ -8,6 +8,8 @@
 /ebin/*.app
 # Rebar compiles tests and more to .eunit/
 /.eunit
+# Rebar build-plt saves it to .rebar/
+/.rebar
 # Generated from src/gpb_parse.xrl
 /src/gpb_parse.erl
 # Generated from src/gpb_scan.yrl
