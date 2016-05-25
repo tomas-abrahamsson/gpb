@@ -1,5 +1,24 @@
 -*- coding: utf-8 -*-
 
+Version 3.21.1
+2016-May-25
+
+	* Improve performance slightly for maps by replacing calls to
+	maps:find with map matching expressions. On the benchmarks, it
+	only yields a 2-7% speedup, but the generated code looks nicer.
+	* Refine the type definitions in gpb.hrl
+	* Make dialyzer happy about gpb. (It is also happy about generated
+	code.)
+	* Several benchmark updates:
+	-- Make it easier to run benchmarks for code generated with -maps.
+	-- Update the benchmarks/README.txt, thanks to Luke Bakken.
+	-- Use pkg-config if present to get protobuf lib information,
+	   thanks to Luke Bakken.
+	-- Use which to find protoc command, else use PROTOC or PROTOHOME,
+	   thanks to Luke Bakken.
+	-- Pass CXXFLAGS to C++ compiler so that include path to erl_nif.h
+	   can be specified, thanks to Luke Bakken.
+
 Version 3.21.0
 2016-May-17
 
