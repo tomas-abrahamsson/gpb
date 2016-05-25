@@ -2,8 +2,11 @@ erl     ?= erl
 erlc    ?= erlc
 escript ?= escript
 
-# "HIPE_ERLC_OPTS=+'native' +'{hipe,[o3]}'"
-HIPE_ERLC_OPTS ?=
+ifdef HIPE
+  HIPE_ERLC_OPTS := +'native' +'{hipe,[o3]}'
+else
+  HIPE_ERLC_OPTS :=
+endif
 
 PROTOBUF_CFLAGS  ?= $(shell pkg-config --cflags protobuf)
 PROTOBUF_LDFLAGS ?= $(shell pkg-config --libs protobuf)
