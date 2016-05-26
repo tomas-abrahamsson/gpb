@@ -3560,8 +3560,13 @@ field_verifier(#?gpb_field{name=FName, type=Type, occurrence=Occurrence},
                   Replacements);
         repeated when not IsMapField ->
             ?expr(if is_list('<F>') ->
-                          ['<verify-fn>'(Elem, ['<FName>' | Path])
-                           || Elem <- '<F>'];
+                          %% _ = [...] to avoid dialyzer error
+                          %% "Expression produces a value of type
+                          %% ['ok'], but this value is unmatched"
+                          %% with the -Wunmatched_returns flag.
+                          _ = ['<verify-fn>'(Elem, ['<FName>' | Path])
+                               || Elem <- '<F>'],
+                          ok;
                      true ->
                           mk_type_error(
                             {invalid_list_of, '<Type>'}, '<F>', Path)
