@@ -55,6 +55,11 @@ Running a benchmark
      Benchmark the google messages using the nif bindings to Google's
      libprotobuf
 
+   To run the benchmarks with HiPE-compiled code, set the HIPE
+   variable, for example like this:
+
+     make HIPE=1 erl-benchmarks
+
    Please note that things here might change as development shifts,
    for instance target names and variables, these names are super stable.
 
