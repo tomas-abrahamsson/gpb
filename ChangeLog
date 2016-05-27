@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 3.21.2
+2016-May-27
+
+	* Make it easier to HiPE compile benchmarks. Thanks to Luke
+	Bakken.
+	* Fix dialyzer error in the generated code, in verifiers for
+	repeated fields, with the -Wunmatched_returns flag to dialyzer.
+	Thanks to Luke Bakken for reporting this.
+
 Version 3.21.1
 2016-May-25
 
