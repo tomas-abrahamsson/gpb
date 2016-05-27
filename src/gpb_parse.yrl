@@ -821,21 +821,23 @@ reformat_rpcs(RPCs) ->
 
 %% `Defs' is expected to be flattened and may or may not be reformatted
 %% `Defs' is expected to be verified, to not extend missing messages
-extend_msgs(Defs) ->
-    [possibly_extend_msg(Def, Defs) || Def <- Defs,
-                                       not is_extended(Def, Defs)].
+extend_msgs(Defs0) ->
+    Extendings = [E || {{extend,_MsgToExtend},_MoreFields}=E <- Defs0],
+    lists:foldl(fun({{extend, _MsgToExtend}, _MoreFields}=Ext, Defs) ->
+                        possibly_extend_msg(Ext, Defs)
+                end,
+                Defs0,
+                Extendings).
 
-is_extended({{msg,Msg}, _Fields}, Defs) ->
-    lists:keymember({extend,Msg}, 1, Defs);
-is_extended(_OtherDef, _Defs) ->
-    false.
 
-possibly_extend_msg({{extend,Msg}, MoreFields}, Defs) ->
-    {value, {{msg,Msg}, OrigFields}} = lists:keysearch({msg,Msg}, 1, Defs),
-    {{msg,Msg}, OrigFields ++ MoreFields};
-possibly_extend_msg(OtherElem, _Defs) ->
-    OtherElem.
-
+possibly_extend_msg({{extend,Msg}, MoreFields}=Extending, Defs) ->
+    case lists:keyfind({msg,Msg}, 1, Defs) of
+        {{msg,Msg}, OrigFields} ->
+            NewDef = {{msg,Msg}, OrigFields ++ MoreFields},
+            lists:keyreplace({msg,Msg}, 1, Defs, NewDef) -- [Extending];
+        false ->
+            Defs
+    end.
 
 %% `Defs' is expected to be flattened
 enumerate_msg_fields(Defs) ->
