@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 3.21.3
+2016-May-30
+
+	* Add support for extending messages in other packages.  As part
+	of this, also fixup resolution of what 'extend' refers to.
+	Thanks to Steven Gravell for reporting and providing code
+	outlining the way to go.
+	* Fix a bug if a message is 'extend'ed more than once.
+
 Version 3.21.2
 2016-May-27
 
