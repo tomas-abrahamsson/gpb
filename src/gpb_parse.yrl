@@ -158,8 +158,8 @@ msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
 msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
 msg_elem -> oneof_def:                  '$1'.
-msg_elem -> extend identifier '{' msg_elems '}':
-                                 {{extend,identifier_name('$2')},'$4'}.
+msg_elem -> extend name '{' msg_elems '}':
+                                 {{extend,{eref1,'$2'}},'$4'}.
 
 fidentifier -> identifier:              '$1'.
 fidentifier -> package:                 kw_to_identifier('$1').
@@ -294,8 +294,8 @@ oneof_elem -> type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
                                                     fnum=literal_value('$4'),
                                                     opts='$6'}.
 
-extend_def -> extend identifier '{' msg_elems '}':
-                                        {{extend,identifier_name('$2')},'$4'}.
+extend_def -> extend name '{' msg_elems '}':
+                                        {{extend,{eref1,'$2'}},'$4'}.
 
 
 service_def -> service identifier '{' rpc_defs '}':
@@ -346,12 +346,13 @@ post_process_one_file(Defs, Opts) ->
     end.
 
 post_process_all_files(Defs, Opts) ->
-    case resolve_names(extend_msgs(Defs)) of
+    case resolve_names(Defs) of
         {ok, Defs2} ->
             {ok, possibly_prefix_suffix_msgs(
                    normalize_msg_field_options( %% Sort it?
                      enumerate_msg_fields(
-                       reformat_names(Defs2))),
+                       reformat_names(
+                         extend_msgs(Defs2)))),
                    Opts)};
         {error, Reasons} ->
             {error, Reasons}
@@ -375,12 +376,11 @@ resolve_names(Defs) ->
 %% may exist, and it can exist anywhere (top-level) in the proto file,
 %% yet it still applies to the whole file.
 find_package_def(Defs, Opts) ->
-    DefaultPkg = ['.'],
     case proplists:get_bool(use_packages, Opts) of
         true ->
             case [Pkg || {package, Pkg} <- Defs] of
                 [] ->
-                    {ok, DefaultPkg};
+                    {ok, empty_pkg_root()};
                 [Pkg] ->
                     {ok, ['.' | Pkg]};
                 Pkgs when length(Pkgs) >= 2 ->
@@ -388,8 +388,11 @@ find_package_def(Defs, Opts) ->
                     {error, [{multiple_pkg_specifiers, PrettyPkgs}]}
             end;
         false ->
-            {ok, DefaultPkg}
+            {ok, empty_pkg_root()}
     end.
+
+empty_pkg_root() ->
+    ['.'].
 
 %% For nested message definitions such as
 %% ```
@@ -433,10 +436,12 @@ flatten_qualify_defnames(Defs, Root) ->
                 [{{enum,FullName}, ENs} | Acc];
            ({extensions,Exts}, Acc) ->
                 [{{extensions,Root},Exts} | Acc];
-           ({{extend,Name}, FieldsOrDefs}, Acc) ->
-                FullName = prepend_path(Root, Name),
-                {Fields2, Defs2} = flatten_fields(FieldsOrDefs, FullName),
-                [{{extend,FullName},Fields2} | Defs2] ++ Acc;
+           ({{extend,{eref1,Name}}, FieldsOrDefs}, Acc) ->
+                FullNameCandidates =
+                    compute_roots(prepend_path(Root, Name)) ++
+                    compute_roots(prepend_path(empty_pkg_root(), Name)),
+                {Fields2, Defs2} = flatten_fields(FieldsOrDefs, Root),
+                [{{extend,{eref2,FullNameCandidates}},Fields2} | Defs2] ++ Acc;
            ({{service, Name}, RPCs}, Acc) ->
                 FullName = prepend_path(Root, Name),
                 [{{service,FullName}, RPCs} | Acc];
@@ -452,9 +457,8 @@ flatten_fields(FieldsOrDefs, FullName) ->
                             {[F | Fs], Ds};
                        (#gpb_oneof{}=O, {Fs,Ds}) ->
                             {[O | Fs], Ds};
-                       ({{extend, _Msg},_}=Def, {Fs,Ds}) ->
-                            QDefs = flatten_qualify_defnames(
-                                      [Def], drop_last_level(FullName)),
+                       ({{extend, _Ref},_}=Def, {Fs,Ds}) ->
+                            QDefs = flatten_qualify_defnames([Def], FullName),
                             {Fs, QDefs ++ Ds};
                        (Def, {Fs,Ds}) ->
                             QDefs = flatten_qualify_defnames([Def], FullName),
@@ -477,6 +481,11 @@ resolve_refs(Defs) ->
                   {NewRPCs, Acc2} =
                       resolve_rpc_refs(Rpcs, Defs, Root, FullName, Acc),
                   {{{service,FullName}, NewRPCs}, Acc2};
+             ({{extend,ExtendeeCandidates}, Fields}, Acc) ->
+                  {Extendee, NewFields, Acc2} =
+                      resolve_extend_refs(ExtendeeCandidates, Fields, Defs,
+                                          Root, Acc),
+                  {{{extend,Extendee}, NewFields}, Acc2};
              (OtherElem, Acc) ->
                   {OtherElem, Acc}
           end,
@@ -552,6 +561,17 @@ resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
       Reasons,
       Rpcs).
 
+resolve_extend_refs({eref2, ExtendeeCandidates}, Fields, Defs, Root, Acc) ->
+    case resolve_ref_candidates(Defs, ExtendeeCandidates) of
+        {found, {msg,NewToBeExtended}} ->
+            {NewFields, Acc2} =
+                resolve_field_refs(Fields, Defs, Root, ['.'], Acc),
+            {NewToBeExtended, NewFields, Acc2};
+        not_found ->
+            Reason = {extend_ref_to_undefined_msg, hd(ExtendeeCandidates)},
+            {hd(ExtendeeCandidates), Fields, [Reason | Acc]}
+    end.
+
 %% -> {found, {msg,FullName}|{enum,FullName}} | not_found
 resolve_ref(Defs, Ref, Root, FullName) ->
     case is_absolute_ref(Ref) of
@@ -562,6 +582,14 @@ resolve_ref(Defs, Ref, Root, FullName) ->
             PossibleRoots = compute_roots(FullName),
             find_ref_rootwards(PossibleRoots, Ref, Defs)
     end.
+
+resolve_ref_candidates(Defs, [Cand1 | Rest]) ->
+    case find_typename(Cand1, Defs) of
+        {found, TypeName} -> {found, TypeName};
+        not_found -> resolve_ref_candidates(Defs, Rest)
+    end;
+resolve_ref_candidates(_Defs, []) ->
+    not_found.
 
 find_ref_rootwards([PossibleRoot | Rest], Ref, Defs) ->
     FullRef = ensure_path_prepended(PossibleRoot, Ref),
@@ -719,6 +747,8 @@ fmt_err({multiple_pkg_specifiers, Pkgs}) ->
 fmt_err({ref_to_undefined_msg_or_enum, {{Msg, Field}, To}}) ->
     ?f("in msg ~s, field ~s: undefined reference  ~s",
        [name_to_dstr(Msg), name_to_dstr(Field), name_to_absdstr(To)]);
+fmt_err({extend_ref_to_undefined_msg, Msg}) ->
+    ?f("extend of unknown message ~s", [name_to_absdstr(Msg)]);
 fmt_err({rpc_return_ref_to_non_msg,
          {{FullName, RpcName, Return}, BadType, MReturn}}) ->
     ?f("in service ~s, rpc ~s, the return type, ~s, refers to "
@@ -773,6 +803,7 @@ reformat_names(Defs) ->
                  ({{extensions,Name}, Exts}) ->
                       {{extensions,reformat_name(Name)}, Exts};
                  ({{extend,Name}, Fields}) ->
+                      %% FIXME: extend
                       {{extend,reformat_name(Name)}, reformat_fields(Fields)};
                  ({{service,Name}, RPCs}) ->
                       {{service,reformat_name(Name)}, reformat_rpcs(RPCs)};
@@ -822,12 +853,8 @@ reformat_rpcs(RPCs) ->
 %% `Defs' is expected to be flattened and may or may not be reformatted
 %% `Defs' is expected to be verified, to not extend missing messages
 extend_msgs(Defs0) ->
-    Extendings = [E || {{extend,_MsgToExtend},_MoreFields}=E <- Defs0],
-    lists:foldl(fun({{extend, _MsgToExtend}, _MoreFields}=Ext, Defs) ->
-                        possibly_extend_msg(Ext, Defs)
-                end,
-                Defs0,
-                Extendings).
+    Extendings = [E || {{extend,_MsgToExtend},_Mor91eFields}=E <- Defs0],
+    lists:foldl(fun possibly_extend_msg/2, Defs0, Extendings).
 
 
 possibly_extend_msg({{extend,Msg}, MoreFields}=Extending, Defs) ->

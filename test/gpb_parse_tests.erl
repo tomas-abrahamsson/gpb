@@ -398,19 +398,47 @@ parses_extending_msgs_test() ->
                                    occurrence=optional}]}] =
         do_process_sort_defs(Defs).
 
-parses_nested_extending_msgs_test() ->
+parses_extend_scope_rules_test() ->
     {ok,Defs} = parse_lines(["message m1 {",
-                             "  required uint32 f1=1 [default=17];",
-                             "  extensions 200 to 299;",
-                             "  extend m1 {",
-                             "    optional uint32 f2=2;",
+                             "  required uint32 f1 = 1;",
+                             "  extensions 100 to 199;",
+                             "  message m1 {",
+                             "    required uint32 f2 = 2;",
+                             "    extensions 200 to 299;",
+                             "    message m1 {",
+                             "      required uint32 f3 = 3;",
+                             "      extensions 300 to 399;",
+
+                             %% This extends m1.m1.m1, ie the innermost m1
+                             %% Located in m1.m1.m1
+                             "      extend m1 {",
+                             "        optional string e31 = 301;",
+                             "      }",
+                             "    }",
                              "  }",
+
+                             %% This extends m1.m1, even though it is
+                             %% located in m1, not in m1.m1
+                             "  extend m1 {",
+                             "    optional string e21 = 201;",
+                             "  }",
+                             "}",
+
+                             "extend m1.m1 {",
+                             "  optional string e22 = 202;",
                              "}"]),
-    [{{extensions,m1},[{200,299}]},
-     {{msg,m1},       [#?gpb_field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
-                                   occurrence=required},
-                       #?gpb_field{name=f2, fnum=2, rnum=3, opts=[],
-                                   occurrence=optional}]}] =
+    [{{extensions,m1},[{100,199}]},
+     {{extensions,'m1.m1'},[{200,299}]},
+     {{extensions,'m1.m1.m1'},[{300,399}]},
+     {{msg,m1},
+      [#?gpb_field{name=f1,  fnum=1,   occurrence=required}]},
+     {{msg,'m1.m1'},
+      [#?gpb_field{name=f2,  fnum=2,   occurrence=required},
+       #?gpb_field{name=e21, fnum=201, occurrence=optional},
+       #?gpb_field{name=e22, fnum=202, occurrence=optional}]},
+     {{msg,'m1.m1.m1'},
+      [#?gpb_field{name=f3,  fnum=3,   occurrence=required},
+       #?gpb_field{name=e31, fnum=301, occurrence=optional}]}] =
         do_process_sort_defs(Defs).
 
 parses_extending_msgs_with_nested_msg_test() ->
@@ -469,6 +497,41 @@ extend_msg_several_times_test() ->
        #?gpb_field{name=f2, fnum=202, rnum=3, type=bool, occurrence=optional},
        #?gpb_field{name=f3, fnum=203, rnum=4, type=string, occurrence=optional}
       ]}] = do_process_sort_defs(Defs, []).
+
+extend_msg_in_other_package_test() ->
+    {ok, FooDefs} = parse_lines([%% foo.proto"
+                                 "package foo;",
+                                 "message fm1 {",
+                                 "    required int32 f = 1;",
+                                 "    extensions 100 to 199;",
+                                 "}",
+                                 "message fm2 {",
+                                 "    required bool g = 1;",
+                                 "}"]),
+    {ok, BarDefs} = parse_lines([%% bar.proto
+                                 "package bar;",
+                                 %% import "foo.proto"; % done implicitly
+                                 "extend foo.fm1 {",
+                                 "    optional string b1 = 100;",
+                                 "    optional foo.fm2 b2 = 101;",
+                                 "}"]),
+    Opts = [use_packages],
+    {ok, FooDefs2} = gpb_parse:post_process_one_file(FooDefs, Opts),
+    {ok, BarDefs2} = gpb_parse:post_process_one_file(BarDefs, Opts),
+    {ok, AllDefs} = gpb_parse:post_process_all_files(FooDefs2 ++ BarDefs2,
+                                                     Opts),
+
+    [{package,bar},
+     {package,foo},
+     {{extensions,'foo.fm1'},[{100,199}]},
+     {{msg,'foo.fm1'},
+      [#?gpb_field{name=f, fnum=1, type=int32, occurrence=required},
+       #?gpb_field{name=b1, fnum=100, type=string, occurrence=optional},
+       #?gpb_field{name=b2, fnum=101, type={msg,'foo.fm2'},
+                   occurrence=optional}]},
+     {{msg,'foo.fm2'},
+      [#?gpb_field{name=g, fnum=1, type=bool, occurrence=required}]}] =
+        lists:sort(AllDefs).
 
 parses_service_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
