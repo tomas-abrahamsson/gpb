@@ -142,6 +142,18 @@ msg_elem -> occurrence type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
                                                     name=identifier_name('$3'),
                                                     fnum=literal_value('$5'),
                                                     opts='$7'}.
+msg_elem -> type fidentifier '=' dec_lit ';': % proto3
+                                        #?gpb_field{occurrence=required,
+                                                    type='$1',
+                                                    name=identifier_name('$2'),
+                                                    fnum=literal_value('$4'),
+                                                    opts=[]}.
+msg_elem -> type fidentifier '=' dec_lit '[' opt_field_opts ']' ';': % proto3
+                                        #?gpb_field{occurrence=required,
+                                                    type='$1',
+                                                    name=identifier_name('$2'),
+                                                    fnum=literal_value('$4'),
+                                                    opts='$6'}.
 msg_elem -> map_type fidentifier '=' dec_lit ';':
                                         #?gpb_field{occurrence=repeated,
                                                     type='$1',
@@ -325,6 +337,8 @@ Erlang code.
 
 verify_syntax({str_lit, _Line, "proto2"}) ->
     {syntax, "proto2"};
+verify_syntax({str_lit, _Line, "proto3"}) ->
+    {syntax, "proto3"};
 verify_syntax({str_lit, Line, "proto"++_ = Unsupported}) ->
     return_error(Line, "Unsupported proto version: " ++ Unsupported);
 verify_syntax({str_lit, Line, Unsupported}) ->
@@ -340,7 +354,8 @@ literal_value({_TokenType, _Line, Value}) -> Value.
 post_process_one_file(Defs, Opts) ->
     case find_package_def(Defs, Opts) of
         {ok, Package} ->
-            {ok, flatten_qualify_defnames(Defs, Package)};
+            {ok, handle_proto_syntax_version(
+                   flatten_qualify_defnames(Defs, Package))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -605,6 +620,48 @@ ensure_path_prepended(Pkg, Path)   ->
         false -> prepend_path(Pkg, Path);
         true ->  Path
     end.
+
+handle_proto_syntax_version(Defs) ->
+    case proplists:get_value(syntax, Defs) of
+        undefined -> handle_proto2(Defs);
+        "proto2"  -> handle_proto2(Defs);
+        "proto3"  -> handle_proto3(Defs)
+    end.
+
+handle_proto2(Defs) ->
+    Defs.
+
+handle_proto3(Defs) ->
+    %% FIXME: Verify no 'extensions' or 'extend'
+    %% FIXME: Verify no 'required' occurrences
+    %% FIXME: Verify enums start with 0
+
+    %% The protobuf language guide for proto3 says: "In proto3,
+    %% repeated fields of scalar numeric types use packed encoding by
+    %% default."
+    default_repeated_to_packed(Defs).
+
+default_repeated_to_packed([{{msg,MsgName},Fields} | Rest]) ->
+    NewDef = {{msg,MsgName}, default_repeated_fields_to_packed(Fields)},
+    [NewDef | default_repeated_to_packed(Rest)];
+default_repeated_to_packed([Other | Rest]) ->
+    [Other | default_repeated_to_packed(Rest)];
+default_repeated_to_packed([]) ->
+    [].
+
+default_repeated_fields_to_packed(Fields) ->
+    lists:map(fun(#?gpb_field{occurrence=repeated, opts=Opts}=F) ->
+                      case proplists:get_value(packed, Opts) of
+                          undefined ->
+                              NewOpts = [{packed, true} | Opts],
+                              F#?gpb_field{opts=NewOpts};
+                          _ ->
+                              F
+                      end;
+                 (F) ->
+                      F
+              end,
+              Fields).
 
 %% Find inconsistencies
 %%

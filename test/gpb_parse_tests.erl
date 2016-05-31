@@ -24,8 +24,7 @@
 
 parses_syntax_test() ->
     {ok, [{syntax,"proto2"}]} = parse_lines(["syntax=\"proto2\";"]),
-    ?assertError({parse_error,_,{_LNum,_Module,_EMsg}},
-                 parse_lines(["syntax=\"proto3\";"])),
+    {ok, [{syntax,"proto3"}]} = parse_lines(["syntax=\"proto3\";"]),
     ?assertError({parse_error,_,{_LNum,_Module,_EMsg}},
                  parse_lines(["syntax=\"totally-unknonwn\";"])).
 
@@ -513,6 +512,35 @@ parses_empty_service_statement_method_options_test() ->
                              "service s1 { rpc r1(m1) returns (m1){;;;}; }"]),
     [{{msg,m1}, _},
      {{service,s1},[#?gpb_rpc{name=r1, input=m1, output=m1}]}] =
+        do_process_sort_defs(Defs).
+
+proto3_no_occurrence_test() ->
+    {ok,Defs} = parse_lines(["syntax=\"proto3\";",
+                             "message m1 {",
+                             "  uint32 f1=1;",
+                             "  repeated uint32 f2=2;",
+                             "}"]),
+    [{syntax,"proto3"},
+     {{msg,m1},
+      [#?gpb_field{name=f1,fnum=1,occurrence=required},
+       #?gpb_field{name=f2,fnum=2,occurrence=repeated}]}] =
+        do_process_sort_defs(Defs).
+
+proto3_no_repeated_are_packed_by_default_test() ->
+    {ok,Defs} = parse_lines(["syntax=\"proto3\";",
+                             "message m1 {",
+                             "  repeated uint32 f2=2;", % to be packed
+                             "  repeated uint32 f3=3 [packed=false];",
+                             "  repeated uint32 f4=4 [packed=true];",
+                             "  repeated uint32 f5=5 [packed];",
+                             "}"]),
+    [{syntax,"proto3"},
+     {{msg,m1},
+      [#?gpb_field{name=f2,fnum=2,occurrence=repeated,opts=[packed]},
+       #?gpb_field{name=f3,fnum=3,occurrence=repeated,opts=[]},
+       #?gpb_field{name=f4,fnum=4,occurrence=repeated,opts=[packed]},
+       #?gpb_field{name=f5,fnum=5,occurrence=repeated,opts=[packed]}
+      ]}] =
         do_process_sort_defs(Defs).
 
 fetches_imports_test() ->
