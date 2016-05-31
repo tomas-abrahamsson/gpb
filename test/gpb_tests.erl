@@ -588,6 +588,48 @@ encode_map_test() ->
       21, 18:32/little  %% value
     >> = encode_msg(#m1{a = [{"x",17},{"y",18}]}, Defs).
 
+-ifndef(gpb_compile_common_tests). % proto3 not yet implemented in gpb_compile
+proto3_type_default_values_never_serialized_test() ->
+    %% "... if a scalar message field is set to its default, the value
+    %% will not be serialized on the wire."
+    %% -- https://developers.google.com/protocol-buffers/docs/proto3#default
+    %%
+    %% Assuming for oneof it means default = undefined (but I couldn't
+    %% find any mention of this in the official protobuf docs)
+    Defs = [{syntax,"proto3"},
+            {proto3_msgs,[m,s]},
+            {{enum,e}, [{e0,0},{e1,1}]},
+            {{msg,s}, % submsg
+             [#?gpb_field{name=a, fnum=1, rnum=2, type=string,
+                          occurrence=required, opts=[]}]},
+            {{msg,m},
+             [#?gpb_field{name=a, fnum=1, rnum=2, type=string,
+                          occurrence=required, opts=[]},
+              #?gpb_field{name=b, fnum=2, rnum=3, type=bytes,
+                          occurrence=required, opts=[]},
+              #?gpb_field{name=c, fnum=3, rnum=4, type=bool,
+                          occurrence=required, opts=[]},
+              #?gpb_field{name=d, fnum=4, rnum=5, type=uint32,
+                          occurrence=required, opts=[]},
+              #?gpb_field{name=e, fnum=5, rnum=6, type=float,
+                          occurrence=required, opts=[]},
+              #?gpb_field{name=f, fnum=6, rnum=7, type=double,
+                          occurrence=required, opts=[]},
+              #?gpb_field{name=g, fnum=7, rnum=8, type={msg,s},
+                          occurrence=optional, opts=[]},
+              #gpb_oneof{
+                 name=h, rnum=9,
+                 fields=[#?gpb_field{name=ha, fnum=8, rnum=9, type=uint32,
+                                     occurrence=optional, opts=[]}]}]}],
+    Msg = {m,"",<<>>,false, % string, bytes, bool
+           0,               % numeric types
+           0.0, 0.0,        % float, double
+           undefined,       % submsg
+           undefined},      % oneof
+    <<>> = encode_msg(Msg, Defs),
+    Msg = decode_msg(<<>>, m, Defs).
+-endif.
+
 %% -------------------------------------------------------------
 
 merging_second_required_integer_overrides_first_test() ->
@@ -963,6 +1005,14 @@ verify_invalid_map_fails_test() ->
     ?verify_gpb_err(verify_msg(#m1{a = [{16,"x"}]}, Defs)), %% wrong key type
     ?verify_gpb_err(verify_msg(#m1{a = [{"x","wrong value type"}]}, Defs)).
 
+-ifndef(gpb_compile_common_tests). % proto3 not yet implemented in gpb_compile
+verify_proto3_fields_mandatory_test() ->
+    Defs = [{syntax,"proto3"},
+            {proto3_msgs,[m1]},
+            {{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a, type=uint32,
+                                    occurrence=required, opts=[]}]}],
+    ?verify_gpb_err(verify_msg(#m1{a = undefined}, Defs)).
+-endif.
 
 verify_path_when_failure_test() ->
     MsgDefs = [{{msg,m1}, [#?gpb_field{name=a,fnum=1,rnum=#m1.a,

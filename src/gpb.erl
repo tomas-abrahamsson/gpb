@@ -25,6 +25,7 @@
 -export([verify_msg/2, check_scalar/2]).
 -export([map_item_pseudo_fields/2]).
 -export([is_allowed_as_key_type/1]).
+-export([is_msg_proto3/2, proto3_type_default/2]).
 -export([encode_varint/1, decode_varint/1, decode_varint/2]).
 -export([encode_wiretype/1, decode_wiretype/1]).
 -export([version_as_string/0, version_as_list/0]).
@@ -140,13 +141,22 @@ decode_msg(Bin, MsgName, MsgDefs) ->
 
 new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
     MsgDef = keyfetch(MsgKey, MsgDefs),
+    IsProto3 = is_msg_proto3(MsgName, MsgDefs),
     lists:foldl(fun(#?gpb_field{rnum=RNum, occurrence=repeated}, Record) ->
                         setelement(RNum, Record, []);
                    (#?gpb_field{type={msg,_Name}, occurrence=optional}, Record)->
                         Record;
                    (#?gpb_field{rnum=RNum, type={msg,_Name}=FMsgKey}, Record) ->
-                        SubMsg = new_initial_msg(FMsgKey, MsgDefs),
-                        setelement(RNum, Record, SubMsg);
+                        if not IsProto3 ->
+                                SubMsg = new_initial_msg(FMsgKey, MsgDefs),
+                                setelement(RNum, Record, SubMsg);
+                           IsProto3 ->
+                                Record
+                        end;
+                   (#?gpb_field{type=Type, occurrence=required, rnum=RNum},
+                    Record) when IsProto3 ->
+                        Default = proto3_type_default(Type, MsgDefs),
+                        setelement(RNum, Record, Default);
                    (#?gpb_field{}, Record) ->
                         Record;
                    (#gpb_oneof{}, Record) ->
@@ -480,7 +490,14 @@ encode_packed_2([], _Type, _MsgDefs, Acc) ->
 
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
              Msg, MsgDefs) ->
-    encode_field_value(element(RNum, Msg), FNum, Type, MsgDefs);
+    Value = element(RNum, Msg),
+    case is_msg_proto3(element(1, Msg), MsgDefs)
+        andalso proto3_type_default(Type, MsgDefs) =:= Value of
+        true ->
+            <<>>;
+        false ->
+            encode_field_value(Value, FNum, Type, MsgDefs)
+    end;
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=optional},
              Msg, MsgDefs) ->
     case element(RNum, Msg) of
@@ -876,6 +893,38 @@ is_allowed_as_key_type(_) -> true.
 
 is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
+
+is_msg_proto3(Name, MsgDefs) ->
+    case lists:keyfind(proto3_msgs, 1, MsgDefs) of
+        {proto3_msgs, Names} ->
+            lists:member(Name, Names);
+        false ->
+            false
+    end.
+
+proto3_type_default(Type, MsgDefs) ->
+    case Type of
+        sint32   -> 0;
+        sint64   -> 0;
+        int32    -> 0;
+        int64    -> 0;
+        uint32   -> 0;
+        uint64   -> 0;
+        bool     -> false;
+        fixed64  -> 0;
+        sfixed64 -> 0;
+        double   -> 0.0;
+        string   -> "";
+        bytes    -> <<>>;
+        {msg,_}  -> undefined;
+        fixed32  -> 0;
+        sfixed32 -> 0;
+        float    -> 0.0;
+        {map,_KT,_VT} -> [];
+        {enum, _EnumName}=Key ->
+            {Key,[{Sym0,_V0} | _]} = lists:keyfind(Key, 1, MsgDefs),
+            Sym0
+    end.
 
 keyfetch(Key, KVPairs) ->
     case lists:keysearch(Key, 1, KVPairs) of
