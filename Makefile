@@ -223,6 +223,11 @@ $(test)/gpb_codegen_tests.beam: $(ebin)/gpb_codegen.beam
 # To compile gpb.erl, we need gpb_include.hrl
 $(ebin)/gpb.beam: $(src)/gpb.erl $(incdir)/gpb_version.hrl
 
+# gpb_compile_tests.erl includes gpb_tests.erl (see the files for details
+# on this unorthodox setup), this dependency needs to be recorded
+$(test)/gpb_compile_tests.beam: $(test)/gpb_compile_tests.erl \
+				$(test)/gpb_tests.erl
+
 # To compile the description generator, we
 # must first have compiled the proto file for the gpb_description.proto
 descr_encoder = $(patsubst %.proto,%.erl,$(DESCR_PROTO))
