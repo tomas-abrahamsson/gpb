@@ -1671,17 +1671,17 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
         smember({enum,EnumName}, UsedTypes)].
 
 format_msg_encoders(Defs, AnRes, Opts, IncludeStarter) ->
-    [[format_msg_encoder(MsgName, MsgDef, AnRes, Opts, IncludeStarter)
+    [[format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter)
       || {{msg, MsgName}, MsgDef} <- Defs],
      format_special_field_encoders(Defs, AnRes)].
 
-format_msg_encoder(MsgName, [], _AnRes, _Opts, _IncludeStarter) ->
+format_msg_encoder(MsgName, [], _Defs, _AnRes, _Opts, _IncludeStarter) ->
     gpb_codegen:format_fn(
       mk_fn(e_msg_, MsgName),
       fun(_Msg) ->
               <<>>
       end);
-format_msg_encoder(MsgName, MsgDef, AnRes, Opts, IncludeStarter) ->
+format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
     FNames = get_field_names(MsgDef),
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
     BVars = [var_b_n(I) || I <- lists:seq(1, length(FNames)-1)] ++ [last],
@@ -1690,14 +1690,16 @@ format_msg_encoder(MsgName, MsgDef, AnRes, Opts, IncludeStarter) ->
         lists:mapfoldl(
           fun({NewBVar, Field, FVar}, PrevBVar) when NewBVar /= last ->
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
-                                              PrevBVar, AnRes, Opts),
+                                              PrevBVar, Defs, AnRes, Opts,
+                                              p3_check_typedefaults),
                   E = ?expr('<NewB>' = '<encode-expr>',
                             [replace_tree('<NewB>', NewBVar),
                              replace_tree('<encode-expr>', EncExpr)]),
                   {E, NewBVar};
              ({last, Field, FVar}, PrevBVar) ->
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
-                                              PrevBVar, AnRes, Opts),
+                                              PrevBVar, Defs, AnRes, Opts,
+                                              p3_check_typedefaults),
                   {EncExpr, dummy}
           end,
           ?expr(Bin),
@@ -1751,8 +1753,8 @@ zip_for_non_opt_fields([#gpb_oneof{} | FRest], [_Elem | ERest]) ->
 zip_for_non_opt_fields([], []) ->
     [].
 
-field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field, FVar,
-                  PrevBVar, AnRes, Opts)->
+field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
+                  FVar, PrevBVar, Defs, AnRes, Opts, P3TypeDefaultHandling)->
     FEncoder = mk_field_encode_fn_name(MsgName, Field),
     #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum, name=FName}=Field,
     TrFVar = prefix_var("Tr", FVar),
@@ -1795,12 +1797,35 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field, FVar,
                end,
                Transforms);
         required ->
-            ?expr(
-               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>),
-               Transforms)
+            case gpb:is_msg_proto3(MsgName, Defs) of
+                true when P3TypeDefaultHandling == p3_check_typedefaults,
+                          Type /= string ->
+                    TypeDefault = gpb:proto3_type_default(Type, Defs),
+                    ?expr(
+                       if '<F>' =:= '<TypeDefault>' ->
+                               '<Bin>';
+                          true ->
+                               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+                       end,
+                       [replace_term('<TypeDefault>', TypeDefault)
+                        | Transforms]);
+                true when P3TypeDefaultHandling == p3_check_typedefaults,
+                          Type == string ->
+                    ?expr(case iolist_size('<F>') of
+                              0 ->
+                                  '<Bin>';
+                              _ ->
+                                  '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+                          end,
+                          Transforms);
+                _not_proto3_or_no_check_for_typedefaults ->
+                    ?expr(
+                       '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>),
+                       Transforms)
+            end
     end;
-field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields}, FVar,
-                  PrevBVar, AnRes, Opts) ->
+field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
+                  FVar, PrevBVar, Defs, AnRes, Opts, _P3TypeDefaultHandling) ->
     OFVar = prefix_var("O", FVar),
     OneofClauseTransform =
         repeat_clauses(
@@ -1822,7 +1847,8 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields}, FVar,
                %% the field occurs, as if it had been required
                OField2 = OField#?gpb_field{occurrence=required},
                EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
-                                           PrevBVar, AnRes, Opts),
+                                           PrevBVar, Defs, AnRes, Opts,
+                                           no_typedefault_checking),
                [replace_tree('<oneof...>', MatchPattern),
                 replace_tree('<expr>', EncExpr)]
            end
@@ -2219,15 +2245,15 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
         smember({enum,EnumName}, UsedTypes)].
 
 format_msg_decoders(Defs, AnRes, Opts) ->
-    [format_msg_decoder(MsgName, MsgDef, AnRes, Opts)
+    [format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts)
      || {{msg, MsgName}, MsgDef} <- Defs].
 
-format_msg_decoder(MsgName, MsgDef, AnRes, Opts) ->
-    [format_msg_decoder_read_field(MsgName, MsgDef, AnRes, Opts),
+format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    [format_msg_decoder_read_field(MsgName, MsgDef, Defs, AnRes, Opts),
      format_field_decoders(MsgName, MsgDef, AnRes, Opts),
      format_field_skippers(MsgName, AnRes)].
 
-format_msg_decoder_read_field(MsgName, MsgDef, AnRes, Opts) ->
+format_msg_decoder_read_field(MsgName, MsgDef, Defs, AnRes, Opts) ->
     Key = ?expr(Key),
     Rest = ?expr(Rest),
     {Params, FParams, FParamBinds} =
@@ -2237,17 +2263,18 @@ format_msg_decoder_read_field(MsgName, MsgDef, AnRes, Opts) ->
                              {'<FFields>', FParamBinds},
                              {'<Key>', Key},
                              {'<Rest>', Rest}]),
-    [format_msg_init_decoder(MsgName, MsgDef, AnRes, Opts),
+    [format_msg_init_decoder(MsgName, MsgDef, Defs, AnRes, Opts),
      format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts),
      format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts)].
 
-format_msg_init_decoder(MsgName, MsgDef, AnRes, Opts) ->
+format_msg_init_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     gpb_codegen:format_fn(
       mk_fn(d_msg_, MsgName),
       fun(Bin) -> '<decode-field-fp>'(Bin, 0, 0, '<initial-params>') end,
       [replace_term('<decode-field-fp>', mk_fn(dfp_read_field_def_, MsgName)),
        splice_trees('<initial-params>',
-                    msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts))]).
+                    msg_decoder_initial_params(MsgName, MsgDef, Defs,
+                                               AnRes, Opts))]).
 
 format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The fast-path decoder directly matches the minimal varint form
@@ -2305,13 +2332,22 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
                     decoder_finalize_result(Params, FFields,
                                             MsgName, MsgDef, AnRes, Opts))]).
 
-msg_decoder_initial_params(MsgName, MsgDef, AnRes, Opts) ->
+msg_decoder_initial_params(MsgName, MsgDef, Defs, AnRes, Opts) ->
     ExprInfos1 =
         [case Field of
-             #?gpb_field{name=FName, occurrence=Occurrence} ->
+             #?gpb_field{name=FName, occurrence=Occurrence, type=Type} ->
+                 {Undefined, Undef} =
+                     case gpb:is_msg_proto3(MsgName, Defs) of
+                         true ->
+                             TD = proto3_type_default(Type, Defs, Opts),
+                             ATD = erl_syntax:abstract(TD),
+                             {ATD, ATD};
+                         false ->
+                             {?expr(undefined), ?expr('$undef')}
+                     end,
                  case Occurrence of
                      repeated -> {FName, m, ?expr([]),        ?expr([])};
-                     required -> {FName, o, ?expr(undefined), ?expr('$undef')};
+                     required -> {FName, o, Undefined,        Undef};
                      optional -> {FName, o, ?expr(undefined), ?expr('$undef')}
                  end;
              #gpb_oneof{name=FName} ->
@@ -6399,6 +6435,18 @@ repeat_clauses(Marker, RepetitionReplacements) ->
 
 get_strings_as_binaries_by_opts(Opts) ->
     proplists:get_bool(strings_as_binaries, Opts).
+
+proto3_type_default(Type, Defs, Opts) ->
+    if Type == string ->
+            case get_strings_as_binaries_by_opts(Opts) of
+                true ->
+                    list_to_binary(gpb:proto3_type_default(Type, Defs));
+                false ->
+                    gpb:proto3_type_default(Type, Defs)
+            end;
+       Type /= string ->
+            gpb:proto3_type_default(Type, Defs)
+    end.
 
 flatten_iolist(IoList) ->
     binary_to_list(iolist_to_binary(IoList)).

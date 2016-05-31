@@ -588,7 +588,6 @@ encode_map_test() ->
       21, 18:32/little  %% value
     >> = encode_msg(#m1{a = [{"x",17},{"y",18}]}, Defs).
 
--ifndef(gpb_compile_common_tests). % proto3 not yet implemented in gpb_compile
 proto3_type_default_values_never_serialized_test() ->
     %% "... if a scalar message field is set to its default, the value
     %% will not be serialized on the wire."
@@ -628,7 +627,6 @@ proto3_type_default_values_never_serialized_test() ->
            undefined},      % oneof
     <<>> = encode_msg(Msg, Defs),
     Msg = decode_msg(<<>>, m, Defs).
--endif.
 
 %% -------------------------------------------------------------
 
@@ -1005,14 +1003,12 @@ verify_invalid_map_fails_test() ->
     ?verify_gpb_err(verify_msg(#m1{a = [{16,"x"}]}, Defs)), %% wrong key type
     ?verify_gpb_err(verify_msg(#m1{a = [{"x","wrong value type"}]}, Defs)).
 
--ifndef(gpb_compile_common_tests). % proto3 not yet implemented in gpb_compile
 verify_proto3_fields_mandatory_test() ->
     Defs = [{syntax,"proto3"},
             {proto3_msgs,[m1]},
             {{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a, type=uint32,
                                     occurrence=required, opts=[]}]}],
     ?verify_gpb_err(verify_msg(#m1{a = undefined}, Defs)).
--endif.
 
 verify_path_when_failure_test() ->
     MsgDefs = [{{msg,m1}, [#?gpb_field{name=a,fnum=1,rnum=#m1.a,
