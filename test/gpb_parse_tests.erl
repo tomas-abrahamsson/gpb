@@ -520,7 +520,8 @@ proto3_no_occurrence_test() ->
                              "  uint32 f1=1;",
                              "  repeated uint32 f2=2;",
                              "}"]),
-    [{syntax,"proto3"},
+    [{proto3_msgs,[m1]},
+     {syntax,"proto3"},
      {{msg,m1},
       [#?gpb_field{name=f1,fnum=1,occurrence=required},
        #?gpb_field{name=f2,fnum=2,occurrence=repeated}]}] =
@@ -534,7 +535,8 @@ proto3_no_repeated_are_packed_by_default_test() ->
                              "  repeated uint32 f4=4 [packed=true];",
                              "  repeated uint32 f5=5 [packed];",
                              "}"]),
-    [{syntax,"proto3"},
+    [{proto3_msgs,[m1]},
+     {syntax,"proto3"},
      {{msg,m1},
       [#?gpb_field{name=f2,fnum=2,occurrence=repeated,opts=[packed]},
        #?gpb_field{name=f3,fnum=3,occurrence=repeated,opts=[]},
@@ -542,6 +544,27 @@ proto3_no_repeated_are_packed_by_default_test() ->
        #?gpb_field{name=f5,fnum=5,occurrence=repeated,opts=[packed]}
       ]}] =
         do_process_sort_defs(Defs).
+
+mixing_proto2_and_proto3_test() ->
+    {ok,Defs1} = parse_lines(["syntax=\"proto3\";",
+                             %% import "f2.proto"; % (done another way below)
+                             "message m1 {",
+                             "  m2 f1=1;",
+                             "  repeated uint32 f2=2;",
+                             "}"]),
+    {ok,Defs2} = parse_lines(["syntax=\"proto2\";",
+                             "message m2 {",
+                             "  repeated uint32 f3=3;",
+                             "}"]),
+    [{proto3_msgs,[m1]},
+     {syntax,"proto2"},
+     {syntax,"proto3"},
+     {{msg,m1},
+      [#?gpb_field{name=f1,type={msg,m2}},
+       #?gpb_field{name=f2,occurrence=repeated,opts=[packed]}]},
+     {{msg,m2},
+      [#?gpb_field{name=f3,occurrence=repeated,opts=[]}]}] =
+        do_process_sort_several_defs([Defs1, Defs2]).
 
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
@@ -812,3 +835,16 @@ post_process(Elems, Opts) ->
     {ok, Elems2} = gpb_parse:post_process_one_file(Elems, Opts),
     gpb_parse:post_process_all_files(Elems2, Opts).
 
+do_process_sort_several_defs(ListOfDefs) ->
+    do_process_sort_several_defs(ListOfDefs, []).
+
+do_process_sort_several_defs(ListOfDefs, Opts) ->
+    AllElems =
+        lists:append(
+          [begin
+               {ok, Elems2} = gpb_parse:post_process_one_file(Elems, Opts),
+               Elems2
+           end
+           || Elems <- ListOfDefs]),
+    {ok, Defs2} = gpb_parse:post_process_all_files(AllElems, Opts),
+    lists:sort(Defs2).

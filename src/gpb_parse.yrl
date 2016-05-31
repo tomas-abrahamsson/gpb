@@ -354,7 +354,7 @@ literal_value({_TokenType, _Line, Value}) -> Value.
 post_process_one_file(Defs, Opts) ->
     case find_package_def(Defs, Opts) of
         {ok, Package} ->
-            {ok, handle_proto_syntax_version(
+            {ok, handle_proto_syntax_version_one_file(
                    flatten_qualify_defnames(Defs, Package))};
         {error, Reasons} ->
             {error, Reasons}
@@ -363,11 +363,12 @@ post_process_one_file(Defs, Opts) ->
 post_process_all_files(Defs, Opts) ->
     case resolve_names(extend_msgs(Defs)) of
         {ok, Defs2} ->
-            {ok, possibly_prefix_suffix_msgs(
-                   normalize_msg_field_options( %% Sort it?
-                     enumerate_msg_fields(
-                       reformat_names(Defs2))),
-                   Opts)};
+            {ok, handle_proto_syntax_version_all_files(
+                   possibly_prefix_suffix_msgs(
+                     normalize_msg_field_options(
+                       enumerate_msg_fields(
+                         reformat_names(Defs2))),
+                     Opts))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -621,17 +622,17 @@ ensure_path_prepended(Pkg, Path)   ->
         true ->  Path
     end.
 
-handle_proto_syntax_version(Defs) ->
+handle_proto_syntax_version_one_file(Defs) ->
     case proplists:get_value(syntax, Defs) of
-        undefined -> handle_proto2(Defs);
-        "proto2"  -> handle_proto2(Defs);
-        "proto3"  -> handle_proto3(Defs)
+        undefined -> handle_proto2_1(Defs);
+        "proto2"  -> handle_proto2_1(Defs);
+        "proto3"  -> handle_proto3_1(Defs)
     end.
 
-handle_proto2(Defs) ->
+handle_proto2_1(Defs) ->
     Defs.
 
-handle_proto3(Defs) ->
+handle_proto3_1(Defs) ->
     %% FIXME: Verify no 'extensions' or 'extend'
     %% FIXME: Verify no 'required' occurrences
     %% FIXME: Verify enums start with 0
@@ -639,7 +640,10 @@ handle_proto3(Defs) ->
     %% The protobuf language guide for proto3 says: "In proto3,
     %% repeated fields of scalar numeric types use packed encoding by
     %% default."
-    default_repeated_to_packed(Defs).
+    Defs1 = default_repeated_to_packed(Defs),
+    %% Remember which msgs were defined using proto3 syntax,
+    %% so we can treat them differently later on.
+    anno_msgs_proto3_origin(Defs1).
 
 default_repeated_to_packed([{{msg,MsgName},Fields} | Rest]) ->
     NewDef = {{msg,MsgName}, default_repeated_fields_to_packed(Fields)},
@@ -662,6 +666,27 @@ default_repeated_fields_to_packed(Fields) ->
                       F
               end,
               Fields).
+
+anno_msgs_proto3_origin(Defs) ->
+    anno_msgs_proto3_origin_2(Defs, []).
+
+anno_msgs_proto3_origin_2([{{msg,Msg},_Fields}=Def | Rest], P3Msgs) ->
+    [Def | anno_msgs_proto3_origin_2(Rest, [Msg | P3Msgs])];
+anno_msgs_proto3_origin_2([Def | Rest], Acc) ->
+    [Def | anno_msgs_proto3_origin_2(Rest, Acc)];
+anno_msgs_proto3_origin_2([], Acc) ->
+    [{proto3_msgs,lists:reverse(Acc)}].
+
+handle_proto_syntax_version_all_files(Defs) ->
+    P3Items = [X || {proto3_msgs,_}=X <- Defs],
+    if P3Items == [] ->
+            Defs;
+       P3Items /= [] ->
+            Proto3Msgs = lists:append([Msgs || {proto3_msgs,Msgs} <- P3Items]),
+            Defs1 = Defs -- P3Items,
+            Defs1 ++ [{proto3_msgs, lists:sort(Proto3Msgs)}]
+    end.
+
 
 %% Find inconsistencies
 %%
@@ -835,6 +860,8 @@ reformat_names(Defs) ->
                       {{service,reformat_name(Name)}, reformat_rpcs(RPCs)};
                  ({package, Name}) ->
                       {package, reformat_name(Name)};
+                 ({proto3_msgs,Names}) ->
+                      {proto3_msgs,[reformat_name(Name) || Name <- Names]};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -972,6 +999,10 @@ prefix_suffix_msgs(Prefix, Suffix, ToLower, Defs) ->
                        prefix_suffix_rpcs(Prefix, Suffix, ToLower, RPCs)};
                  ({package,Name}) ->
                       {package,maybe_tolower_name(Name,ToLower)};
+                 ({proto3_msgs,Names}) ->
+                      {proto3_msgs,
+                       [prefix_suffix_name(Prefix, Suffix, ToLower, Name)
+                        || Name <- Names]};
                  (OtherElem) ->
                       OtherElem
               end,
