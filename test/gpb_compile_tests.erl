@@ -32,12 +32,14 @@
 -export([nif_tests_check_prerequisites/1]).
 -export([nif_oneof_tests_check_prerequisites/1]).
 -export([nif_mapfield_tests_check_prerequisites/1]).
+-export([nif_proto3_tests_check_prerequisites/1]).
 -export([increase_timeouts/1]).
 -export([with_tmpdir/1]).
 -export([in_separate_vm/4]).
 -export([compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
 -export([check_protoc_can_do_oneof/0]).
 -export([check_protoc_can_do_mapfields/0]).
+-export([check_protoc_can_do_proto3/0]).
 
 %% internally used
 -export([main_in_separate_vm/1]).
@@ -1095,6 +1097,9 @@ nif_code_test_() ->
          increase_timeouts(
            nif_mapfield_tests_check_prerequisites(
              [{"encode decode", fun nif_encode_decode_maps/0}])),
+         increase_timeouts(
+           nif_proto3_tests_check_prerequisites(
+             [{"encode decode", fun nif_encode_decode_proto3/0}])),
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
          {"Nif with strbin", fun nif_with_strbin/0}])).
@@ -1126,6 +1131,12 @@ nif_mapfield_tests_check_prerequisites(Tests) ->
     case check_protoc_can_do_mapfields() of
         true  -> {"Nif with map fields", Tests};
         false -> {"Protoc < 3.0.0, not testing nifs with map fields", []}
+    end.
+
+nif_proto3_tests_check_prerequisites(Tests) ->
+    case check_protoc_can_do_proto3() of
+        true  -> {"Nif with proto3", Tests};
+        false -> {"Protoc < 3.0.0, not testing nifs with proto3", []}
     end.
 
 nif_compiles() ->
@@ -1245,6 +1256,20 @@ nif_encode_decode_maps() ->
                 TmpDir, NEDM, Code,
                 fun() ->
                         nif_encode_decode_mapfields(NEDM, Defs),
+                        ok
+                end)
+      end).
+
+nif_encode_decode_proto3() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              NEDM = gpb_nif_test_ed_mapfields1,
+              Defs = mk_proto3_fields(),
+              {ok, Code} = compile_nif_msg_defs(NEDM, Defs, TmpDir),
+              in_separate_vm(
+                TmpDir, NEDM, Code,
+                fun() ->
+                        nif_encode_decode_test_it(NEDM, Defs),
                         ok
                 end)
       end).
@@ -1621,6 +1646,11 @@ check_protoc_can_do_mapfields() ->
                     %% map<_,_> appeared in 3.0.0
                     fun() -> check_protoc_version_is_at_least([3,0]) end).
 
+check_protoc_can_do_proto3() ->
+    cachingly_check('$cached_check_protoc_can_do_proto3',
+                    %% proto3 appeared in 3.0.0 :)
+                    fun() -> check_protoc_version_is_at_least([3,0]) end).
+
 check_protoc_version_is_at_least(MinVsn) ->
     case cachingly_find_protoc_version() of
         {ok, Vsn} -> Vsn >= MinVsn;
@@ -1681,44 +1711,59 @@ get_ldflags() ->
     end ++ platform_ldflags(os:type()).
 
 msg_defs_to_proto(MsgDefs) ->
-    iolist_to_binary([maybe_syntaxdef(MsgDefs),
-                      lists:map(fun msg_def_to_proto/1, MsgDefs)]).
+    iolist_to_binary(
+      [maybe_syntaxdef(MsgDefs),
+       lists:map(fun(M) -> msg_def_to_proto(M, MsgDefs) end, MsgDefs)]).
 
 maybe_syntaxdef(MsgDefs) ->
-    case contains_any_maptype_field(MsgDefs) of
-        true  -> "syntax = \"proto2\";\n";
-        false -> ""
+    case proplists:get_value(syntax, MsgDefs) of
+        undefined ->
+            case contains_any_maptype_field(MsgDefs) of
+                true  -> "syntax = \"proto2\";\n";
+                false -> ""
+            end;
+        Syntax ->
+            f("syntax = \"~s\";\n", [Syntax])
     end.
 
 contains_any_maptype_field(MsgDefs) ->
     lists:any(fun(Fields) ->
-                      lists:any(fun(#?gpb_field{type={map,_,_}}) -> true; 
+                      lists:any(fun(#?gpb_field{type={map,_,_}}) -> true;
                                    (_) -> false
                                 end,
                                 Fields)
               end,
               [Fields || {{msg,_}, Fields} <- MsgDefs]).
 
-msg_def_to_proto({{enum, Name}, EnumValues}) ->
+msg_def_to_proto({{enum, Name}, EnumValues}, _MsgDefs) ->
     f("enum ~s {~n~s}~n~n",
       [Name, lists:map(fun format_enumerator/1, EnumValues)]);
-msg_def_to_proto({{msg, Name}, Fields}) ->
+msg_def_to_proto({{msg, Name}, Fields}, MsgDefs) ->
+    IsProto3 = gpb:is_msg_proto3(Name, MsgDefs),
     f("message ~s {~n~s}~n~n",
-      [Name, lists:map(fun format_field/1, Fields)]).
+      [Name, lists:map(fun(F) -> format_field(F, IsProto3) end, Fields)]);
+msg_def_to_proto(_OtherElem, _MsgDefs) ->
+    "".
+
 
 format_enumerator({N,V}) ->
     f("  ~s = ~w;~n", [N, V]).
 
 format_field(#?gpb_field{name=FName, fnum=FNum, type=Type,
-                         occurrence=Occurrence}) ->
+                         occurrence=Occurrence},
+             IsProto3) ->
+    OccurrenceTxt = if Occurrence == repeated -> repeated;
+                       IsProto3               -> "";
+                       true                   -> Occurrence
+                    end,
     case Type of
         {map,_,_} ->
             f("  ~s ~s = ~w;~n", [format_type(Type), FName, FNum]);
         _ ->
             f("  ~s ~s ~s = ~w;~n",
-              [Occurrence, format_type(Type), FName, FNum])
+              [OccurrenceTxt, format_type(Type), FName, FNum])
     end;
-format_field(#gpb_oneof{name=FName, fields=Fields}) ->
+format_field(#gpb_oneof{name=FName, fields=Fields}, _IsProto3) ->
     f("  oneof ~s {~n"
       "~s"
       "  };~n",
@@ -1785,14 +1830,38 @@ mk_one_map_field_of_each_type() ->
     MapMsg1    = {{msg, map1},  mk_map_fields_of_type(KeyTypes, ValueTypes)},
     [EnumDef, SubMsgDef, MapMsg1].
 
+mk_proto3_fields() ->
+    EachType   = [sint32, sint64, bool, double, string, bytes, {enum, ee}],
+    MsgType    = {msg, submsg1},
+    EnumDef    = {{enum, ee}, [{en0, 0}, {en1, 1}, {en2, 2}]},
+    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], required)},
+    TopMsgDef1 = {{msg, topmsg1}, (mk_fields_of_type(EachType, required)
+                                   ++ mk_fields_of_type(
+                                        [MsgType], optional,
+                                        [{offset, length(EachType)}]))},
+    TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(
+                                    EachType ++ [MsgType],
+                                    repeated,
+                                    [{field_opts, [packed]}])},
+    OneofMsg1  = {{msg, oneof1},  mk_oneof_fields_of_type([fixed32], 1)},
+    MapMsg1    = {{msg, map1},    mk_map_fields_of_type([uint32], [string])},
+    [{syntax, "proto3"},
+     {proto3_msgs, [topmsg1,topmsg2,oneof1,map1,submsg1]},
+     EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, OneofMsg1, MapMsg1].
+
 mk_fields_of_type(Types, Occurrence) ->
+    mk_fields_of_type(Types, Occurrence, []).
+
+mk_fields_of_type(Types, Occurrence, Opts) ->
+    FieldOpts = proplists:get_value(field_opts, Opts, []),
+    Offset = proplists:get_value(offset, Opts, 0),
     Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
-    [#?gpb_field{name=list_to_atom(lists:concat([f,I])),
-                 rnum=I + 1,
-                 fnum=I,
+    [#?gpb_field{name=list_to_atom(lists:concat([f, I + Offset])),
+                 rnum=I + 1 + Offset,
+                 fnum=I + Offset,
                  type=Type,
                  occurrence=Occurrence,
-                 opts=[]}
+                 opts=FieldOpts}
      || {I, Type} <- index_seq(Types1)].
 
 mk_oneof_fields_of_type(Types, Pos) ->
