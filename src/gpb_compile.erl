@@ -1593,11 +1593,17 @@ format_encoders_top_function_no_msgs(Opts) ->
                       records -> [];
                       maps    -> [?expr(_MsgName)]
                   end,
-    [gpb_codegen:format_fn(
+    SpecExtraArgs = case Mapping of
+                      records -> "";
+                      maps    -> ",_"
+                  end,
+    [?f("-spec encode_msg(_~s) -> no_return().~n", [SpecExtraArgs]),
+     gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
+     ?f("-spec encode_msg(_,_~s) -> no_return().~n", [SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(_Msg, '<MsgName>', _Opts) ->
@@ -2190,11 +2196,12 @@ format_decoders_top_function(Defs) ->
     end.
 
 format_decoders_top_function_no_msgs() ->
-    gpb_codegen:format_fn(
+    ["-spec decode_msg(binary(), atom()) -> no_return().\n",
+     gpb_codegen:format_fn(
       decode_msg,
       fun(Bin, _MsgName) when is_binary(Bin) ->
               erlang:error({gpb_error, no_messages})
-      end).
+      end)].
 
 format_decoders_top_function_msgs(Defs) ->
     gpb_codegen:format_fn(
@@ -3090,17 +3097,19 @@ format_msg_merge_code(Defs, AnRes, Opts) ->
 format_msg_merge_code_no_msgs(Opts) ->
     case get_records_or_maps_by_opts(Opts) of
         records ->
-            gpb_codegen:format_fn(
-              merge_msgs,
-              fun(_Prev, _New) ->
-                      erlang:error({gpb_error, no_messages})
-              end);
+            ["-spec merge_msgs(_, _) -> no_return().\n",
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(_Prev, _New) ->
+                       erlang:error({gpb_error, no_messages})
+               end)];
         maps ->
-            gpb_codegen:format_fn(
-              merge_msgs,
-              fun(_Prev, _New, _MsgName) ->
-                      erlang:error({gpb_error, no_messages})
-              end)
+            ["-spec merge_msgs(_, _, _) -> no_return().\n",
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(_Prev, _New, _MsgName) ->
+                       erlang:error({gpb_error, no_messages})
+               end)]
     end.
 
 format_msg_merge_code_msgs(Defs, AnRes, Opts) ->
@@ -3446,36 +3455,44 @@ format_verifiers_top_function(Defs, Opts) ->
                       records -> [];
                       maps    -> [?expr(MsgName)]
                   end,
-    gpb_codegen:format_fn(
-      verify_msg,
-      fun(Msg, '<MsgName>') ->
-              case '<MsgOrMsgName>' of
-                  '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>']);
-                  _ -> mk_type_error(not_a_known_message, Msg, [])
-              end
-      end,
-      [repeat_clauses(
-         '<msg-match>',
-         [[replace_tree('<msg-match>',
-                        case Mapping of
-                            records -> record_match(MsgName, []);
-                            maps    -> erl_syntax:atom(MsgName)
-                        end),
-           replace_term('<verify-msg>', mk_fn(v_msg_, MsgName)),
-           replace_term('<MsgName>', MsgName)]
-          || {{msg, MsgName}, _MsgDef} <- Defs]),
-       replace_tree('<MsgOrMsgName>', case Mapping of
-                                          records -> ?expr(Msg);
-                                          maps    -> ?expr(MsgName)
-                                      end),
-       splice_trees('<MsgName>', MsgNameVars)]).
+    SpecExtraArgs = case Mapping of
+                        records -> "";
+                        maps    -> ",_"
+                    end,
+    [case contains_messages(Defs) of
+         true  -> "";
+         false -> ?f("-spec verify_msg(_~s) -> no_return().~n", [SpecExtraArgs])
+     end,
+     gpb_codegen:format_fn(
+       verify_msg,
+       fun(Msg, '<MsgName>') ->
+               case '<MsgOrMsgName>' of
+                   '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>']);
+                   _ -> mk_type_error(not_a_known_message, Msg, [])
+               end
+       end,
+       [repeat_clauses(
+          '<msg-match>',
+          [[replace_tree('<msg-match>',
+                         case Mapping of
+                             records -> record_match(MsgName, []);
+                             maps    -> erl_syntax:atom(MsgName)
+                         end),
+            replace_term('<verify-msg>', mk_fn(v_msg_, MsgName)),
+            replace_term('<MsgName>', MsgName)]
+           || {{msg, MsgName}, _MsgDef} <- Defs]),
+        replace_tree('<MsgOrMsgName>', case Mapping of
+                                           records -> ?expr(Msg);
+                                           maps    -> ?expr(MsgName)
+                                       end),
+        splice_trees('<MsgName>', MsgNameVars)])].
 
 format_verifiers(Defs, AnRes, Opts) ->
     [format_msg_verifiers(Defs, AnRes, Opts),
      format_enum_verifiers(Defs, AnRes),
      format_type_verifiers(AnRes),
      format_map_verifiers(AnRes, Opts),
-     format_verifier_auxiliaries()
+     format_verifier_auxiliaries(Defs)
     ].
 
 format_msg_verifiers(Defs, AnRes, Opts) ->
@@ -3827,8 +3844,9 @@ format_map_verifier(KeyType, ValueType, RecordsOrMaps) ->
                replace_term('VerifyValue', ValueVerifierFn)])
     end.
 
-format_verifier_auxiliaries() ->
-    [gpb_codegen:format_fn(
+format_verifier_auxiliaries(Defs) ->
+    ["-spec mk_type_error(_, _, list()) -> no_return().\n",
+     gpb_codegen:format_fn(
        mk_type_error,
        fun(Error, ValueSeen, Path) ->
                Path2 = prettify_path(Path),
@@ -3836,16 +3854,23 @@ format_verifier_auxiliaries() ->
                              {Error, [{value, ValueSeen},{path, Path2}]}})
        end),
      "\n",
-     gpb_codegen:format_fn(
-       prettify_path,
-       fun([]) ->
-               top_level;
-          (PathR) ->
-               list_to_atom(
-                 string:join(
-                   lists:map(fun atom_to_list/1, lists:reverse(PathR)),
-                   "."))
-       end)].
+     case contains_messages(Defs) of
+         false ->
+             gpb_codegen:format_fn(
+               prettify_path,
+               fun([]) -> top_level end);
+         true ->
+             gpb_codegen:format_fn(
+               prettify_path,
+               fun([]) ->
+                       top_level;
+                  (PathR) ->
+                       list_to_atom(
+                         string:join(
+                           lists:map(fun atom_to_list/1, lists:reverse(PathR)),
+                           "."))
+               end)
+     end].
 
 %% -- translators ------------------------------------------------------
 
