@@ -4119,9 +4119,10 @@ field_tree(#gpb_oneof{fields=OFields}=F, Opts) ->
       Opts).
 
 format_fetch_msg_defs([]) ->
-    gpb_codegen:format_fn(
-      fetch_msg_def,
-      fun(MsgName) -> erlang:error({no_such_msg, MsgName}) end);
+    ["-spec fetch_msg_def(_) -> no_return().\n",
+     gpb_codegen:format_fn(
+       fetch_msg_def,
+       fun(MsgName) -> erlang:error({no_such_msg, MsgName}) end)];
 format_fetch_msg_defs(_MsgDefs) ->
     gpb_codegen:format_fn(
       fetch_msg_def,
@@ -4133,9 +4134,10 @@ format_fetch_msg_defs(_MsgDefs) ->
       end).
 
 format_fetch_enum_defs([]) ->
-    gpb_codegen:format_fn(
-      fetch_enum_def,
-      fun(EnumName) -> erlang:error({no_such_enum, EnumName}) end);
+    ["-spec fetch_enum_def(_) -> no_return().\n",
+     gpb_codegen:format_fn(
+       fetch_enum_def,
+       fun(EnumName) -> erlang:error({no_such_enum, EnumName}) end)];
 format_fetch_enum_defs(_EnumDefs) ->
     gpb_codegen:format_fn(
       fetch_enum_def,
@@ -4218,10 +4220,12 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
                           || {EnumSym, EnumValue} <- EnumDef])])]
       || {{enum, EnumName}, EnumDef} <- EnumDefs]];
 format_enum_value_symbol_converters([]=_EnumDefs) ->
-    [gpb_codegen:format_fn(
+    ["-spec enum_symbol_by_value(_, _) -> no_return().\n",
+     gpb_codegen:format_fn(
        enum_symbol_by_value,
        fun(E, V) -> erlang:error({no_enum_defs, E, V}) end),
      "\n",
+     "-spec enum_value_by_symbol(_, _) -> no_return().\n",
      gpb_codegen:format_fn(
        enum_value_by_symbol,
        fun(E, V) -> erlang:error({no_enum_defs, E, V}) end),
@@ -4325,11 +4329,12 @@ format_find_service_rpc_defs(ServiceName, Rpcs, Opts) ->
                        || #?gpb_rpc{name=RpcName} = Rpc <- Rpcs])]).
 
 format_fetch_rpc_defs([]) ->
-    gpb_codegen:format_fn(
-      fetch_rpc_def,
-      fun(ServiceName, RpcName) ->
-              erlang:error({no_such_rpc, ServiceName, RpcName})
-      end);
+    ["-spec fetch_rpc_def(_, _) -> no_return().\n",
+     gpb_codegen:format_fn(
+       fetch_rpc_def,
+       fun(ServiceName, RpcName) ->
+               erlang:error({no_such_rpc, ServiceName, RpcName})
+       end)];
 format_fetch_rpc_defs(_ServiceDefs) ->
     gpb_codegen:format_fn(
       fetch_rpc_def,
