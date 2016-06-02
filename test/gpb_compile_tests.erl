@@ -1612,34 +1612,29 @@ find_protoc() ->
     end.
 
 check_protoc_can_do_oneof() ->
-    case get('$cached_check_protoc_can_do_oneof') of
-        undefined ->
-            CanIt =
-                case find_protoc_version() of
-                    {ok, Vsn} ->
-                        Vsn >= [2,6];  %% oneof appeared in 2.6.0
-                    {error, X} ->
-                        ?debugFmt("Trouble finding protoc version in ~s~n", [X]),
-                        false
-                end,
-            put('$cached_check_protoc_can_do_oneof', CanIt),
-            CanIt;
-        CanIt ->
-            CanIt
-    end.
+    cachingly_check('$cached_check_protoc_can_do_oneof',
+                    %% oneof appeared in 2.6.0
+                    fun() -> check_protoc_version_is_at_least([2,6]) end).
 
 check_protoc_can_do_mapfields() ->
-    case get('$cached_check_protoc_can_do_mapfields') of
+    cachingly_check('$cached_check_protoc_can_do_mapfields',
+                    %% map<_,_> appeared in 3.0.0
+                    fun() -> check_protoc_version_is_at_least([3,0]) end).
+
+check_protoc_version_is_at_least(MinVsn) ->
+    case cachingly_find_protoc_version() of
+        {ok, Vsn} -> Vsn >= MinVsn;
+        {error,_} -> false
+    end.
+
+cachingly_find_protoc_version() ->
+    cachingly_check('$cached_protoc_version', fun find_protoc_version/0).
+
+cachingly_check(CacheKey, F) ->
+    case get(CacheKey) of
         undefined ->
-            CanIt =
-                case find_protoc_version() of
-                    {ok, Vsn} ->
-                        Vsn >= [3,0];  %% map<_,_> appeared in 3.0.0
-                    {error, X} ->
-                        ?debugFmt("Trouble finding protoc version in ~s~n", [X]),
-                        false
-                end,
-            put('$cached_check_protoc_can_do_mapfields', CanIt),
+            CanIt = F(),
+            put(CacheKey, CanIt),
             CanIt;
         CanIt ->
             CanIt
@@ -1647,7 +1642,12 @@ check_protoc_can_do_mapfields() ->
 
 find_protoc_version() ->
     Output = os:cmd(find_protoc() ++ " --version"),
-    find_protoc_version_aux(string:tokens(Output, " \t\r\n"), Output).
+    case find_protoc_version_aux(string:tokens(Output, " \t\r\n"), Output) of
+        {ok, _}=Res -> Res;
+        {error, X}=Res ->
+            ?debugFmt("Trouble finding protoc version in ~s~n", [X]),
+            Res
+    end.
 
 find_protoc_version_aux(["libprotoc", VersionStr | _], All) ->
     try {ok, [list_to_integer(X) || X <- string:tokens(VersionStr, ".")]}
