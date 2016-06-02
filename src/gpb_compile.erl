@@ -567,8 +567,16 @@ fmt_err({parse_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
 fmt_err({scan_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
-fmt_err({import_not_found, Import}) ->
-    ?f("Could not find import file ~p", [Import]);
+fmt_err({import_not_found, Import, Tried}) ->
+    PrettyTried = [begin
+                       PrettyReason = file:format_error(Reason),
+                       ?f("~n  ~ts (~s (~p))", [File,PrettyReason,Reason])
+                   end
+                   || {File,Reason} <- Tried],
+    TriedTxt = if Tried == [] -> "";
+                  true -> ", tried:"
+               end,
+    ?f("Could not find import file ~p~s~s", [Import, TriedTxt, PrettyTried]);
 fmt_err({read_failed, File, Reason}) ->
     ?f("failed to read ~p: ~s (~p)", [File, file:format_error(Reason), Reason]);
 fmt_err({post_process, Reasons}) ->
@@ -1030,9 +1038,9 @@ import_it(Import, AlreadyImported, Defs, Opts) ->
 
 locate_import(Import, Opts) ->
     ImportPaths = [Path || {i, Path} <- Opts],
-    locate_import_aux(ImportPaths, Import, Opts).
+    locate_import_aux(ImportPaths, Import, Opts, []).
 
-locate_import_aux([Path | Rest], Import, Opts) ->
+locate_import_aux([Path | Rest], Import, Opts, Tried) ->
     File = filename:join(Path, Import),
     case file_read_file_info(File, Opts) of
         {ok, #file_info{access = A}} when A == read; A == read_write ->
@@ -1043,12 +1051,12 @@ locate_import_aux([Path | Rest], Import, Opts) ->
                     {error, {read_failed, File, Reason}}
             end;
         {ok, #file_info{}} ->
-            locate_import_aux(Rest, Import, Opts);
-        {error, _Reason} ->
-            locate_import_aux(Rest, Import, Opts)
+            locate_import_aux(Rest, Import, Opts, Tried);
+        {error, Reason} ->
+            locate_import_aux(Rest, Import, Opts, [{File,Reason} | Tried])
     end;
-locate_import_aux([], Import, _Opts) ->
-    {error, {import_not_found, Import}}.
+locate_import_aux([], Import, _Opts, Tried) ->
+    {error, {import_not_found, Import, Tried}}.
 
 try_topsort_defs(Defs) ->
     G = digraph:new(),
