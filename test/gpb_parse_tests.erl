@@ -582,6 +582,26 @@ mixing_proto2_and_proto3_test() ->
       [#?gpb_field{name=f3,occurrence=repeated,opts=[]}]}] =
         do_process_sort_several_defs([Defs1, Defs2]).
 
+proto3_reserved_numbers_and_names_test() ->
+    {ok,Defs} = parse_lines(["syntax=\"proto3\";",
+                             "message m1 {",
+                             "  uint32 f1=1;",
+                             "  reserved 2, 15, 9 to 11;",
+                             "  reserved \"foo\", \"bar\";",
+                             "  message m2 {",
+                             "    uint32 f2=2;",
+                             "    reserved 17;",
+                             "  }",
+                             "}"]),
+    [{proto3_msgs,[m1,'m1.m2']},
+     {syntax,"proto3"},
+     {{msg,m1},      [#?gpb_field{name=f1}]},
+     {{msg,'m1.m2'}, [#?gpb_field{name=f2}]},
+     {{reserved_names,m1},       ["foo","bar"]},
+     {{reserved_numbers,m1},     [2,15,{9,11}]},
+     {{reserved_numbers,'m1.m2'},[17]}] =
+        do_process_sort_defs(Defs).
+
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
                                "import \"a/b/c.proto\";",
