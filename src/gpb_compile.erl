@@ -4529,22 +4529,27 @@ format_msg_record(Msg, Fields, Opts, Defs) ->
 format_hfields(Indent, Fields, Opts, Defs) ->
     TypeSpecs = get_type_specs_by_opts(Opts),
     MapsOrRecords = get_records_or_maps_by_opts(Opts),
-    TypeSpecifierSep = case MapsOrRecords of
-                           records -> "::";
-                           maps -> "=>"
-                       end,
     MappingAndUnset = get_mapping_and_unset_by_opts(Opts),
+    TypespecsCanIndicateMapItemPresence =
+        can_specify_map_item_presence_in_typespecs(),
     LastIndex = case MappingAndUnset of
                     records -> length(Fields);
                     {maps, present_undefined} -> length(Fields);
-                    {maps, omitted} -> find_last_nonopt_field_index(Fields)
+                    {maps, omitted} ->
+                        if TypespecsCanIndicateMapItemPresence ->
+                                length(Fields); % do typespecs for all fields
+                           true ->
+                                find_last_nonopt_field_index(Fields)
+                        end
                 end,
     string:join(
       lists:map(
         fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts,
                             occurrence=Occur}=Field}) ->
+                TypeSpecifierSep = calc_field_type_sep(Field, Opts),
                 LineLead = if MappingAndUnset == {maps, omitted},
-                              Occur == optional ->
+                              Occur == optional,
+                              not TypespecsCanIndicateMapItemPresence ->
                                    "%% ";
                               true ->
                                    ""
@@ -4586,8 +4591,12 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                    [FieldTxt2, LineUpStr2, FNum,
                     [", " || TypeComment /= ""], TypeComment]);
            ({I, #gpb_oneof{name=Name}=Field}) ->
-                LineLead = if MappingAndUnset == {maps, omitted} -> "%% ";
-                              true -> ""
+                TypeSpecifierSep = calc_field_type_sep(Field, Opts),
+                LineLead = if MappingAndUnset == {maps, omitted},
+                              not TypespecsCanIndicateMapItemPresence->
+                                   "%% ";
+                              true ->
+                                   ""
                            end,
                 TypeStr = ?f("~s", [type_to_typestr(Field, Defs, Opts)]),
                 CommaSep = if I < LastIndex -> ",";
@@ -4628,6 +4637,55 @@ find_last_nonopt_field_index(Fields) ->
                 end,
                 0,
                 index_seq(Fields)).
+
+calc_field_type_sep(#?gpb_field{occurrence=Occurrence}, Opts) ->
+    case get_mapping_and_unset_by_opts(Opts) of
+        records ->
+            "::";
+        {maps, present_undefined} ->
+            mandatory_map_item_type_sep();
+        {maps, omitted} ->
+            case Occurrence of
+                required -> mandatory_map_item_type_sep();
+                repeated -> mandatory_map_item_type_sep();
+                optional -> "=>"
+            end
+    end;
+calc_field_type_sep(#gpb_oneof{}, Opts) ->
+    case get_mapping_and_unset_by_opts(Opts) of
+        records   -> "::";
+        {maps, _} -> "=>"
+    end.
+
+mandatory_map_item_type_sep() ->
+    %% With Erlang 19 we write #{n := integer()} to say that a
+    %% map must contain a map item with key `n' and an integer value.
+    %%
+    %% With earlier Erlang versions, we can only write #{n => integer()}
+    %% and we can never distinguish between map items that may or must
+    %% be present.
+    %%
+    %% Ideally, we would want to know for which version of Erlang we're
+    %% generating code.  For now, we assume the run-time version is the
+    %% same as the compile-time version, which is not necessarily true.  For
+    %% instance, we can generate code for maps even on pre-map Erlang R15.
+    %%
+    %% (At the time of this writing, the OTP_RELEASE pre-defined macro
+    %% does not exist, but even if it had existed, it would have been of
+    %% limited value because it would have linked the Erlang version at
+    %% proto-encoding run-time with the Erlang version at compile-time
+    %% of `gpb' not at compile-time of the .proto file.  In some
+    %% scenario with a package manager, it might have a `gpb'
+    %% pre-compiled with an old Erlang-version to be compatible with
+    %% many environments.  Better to check version at run-time.)
+    %%
+    case can_specify_map_item_presence_in_typespecs() of
+        true  -> ":=";
+        false -> "=>"
+    end.
+
+can_specify_map_item_presence_in_typespecs() ->
+    is_major_version_at_least(19).
 
 type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs, Opts) ->
     OrUndefined = case get_mapping_and_unset_by_opts(Opts) of
