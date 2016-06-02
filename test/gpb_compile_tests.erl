@@ -30,6 +30,7 @@
 
 %% NIF related
 -export([nif_tests_check_prerequisites/1]).
+-export([nif_oneof_tests_check_prerequisites/1]).
 -export([nif_mapfield_tests_check_prerequisites/1]).
 -export([increase_timeouts/1]).
 -export([with_tmpdir/1]).
