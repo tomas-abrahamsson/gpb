@@ -3961,7 +3961,7 @@ nowarn_dialyzer_attr(FnName,Arity) ->
         true ->
             ?f("-dialyzer({nowarn_function,~p/~w}).~n", [FnName,Arity]);
         false ->
-            %% Too old system (R16 or older), which will see
+            %% Too old system (Erlang 17 or older), which will see
             %% the dialyzer attr as just another plain attr,
             %% which must be located before all functions.
             %% Just don't silence dialyzer on these systems.
@@ -3969,7 +3969,7 @@ nowarn_dialyzer_attr(FnName,Arity) ->
     end.
 
 can_do_dialyzer_attr() ->
-    is_major_version_at_least(17).
+    is_major_version_at_least(18).
 
 %% -- translators ------------------------------------------------------
 
