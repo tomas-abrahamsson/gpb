@@ -32,6 +32,7 @@ Nonterminals
         import_def
         identifiers
         extend_def extensions_def exts ext
+        reserved_def res_numbers res_number res_names
         oneof_def oneof_elems oneof_elem
         option_def
         service_def rpc_defs rpc_def m_opts
@@ -53,7 +54,7 @@ Terminals
         default
         import
         option
-        extensions extend max to
+        extensions extend max to reserved
         oneof
         service rpc returns
         packed deprecated
@@ -142,6 +143,18 @@ msg_elem -> occurrence type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
                                                     name=identifier_name('$3'),
                                                     fnum=literal_value('$5'),
                                                     opts='$7'}.
+msg_elem -> type fidentifier '=' dec_lit ';': % proto3
+                                        #?gpb_field{occurrence=required,
+                                                    type='$1',
+                                                    name=identifier_name('$2'),
+                                                    fnum=literal_value('$4'),
+                                                    opts=[]}.
+msg_elem -> type fidentifier '=' dec_lit '[' opt_field_opts ']' ';': % proto3
+                                        #?gpb_field{occurrence=required,
+                                                    type='$1',
+                                                    name=identifier_name('$2'),
+                                                    fnum=literal_value('$4'),
+                                                    opts='$6'}.
 msg_elem -> map_type fidentifier '=' dec_lit ';':
                                         #?gpb_field{occurrence=repeated,
                                                     type='$1',
@@ -160,6 +173,7 @@ msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
 msg_elem -> oneof_def:                  '$1'.
 msg_elem -> extend name '{' msg_elems '}':
                                  {{extend,{eref1,'$2'}},'$4'}.
+msg_elem -> reserved_def:               '$1'.
 
 fidentifier -> identifier:              '$1'.
 fidentifier -> package:                 kw_to_identifier('$1').
@@ -198,6 +212,7 @@ fidentifier -> packed:                  kw_to_identifier('$1').
 fidentifier -> deprecated:              kw_to_identifier('$1').
 fidentifier -> syntax:                  kw_to_identifier('$1').
 fidentifier -> map:                     kw_to_identifier('$1').
+fidentifier -> reserved:                kw_to_identifier('$1').
 
 opt_field_opts -> field_opts:           '$1'.
 opt_field_opts -> '$empty':             [].
@@ -274,6 +289,18 @@ ext -> integer:                         {'$1','$1'}.
 ext -> integer to integer:              {'$1','$3'}.
 ext -> integer to max:                  {'$1',max}.
 
+reserved_def -> reserved res_numbers:   {reserved_numbers,'$2'}.
+reserved_def -> reserved res_names:     {reserved_names,'$2'}.
+
+res_numbers -> res_number ',' res_numbers: ['$1' | '$3'].
+res_numbers -> res_number:                 ['$1'].
+
+res_number -> integer:                  '$1'.
+res_number -> integer to integer:       {'$1','$3'}.
+
+res_names -> string_expr ',' res_names: ['$1' | '$3'].
+res_names -> string_expr:               ['$1'].
+
 oneof_def -> 'oneof' identifier '{' oneof_elems '}':
                                         #gpb_oneof{name=identifier_name('$2'),
                                                    fields='$4'}.
@@ -325,6 +352,8 @@ Erlang code.
 
 verify_syntax({str_lit, _Line, "proto2"}) ->
     {syntax, "proto2"};
+verify_syntax({str_lit, _Line, "proto3"}) ->
+    {syntax, "proto3"};
 verify_syntax({str_lit, Line, "proto"++_ = Unsupported}) ->
     return_error(Line, "Unsupported proto version: " ++ Unsupported);
 verify_syntax({str_lit, Line, Unsupported}) ->
@@ -340,7 +369,8 @@ literal_value({_TokenType, _Line, Value}) -> Value.
 post_process_one_file(Defs, Opts) ->
     case find_package_def(Defs, Opts) of
         {ok, Package} ->
-            {ok, flatten_qualify_defnames(Defs, Package)};
+            {ok, handle_proto_syntax_version_one_file(
+                   flatten_qualify_defnames(Defs, Package))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -348,12 +378,13 @@ post_process_one_file(Defs, Opts) ->
 post_process_all_files(Defs, Opts) ->
     case resolve_names(Defs) of
         {ok, Defs2} ->
-            {ok, possibly_prefix_suffix_msgs(
-                   normalize_msg_field_options( %% Sort it?
-                     enumerate_msg_fields(
-                       reformat_names(
-                         extend_msgs(Defs2)))),
-                   Opts)};
+            {ok, handle_proto_syntax_version_all_files(
+                   possibly_prefix_suffix_msgs(
+                     normalize_msg_field_options(
+                       enumerate_msg_fields(
+                         reformat_names(
+                           extend_msgs(Defs2)))),
+                     Opts))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -460,6 +491,12 @@ flatten_fields(FieldsOrDefs, FullName) ->
                        ({{extend, _Ref},_}=Def, {Fs,Ds}) ->
                             QDefs = flatten_qualify_defnames([Def], FullName),
                             {Fs, QDefs ++ Ds};
+                       ({reserved_numbers, Ns}, {Fs,Ds}) ->
+                            Def = {{reserved_numbers,FullName}, Ns},
+                            {Fs, [Def | Ds]};
+                       ({reserved_names, Ns}, {Fs,Ds}) ->
+                            Def = {{reserved_names,FullName}, Ns},
+                            {Fs, [Def | Ds]};
                        (Def, {Fs,Ds}) ->
                             QDefs = flatten_qualify_defnames([Def], FullName),
                             {Fs, QDefs++Ds}
@@ -633,6 +670,103 @@ ensure_path_prepended(Pkg, Path)   ->
         false -> prepend_path(Pkg, Path);
         true ->  Path
     end.
+
+handle_proto_syntax_version_one_file(Defs) ->
+    case proplists:get_value(syntax, Defs) of
+        undefined -> handle_proto2_1(Defs);
+        "proto2"  -> handle_proto2_1(Defs);
+        "proto3"  -> handle_proto3_1(Defs)
+    end.
+
+handle_proto2_1(Defs) ->
+    Defs.
+
+handle_proto3_1(Defs) ->
+    %% FIXME: Verify no 'extensions' or 'extend'
+    %% FIXME: Verify no 'required' occurrences
+    %% FIXME: Verify enums start with 0
+
+    %% The protobuf language guide for proto3 says: "In proto3,
+    %% repeated fields of scalar numeric types use packed encoding by
+    %% default."
+    Defs1 = default_repeated_to_packed(Defs),
+    %% Remember which msgs were defined using proto3 syntax,
+    %% so we can treat them differently later on.
+    anno_msgs_proto3_origin(Defs1).
+
+default_repeated_to_packed([{{msg,MsgName},Fields} | Rest]) ->
+    NewDef = {{msg,MsgName}, default_repeated_fields_to_packed(Fields)},
+    [NewDef | default_repeated_to_packed(Rest)];
+default_repeated_to_packed([Other | Rest]) ->
+    [Other | default_repeated_to_packed(Rest)];
+default_repeated_to_packed([]) ->
+    [].
+
+default_repeated_fields_to_packed(Fields) ->
+    lists:map(fun(#?gpb_field{occurrence=repeated, opts=Opts}=F) ->
+                      case proplists:get_value(packed, Opts) of
+                          undefined ->
+                              NewOpts = [{packed, true} | Opts],
+                              F#?gpb_field{opts=NewOpts};
+                          _ ->
+                              F
+                      end;
+                 (F) ->
+                      F
+              end,
+              Fields).
+
+anno_msgs_proto3_origin(Defs) ->
+    anno_msgs_proto3_origin_2(Defs, []).
+
+anno_msgs_proto3_origin_2([{{msg,Msg},_Fields}=Def | Rest], P3Msgs) ->
+    [Def | anno_msgs_proto3_origin_2(Rest, [Msg | P3Msgs])];
+anno_msgs_proto3_origin_2([Def | Rest], Acc) ->
+    [Def | anno_msgs_proto3_origin_2(Rest, Acc)];
+anno_msgs_proto3_origin_2([], Acc) ->
+    [{proto3_msgs,lists:reverse(Acc)}].
+
+handle_proto_syntax_version_all_files(Defs) ->
+    P3Items = [X || {proto3_msgs,_}=X <- Defs],
+    if P3Items == [] ->
+            Defs;
+       P3Items /= [] ->
+            Proto3Msgs = lists:append([Msgs || {proto3_msgs,Msgs} <- P3Items]),
+            Defs1 = Defs -- P3Items,
+            Defs2 = Defs1 ++ [{proto3_msgs, lists:sort(Proto3Msgs)}],
+            %% The language guide says "For message fields, the
+            %% default value is null.", so making them optional ---
+            %% %% rather than default --- makes more sense.
+            make_proto3_submsg_fields_optional(Defs2, Proto3Msgs)
+    end.
+
+make_proto3_submsg_fields_optional([Def | Rest], P3Msgs) ->
+    case Def of
+        {{msg,MsgName}, Fields} ->
+            case lists:member(MsgName, P3Msgs) of
+                true ->
+                    Fields1 =
+                        lists:map(
+                          fun(#?gpb_field{type={msg,_}, occurrence=Occ}=F) ->
+                                  case Occ of
+                                      repeated -> F; % don't change repeated
+                                      _ -> F#?gpb_field{occurrence=optional}
+                                  end;
+                             (OtherField) ->
+                                  OtherField
+                          end,
+                          Fields),
+                    Def1 = {{msg,MsgName}, Fields1},
+                    [Def1 | make_proto3_submsg_fields_optional(Rest, P3Msgs)];
+                false ->
+                    [Def | make_proto3_submsg_fields_optional(Rest, P3Msgs)]
+            end;
+        _ ->
+            [Def | make_proto3_submsg_fields_optional(Rest, P3Msgs)]
+    end;
+make_proto3_submsg_fields_optional([], _P3Msgs) ->
+    [].
+
 
 %% Find inconsistencies
 %%
@@ -809,6 +943,12 @@ reformat_names(Defs) ->
                       {{service,reformat_name(Name)}, reformat_rpcs(RPCs)};
                  ({package, Name}) ->
                       {package, reformat_name(Name)};
+                 ({proto3_msgs,Names}) ->
+                      {proto3_msgs,[reformat_name(Name) || Name <- Names]};
+                 ({{reserved_numbers,Name}, Ns}) ->
+                      {{reserved_numbers,reformat_name(Name)}, Ns};
+                 ({{reserved_names,Name}, FieldNames}) ->
+                      {{reserved_names,reformat_name(Name)}, FieldNames};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -944,6 +1084,10 @@ prefix_suffix_msgs(Prefix, Suffix, ToLower, Defs) ->
                        prefix_suffix_rpcs(Prefix, Suffix, ToLower, RPCs)};
                  ({package,Name}) ->
                       {package,maybe_tolower_name(Name,ToLower)};
+                 ({proto3_msgs,Names}) ->
+                      {proto3_msgs,
+                       [prefix_suffix_name(Prefix, Suffix, ToLower, Name)
+                        || Name <- Names]};
                  (OtherElem) ->
                       OtherElem
               end,

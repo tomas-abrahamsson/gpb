@@ -24,8 +24,7 @@
 
 parses_syntax_test() ->
     {ok, [{syntax,"proto2"}]} = parse_lines(["syntax=\"proto2\";"]),
-    ?assertError({parse_error,_,{_LNum,_Module,_EMsg}},
-                 parse_lines(["syntax=\"proto3\";"])),
+    {ok, [{syntax,"proto3"}]} = parse_lines(["syntax=\"proto3\";"]),
     ?assertError({parse_error,_,{_LNum,_Module,_EMsg}},
                  parse_lines(["syntax=\"totally-unknonwn\";"])).
 
@@ -597,6 +596,94 @@ parses_empty_service_statement_method_options_test() ->
      {{service,s1},[#?gpb_rpc{name=r1, input=m1, output=m1}]}] =
         do_process_sort_defs(Defs).
 
+proto3_no_occurrence_test() ->
+    {ok,Defs} = parse_lines(["syntax=\"proto3\";",
+                             "message m1 {",
+                             "  uint32 f1=1;",
+                             "  repeated uint32 f2=2;",
+                             "}"]),
+    [{proto3_msgs,[m1]},
+     {syntax,"proto3"},
+     {{msg,m1},
+      [#?gpb_field{name=f1,fnum=1,occurrence=required},
+       #?gpb_field{name=f2,fnum=2,occurrence=repeated}]}] =
+        do_process_sort_defs(Defs).
+
+proto3_sub_msgs_gets_occurrence_optional_test() ->
+    {ok,Defs} = parse_lines(["syntax=\"proto3\";",
+                             "message m1 {",
+                             "  s1 f1=1;",
+                             "  repeated s1 f2=2;",
+                             "}",
+                             "message s1 { uint32 f1=1; }"]),
+    [{proto3_msgs,[m1,s1]},
+     {syntax,"proto3"},
+     {{msg,m1},
+      [#?gpb_field{name=f1,fnum=1,type={msg,s1},occurrence=optional},
+       #?gpb_field{name=f2,fnum=2,type={msg,s1},occurrence=repeated}]},
+     {{msg,s1},
+      [#?gpb_field{name=f1,fnum=1,type=uint32,occurrence=required}]}] =
+        do_process_sort_defs(Defs).
+
+proto3_no_repeated_are_packed_by_default_test() ->
+    {ok,Defs} = parse_lines(["syntax=\"proto3\";",
+                             "message m1 {",
+                             "  repeated uint32 f2=2;", % to be packed
+                             "  repeated uint32 f3=3 [packed=false];",
+                             "  repeated uint32 f4=4 [packed=true];",
+                             "  repeated uint32 f5=5 [packed];",
+                             "}"]),
+    [{proto3_msgs,[m1]},
+     {syntax,"proto3"},
+     {{msg,m1},
+      [#?gpb_field{name=f2,fnum=2,occurrence=repeated,opts=[packed]},
+       #?gpb_field{name=f3,fnum=3,occurrence=repeated,opts=[]},
+       #?gpb_field{name=f4,fnum=4,occurrence=repeated,opts=[packed]},
+       #?gpb_field{name=f5,fnum=5,occurrence=repeated,opts=[packed]}
+      ]}] =
+        do_process_sort_defs(Defs).
+
+mixing_proto2_and_proto3_test() ->
+    {ok,Defs1} = parse_lines(["syntax=\"proto3\";",
+                             %% import "f2.proto"; % (done another way below)
+                             "message m1 {",
+                             "  m2 f1=1;",
+                             "  repeated uint32 f2=2;",
+                             "}"]),
+    {ok,Defs2} = parse_lines(["syntax=\"proto2\";",
+                             "message m2 {",
+                             "  repeated uint32 f3=3;",
+                             "}"]),
+    [{proto3_msgs,[m1]},
+     {syntax,"proto2"},
+     {syntax,"proto3"},
+     {{msg,m1},
+      [#?gpb_field{name=f1,type={msg,m2}},
+       #?gpb_field{name=f2,occurrence=repeated,opts=[packed]}]},
+     {{msg,m2},
+      [#?gpb_field{name=f3,occurrence=repeated,opts=[]}]}] =
+        do_process_sort_several_defs([Defs1, Defs2]).
+
+proto3_reserved_numbers_and_names_test() ->
+    {ok,Defs} = parse_lines(["syntax=\"proto3\";",
+                             "message m1 {",
+                             "  uint32 f1=1;",
+                             "  reserved 2, 15, 9 to 11;",
+                             "  reserved \"foo\", \"bar\";",
+                             "  message m2 {",
+                             "    uint32 f2=2;",
+                             "    reserved 17;",
+                             "  }",
+                             "}"]),
+    [{proto3_msgs,[m1,'m1.m2']},
+     {syntax,"proto3"},
+     {{msg,m1},      [#?gpb_field{name=f1}]},
+     {{msg,'m1.m2'}, [#?gpb_field{name=f2}]},
+     {{reserved_names,m1},       ["foo","bar"]},
+     {{reserved_numbers,m1},     [2,15,{9,11}]},
+     {{reserved_numbers,'m1.m2'},[17]}] =
+        do_process_sort_defs(Defs).
+
 fetches_imports_test() ->
     {ok, Elems} = parse_lines(["package p1;"
                                "import \"a/b/c.proto\";",
@@ -866,3 +953,16 @@ post_process(Elems, Opts) ->
     {ok, Elems2} = gpb_parse:post_process_one_file(Elems, Opts),
     gpb_parse:post_process_all_files(Elems2, Opts).
 
+do_process_sort_several_defs(ListOfDefs) ->
+    do_process_sort_several_defs(ListOfDefs, []).
+
+do_process_sort_several_defs(ListOfDefs, Opts) ->
+    AllElems =
+        lists:append(
+          [begin
+               {ok, Elems2} = gpb_parse:post_process_one_file(Elems, Opts),
+               Elems2
+           end
+           || Elems <- ListOfDefs]),
+    {ok, Defs2} = gpb_parse:post_process_all_files(AllElems, Opts),
+    lists:sort(Defs2).
