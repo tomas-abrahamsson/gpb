@@ -1,5 +1,16 @@
 -*- coding: utf-8 -*-
 
+Version 3.22.1
+2016-Jun-03
+
+	* Fix an bug in the generated code in Erlang 17. An attribute to
+	mute dialyzer, for generated verifiers, wasn't available until
+	Erlang 18, but erroneously used with too old Erlang versions.
+	* Fix an bug in the generated code for fields of type
+	map<KeyType,ValueType> for Erlang 17. A syntax that wasn't
+	available until Erlang 18 was erroneously used already
+	with Erlang 17.
+
 Version 3.22.0
 2016-Jun-03
 
