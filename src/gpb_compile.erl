@@ -4088,13 +4088,27 @@ format_default_translators(#anres{map_types=MapTypes}=AnRes, Opts) ->
                  [replace_tree('#{}', map_create([]))]),
                "\n",
                inline_attr(mt_add_item_m,2),
-               gpb_codegen:format_fn(
-                 mt_add_item_m,
-                 fun('#{key := K,value := V}', M) -> 'M#{K => V}' end,
-                 [replace_tree('#{key := K,value := V}',
-                               map_match([{key,K}, {value,V}])),
-                  replace_tree('M#{K => V}',
-                               map_set(M, [{K,V}]))]),
+               case is_major_version_at_least(18) of
+                   true ->
+                       gpb_codegen:format_fn(
+                         mt_add_item_m,
+                         fun('#{key := K,value := V}', M) -> 'M#{K => V}' end,
+                         [replace_tree('#{key := K,value := V}',
+                                       map_match([{key,K}, {value,V}])),
+                          replace_tree('M#{K => V}',
+                                       map_set(M, [{K,V}]))]);
+                   false ->
+                       gpb_codegen:format_fn(
+                         mt_add_item_m,
+                         fun('#{key := K,value := V}', M) ->
+                                 maps:put('K', 'V', 'M')
+                         end,
+                         [replace_tree('#{key := K,value := V}',
+                                       map_match([{key,K}, {value,V}])),
+                          replace_tree('K', K),
+                          replace_tree('V', V),
+                          replace_tree('M', M)])
+               end,
                "\n"]
       end,
       format_default_merge_translators(AnRes, Opts)]
