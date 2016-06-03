@@ -3524,37 +3524,39 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                           records -> can_occur_as_sub_msg(MsgName, AnRes);
                           maps    -> true
                       end,
-    gpb_codegen:format_fn(
-      mk_fn(v_msg_, MsgName),
-      fun('<msg-match>', '<Path>') ->
-              '<verify-fields>',
-              ok;
-         ('<M>', Path) when is_map('<M>') ->
-              mk_type_error(
-                {missing_fields, 'NonOptKeys' -- maps:keys('<M>'), '<MsgName>'},
-                '<M>', Path);
-         ('<X>', Path) ->
-              mk_type_error({expected_msg,'<MsgName>'}, X, Path)
-      end,
-      [replace_tree('<msg-match>', FieldMatching),
-       replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
-                                 MsgDef /= [] -> ?expr(Path)
+    FnName = mk_fn(v_msg_, MsgName),
+    [nowarn_dialyzer_attr(FnName,2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun('<msg-match>', '<Path>') ->
+               '<verify-fields>',
+               ok;
+          ('<M>', Path) when is_map('<M>') ->
+               mk_type_error(
+                 {missing_fields, 'NonOptKeys'--maps:keys('<M>'), '<MsgName>'},
+                 '<M>', Path);
+          ('<X>', Path) ->
+               mk_type_error({expected_msg,'<MsgName>'}, X, Path)
+       end,
+       [replace_tree('<msg-match>', FieldMatching),
+        replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
+                                  MsgDef /= [] -> ?expr(Path)
+                               end),
+        splice_trees('<verify-fields>',
+                     field_verifiers(MsgDef, FVars, MsgVar, Opts)),
+        repeat_clauses('<X>', case NeedsMatchOther of
+                                  true  -> [[replace_tree('<X>', ?expr(X))]];
+                                  false -> [] %% omit the else clause
                               end),
-       splice_trees('<verify-fields>',
-                    field_verifiers(MsgDef, FVars, MsgVar, Opts)),
-       repeat_clauses('<X>', case NeedsMatchOther of
-                                 true  -> [[replace_tree('<X>', ?expr(X))]];
-                                 false -> [] %% omit the else clause
-                             end),
-       repeat_clauses('<M>',
-                      case get_records_or_maps_by_opts(Opts) of
-                          records ->
-                              []; % omit this clause
-                          maps ->
-                              [[replace_tree('<M>', ?expr(M)),
-                                replace_term('NonOptKeys', NonOptKeys)]]
-                      end),
-       replace_term('<MsgName>', MsgName)]).
+        repeat_clauses('<M>',
+                       case get_records_or_maps_by_opts(Opts) of
+                           records ->
+                               []; % omit this clause
+                           maps ->
+                               [[replace_tree('<M>', ?expr(M)),
+                                 replace_term('NonOptKeys', NonOptKeys)]]
+                       end),
+        replace_term('<MsgName>', MsgName)])].
 
 field_verifiers(Fields, FVars, MsgVar, Opts) ->
     [field_verifier(Field, FVar, MsgVar, Opts)
@@ -3698,14 +3700,16 @@ format_enum_verifiers(Defs, #anres{used_types=UsedTypes}) ->
         smember({enum, EnumName}, UsedTypes)].
 
 format_enum_verifier(EnumName, EnumMembers) ->
-    gpb_codegen:format_fn(
-      mk_fn(v_enum_, EnumName),
-      fun('<sym>', _Path) -> ok;
-         (X, Path) -> mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
-      end,
-      [repeat_clauses('<sym>', [[replace_term('<sym>', EnumSym)]
-                                || {EnumSym, _Value} <- EnumMembers]),
-       replace_term('<EnumName>', EnumName)]).
+    FnName = mk_fn(v_enum_, EnumName),
+    [nowarn_dialyzer_attr(FnName, 2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun('<sym>', _Path) -> ok;
+          (X, Path) -> mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
+       end,
+       [repeat_clauses('<sym>', [[replace_term('<sym>', EnumSym)]
+                                 || {EnumSym, _Value} <- EnumMembers]),
+        replace_term('<EnumName>', EnumName)])].
 
 format_type_verifiers(#anres{used_types=UsedTypes}) ->
     [[format_int_verifier(sint32, signed, 32)   || smember(sint32, UsedTypes)],
@@ -3733,67 +3737,77 @@ format_int_verifier(IntType, Signedness, NumBits) ->
               unsigned -> 1 bsl NumBits - 1;
               signed   -> 1 bsl (NumBits-1) - 1
           end,
-    gpb_codegen:format_fn(
-      mk_fn(v_type_, IntType),
-      fun(N, _Path) when '<Min>' =< N, N =< '<Max>' ->
-              ok;
-         (N, Path) when is_integer(N) ->
-              mk_type_error({value_out_of_range, '<details>'}, N, Path);
-         (X, Path) ->
-              mk_type_error({bad_integer, '<details>'}, X, Path)
-      end,
-      [replace_term('<Min>', Min),
-       replace_term('<Max>', Max),
-       splice_trees('<details>', [erl_syntax:atom(IntType),
-                                  erl_syntax:atom(Signedness),
-                                  erl_syntax:integer(NumBits)])]).
+    FnName = mk_fn(v_type_, IntType),
+    [nowarn_dialyzer_attr(FnName, 2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(N, _Path) when '<Min>' =< N, N =< '<Max>' ->
+               ok;
+          (N, Path) when is_integer(N) ->
+               mk_type_error({value_out_of_range, '<details>'}, N, Path);
+          (X, Path) ->
+               mk_type_error({bad_integer, '<details>'}, X, Path)
+       end,
+       [replace_term('<Min>', Min),
+        replace_term('<Max>', Max),
+        splice_trees('<details>', [erl_syntax:atom(IntType),
+                                   erl_syntax:atom(Signedness),
+                                   erl_syntax:integer(NumBits)])])].
 
 format_bool_verifier() ->
-    gpb_codegen:format_fn(
-      mk_fn(v_type_, bool),
-      fun(false, _Path) -> ok;
-         (true, _Path)  -> ok;
-         (X, Path) -> mk_type_error(bad_boolean_value, X, Path)
-      end).
+    FnName = mk_fn(v_type_, bool),
+    [nowarn_dialyzer_attr(FnName, 2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(false, _Path) -> ok;
+          (true, _Path)  -> ok;
+          (X, Path) -> mk_type_error(bad_boolean_value, X, Path)
+       end)].
 
 format_float_verifier(FlType) ->
     BadTypeOfValue = list_to_atom(lists:concat(["bad_", FlType, "_value"])),
-    gpb_codegen:format_fn(
-      mk_fn(v_type_, FlType),
-      fun(N, _Path) when is_float(N) -> ok;
-         %% It seems a float for the corresponding integer value is
-         %% indeed packed when doing <<Integer:32/little-float>>.
-         %% So let verify accept integers too.
-         %% When such a value is unpacked, we get a float.
-         (N, _Path) when is_integer(N) -> ok;
-         (X, Path) -> mk_type_error('<bad_x_value>', X, Path)
-      end,
-      [replace_term('<bad_x_value>', BadTypeOfValue)]).
+    FnName = mk_fn(v_type_, FlType),
+    [nowarn_dialyzer_attr(FnName, 2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(N, _Path) when is_float(N) -> ok;
+          %% It seems a float for the corresponding integer value is
+          %% indeed packed when doing <<Integer:32/little-float>>.
+          %% So let verify accept integers too.
+          %% When such a value is unpacked, we get a float.
+          (N, _Path) when is_integer(N) -> ok;
+          (X, Path) -> mk_type_error('<bad_x_value>', X, Path)
+       end,
+       [replace_term('<bad_x_value>', BadTypeOfValue)])].
 
 format_string_verifier() ->
-    gpb_codegen:format_fn(
-      mk_fn(v_type_, string),
-      fun(S, Path) when is_list(S); is_binary(S) ->
-              try unicode:characters_to_binary(S) of
-                  B when is_binary(B) ->
-                      ok;
-                  {error, _, _} -> %% a non-UTF-8 binary
-                      mk_type_error(bad_unicode_string, S, Path)
-              catch error:badarg ->
-                      mk_type_error(bad_unicode_string, S, Path)
-              end;
-         (X, Path) ->
-              mk_type_error(bad_unicode_string, X, Path)
-      end).
+    FnName = mk_fn(v_type_, string),
+    [nowarn_dialyzer_attr(FnName, 2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(S, Path) when is_list(S); is_binary(S) ->
+               try unicode:characters_to_binary(S) of
+                   B when is_binary(B) ->
+                       ok;
+                   {error, _, _} -> %% a non-UTF-8 binary
+                       mk_type_error(bad_unicode_string, S, Path)
+               catch error:badarg ->
+                       mk_type_error(bad_unicode_string, S, Path)
+               end;
+          (X, Path) ->
+               mk_type_error(bad_unicode_string, X, Path)
+       end)].
 
 format_bytes_verifier() ->
-    gpb_codegen:format_fn(
-      mk_fn(v_type_, bytes),
-      fun(B, _Path) when is_binary(B) ->
-              ok;
-         (X, Path) ->
-              mk_type_error(bad_binary_value, X, Path)
-      end).
+    FnName = mk_fn(v_type_, bytes),
+    [nowarn_dialyzer_attr(FnName, 2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(B, _Path) when is_binary(B) ->
+               ok;
+          (X, Path) ->
+               mk_type_error(bad_binary_value, X, Path)
+       end)].
 
 format_map_verifiers(#anres{map_types=MapTypes}, Opts) ->
     RecordsOrMaps = get_records_or_maps_by_opts(Opts),
@@ -3808,41 +3822,42 @@ format_map_verifier(KeyType, ValueType, RecordsOrMaps) ->
                           {enum,EnumName} -> mk_fn(v_enum_, EnumName);
                           Type            -> mk_fn(v_type_, Type)
                       end,
-    case RecordsOrMaps of
-        records ->
-            gpb_codegen:format_fn(
-              FnName,
-              fun(KVs, Path) when is_list(KVs) ->
-                      [case X of
-                           {Key, Value} ->
-                               'VerifyKey'(Key, ['key' | Path]),
-                               'VerifyValue'(Value, ['value' | Path]);
-                           _ ->
-                               mk_type_error(invalid_key_value_tuple, X, Path)
-                       end
-                       || X <- KVs],
-                      ok;
-                 (X, Path) ->
-                      mk_type_error(invalid_list_of_key_value_tuples, X, Path)
-              end,
-              [replace_term('VerifyKey', KeyVerifierFn),
-               replace_term('VerifyValue', ValueVerifierFn)]);
-        maps ->
-            gpb_codegen:format_fn(
-              FnName,
-              fun(M, Path) when is_map(M) ->
-                      [begin
-                           'VerifyKey'(Key, ['key' | Path]),
-                           'VerifyValue'(Value, ['value' | Path])
-                       end
-                       || {Key, Value} <- maps:to_list(M)],
-                      ok;
-                 (X, Path) ->
-                      mk_type_error(invalid_map, X, Path)
-              end,
-              [replace_term('VerifyKey', KeyVerifierFn),
-               replace_term('VerifyValue', ValueVerifierFn)])
-    end.
+    [nowarn_dialyzer_attr(FnName, 2),
+     case RecordsOrMaps of
+         records ->
+             gpb_codegen:format_fn(
+               FnName,
+               fun(KVs, Path) when is_list(KVs) ->
+                       [case X of
+                            {Key, Value} ->
+                                'VerifyKey'(Key, ['key' | Path]),
+                                'VerifyValue'(Value, ['value' | Path]);
+                            _ ->
+                                mk_type_error(invalid_key_value_tuple, X, Path)
+                        end
+                        || X <- KVs],
+                       ok;
+                  (X, Path) ->
+                       mk_type_error(invalid_list_of_key_value_tuples, X, Path)
+               end,
+               [replace_term('VerifyKey', KeyVerifierFn),
+                replace_term('VerifyValue', ValueVerifierFn)]);
+         maps ->
+             gpb_codegen:format_fn(
+               FnName,
+               fun(M, Path) when is_map(M) ->
+                       [begin
+                            'VerifyKey'(Key, ['key' | Path]),
+                            'VerifyValue'(Value, ['value' | Path])
+                        end
+                        || {Key, Value} <- maps:to_list(M)],
+                       ok;
+                  (X, Path) ->
+                       mk_type_error(invalid_map, X, Path)
+               end,
+               [replace_term('VerifyKey', KeyVerifierFn),
+                replace_term('VerifyValue', ValueVerifierFn)])
+     end].
 
 format_verifier_auxiliaries(Defs) ->
     ["-spec mk_type_error(_, _, list()) -> no_return().\n",
@@ -3871,6 +3886,30 @@ format_verifier_auxiliaries(Defs) ->
                            "."))
                end)
      end].
+
+nowarn_dialyzer_attr(FnName,Arity) ->
+    %% Especially for the verifiers, dialyzer's success typing can
+    %% think that some code paths in the verifiers can't be reached,
+    %% and in a sense, it is right: the verifiers do much the same
+    %% work as dialyzer. But I think their existence is still
+    %% warranted because (a) they work-time rather than compile-time,
+    %% and (b) provide for shorter turn-around times when dialyzer
+    %% can take some time to analyze a non-trivial proto file.
+    %%
+    %% So mute dialyzer for the verifier functions.
+    case can_do_dialyzer_attr() of
+        true ->
+            ?f("-dialyzer({nowarn_function,~p/~w}).~n", [FnName,Arity]);
+        false ->
+            %% Too old system (R16 or older), which will see
+            %% the dialyzer attr as just another plain attr,
+            %% which must be located before all functions.
+            %% Just don't silence dialyzer on these systems.
+            ""
+    end.
+
+can_do_dialyzer_attr() ->
+    is_major_version_at_least(17).
 
 %% -- translators ------------------------------------------------------
 
@@ -6319,6 +6358,26 @@ map_kvalues(KVars) ->
      || {Key, Expr} <- KVars].
 
 -endif. %% NO_HAVE_MAPS
+
+is_major_version_at_least(VsnMin) when VsnMin >= 17 ->
+    case erlang:system_info(otp_release) of
+        "R"++_ -> % R16 or ealier
+            false;
+        RelStr ->
+            %% In Erlang 17 the leading "R" was dropped
+            %% The exact format isn't super documented,
+            %% so be prepared for some (future?) alternatives.
+            try list_to_integer(RelStr) of
+                N when is_integer(N) -> N >= VsnMin
+            catch error:badarg ->
+                    [NStr | _] = string:tokens(RelStr, ".-"),
+                    try list_to_integer(NStr) of
+                        N when is_integer(N) -> N >= VsnMin
+                    catch error:badarg ->
+                            false
+                    end
+            end
+    end.
 
 find_translation(ElemPath, Op, AnRes) ->
     find_translation(ElemPath, Op, AnRes, undefined).
