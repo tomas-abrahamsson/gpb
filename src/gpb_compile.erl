@@ -1143,16 +1143,20 @@ find_used_types(Defs) ->
       Defs).
 
 find_msg_occurrences(Defs) ->
-    fold_msg_fields(fun(_MsgName, #?gpb_field{type=Type, occurrence=Occ}, Acc) ->
-                            case Type of
-                                {msg,SubMsgName} ->
-                                    add_occurrence(SubMsgName, Occ, Acc);
-                                _Other ->
-                                    Acc
-                            end
-                    end,
-                    dict:new(),
-                    Defs).
+    %% Don't "count" occurrences inside oneof fields
+    fold_msg_fields_o(
+      fun(_MsgName, #?gpb_field{type=Type, occurrence=Occ}, false, Acc) ->
+              case Type of
+                  {msg,SubMsgName} ->
+                      add_occurrence(SubMsgName, Occ, Acc);
+                  _Other ->
+                      Acc
+              end;
+         (_MsgName, #?gpb_field{}, {true, _CFName}, Acc) ->
+              Acc
+      end,
+      dict:new(),
+      Defs).
 
 add_occurrence(MsgName, Occurrence, D) ->
     case dict:find(MsgName, D) of
@@ -1195,22 +1199,39 @@ find_num_packed_fields(Defs) ->
 %% Loop over all message fields, including oneof-fields
 %% Call Fun for all #?gpb_fields{}, skip over non-msg defs
 fold_msg_fields(Fun, InitAcc, Defs) ->
+    fold_msg_fields_o(
+      fun(MsgName, Field, _IsOneOf, Acc) -> Fun(MsgName, Field, Acc) end,
+      InitAcc,
+      Defs).
+
+fold_msgdef_fields(Fun, InitAcc, Fields) ->
+    fold_msgdef_fields_o(
+      fun(Field, _IsOneOf, Acc) -> Fun(Field, Acc) end,
+      InitAcc,
+      Fields).
+
+%% The fun takes 4 args: Fun(Msgname, #?gpb_field{}, IsOneof, Acc) -> Acc1
+fold_msg_fields_o(Fun, InitAcc, Defs) ->
     lists:foldl(
       fun({{msg, MsgName}, Fields}, Acc) ->
-              FFun = fun(Field, FAcc) -> Fun(MsgName, Field, FAcc) end,
-              fold_msgdef_fields(FFun, Acc, Fields);
+              FFun = fun(Field, IsOneOf, FAcc) ->
+                             Fun(MsgName, Field, IsOneOf, FAcc)
+                     end,
+              fold_msgdef_fields_o(FFun, Acc, Fields);
          (_Def, Acc) ->
               Acc
       end,
       InitAcc,
       Defs).
 
-fold_msgdef_fields(Fun, InitAcc, Fields) ->
+%% The fun takes 3 args: Fun(#?gpb_field{}, IsOneof, Acc) -> Acc1
+fold_msgdef_fields_o(Fun, InitAcc, Fields) ->
     lists:foldl(
       fun(#?gpb_field{}=Field, Acc) ->
-              Fun(Field, Acc);
-         (#gpb_oneof{fields=OFields}, Acc) ->
-              lists:foldl(fun(OField, OAcc) -> Fun(OField, OAcc) end,
+              Fun(Field, false, Acc);
+         (#gpb_oneof{name=CFName, fields=OFields}, Acc) ->
+              IsOneOf = {true, CFName},
+              lists:foldl(fun(OField, OAcc) -> Fun(OField, IsOneOf, OAcc) end,
                           Acc,
                           OFields)
       end,
@@ -3389,7 +3410,10 @@ occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
     %% Note: order of evaluation below is important (the exprs of `andalso'):
     %% Messages are present in Occurrences only if they are sub-messages
     can_occur_as_sub_msg(MsgName, AnRes) andalso
-        lists:member(optional, dict:fetch(MsgName, Occurrences)).
+        case dict:find(MsgName, Occurrences) of
+            error       -> false; % likely only referenced from a oneof
+            {ok, MOccs} -> lists:member(optional, MOccs)
+        end.
 
 format_field_skippers(MsgName, AnRes) ->
     SkipVarintFnName = mk_fn(skip_varint_, MsgName),
