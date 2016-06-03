@@ -1,5 +1,18 @@
 -*- coding: utf-8 -*-
 
+Version 3.22.0
+2016-Jun-03
+
+	* Add proto3 support to a rudimentary level: support for the new
+	syntax and semantics, but not yet any well-known types, or any
+	JSON mapping.
+	* Fix more dialyzer errors in the generated code.
+	* For Erlang 19, use := for the type specs for maps for mandatory
+	fields (required and repeated). For earlier Erlang versions,
+	fallback to using the => notation.
+	* Improve the error when an import file is not found, to make it
+	easier to trouble-shoot search path problems.
+
 Version 3.21.3
 2016-May-30
 
