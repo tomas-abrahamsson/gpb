@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.22.2
+2016-Jun-04
+
+	* For proto3, automatically find well-known types in imports,
+	without the user explicitly having to specify include paths.
+	This is done by adding an internal include path last.
+
 Version 3.22.1
 2016-Jun-03
 
