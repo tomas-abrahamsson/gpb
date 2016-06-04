@@ -20,11 +20,13 @@ is_up_to_date () {
 
 set -e
 
-is_up_to_date descr_src/gpb_descriptor.erl descr_src/gpb_descriptor.proto || \
-    ( echo "Compiling gpb_descriptor.proto..."
+is_up_to_date descr_src/gpb_descriptor.erl \
+	      priv/proto3/google/protobuf/descriptor.proto || \
+    ( echo "Compiling descriptor.proto..."
     erl +B -noinput -pa ebin \
-        -I descr_src -o descr_src \
-        -s gpb_compile c gpb_descriptor.proto ) || exit $?
+        -I priv/proto3/google/protobuf -o descr_src \
+	-modprefix gpb_ \
+        -s gpb_compile c descriptor.proto ) || exit $?
 is_up_to_date ebin/gpb_descriptor.beam descr_src/gpb_descriptor.erl || \
     ( echo "Compiling gpb_descriptor.erl..."
     erlc -Idescr_src -Iinclude -o ebin +debug_info \

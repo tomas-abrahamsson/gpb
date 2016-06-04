@@ -24,7 +24,8 @@ Features of gpb
    - package namespacing (optional)
    - oneof (introduced in protobuf 2.6.0)
    - map<_,_> (introduced in protobuf 3.0.0)
-   - proto3 syntax to a rudimentary level
+   - proto3 syntax to a rudimentary level (including import of
+     well-known types)
 
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'
@@ -34,7 +35,6 @@ Features of gpb
    - groups
    - aggregate custom options introduced in protobuf 2.4.0
    - rpc
-   - proto3 well-known types
    - proto3 JSON mapping
 
 *  Characteristics of gpb:

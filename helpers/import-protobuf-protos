@@ -1,0 +1,72 @@
+#! /bin/bash
+
+usage () {
+    cat <<EOF
+Usage: $(basename "$0") <directory of protobuf git repo>
+Example: $(basename "$0") /usr/local/src/protobuf
+
+Import .proto files from a local clone of the protobuf git repo
+to this gpb repo
+EOF
+}
+
+local_protobuf_repo="$1"
+if [ -z "$local_protobuf_repo" ]
+then
+    usage
+    exit 1
+fi
+
+if [ ! -d "$local_protobuf_repo" ]
+then
+    echo "$local_protobuf_repo does not seem to be a directory"
+    exit 1
+fi
+
+set -e
+
+echo "Ensureing we are at the top of the gpb repo..."
+repotop="$(git rev-parse --show-toplevel)"
+cd "$repotop"
+echo
+
+protobuf_shortsha=$(cd "$local_protobuf_repo" && git log -1 --format="%h")
+protobuf_version=$(cat "$local_protobuf_repo"/CHANGES.txt | \
+			  awk '/.* version .*/ { \
+				for (i=1;i<NF;i++) \
+				    if ($i == "version") { \
+				        print $(i+1); \
+				        exit(0); \
+				    } \
+			  }')
+
+echo "Local protobuf repo info:"
+echo "   version: " "$protobuf_version"
+echo "   sha:     " "$protobuf_shortsha"
+echo
+
+import_proto () {
+    src="$1"
+    dest="$2"
+
+    cat > "$dest"  <<EOF
+// This file is imported from protobuf $protobuf_version ($protobuf_shortsha)
+
+EOF
+    cat "$f" >> "$dest"
+}
+
+
+destdir=priv/proto3/google/protobuf
+if [ -d "$destdir" ]
+then
+    for f in $(ls "$local_protobuf_repo"/src/google/protobuf/*.proto | \
+		      egrep -v '(unittest|_test)')
+    do
+	# can not rename due to import statements in the imported files.
+	echo "$f"
+	import_proto "$f" "$destdir/$(basename "$f")"
+    done
+else
+    echo "Warning: No directory $destdir, so not importing."
+fi

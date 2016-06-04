@@ -1,6 +1,4 @@
-// This file is imported from protobuf 3.0.0-beta2 (667f4a6)
-// and renamed from descriptor.proto to gpb_descriptor.proto
-// to avoid collisions.
+// This file is imported from protobuf 3.0.0-beta-2 (667f4a6)
 
 // Protocol Buffers - Google's data interchange format
 // Copyright 2008 Google Inc.  All rights reserved.
