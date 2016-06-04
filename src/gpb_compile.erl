@@ -974,10 +974,13 @@ parse_file_and_imports(FName, AlreadyImported, Opts) ->
             %% case we get an error we don't want to try to reprocess it later
             %% (in case it is multiply imported) and get the error again.
             AlreadyImported2 = [FName | AlreadyImported],
-            case scan_and_parse_string(binary_to_list(Contents), FName, Opts) of
+            case scan_and_parse_string(binary_to_list(Contents),FName,Opts) of
                 {ok, Defs} ->
                     Imports = gpb_parse:fetch_imports(Defs),
-                    read_and_parse_imports(Imports,AlreadyImported2,Defs,Opts);
+                    Opts2 = ensure_include_path_to_wellknown_types_if_proto3(
+                              Defs, Imports, Opts),
+                    read_and_parse_imports(Imports, AlreadyImported2,
+                                           Defs, Opts2);
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -1052,6 +1055,64 @@ locate_import_aux([Path | Rest], Import, Opts) ->
     end;
 locate_import_aux([], Import, _Opts) ->
     {error, {import_not_found, Import}}.
+
+ensure_include_path_to_wellknown_types_if_proto3(Defs, Imports, Opts) ->
+    case proplists:get_value(syntax, Defs) of
+        "proto3" ->
+            case lists:any(fun imports_wellknown/1, Imports) of
+                true ->
+                    PrivDir = get_priv_dir(),
+                    Wellknown = filename:join(PrivDir, "proto3"),
+                    sanity_check_installation_wellknown_proto3(Wellknown),
+                    add_opt_unless_present({i,Wellknown}, Opts);
+                false ->
+                    Opts
+            end;
+        _ ->
+            Opts
+    end.
+
+imports_wellknown("google/protobuf/"++_) -> true;
+imports_wellknown(_) -> false.
+
+add_opt_unless_present(Opt, [Opt | Rest]) ->
+    [Opt | Rest];
+add_opt_unless_present(Opt, [H | Rest]) ->
+    [H | add_opt_unless_present(Opt, Rest)];
+add_opt_unless_present(Opt, []) ->
+    [Opt].
+
+get_priv_dir() ->
+    case application:get_application(?MODULE) of
+        {ok,CurrApp} ->
+            code:priv_dir(CurrApp);
+        undefined ->
+            %% Not loaded as an application, just executing code;
+            %% from an escript possibly? (or even from an ez archive?)
+            MDir = filename:dirname(code:which(?MODULE)),
+            case filename:basename(MDir) of
+                "ebin" ->
+                    filename:join(filename:dirname(MDir), "priv");
+                _ ->
+                    case code:priv_dir(gpb) of % hard-wired app name...
+                        Dir when is_list(Dir) ->
+                            Dir;
+                        {error,Reason} ->
+                            error({failed_to_locate_privdir,Reason})
+                    end
+            end
+    end.
+
+sanity_check_installation_wellknown_proto3(WellknownDir) ->
+    case filelib:is_dir(WellknownDir) of
+        true ->
+            ok;
+        false ->
+            error({your_installation_is_missing_the, WellknownDir, directory,
+                   which_is_expected_to_house_proto3_well_known_types,
+                   such_as, ["google/protobuf/timestamp.proto",
+                             "google/protobuf/duration.proto", and_more]})
+    end.
 
 try_topsort_defs(Defs) ->
     G = digraph:new(),
