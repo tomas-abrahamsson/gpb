@@ -54,6 +54,7 @@ ebin           = $(GPB_PREFIX)ebin
 incdir         = $(GPB_PREFIX)include
 descr_src      = $(GPB_PREFIX)descr_src
 test           = $(GPB_PREFIX)test
+priv           = $(GPB_PREFIX)priv
 doc            = $(GPB_PREFIX)doc
 build          = $(GPB_PREFIX)build
 
@@ -117,11 +118,13 @@ MODULES := \
 	$(patsubst $(src)/%.yrl,%,$(wildcard $(src)/*.yrl)) \
 	$(patsubst $(src)/%.xrl,%,$(wildcard $(src)/*.xrl))
 
-DESCR_PROTO := $(descr_src)/gpb_descriptor.proto
+DESCR_PROTO := $(priv)/proto3/google/protobuf/descriptor.proto
+DESCR_PROTO_ERL := $(descr_src)/gpb_descriptor.erl
+DESCR_PROTO_HRL := $(descr_src)/gpb_descriptor.hrl
 
 DESCR_MODULES := \
 	gpb_compile_descr \
-	$(patsubst $(descr_src)/%.proto,%,$(DESCR_PROTO))
+	$(patsubst $(priv)/proto3/google/protobuf/%.proto,gpb_%,$(DESCR_PROTO))
 
 TEST_MODULES := \
 	$(patsubst $(test)/%.erl,%,$(wildcard $(test)/*.erl))
@@ -145,8 +148,8 @@ clean:
 	$(RM) $(TARGETS)
 	$(RM) $(src)/gpb_parse.erl
 	$(RM) $(src)/gpb_scan.erl
-	$(RM) $(patsubst %.proto,%.erl,$(DESCR_PROTO))
-	$(RM) $(patsubst %.proto,%.hrl,$(DESCR_PROTO))
+	$(RM) $(DESCR_PROTO_ERL)
+	$(RM) $(DESCR_PROTO_HRL)
 	$(RM) $(TEST_BEAMS)
 	$(RM) -r doc
 
@@ -214,17 +217,16 @@ $(ebin)/gpb.beam: $(src)/gpb.erl $(incdir)/gpb_version.hrl
 
 # To compile the description generator, we
 # must first have compiled the proto file for the gpb_description.proto
-descr_encoder = $(patsubst %.proto,%.erl,$(DESCR_PROTO))
-
 $(ebin)/gpb_compile_descr.beam: $(descr_src)/gpb_compile_descr.erl \
-				$(descr_encoder)
+				$(DESCR_PROTO_ERL)
 
-$(descr_encoder): $(DESCR_PROTO) $(BEAMS)
+$(descr_src)/gpb_%.erl: $(priv)/proto3/google/protobuf/%.proto $(BEAMS)
 	@echo Proto-compiling the description definition...
 	$(silencer)$(ERL) $(ERL_BATCH_FLAGS) -pa $(ebin) \
-		-I $(abspath $(descr_src)) \
+		-I $(abspath $(priv)/proto3/google/protobuf) \
+		-modprefix gpb_ \
 		-o $(descr_src) \
-		-s gpb_compile c $(abspath $(descr_src))/gpb_descriptor.proto
+		-s gpb_compile c $(abspath $(<))
 
 # To generate the ebin/gpb.app file, process the src/gpb.app.src file
 $(ebin)/gpb.app: $(src)/gpb.app.src | $(ebin)
