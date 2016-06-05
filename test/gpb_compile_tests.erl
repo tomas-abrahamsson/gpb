@@ -832,7 +832,8 @@ compile_msg_defs_get_output(MsgDefs, Opts) ->
                                                       end}]),
                     [FOpt | RestOpts]
             end,
-    capture_stdout(fun() -> gpb_compile:proto_defs('x', MsgDefs, Opts2) end).
+    Opts3 = ensure_file_writing_stubbed_opt(Opts2),
+    capture_stdout(fun() -> gpb_compile:proto_defs('x', MsgDefs, Opts3) end).
 
 compile_file_get_output(Txt, Opts) ->
     Contents = iolist_to_binary(Txt),
@@ -845,10 +846,17 @@ compile_file_get_output(Txt, Opts) ->
                     true -> mk_fileop_opt(
                               [{read_file, fun(_) -> {ok, Contents} end}])
                  end,
-    capture_stdout(
-      fun() ->
-              gpb_compile:file("X.proto", [FileOpOpts, {i,"."} | RestOpts])
-      end).
+    Opts2 = [FileOpOpts, {i,"."} | RestOpts],
+    Opts3 = ensure_file_writing_stubbed_opt(Opts2),
+    capture_stdout(fun() -> gpb_compile:file("X.proto", Opts3) end).
+
+ensure_file_writing_stubbed_opt(Opts) ->
+    case proplists:get_value(file_op, Opts) of
+        undefined ->
+            [mk_fileop_opt([]) | Opts]; % the default will stub writing
+        _ ->
+            Opts % already stubbed or changed
+    end.
 
 eval_return(Expected, Actual, Output,
             Options, CompileTo, SrcType, SrcQuality) ->
