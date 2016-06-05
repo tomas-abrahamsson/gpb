@@ -6797,12 +6797,18 @@ possibly_write_file(FileName, Bin, Opts) when is_binary(Bin) ->
 possibly_write_file(_FileName, '$not_generated', _Opts) ->
     ok.
 
-file_op(Fn, Args, Opts) ->
-    FileOp = proplists:get_value(file_op, Opts, fun use_the_file_module/2),
-    FileOp(Fn, Args).
-
-use_the_file_module(Fn, Args) ->
-    apply(file, Fn, Args).
+file_op(FnName, Args, Opts) ->
+    case proplists:get_value(file_op, Opts) of
+        undefined ->
+            apply(file, FnName, Args);
+        Ops ->
+            case proplists:get_value(FnName, Ops) of
+                undefined ->
+                    apply(file, FnName, Args);
+                Fn ->
+                    apply(Fn, Args)
+            end
+    end.
 
 possibly_probe_defs(Defs, Opts) ->
     case proplists:get_value(probe_defs, Opts, '$no') of

@@ -171,23 +171,21 @@ encode_decode_round_trip(MsgDefAsIoList, Msg, Opts) ->
     Result.
 
 mk_fileop_opt(NonDefaults) ->
-    {file_op,
-     fun(read_file_info, [FileName]) ->
-             case proplists:get_value(read_file_info, NonDefaults, '$no') of
-                 '$no' -> {ok, #file_info{access=read}};
-                 Fn    -> Fn(filename:basename(FileName))
-             end;
-        (read_file, [FileName]) ->
-             case proplists:get_value(read_file, NonDefaults, '$no') of
-                 '$no' -> {error, enoent};
-                 Fn    -> Fn(filename:basename(FileName))
-             end;
-        (write_file, [FileName, Bin]) ->
-             case proplists:get_value(write_file, NonDefaults, '$no') of
-                 '$no' -> ok;
-                 Fn    -> Fn(filename:basename(FileName), Bin)
-             end
-     end}.
+    NonDefaults1 = [case Op of
+                        read_file_info -> {Op, mk_with_basename_1(Fn)};
+                        read_file      -> {Op, mk_with_basename_1(Fn)};
+                        write_file     -> {Op, mk_with_basename_2(Fn)}
+                    end
+                    || {Op, Fn} <- NonDefaults],
+    {file_op, NonDefaults1 ++ mk_default_file_ops()}.
+
+mk_with_basename_1(Fn) -> fun(Path) -> Fn(filename:basename(Path)) end.
+mk_with_basename_2(Fn) -> fun(Path, A) -> Fn(filename:basename(Path), A) end.
+
+mk_default_file_ops() ->
+    [{read_file_info, fun(_FileName) -> {ok, #file_info{access=read}} end},
+     {read_file,      fun(_FileName) -> {error, enoent} end},
+     {write_file,     fun(_FileName, _Bin) -> ok end}].
 
 mk_defs_probe_sender_opt(SendTo) ->
     {probe_defs, fun(Defs) -> SendTo ! {defs, Defs} end}.
