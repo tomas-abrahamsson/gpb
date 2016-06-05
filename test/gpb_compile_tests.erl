@@ -636,7 +636,24 @@ report_or_return_warnings_or_errors_test_() ->
 report_or_return_warnings_or_errors_test_aux() ->
     [begin
          Options = WarningOptions ++ ErrorOptions ++ WarnsAsErrsOpts,
-         rwre_go(Options, CompileTo, SrcType, SrcQuality)
+         try
+             rwre_go(Options, CompileTo, SrcType, SrcQuality)
+         catch Class:Reason ->
+                 Stack = erlang:get_stacktrace(),
+                 %% Need some trouble shooting info for the failing combination
+                 %% This could have been made into a test generator,
+                 %% with each combination its won test,
+                 %% but in total 544 tests are executed, and if running
+                 %% with verbose mode, it'll always be half a thousand lines
+                 %% of (almost) non-interesting info.
+                 ?debugFmt("~nFailed for~n"
+                           "   Options=~p~n"
+                           "   CompileTo=~p~n"
+                           "   SrcType=~p~n"
+                           "   SrcQuality=~p~n",
+                           [Options, CompileTo, SrcType, SrcQuality]),
+                 erlang:raise(Class, Reason, Stack)
+         end
      end
      || WarningOptions     <- [[], [report_warnings], [return_warnings],
                                [report_warnings, return_warnings]],
