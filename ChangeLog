@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 3.22.3
+2016-Jun-15
+
+	* Running the eunit tests previously caused the files x.erl and
+	x.hrl to be created as a side-effect, this has been fixed: they
+	are no longer created.
+	* Don't include the timestamp in a comment in the generated source
+	code, for the purpose of reproducible builds.
+
 Version 3.22.2
 2016-Jun-04
 
