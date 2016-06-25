@@ -4101,7 +4101,8 @@ args_by_op(decode)                   -> [?expr(X)];
 args_by_op(decode_init_default)      -> [?expr(InitialValue)];
 args_by_op(decode_repeated_add_elem) -> [?expr(Elem), ?expr(L)];
 args_by_op(decode_repeated_finalize) -> [?expr(L)];
-args_by_op(merge)                    -> [?expr(X1), ?expr(X2)].
+args_by_op(merge)                    -> [?expr(X1), ?expr(X2)];
+args_by_op(verify)                   -> [?expr(X)].
 
 format_aux_transl_helpers() ->
     [nowarn_attrs(id,1),
