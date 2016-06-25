@@ -94,7 +94,8 @@ file(File) ->
 %%                   {msg_name_suffix, string() | atom()} |
 %%                   {msg_name_to_lower, boolean()} |
 %%                   {module_name_prefix, string() | atom()} |
-%%                   {module_name_suffix, string() | atom()}
+%%                   {module_name_suffix, string() | atom()} |
+%%                   {any_translate, AnyTranslation}
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
@@ -106,6 +107,13 @@ file(File) ->
 %%            CodeType = {erl, binary()} | {nif, NifCcText}
 %%            NifCcText = binary()
 %%            LoadNif = string()
+%%            AnyTranslation = [Translation]
+%%            Translation = {encode,{ModuleName,FnName,ArgTemplate}} |
+%%                          {decode,{ModuleName,FnName,ArgTemplate}} |
+%%                          {merge,{ModuleName,FnName,ArgTemplate}} |
+%%                          {verify,{ModuleName,FnName,ArgTemplate}}
+%%            FnName = atom()
+%%            ArgTemplate = [term()|'$1'|'$2'|'$errorf']
 %%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
@@ -297,6 +305,39 @@ file(File) ->
 %% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to the generated code and definition files. The `{module_name_suffix,Suffix}'
 %% works correspondingly.
+%%
+%% The `any_translate' option can be used to provide packer and
+%% unpacker functions for `google.protobuf.Any' messages.
+%% The translation calls are specified as `{Mod,Fn,ArgTemplate}' where
+%% `Mod',`Fn' is a module and function to call, `ArgTemplate' is a list
+%% of terms, containing markers, such as `$1', `$2' and so on, for where
+%% to place the actual args. This makes it possible to specify additional
+%% static argument terms, for instance.
+%% The translator functions are called as follows:
+%% <dl>
+%%   <dt>Encode (Packing)</dt>
+%%   <dd>Call `Mod:Fn(Term)' to pack the `Term' (`$1') to
+%%       a `google.protobuf.Any' message.</dd>
+%%   <dt>Decode (Unpacking)</dt>
+%%   <dd>Call `Mod:Fn(Any)' to unpack the `Any' (`$1') to
+%%       unpack a `google.protobuf.Any' message to a term.</dd>
+%%   <dt>Merge </dt>
+%%   <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
+%%       unpacked terms to a resulting Term3. The `$1' is the
+%%       previously seen term (during decoding, on encountering a
+%%       second `Any' field), or the first argument to the
+%%       `merge_msgs' function. The `$2' is the lastly seen term, or
+%%       the second argument to the `merge_msgs' function.</dd>
+%%   <dt>Verify</dt>
+%%   <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
+%%       If `Term' (`$1') is valid, the function is expected to just return
+%%       any value, which is ignored and discarded.
+%%       If `Term' is invalid, the function is exptected to
+%%       call `ErrorF' (`$errorf') with one argument, the reason for
+%%       error. That function will raise an error, which will also
+%%       additionally contain the actual value of `Term' and the path
+%%       to the field.</dd>
+%% </dl>
 file(File, Opts0) ->
     Opts1 = normalize_alias_opts(Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
@@ -658,6 +699,31 @@ c() ->
 %%       If no package is defined, nothing will be prepended.
 %%       Default is to not prepend package names for backwards
 %%       compatibility, but it is needed for some proto files.</dd>
+%%   <dt>`-any_translate MsFs'</dt>
+%%   <dd>Call functions in `MsFs' to pack, unpack, merge and verify
+%%       `google.protobuf.Any' messages. The `MsFs' is a string on the
+%%       following format: `e=Mod:Fn,d=Mod:Fn,m=Mod:Fn,v=Mod:Fn'.
+%%       The specified modules and functinos are called and used as follows:
+%%       <dl>
+%%         <dt>e=Mod:Fn</dt>
+%%         <dd>Call `Mod:Fn(Term)' to pack the `Term' to
+%%             a `google.protobuf.Any' message.</dd>
+%%         <dt>d=Mod:Fn</dt>
+%%         <dd>Call `Mod:Fn(Any)' to unpack the `Any' to
+%%             unpack a `google.protobuf.Any' message to a term.</dd>
+%%         <dt>m=Mod:Fn</dt>
+%%         <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
+%%             unpacked terms to a resulting Term3.</dd>
+%%         <dt>v=Mod:Fn</dt>
+%%         <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
+%%             If `Term' is valid, the function is expected to just return
+%%             any value, which is ignored and discarded.
+%%             If `Term' is invalid, the function is exptected to call `ErrorF'
+%%             with one argument, the reason for error. That function will
+%%             raise an error, which will also additionally contain the
+%%             actual value of `Term' and the path to the field.</dd>
+%%       </dl>
+%%   </dd>
 %%   <dt>`-msgprefix Prefix'</dt>
 %%   <dd>Prefix each message with `Prefix'. This can be useful to
 %%       when including different sub-projects that have colliding
@@ -800,6 +866,8 @@ parse_opt(OptName, {OptName, undefined, OptTag, _Descr}, Rest) ->
     {ok, {OptTag, Rest}};
 parse_opt(OptName, {OptName, 'string()', OptTag, _Descr}, [OptArg | Rest]) ->
     {ok, {{OptTag, OptArg}, Rest}};
+parse_opt(OptName, {OptName, F, OptTag, _Descr}, Rest) when is_function(F) ->
+    F(OptTag, Rest);
 parse_opt(OptName, {OptName, Alternatives, OptTag, _Descr}, [OptArg | Rest]) ->
     case parse_opt_alts(tuple_to_list(Alternatives), OptArg, OptTag) of
         {ok, Opt} -> {ok, {Opt, Rest}};
@@ -866,6 +934,13 @@ opt_specs() ->
       "       If no package is defined, nothing will be prepended.\n"
       "       Default is to not prepend package names for backwards\n"
       "       compatibility, but it is needed for some proto files.\n"},
+     {"any_translate", fun opt_any_translate/2, any_translate,
+      " e=Mod:Fn,d=Mod:Fn,m=Mod:Fn,v=Mod:Fn\n"
+      "       For a google.protobuf.Any message, call Mod:Fn to:\n"
+      "       - encode (calls Mod:Fn(Term) -> AnyMessage to pack)\n"
+      "       - decode (calls Mod:Fn(AnyMessage) -> Term to unpack)\n"
+      "       - merge  (calls Mod:Fn(Term,Term2) -> Term3 to merge unpacked)\n"
+      "       - verify (calls Mod:Fn(Term,ErrorF) -> _ to verify unpacked)\n"},
      {"msgprefix", 'string()', msg_name_prefix, "Prefix\n"
       "       Prefix each message with Prefix.\n"},
      {"modprefix", 'string()', module_name_prefix, "Prefix\n"
@@ -914,6 +989,33 @@ opt_specs() ->
       "       Show version\n"}
     ].
 
+opt_any_translate(OptTag, [S | Rest]) ->
+    try
+        Ts = string:tokens(S, ","),
+        Opt = {OptTag, [opt_any_translate_mfa(T) || T <- Ts]},
+        {ok, {Opt, Rest}}
+    catch throw:{badopt,ErrText} ->
+            {error, ErrText}
+    end.
+
+opt_any_translate_mfa("e="++MF) -> {encode,opt_mf_str(MF, 1)};
+opt_any_translate_mfa("d="++MF) -> {decode,opt_mf_str(MF, 1)};
+opt_any_translate_mfa("m="++MF) -> {merge, opt_mf_str(MF, 2)};
+opt_any_translate_mfa("v="++MF) -> {verify,opt_mf_str_verify(MF)};
+opt_any_translate_mfa(X) -> throw({badopt,"Invalid translation spec: "++X}).
+
+opt_mf_str(S, Arity) ->
+    case string:tokens(S, ":") of
+        [M,F] -> {list_to_atom(M),list_to_atom(F),opt_arg_template(Arity)};
+        _     -> throw({badopt,"Invalid Mod:Fn spec: "++S})
+    end.
+
+opt_mf_str_verify(S) ->
+    {M,F,[A]} = opt_mf_str(S, 1),
+    {M,F,[A,'$errorf']}.
+
+opt_arg_template(Arity) ->
+    [list_to_atom(?ff("$~w", [I])) || I <- lists:seq(1,Arity)].
 
 determine_cmdline_op(Opts, FileNames) ->
     case {lists:member(help, Opts), lists:member(version, Opts)} of
@@ -1167,7 +1269,7 @@ analyze_defs(Defs, Opts) ->
            d_field_pass_method = compute_decode_field_pass_methods(
                                    MapsAsMsgs ++ Defs, Opts),
            maps_as_msgs        = MapsAsMsgs,
-           translations        = compute_map_translations(Defs, Opts),
+           translations        = compute_translations(Defs, Opts),
            map_types           = MapTypes}.
 
 find_map_types(Defs) ->
@@ -1467,6 +1569,25 @@ count_map_fields(MsgDef) ->
                        0,
                        MsgDef).
 
+compute_translations(Defs, Opts) ->
+    lists:foldl(
+      fun({Name, Dict}, D) ->
+              %% For now it is an (internal) error if translations overlap,
+              %% (don't expect that to happen with current translations)
+              %% but in the future (eg with user-specified translations)
+              %% they might stack instead: ie Ts1 ++ Ts2 instead of error.
+              dict:merge(fun(Key, Ts1, Ts2) ->
+                                 error({error,{duplicate_translation,
+                                               {when_adding_transls_for,Name},
+                                               {key,Key},
+                                               {translations,Ts1,Ts2}}})
+                         end,
+                         Dict, D)
+      end,
+      dict:new(),
+      [{map_translations, compute_map_translations(Defs, Opts)},
+       {any_translations, compute_any_translations(Defs, Opts)}]).
+
 compute_map_translations(Defs, Opts) ->
     MapInfos =
         fold_msg_fields(
@@ -1504,6 +1625,51 @@ compute_map_translations(Defs, Opts) ->
              end
          end
          || {{MsgName, FName}, {KeyType, ValueType}} <- MapInfos])).
+
+compute_any_translations(Defs, Opts) ->
+    case proplists:get_value(any_translate,Opts) of
+        undefined ->
+            dict:new();
+        AnyTranslations ->
+            compute_any_translations_2(Defs, AnyTranslations)
+    end.
+
+compute_any_translations_2(Defs, AnyTranslations) ->
+    P3AnyInfos =
+        fold_msg_fields_o(
+          fun(MsgName, #?gpb_field{name=FName, type={msg,Any}, occurrence=Occ},
+              Oneof,
+              Acc) when Any == 'google.protobuf.Any'->
+                  Path = case {Oneof, Occ} of
+                             {false, repeated}  -> [MsgName,FName,[]];
+                             {false, _}         -> [MsgName,FName];
+                             {{true,CFName}, _} -> [MsgName,CFName,FName]
+                         end,
+                  [Path | Acc];
+             (_MsgName, _Field, _Oneof, Acc) ->
+                  Acc
+          end,
+          [],
+          Defs),
+    Encode = {encode, fetch_any_translation(encode, AnyTranslations)},
+    Decode = {decode, fetch_any_translation(decode, AnyTranslations)},
+    Merge  = {merge,  fetch_any_translation(merge,  AnyTranslations)},
+    Verify = {verify, fetch_any_translation(verify, AnyTranslations)},
+    dict:from_list(
+      [{Path, ([Encode,Decode,Verify]
+               ++ [Merge || not is_repeated_elem_path(Path)])}
+       || Path <- P3AnyInfos]).
+
+fetch_any_translation(Op, Translations) ->
+    case proplists:get_value(Op, Translations) of
+        undefined ->
+            error({error, {missing_any_translation, {op,Op}, Translations}});
+        {M,F,ArgTempl} ->
+            {M,F,ArgTempl}
+    end.
+
+is_repeated_elem_path([_MsgName,_FName,[]]) -> true;
+is_repeated_elem_path(_) -> false.
 
 %% -- generating code ----------------------------------------------
 
@@ -3930,19 +4096,24 @@ format_bytes_verifier() ->
                mk_type_error(bad_binary_value, X, Path)
        end)].
 
-format_map_verifiers(#anres{map_types=MapTypes}, Opts) ->
+format_map_verifiers(#anres{map_types=MapTypes}=AnRes, Opts) ->
     RecordsOrMaps = get_records_or_maps_by_opts(Opts),
-    [format_map_verifier(KeyType, ValueType, RecordsOrMaps)
+    [format_map_verifier(KeyType, ValueType, RecordsOrMaps, AnRes)
      || {KeyType,ValueType} <- sets:to_list(MapTypes)].
 
-format_map_verifier(KeyType, ValueType, RecordsOrMaps) ->
-    FnName = mk_fn(v_, map_type_to_msg_name(KeyType, ValueType)),
+format_map_verifier(KeyType, ValueType, RecordsOrMaps, AnRes) ->
+    MsgName = map_type_to_msg_name(KeyType, ValueType),
+    FnName = mk_fn(v_, MsgName),
     KeyVerifierFn = mk_fn(v_type_, KeyType),
-    ValueVerifierFn = case ValueType of
-                          {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
-                          {enum,EnumName} -> mk_fn(v_enum_, EnumName);
-                          Type            -> mk_fn(v_type_, Type)
-                      end,
+    ValueVerifierFn1 = case ValueType of
+                           {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
+                           {enum,EnumName} -> mk_fn(v_enum_, EnumName);
+                           Type            -> mk_fn(v_type_, Type)
+                       end,
+    ElemPath = [MsgName,value],
+    ValueVerifierFn2 = find_translation(ElemPath, verify, AnRes,
+                                        ValueVerifierFn1),
+
     [nowarn_dialyzer_attr(FnName, 2),
      case RecordsOrMaps of
          records ->
@@ -3962,7 +4133,7 @@ format_map_verifier(KeyType, ValueType, RecordsOrMaps) ->
                        mk_type_error(invalid_list_of_key_value_tuples, X, Path)
                end,
                [replace_term('VerifyKey', KeyVerifierFn),
-                replace_term('VerifyValue', ValueVerifierFn)]);
+                replace_term('VerifyValue', ValueVerifierFn2)]);
          maps ->
              gpb_codegen:format_fn(
                FnName,
@@ -3977,7 +4148,7 @@ format_map_verifier(KeyType, ValueType, RecordsOrMaps) ->
                        mk_type_error(invalid_map, X, Path)
                end,
                [replace_term('VerifyKey', KeyVerifierFn),
-                replace_term('VerifyValue', ValueVerifierFn)])
+                replace_term('VerifyValue', ValueVerifierFn2)])
      end].
 
 format_verifier_auxiliaries(Defs) ->
@@ -4047,7 +4218,7 @@ format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_merge_translators(AnRes, Opts)].
 
-format_field_op_translator(ElemPath, Op, CallTemplate) ->
+format_field_op_translator(ElemPath, Op, CallTemplate) when Op /= verify ->
     ArgTemplate = last_tuple_element(CallTemplate),
     FnName = mk_tr_fn_name(ElemPath, Op),
     InArgs = underscore_unused_args(args_by_op(Op), ArgTemplate),
@@ -4078,23 +4249,52 @@ format_field_op_translator(ElemPath, Op, CallTemplate) ->
                 replace_term('Fn', Fn),
                 splice_trees('InArgs', InArgs),
                 splice_trees('TrArgs', TrArgs)])
-     end].
+     end];
+format_field_op_translator(ElemPath, verify=Op, {Mod, Fn, ArgTemplate}) ->
+    FnName = mk_tr_fn_name(ElemPath, Op),
+    [V,Path] = underscore_unused_args(args_by_op(Op), [1,errorf], ArgTemplate),
+    ErrorF = ?expr(fun(Reason) ->
+                           mk_type_error(Reason, 'ActualValue', 'Path')
+                   end,
+                   [replace_tree('ActualValue', V),
+                    replace_tree('Path', Path)]),
+    TrArgs = [case Term of
+                  '$1'      -> V;
+                  '$errorf' -> ErrorF;
+                  _         -> erl_parse:abstract(Term)
+              end
+              || Term <- ArgTemplate],
+    [inline_attr(FnName,2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun('InArgs') ->
+               'Mod':'Fn'('TrArgs')
+       end,
+       [replace_term('Mod', Mod),
+        replace_term('Fn', Fn),
+        splice_trees('InArgs', [V,Path]),
+        splice_trees('TrArgs', TrArgs)])].
+
 
 last_tuple_element(Tuple) ->
     element(tuple_size(Tuple), Tuple).
 
 underscore_unused_args(Args, Templ) ->
-    [case is_arg_used(I, Templ) of
+    Names = lists:seq(1, length(Args)),
+    underscore_unused_args(Args, Names, Templ).
+
+underscore_unused_args(Args, Names, Templ) ->
+    [case is_arg_used(Name, Templ) of
          true  -> Arg;
          false -> ?expr(_)
      end
-     || {I, Arg} <- index_seq(Args)].
+     || {Name, Arg} <- lists:zip(Names, Args)].
 
-is_arg_used(I, Templ) ->
-    lists:member(dollar_i(I), Templ).
+is_arg_used(Name, Templ) ->
+    lists:member(dollar_name(Name), Templ).
 
-dollar_i(I) ->
-    list_to_atom(?ff("$~w", [I])).
+dollar_name(Name) ->
+    list_to_atom(?ff("$~w", [Name])).
 
 args_by_op(encode)                   -> [?expr(X)];
 args_by_op(decode)                   -> [?expr(X)];
@@ -4102,7 +4302,7 @@ args_by_op(decode_init_default)      -> [?expr(InitialValue)];
 args_by_op(decode_repeated_add_elem) -> [?expr(Elem), ?expr(L)];
 args_by_op(decode_repeated_finalize) -> [?expr(L)];
 args_by_op(merge)                    -> [?expr(X1), ?expr(X2)];
-args_by_op(verify)                   -> [?expr(X)].
+args_by_op(verify)                   -> [?expr(V), ?expr(Path)].
 
 format_aux_transl_helpers() ->
     [nowarn_attrs(id,1),
