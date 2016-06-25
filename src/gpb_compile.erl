@@ -1948,16 +1948,18 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
     {EncodeExprs, _} =
         lists:mapfoldl(
           fun({NewBVar, Field, FVar}, PrevBVar) when NewBVar /= last ->
+                  Tr = mk_find_tr_fn(MsgName, Field, AnRes),
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
-                                              PrevBVar, Defs, AnRes, Opts,
+                                              PrevBVar, Defs, Tr, AnRes, Opts,
                                               p3_check_typedefaults),
                   E = ?expr('<NewB>' = '<encode-expr>',
                             [replace_tree('<NewB>', NewBVar),
                              replace_tree('<encode-expr>', EncExpr)]),
                   {E, NewBVar};
              ({last, Field, FVar}, PrevBVar) ->
+                  Tr = mk_find_tr_fn(MsgName, Field, AnRes),
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
-                                              PrevBVar, Defs, AnRes, Opts,
+                                              PrevBVar, Defs, Tr, AnRes, Opts,
                                               p3_check_typedefaults),
                   {EncExpr, dummy}
           end,
@@ -2013,16 +2015,15 @@ zip_for_non_opt_fields([], []) ->
     [].
 
 field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
-                  FVar, PrevBVar, Defs, AnRes, Opts, P3TypeDefaultHandling)->
+                  FVar, PrevBVar, Defs, Tr, _AnRes, Opts,
+                  P3TypeDefaultHandling)->
     FEncoder = mk_field_encode_fn_name(MsgName, Field),
     #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum, name=FName}=Field,
     TrFVar = prefix_var("Tr", FVar),
-    ElemPath = [MsgName, FName],
-    TranslFn = find_translation(ElemPath, encode, AnRes),
     Transforms = [replace_term('fieldname', FName),
                   replace_tree('<F>', FVar),
                   replace_tree('TrF', TrFVar),
-                  replace_term('Tr', TranslFn),
+                  replace_term('Tr', Tr(encode)),
                   replace_term('<enc>', FEncoder),
                   replace_tree('<Bin>', PrevBVar),
                   splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
@@ -2032,15 +2033,19 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 X when X == records;
                        X == {maps, present_undefined} ->
                     ?expr(
-                       if '<F>' == undefined -> '<Bin>';
-                          true -> '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+                       if '<F>' == undefined ->
+                               '<Bin>';
+                          true ->
+                               'TrF' = 'Tr'('<F>'),
+                               '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>)
                        end,
                        Transforms);
                 {maps, omitted} ->
                     ?expr(
                        case 'M' of
                            '#{fieldname := <F>}' ->
-                               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>);
+                               'TrF' = 'Tr'('<F>'),
+                               '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>);
                            _ ->
                                '<Bin>'
                        end,
@@ -2064,30 +2069,41 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                           Type /= string ->
                     TypeDefault = gpb:proto3_type_default(Type, Defs),
                     ?expr(
-                       if '<F>' =:= '<TypeDefault>' ->
-                               '<Bin>';
-                          true ->
-                               '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+                       begin
+                           'TrF' = 'Tr'('<F>'),
+                           if 'TrF' =:= '<TypeDefault>' ->
+                                   '<Bin>';
+                              true ->
+                                   '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>)
+                           end
                        end,
                        [replace_term('<TypeDefault>', TypeDefault)
                         | Transforms]);
                 true when P3TypeDefaultHandling == p3_check_typedefaults,
                           Type == string ->
-                    ?expr(case iolist_size('<F>') of
-                              0 ->
-                                  '<Bin>';
-                              _ ->
-                                  '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>)
+                    ?expr(begin
+                              'TrF' = 'Tr'('<F>'),
+                              case iolist_size('TrF') of
+                                  0 ->
+                                      '<Bin>';
+                                  _ ->
+                                      '<enc>'('TrF',
+                                              <<'<Bin>'/binary, '<Key>'>>)
+                              end
                           end,
                           Transforms);
                 _not_proto3_or_no_check_for_typedefaults ->
                     ?expr(
-                       '<enc>'('<F>', <<'<Bin>'/binary, '<Key>'>>),
+                       begin
+                           'TrF' = 'Tr'('<F>'),
+                           '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>)
+                       end,
                        Transforms)
             end
     end;
 field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
-                  FVar, PrevBVar, Defs, AnRes, Opts, _P3TypeDefaultHandling) ->
+                  FVar, PrevBVar, Defs, Tr, AnRes, Opts,
+                  _P3TypeDefaultHandling) ->
     OFVar = prefix_var("O", FVar),
     OneofClauseTransforms =
         [begin
@@ -2105,8 +2121,9 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
              %% undefined is already handled, we have a match,
              %% the field occurs, as if it had been required
              OField2 = OField#?gpb_field{occurrence=required},
+             Tr2 = Tr({update_elem_path,Name}),
              EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
-                                         PrevBVar, Defs, AnRes, Opts,
+                                         PrevBVar, Defs, Tr2, AnRes, Opts,
                                          no_typedefault_checking),
              [replace_tree('<oneof...>', MatchPattern),
               replace_tree('<expr>', EncExpr)]
@@ -2178,14 +2195,15 @@ format_field_encoder(MsgName, FieldDef, AnRes) ->
          {repeated, false} ->
              format_repeated_field_encoder2(MsgName, FieldDef, AnRes);
          {repeated, true} ->
-             format_packed_field_encoder2(MsgName, FieldDef);
+             format_packed_field_encoder2(MsgName, FieldDef, AnRes);
          {optional, false} ->
              [];
          {required, false} ->
              []
      end].
 
-possibly_format_mfield_encoder(MsgName, #?gpb_field{type={msg,SubMsg}}=FieldDef,
+possibly_format_mfield_encoder(MsgName,
+                               #?gpb_field{type={msg,SubMsg}}=FieldDef,
                                AnRes) ->
     FnName = mk_field_encode_fn_name(MsgName, FieldDef),
     case is_msgsize_known_at_generationtime(SubMsg, AnRes) of
@@ -2253,13 +2271,13 @@ format_repeated_field_encoder2(MsgName, FDef, AnRes) ->
        replace_term('<encode-elem>', ElemEncoderFn),
        replace_term('Tr', Transl)]).
 
-format_packed_field_encoder2(MsgName, #?gpb_field{type=Type}=FDef) ->
+format_packed_field_encoder2(MsgName, #?gpb_field{type=Type}=FDef, AnRes) ->
     case packed_byte_size_can_be_computed(Type) of
         {yes, BitLen, BitType} ->
             format_knownsize_packed_field_encoder2(MsgName, FDef,
                                                    BitLen, BitType);
         no ->
-            format_unknownsize_packed_field_encoder2(MsgName, FDef)
+            format_unknownsize_packed_field_encoder2(MsgName, FDef, AnRes)
     end.
 
 packed_byte_size_can_be_computed(fixed32)  -> {yes, 32, [little]};
@@ -2299,13 +2317,17 @@ format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
        [replace_term('<Size>', BitLen),
         splice_trees('<BitType>', [erl_syntax:atom(T) || T <- BitType])])].
 
-format_unknownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
-                                                              fnum=FNum}=FDef) ->
+format_unknownsize_packed_field_encoder2(MsgName,
+                                         #?gpb_field{name=FName,
+                                                     fnum=FNum}=FDef,
+                                        AnRes) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     ElemEncoderFn = mk_field_encode_fn_name(
                       MsgName, FDef#?gpb_field{occurrence=required}),
     KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
+    ElemPath = [MsgName,FName,[]],
+    Transl = find_translation(ElemPath, encode, AnRes),
     [gpb_codegen:format_fn(
        FnName,
        fun(Elems, Bin) when Elems =/= [] ->
@@ -2321,12 +2343,13 @@ format_unknownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
      gpb_codegen:format_fn(
        PackedFnName,
        fun([Value | Rest], Bin) ->
-               Bin2 = '<encode-elem>'(Value, Bin),
+               Bin2 = '<encode-elem>'('Tr'(Value), Bin),
                call_self(Rest, Bin2);
           ([], Bin) ->
                Bin
        end,
-       [replace_term('<encode-elem>', ElemEncoderFn)])].
+       [replace_term('<encode-elem>', ElemEncoderFn),
+        replace_term('Tr', Transl)])].
 
 format_type_encoders(AnRes) ->
     [format_varlength_field_encoders(AnRes),
@@ -6820,6 +6843,17 @@ is_major_version_at_least(VsnMin) when VsnMin >= 17 ->
                     catch error:badarg ->
                             false
                     end
+            end
+    end.
+
+mk_find_tr_fn(MsgName, #?gpb_field{name=FName}, AnRes) ->
+    ElemPath = [MsgName,FName],
+    fun(Op) -> find_translation(ElemPath, Op, AnRes) end;
+mk_find_tr_fn(MsgName, #gpb_oneof{name=CFName}, AnRes) ->
+    fun({update_elem_path,FName}) ->
+            fun(Op) ->
+                    ElemPath = [MsgName,CFName,FName],
+                    find_translation(ElemPath, Op, AnRes)
             end
     end.
 
