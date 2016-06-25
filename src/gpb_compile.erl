@@ -1484,7 +1484,7 @@ compute_map_translations(Defs, Opts) ->
              MapAsMsgName = map_type_to_msg_name(KeyType, ValueType),
              case MapsOrRecords of
                  records ->
-                     [{[MsgName,FName,elem],
+                     [{[MsgName,FName,[]],
                        [{encode, {mt_maptuple_to_pseudomsg_r,
                                   ['$1',MapAsMsgName]}}]},
                       {[MsgName,FName],
@@ -1493,7 +1493,7 @@ compute_map_translations(Defs, Opts) ->
                         {decode_repeated_finalize,{mt_finalize_items_r,['$1']}},
                         {merge, {mt_merge_maptuples_r,['$1','$2']}}]}];
                  maps ->
-                     [{[MsgName,FName,elem],
+                     [{[MsgName,FName,[]],
                        [{encode, {mt_maptuple_to_pseudomsg_m, ['$1']}}]},
                       {[MsgName,FName],
                        [{encode, {mt_map_to_list_m,['$1']}},
@@ -2072,7 +2072,7 @@ format_repeated_field_encoder2(MsgName, FDef, AnRes) ->
     ElemEncoderFn = mk_field_encode_fn_name(
                       MsgName, FDef#?gpb_field{occurrence=required}),
     KeyBytes = key_to_binary_fields(FNum, Type),
-    ElemPath = [MsgName,FName,elem],
+    ElemPath = [MsgName,FName,[]],
     Transl = find_translation(ElemPath, encode, AnRes),
     gpb_codegen:format_fn(
       FnName,
@@ -6638,8 +6638,10 @@ find_translation(ElemPath, Op, #anres{translations=Ts}, Default) ->
             default_fn_by_op(Op, Default)
     end.
 
-mk_tr_fn_name([MsgName,FieldName,elem], Op) ->
-    list_to_atom(?ff("tr_~s_~s.~s.[elem]", [Op, MsgName,FieldName]));
+mk_tr_fn_name([MsgName,FieldName,[]], Op) ->
+    list_to_atom(?ff("tr_~s_~s.~s[x]", [Op, MsgName,FieldName]));
+mk_tr_fn_name([MsgName,FName,OneofName], Op) ->
+    list_to_atom(?ff("tr_~s_~s.~s.~s", [Op, MsgName,FName,OneofName]));
 mk_tr_fn_name([MsgName,FieldName], Op) ->
     list_to_atom(?ff("tr_~s_~s.~s", [Op, MsgName,FieldName])).
 
