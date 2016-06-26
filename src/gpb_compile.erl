@@ -2952,9 +2952,10 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
         replace_term('<call-read-field>', mk_fn(dfp_read_field_def_, MsgName)),
         splice_trees('<OutParams>', OutParams)]),
      "\n",
-     format_packed_field_seq_decoder(MsgName, FieldDef, Opts)].
+     format_packed_field_seq_decoder(MsgName, FieldDef, AnRes, Opts)].
 
-format_packed_field_seq_decoder(MsgName, #?gpb_field{type=Type}=Field, Opts) ->
+format_packed_field_seq_decoder(MsgName, #?gpb_field{type=Type}=Field,
+                                AnRes, Opts) ->
     case Type of
         fixed32  -> format_dpacked_nonvi(MsgName, Field, 32, [little]);
         sfixed32 -> format_dpacked_nonvi(MsgName, Field, 32, [little,signed]);
@@ -2962,7 +2963,7 @@ format_packed_field_seq_decoder(MsgName, #?gpb_field{type=Type}=Field, Opts) ->
         fixed64  -> format_dpacked_nonvi(MsgName, Field, 64, [little]);
         sfixed64 -> format_dpacked_nonvi(MsgName, Field, 64, [little,signed]);
         double   -> format_dpacked_nonvi(MsgName, Field, 64, [little,float]);
-        _        -> format_dpacked_vi(MsgName, Field, Opts)
+        _        -> format_dpacked_vi(MsgName, Field, AnRes, Opts)
     end.
 
 format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes) ->
@@ -2976,7 +2977,7 @@ format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes) ->
       [replace_term('<N>', BitLen),
        splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes])]).
 
-format_dpacked_vi(MsgName, #?gpb_field{name=FName}=FieldDef, Opts) ->
+format_dpacked_vi(MsgName, #?gpb_field{name=FName}=FieldDef, AnRes, Opts) ->
     ExtValue = ?expr(X bsl N + Acc),
     FVar = ?expr(NewFValue), %% result is to be put in this variable
     Rest = ?expr(Rest),
@@ -2989,7 +2990,8 @@ format_dpacked_vi(MsgName, #?gpb_field{name=FName}=FieldDef, Opts) ->
                             replace_tree('<Res>', FVar)]),
                 DecodeExprs ++ C
         end,
-    Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
+    Tr = mk_find_tr_fn_elem(MsgName, FieldDef, false, AnRes),
+    Body = decode_int_value(FVar, Bindings, FieldDef, Tr, Opts, BodyTailFn),
     gpb_codegen:format_fn(
       mk_fn(d_packed_field_, MsgName, FName),
       fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq) when N < ?NB ->
@@ -3002,7 +3004,7 @@ format_dpacked_vi(MsgName, #?gpb_field{name=FName}=FieldDef, Opts) ->
       [splice_trees('<body>', Body)]).
 
 format_vi_based_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
-    {#?gpb_field{name=FName}=FieldDef, _IsOneof}=XFieldDef,
+    {#?gpb_field{name=FName}=FieldDef, IsOneof}=XFieldDef,
     ExtValue = ?expr(X bsl N + Acc),
     FVar = ?expr(NewFValue), %% result is to be put in this variable
     Rest = ?expr(Rest),
@@ -3022,7 +3024,8 @@ format_vi_based_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
                             splice_trees('<Params2>', Params2)]),
                 DecodeExprs ++ C
         end,
-    Body = decode_int_value(FVar, Bindings, FieldDef, Opts, BodyTailFn),
+    Tr = mk_find_tr_fn_elem(MsgName, FieldDef, IsOneof, AnRes),
+    Body = decode_int_value(FVar, Bindings, FieldDef, Tr, Opts, BodyTailFn),
     gpb_codegen:format_fn(
       mk_fn(d_field_, MsgName, FName),
       fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>') when N < ?NB ->
@@ -3036,7 +3039,8 @@ format_vi_based_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
 
 %% -> {[Expr], Rest2VarExpr}
 %% where [Expr] is a list of exprs to calculate the resulting decoded value
-decode_int_value(ResVar, Bindings, #?gpb_field{type=Type}=F, Opts, TailFn) ->
+decode_int_value(ResVar, Bindings, #?gpb_field{type=Type}=F, Tr, Opts,
+                 TailFn) ->
     Value = fetch_binding('<Value>', Bindings),
     Rest = fetch_binding('<Rest>', Bindings),
     StringsAsBinaries = get_strings_as_binaries_by_opts(Opts),
@@ -3087,16 +3091,17 @@ decode_int_value(ResVar, Bindings, #?gpb_field{type=Type}=F, Opts, TailFn) ->
             Rest2 = ?expr(Rest2),
             TailFn(?exprs(Len = '<Value>',
                           <<Bs:Len/binary, Rest2/binary>> = '<Rest>',
-                          '<Res>' = 'd_msg_X'(Bs),
+                          '<Res>' = 'Tr'('d_msg_X'(Bs)),
                           [replace_tree('<Value>', Value),
                            replace_tree('<Rest>', Rest),
                            replace_tree('<Res>', ResVar),
-                           replace_term('d_msg_X', mk_fn(d_msg_, Msg2Name))]),
+                           replace_term('d_msg_X', mk_fn(d_msg_, Msg2Name)),
+                           replace_term('Tr', Tr(decode))]),
                    Rest2);
         {map, KeyType, ValueType} ->
             MapAsMsgMame = map_type_to_msg_name(KeyType, ValueType),
             F2 = F#?gpb_field{type={msg,MapAsMsgMame}},
-            decode_int_value(ResVar, Bindings, F2, Opts, TailFn)
+            decode_int_value(ResVar, Bindings, F2, Tr, Opts, TailFn)
     end.
 
 unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
@@ -6856,6 +6861,22 @@ mk_find_tr_fn(MsgName, #gpb_oneof{name=CFName}, AnRes) ->
                     find_translation(ElemPath, Op, AnRes)
             end
     end.
+
+mk_find_tr_fn_elem(MsgName,
+                   #?gpb_field{name=FName,occurrence=Occ},
+                   false,
+                   AnRes) ->
+    ElemPath = case Occ of
+                   repeated -> [MsgName,FName,[]];
+                   _        -> [MsgName,FName]
+               end,
+    fun(Op) -> find_translation(ElemPath, Op, AnRes) end;
+mk_find_tr_fn_elem(MsgName,
+                   #?gpb_field{name=FName},
+                   {true, CFName},
+                   AnRes) ->
+    ElemPath = [MsgName,CFName,FName],
+    fun(Op) -> find_translation(ElemPath, Op, AnRes) end.
 
 find_translation(ElemPath, Op, AnRes) ->
     find_translation(ElemPath, Op, AnRes, undefined).
