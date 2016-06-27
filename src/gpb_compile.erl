@@ -1639,12 +1639,18 @@ compute_any_translations_2(Defs, AnyTranslations) ->
         fold_msg_fields_o(
           fun(MsgName, #?gpb_field{name=FName, type={msg,Any}, occurrence=Occ},
               Oneof,
-              Acc) when Any == 'google.protobuf.Any'->
+              Acc) when Any == 'google.protobuf.Any' ->
                   Path = case {Oneof, Occ} of
                              {false, repeated}  -> [MsgName,FName,[]];
                              {false, _}         -> [MsgName,FName];
                              {{true,CFName}, _} -> [MsgName,CFName,FName]
                          end,
+                  [Path | Acc];
+             (_MsgName, #?gpb_field{type={map,KeyType,{msg,Any}=ValueType}},
+              _Oneof,
+              Acc) when Any == 'google.protobuf.Any' ->
+                  MsgAsMapName = map_type_to_msg_name(KeyType, ValueType),
+                  Path = [MsgAsMapName,value],
                   [Path | Acc];
              (_MsgName, _Field, _Oneof, Acc) ->
                   Acc
@@ -3841,7 +3847,8 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                   MsgDef /= [] -> ?expr(Path)
                                end),
         splice_trees('<verify-fields>',
-                     field_verifiers(MsgDef, FVars, MsgVar, Opts)),
+                     field_verifiers(MsgName, MsgDef, FVars, MsgVar,
+                                     AnRes, Opts)),
         repeat_clauses('<X>', case NeedsMatchOther of
                                   true  -> [[replace_tree('<X>', ?expr(X))]];
                                   false -> [] %% omit the else clause
@@ -3856,19 +3863,22 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                        end),
         replace_term('<MsgName>', MsgName)])].
 
-field_verifiers(Fields, FVars, MsgVar, Opts) ->
-    [field_verifier(Field, FVar, MsgVar, Opts)
+field_verifiers(MsgName, Fields, FVars, MsgVar, AnRes, Opts) ->
+    [field_verifier(MsgName, Field, FVar, MsgVar, AnRes, Opts)
      || {Field, FVar} <- lists:zip(Fields, FVars)].
 
-field_verifier(#?gpb_field{name=FName, type=Type, occurrence=Occurrence},
-               FVar, MsgVar, Opts) ->
+field_verifier(MsgName,
+               #?gpb_field{name=FName, type=Type, occurrence=Occurrence}=Field,
+               FVar, MsgVar, AnRes, Opts) ->
     FVerifierFn = case Type of
                       {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
                       {enum,EnumName} -> mk_fn(v_enum_, EnumName);
                       {map,KT,VT}     -> mk_fn(v_, map_type_to_msg_name(KT,VT));
                       Type            -> mk_fn(v_type_, Type)
                   end,
-    Replacements = [replace_term('<verify-fn>', FVerifierFn),
+    ElemPath = mk_elempath_elem(MsgName, Field, false),
+    FVerifierFn2 = find_translation(ElemPath, verify, AnRes, FVerifierFn),
+    Replacements = [replace_term('<verify-fn>', FVerifierFn2),
                     replace_tree('<F>', FVar),
                     replace_term('<FName>', FName),
                     replace_term('<Type>', Type)],
@@ -3920,7 +3930,9 @@ field_verifier(#?gpb_field{name=FName, type=Type, occurrence=Occurrence},
                            replace_tree('M', MsgVar) | Replacements])
             end
     end;
-field_verifier(#gpb_oneof{name=FName, fields=OFields}, FVar, MsgVar, Opts) ->
+field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
+               FVar, MsgVar, AnRes, Opts) ->
+    IsOneof = {true, FName},
     case get_mapping_and_unset_by_opts(Opts) of
         X when X == records;
                X == {maps, present_undefined} ->
@@ -3944,15 +3956,18 @@ field_verifier(#gpb_oneof{name=FName, fields=OFields}, FVar, MsgVar, Opts) ->
                                {enum,EnumName} -> mk_fn(v_enum_, EnumName);
                                Type            -> mk_fn(v_type_, Type)
                            end,
+                       ElemPath = mk_elempath_elem(MsgName, F, IsOneof),
+                       FVerifierFn2 = find_translation(ElemPath, verify, AnRes,
+                                                       FVerifierFn),
                        OFVar = prefix_var("O", FVar),
                        [replace_tree('M', MsgVar),
                         replace_tree('<oneof-pattern>',
                                      ?expr({'<OFName>','<OFVar>'})),
-                        replace_term('<verify-fn>', FVerifierFn),
+                        replace_term('<verify-fn>', FVerifierFn2),
                         replace_tree('<OFVar>', OFVar),
                         replace_term('<OFName>', OFName)]
                    end
-                   || #?gpb_field{name=OFName, type=Type} <- OFields])]);
+                   || #?gpb_field{name=OFName, type=Type}=F <- OFields])]);
         {maps, omitted} ->
             ?expr(
                case 'M' of
@@ -3976,16 +3991,19 @@ field_verifier(#gpb_oneof{name=FName, fields=OFields}, FVar, MsgVar, Opts) ->
                                {enum,EnumName} -> mk_fn(v_enum_, EnumName);
                                Type            -> mk_fn(v_type_, Type)
                            end,
+                       ElemPath = mk_elempath_elem(MsgName, F, IsOneof),
+                       FVerifierFn2 = find_translation(ElemPath, verify, AnRes,
+                                                       FVerifierFn),
                        OFVar = prefix_var("O", FVar),
                        Trs1 = [replace_tree('<OFVar>', OFVar),
                                replace_term('<OFName>', OFName)],
                        OFPat = ?expr({'<OFName>','<OFVar>'}, Trs1),
                        [replace_tree('<oneof-pattern>',
                                      map_match([{FName, OFPat}])),
-                        replace_term('<verify-fn>', FVerifierFn)
+                        replace_term('<verify-fn>', FVerifierFn2)
                         | Trs1]
                    end
-                   || #?gpb_field{name=OFName, type=Type} <- OFields])])
+                   || #?gpb_field{name=OFName, type=Type}=F <- OFields])])
     end.
 
 
@@ -4276,6 +4294,9 @@ format_field_op_translator(ElemPath, verify=Op, {Mod, Fn, ArgTemplate}) ->
               end
               || Term <- ArgTemplate],
     [inline_attr(FnName,2),
+     %% Dialyzer might complain that "The created fun has no local return"
+     %% which is true, but expected, so shut this warning down.
+     nowarn_dialyzer_attr(FnName,2),
      gpb_codegen:format_fn(
        FnName,
        fun('InArgs') ->
@@ -4285,7 +4306,6 @@ format_field_op_translator(ElemPath, verify=Op, {Mod, Fn, ArgTemplate}) ->
         replace_term('Fn', Fn),
         splice_trees('InArgs', [V,Path]),
         splice_trees('TrArgs', TrArgs)])].
-
 
 last_tuple_element(Tuple) ->
     element(tuple_size(Tuple), Tuple).
