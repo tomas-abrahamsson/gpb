@@ -3142,24 +3142,26 @@ unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
 
 updated_merged_params(MsgName, XFieldDef, AnRes, NewValue, PrevValue,
                       Params, Opts) ->
+    Tr = mk_find_tr_fn_elem_or_default(MsgName, XFieldDef, AnRes),
     case {get_field_pass(MsgName, AnRes), XFieldDef} of
         {pass_as_params, {#?gpb_field{rnum=RNum}, _IsOneof}} ->
             MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue,
-                                           MsgName, AnRes, Opts),
+                                           MsgName, Tr, AnRes, Opts),
             lists_setelement(RNum - 1, Params, MergedValue);
         {pass_as_record, {#?gpb_field{name=FName}, false}} ->
             MsgVar = hd(Params),
             MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue,
-                                           MsgName, AnRes, Opts),
+                                           MsgName, Tr, AnRes, Opts),
             [mapping_update(MsgVar, MsgName, [{FName, MergedValue}], Opts)];
         {pass_as_record, {_OField, {true, CFName}}} ->
             MsgVar = hd(Params),
             MergedValue = merge_field_expr(XFieldDef, PrevValue, NewValue,
-                                           MsgName, AnRes, Opts),
+                                           MsgName, Tr, AnRes, Opts),
             [mapping_update(MsgVar, MsgName, [{CFName, MergedValue}], Opts)]
     end.
 
-merge_field_expr({FieldDef, false}, PrevValue, NewValue, MsgName, AnRes, Opts) ->
+merge_field_expr({FieldDef, false}, PrevValue, NewValue,
+                 MsgName, Tr, AnRes, Opts) ->
     case classify_field_merge_action(FieldDef) of
         overwrite ->
             NewValue;
@@ -3179,7 +3181,7 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue, MsgName, AnRes, Opts) -
                     ?expr(if 'Prev' == undefined -> 'New';
                              true -> 'merge_msg_X'('Prev', 'New')
                           end,
-                          [replace_term('merge_msg_X', MergeFn),
+                          [replace_term('merge_msg_X', Tr(merge, MergeFn)),
                            replace_tree('Prev', PrevValue),
                            replace_tree('New', NewValue)]);
                 {maps, omitted} ->
@@ -3189,7 +3191,8 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue, MsgName, AnRes, Opts) -
                                      true -> 'merge_msg_X'('Prev', 'New')
                                   end,
                                   [replace_tree('Prev', PrevValue),
-                                   replace_term('merge_msg_X', MergeFn),
+                                   replace_term('merge_msg_X',
+                                                Tr(merge, MergeFn)),
                                    replace_tree('New', NewValue)]);
                         pass_as_record ->
                             FName = get_field_name(FieldDef),
@@ -3203,13 +3206,14 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue, MsgName, AnRes, Opts) -
                                      '#{fieldname := Prev}',
                                      map_match([{FName, ?expr(Prev)}])),
                                    replace_tree('Msg', PrevValue),
-                                   replace_term('merge_msg_X', MergeFn),
+                                   replace_term('merge_msg_X',
+                                                Tr(merge, MergeFn)),
                                    replace_tree('New', NewValue)])
                     end
             end
     end;
 merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
-                 MsgName, AnRes, Opts)->
+                 MsgName, Tr, AnRes, Opts)->
     #?gpb_field{name=FName, type=Type} = FieldDef,
     case Type of
         {msg, FMsgName} ->
@@ -3229,7 +3233,7 @@ merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                           [replace_tree('Prev', PrevValue),
                            replace_term('tag', FName),
                            replace_tree('New', NewValue),
-                           replace_term('merge_msg_X', MergeFn),
+                           replace_term('merge_msg_X', Tr(merge, MergeFn)),
                            replace_tree('MVPrev', MVPrev)]);
                 {maps, omitted} ->
                     MsgVar = PrevValue,
@@ -3245,7 +3249,8 @@ merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                                   end,
                                   [replace_term('tag', FName),
                                    replace_tree('Prev', PrevValue),
-                                   replace_term('merge_msg_X', MergeFn),
+                                   replace_term('merge_msg_X',
+                                                Tr(merge, MergeFn)),
                                    replace_tree('New', NewValue)]);
                         pass_as_record ->
                             OFVal = ?expr({tag, MVPrev},
@@ -3260,7 +3265,8 @@ merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                                                 map_match([{CFName, OFVal}])),
                                    replace_term('tag', FName),
                                    replace_tree('Msg', MsgVar),
-                                   replace_term('merge_msg_X', MergeFn),
+                                   replace_term('merge_msg_X',
+                                                Tr(merge, MergeFn)),
                                    replace_tree('New', NewValue)])
                     end
             end;
@@ -3550,7 +3556,8 @@ compute_msg_field_mergers({om, {MandXInfo, OptXInfo, PMsg, NMsg}},
                                                MsgName, AnRes),
     {MandMergs, reshape_cases_for_maps_find(OptMergs, PMsg, NMsg)}.
 
-format_field_merge_expr(#?gpb_field{name=FName}=Field, PF, NF, MsgName, AnRes)->
+format_field_merge_expr(#?gpb_field{name=FName}=Field,
+                        PF, NF, MsgName, AnRes)->
     Transforms = [replace_tree('PF', PF),
                   replace_tree('NF', NF)],
     case classify_field_merge_action(Field) of
@@ -3562,26 +3569,32 @@ format_field_merge_expr(#?gpb_field{name=FName}=Field, PF, NF, MsgName, AnRes)->
             {expr, ?expr('PF++NF'('PF', 'NF'),
                          Transforms ++ [replace_term('PF++NF',Append)])};
         msgmerge ->
+            Tr = mk_find_tr_fn_elem_or_default(MsgName, Field, false, AnRes),
             #?gpb_field{type={msg,SubMsgName}}=Field,
-            {merge, {{PF, NF}, mk_fn(merge_msg_, SubMsgName)}}
+            {merge, {{PF, NF}, Tr, mk_fn(merge_msg_, SubMsgName)}}
     end;
-format_field_merge_expr(#gpb_oneof{fields=OFields}, PF, NF, _MsgName, _AnRes) ->
+format_field_merge_expr(#gpb_oneof{name=CFName, fields=OFields},
+                        PF, NF, MsgName, AnRes) ->
     case [OField || #?gpb_field{type={msg,_}}=OField <- OFields] of
         [] ->
             {overwrite, {PF, NF}};
         MOFields ->
             {oneof,
              {{PF, NF},
-              [{OFName, mk_fn(merge_msg_, M2Name)}
-               || #?gpb_field{name=OFName, type={msg,M2Name}} <- MOFields]}}
+              [begin
+                   Tr = mk_find_tr_fn_elem_or_default(
+                          MsgName, F, {true, CFName}, AnRes),
+                   {OFName, Tr, mk_fn(merge_msg_, M2Name)}
+               end
+               || #?gpb_field{name=OFName, type={msg,M2Name}}=F <- MOFields]}}
     end.
 
 reshape_cases_for_maps_find(Merges, PMsg, NMsg) ->
     [{FName, case Merge of
                  {overwrite, {_, _}} ->
                      {overwrite, {PMsg, NMsg}};
-                 {merge, {{_, _}, MergeFn}} ->
-                     {merge, {{PMsg, NMsg}, MergeFn}};
+                 {merge, {{_, _}, Tr, MergeFn}} ->
+                     {merge, {{PMsg, NMsg}, Tr, MergeFn}};
                  {oneof, {{_, _}, OFMerges}} ->
                      {oneof, {{PMsg, NMsg}, OFMerges}}
              end}
@@ -3600,11 +3613,11 @@ render_field_merger({overwrite, {PF, NF}}) ->
            replace_tree('NF', NF)]);
 render_field_merger({expr, Expr}) ->
     Expr;
-render_field_merger({merge, {{PF, NF}, MergeFn}}) ->
+render_field_merger({merge, {{PF, NF}, Tr, MergeFn}}) ->
     ?expr('merge'('PF', 'NF'),
           [replace_tree('PF', PF),
            replace_tree('NF', NF),
-           replace_term('merge', MergeFn)]);
+           replace_term('merge', Tr(merge, MergeFn))]);
 render_field_merger({oneof, {{PF, NF}, OFMerges}}) ->
     Transforms = [replace_tree('PF', PF),
                   replace_tree('NF', NF),
@@ -3620,8 +3633,8 @@ render_field_merger({oneof, {{PF, NF}, OFMerges}}) ->
              [[replace_tree('{{tag,OPF},{tag,ONF}}',
                             ?expr({{'tag','OPF'},{'tag','ONF'}})),
                replace_term('tag', OFName),
-               replace_term('merge', OFMergeFn) | Transforms]
-              || {OFName, OFMergeFn} <- OFMerges])
+               replace_term('merge', Tr(merge, OFMergeFn)) | Transforms]
+              || {OFName, Tr, OFMergeFn} <- OFMerges])
            | Transforms]).
 
 render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var) ->
@@ -3631,9 +3644,9 @@ render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var) ->
               _                     -> 'Var'
           end,
           std_omitable_merge_transforms(PMsg, NMsg, FName, Var));
-render_omissible_merger({FName, {merge, {{PMsg, NMsg}, MergeFn}}}, Var) ->
+render_omissible_merger({FName, {merge, {{PMsg, NMsg}, Tr, MergeFn}}}, Var) ->
     Trs = std_omitable_merge_transforms(PMsg, NMsg, FName, Var),
-    MergeCall = ?expr('merge'('PF','NF'), [replace_term(merge,MergeFn) | Trs]),
+    MergeCallTmpl = ?expr('merge'('PF','NF'), Trs),
     ?expr(case {'PMsg', 'NMsg'} of
               {'#{fname := PF}', '#{fname := NF}'} ->
                   'Var#{fname=>merge(PF,NF)}';
@@ -3644,10 +3657,10 @@ render_omissible_merger({FName, {merge, {{PMsg, NMsg}, MergeFn}}}, Var) ->
               {_, _} ->
                   'Var'
           end,
-          [replace_term('merge', MergeFn),
-           replace_tree('Var#{fname=>merge(PF,NF)}',
-                        map_set(Var, [{FName,MergeCall}]))
-           | Trs]);
+          [replace_tree('Var#{fname=>merge(PF,NF)}',
+                        map_set(Var, [{FName,MergeCallTmpl}]))]
+          ++ Trs
+          ++ [replace_term('merge', Tr(merge, MergeFn))]);
 render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
     OPF = var("OPF~s", [FName]),
     ONF = var("ONF~s", [FName]),
@@ -3667,7 +3680,8 @@ render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
              '{#{fname := {tag,OPF}}, #{fname := {tag,ONF}}}',
              [begin
                   Trs2 = [replace_term('tag', OFName),
-                          replace_term('merge', OFMergeFn)] ++ OneofTransforms,
+                          replace_term('merge', Tr(merge, OFMergeFn))]
+                      ++ OneofTransforms,
                   MmO = map_match([{FName, ?expr({'tag', 'OPF'}, Trs2)}]),
                   MmN = map_match([{FName, ?expr({'tag', 'ONF'}, Trs2)}]),
                   MergeCall = ?expr({'tag','merge'('OPF','ONF')}, Trs2),
@@ -3680,7 +3694,7 @@ render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
                                 map_set(Var, [{FName,MergeCall}]))
                    | Trs2]
               end
-              || {OFName, OFMergeFn} <- OFMerges])
+              || {OFName, Tr, OFMergeFn} <- OFMerges])
            | std_omitable_merge_transforms(PMsg, NMsg, FName, Var)]).
 
 std_omitable_merge_transforms(PMsg, NMsg, FName, Var) ->
@@ -6862,21 +6876,24 @@ mk_find_tr_fn(MsgName, #gpb_oneof{name=CFName}, AnRes) ->
             end
     end.
 
-mk_find_tr_fn_elem(MsgName,
-                   #?gpb_field{name=FName,occurrence=Occ},
-                   false,
-                   AnRes) ->
-    ElemPath = case Occ of
-                   repeated -> [MsgName,FName,[]];
-                   _        -> [MsgName,FName]
-               end,
-    fun(Op) -> find_translation(ElemPath, Op, AnRes) end;
-mk_find_tr_fn_elem(MsgName,
-                   #?gpb_field{name=FName},
-                   {true, CFName},
-                   AnRes) ->
-    ElemPath = [MsgName,CFName,FName],
+mk_find_tr_fn_elem(MsgName, Field, IsOneof, AnRes) ->
+    ElemPath = mk_elempath_elem(MsgName, Field, IsOneof),
     fun(Op) -> find_translation(ElemPath, Op, AnRes) end.
+
+mk_find_tr_fn_elem_or_default(MsgName, {Field, IsOneof}=_XField, AnRes) ->
+    mk_find_tr_fn_elem_or_default(MsgName, Field, IsOneof, AnRes).
+
+mk_find_tr_fn_elem_or_default(MsgName, Field, IsOneof, AnRes) ->
+    ElemPath = mk_elempath_elem(MsgName, Field, IsOneof),
+    fun(Op, Default) -> find_translation(ElemPath, Op, AnRes, Default) end.
+
+mk_elempath_elem(MsgName, #?gpb_field{name=FName,occurrence=Occ}, false) ->
+    case Occ of
+        repeated -> [MsgName,FName,[]];
+        _        -> [MsgName,FName]
+    end;
+mk_elempath_elem(MsgName, #?gpb_field{name=FName}, {true, CFName}) ->
+    [MsgName,CFName,FName].
 
 find_translation(ElemPath, Op, AnRes) ->
     find_translation(ElemPath, Op, AnRes, undefined).
