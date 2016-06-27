@@ -44,6 +44,8 @@
 %% internally used
 -export([main_in_separate_vm/1]).
 
+-export([any_e_atom/1, any_d_atom/1, any_m_atom/2, any_v_atom/2]).
+
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
 %% for gpb and for the code that gpb_compile generates.
@@ -607,6 +609,102 @@ verifies_both_strings_and_binaries_as_input_test() ->
     ok = M:verify_msg(R),
     ?assertError(_, M:verify_msg({m1, "a", <<97,98,99,255,191>>})),
     unload_code(M).
+
+%% -- translation of google.protobuf.Any ----------
+
+-define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).
+
+'translation_of_google.protobuf.Any_test'() ->
+    %% The any.proto contains:
+    %%
+    %%     syntax = "proto3";
+    %%     ...
+    %%     message Any {
+    %%       string type_url = 1;
+    %%       bytes value = 2;
+    %%     }
+    %%
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  repeated google.protobuf.Any f1=1 [packed=false];",
+           "  repeated google.protobuf.Any f2=2 [packed=true];",
+           "  required google.protobuf.Any f3=3;",
+           "  optional google.protobuf.Any f4=4;",
+           "  oneof f5 {",
+           "    google.protobuf.Any f6=6;",
+           "  }",
+           "}"],
+          [use_packages,
+           %% The translations assume value is an atom.
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {merge,{?MODULE,any_m_atom,['$1','$2']}},
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    R = {m, [a,b,c], [d,e,f], g, h, {f6,i}},
+    <<10,15,?x_com_atom_1("a"),
+      10,15,?x_com_atom_1("b"),
+      10,15,?x_com_atom_1("c"),
+      18,48,15,?x_com_atom_1("d"),15,?x_com_atom_1("e"),15,?x_com_atom_1("f"),
+      26,15,?x_com_atom_1("g"),
+      34,15,?x_com_atom_1("h"),
+      50,15,?x_com_atom_1("i")>> = B = M:encode_msg(R),
+    R = M:decode_msg(B, m),
+
+    ok = M:verify_msg(R),
+    ?verify_gpb_err(M:verify_msg({m, ["a",b,c], [d,e,f], g, h, {f6,i}})),
+    ?verify_gpb_err(M:verify_msg({m, [a,b,c], ["d",e,f], g, h, {f6,i}})),
+    ?verify_gpb_err(M:verify_msg({m, [a,b,c], [d,e,f], "g", h, {f6,i}})),
+    ?verify_gpb_err(M:verify_msg({m, [a,b,c], [d,e,f], g, "h", {f6,i}})),
+    ?verify_gpb_err(M:verify_msg({m, [a,b,c], [d,e,f], g, h, {f6,"i"}})),
+
+    RR = {m, [a,b,c,a,b,c], [d,e,f,d,e,f], gg, hh, {f6,ii}},
+    RR = M:merge_msgs(R, R),
+    RR = M:decode_msg(<<B/binary, B/binary>>, m),
+    unload_code(M).
+
+translation_of_Any_as_a_map_value_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  map<string,google.protobuf.Any> f1=1;",
+           "}"],
+          [use_packages,
+           %% The translations assume value is an atom.
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {merge,{?MODULE,any_m_atom,['$1','$2']}}, % unused
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    R = {m, MapI=[{"x",a},{"y",b}]},
+    <<10,20, % "pseudo" msg for map item
+      10,1,"x", % key=x
+      18,15,?x_com_atom_1("a"), % value=a
+      10,20,
+      10,1,"y",
+      18,15,?x_com_atom_1("b")>> = B = M:encode_msg(R),
+    {m,MapO} = M:decode_msg(B, m),
+    true = lists:sort(MapI) == lists:sort(MapO),
+
+    ok = M:verify_msg(R),
+    ?verify_gpb_err(M:verify_msg({m, [{"a","not an atom"}]})),
+    unload_code(M).
+
+%% Translators/callbacks:
+any_e_atom(A) ->
+    {'google.protobuf.Any', "x.com/atom", list_to_binary(atom_to_list(A))}.
+
+any_d_atom({'google.protobuf.Any', "x.com/atom", B}) ->
+    list_to_atom(binary_to_list(B)).
+
+any_m_atom(A1, A2) ->
+    list_to_atom(atom_to_list(A1) ++ atom_to_list(A2)).
+
+any_v_atom(A, ErrorF) ->
+    if is_atom(A) -> ok;
+       true -> ErrorF(not_an_atom)
+    end.
 
 %% --- misc ----------
 
