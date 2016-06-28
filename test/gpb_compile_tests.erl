@@ -2182,10 +2182,24 @@ compile_iolist(IoList) ->
 compile_iolist(IoList, ExtraOpts) ->
     Mod = find_unused_module(),
     Contents = iolist_to_binary(IoList),
+    ModProto = f("~s.proto", [Mod]),
+    ReadFile = fun(F) -> case filename:basename(F) of
+                             ModProto -> {ok, Contents};
+                             _ -> file:read_file(F)
+                         end
+               end,
+    ReadFileInfo = fun(F) -> case filename:basename(F) of
+                                 ModProto -> {ok, #file_info{access=read}};
+                                 _ -> file:read_file_info(F)
+                             end
+                   end,
+
     {ok, Mod, Code, []} =
         gpb_compile:file(
-          f("~s.proto", [Mod]),
-          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+          ModProto,
+          [{file_op, [{read_file, ReadFile},
+                      {read_file_info, ReadFileInfo},
+                      {write_file, fun(_,_) -> ok end}]},
            {i,"."},
            binary, return_warnings | ExtraOpts]),
     load_code(Mod, Code),
