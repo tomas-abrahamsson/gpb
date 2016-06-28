@@ -439,18 +439,24 @@ proto_defs(Mod, Defs0, Opts0) ->
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs, Opts2),
-    %% In case verification of options might be necessary,
-    %% consider doing something like this or similar:
-    %%   case verify_opts(Opts2) of
-    %%       ok -> ...;
-    %%       {error, OptError} ->
-    %%           return_or_report_warnings_or_errors(
-    %%             {error, OptError}, [], Opts2, get_output_format(Opts2))
-    %%   end
-    Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
-    return_or_report_warnings_or_errors(Res1, Warns, Opts2,
-                                        get_output_format(Opts2)).
+    case verify_opts(Opts2) of
+        ok ->
+            Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
+            return_or_report_warnings_or_errors(Res1, Warns, Opts2,
+                                                get_output_format(Opts2));
+        {error, OptError} ->
+            return_or_report_warnings_or_errors({error, OptError}, [], Opts2,
+                                                get_output_format(Opts2))
+    end.
 
+verify_opts(Opts) ->
+    case {proplists:get_value(any_translate, Opts),
+          proplists:get_bool(nif, Opts)} of
+        {Translations, true} when Translations /= undefined ->
+            {error, {invalid_options,any_translate,nif}};
+        _ ->
+            ok
+    end.
 
 %% @spec msg_defs(Mod, Defs) -> CompRet
 %% @equiv msg_defs(Mod, Defs, [])
@@ -624,6 +630,8 @@ fmt_err({post_process, Reasons}) ->
     gpb_parse:format_post_process_error({error, Reasons});
 fmt_err({write_failed, File, Reason}) ->
     ?f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
+fmt_err({invalid_options,any_translate,nif}) ->
+    "Option error: Not supported: both any_translate and nif";
 fmt_err(X) ->
     ?f("Unexpected error ~p", [X]).
 

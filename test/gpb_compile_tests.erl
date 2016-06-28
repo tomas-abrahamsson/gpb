@@ -1223,7 +1223,9 @@ nif_code_test_() ->
              [{"encode decode", fun nif_encode_decode_proto3/0}])),
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
-         {"Nif with strbin", fun nif_with_strbin/0}])).
+         {"Nif with strbin", fun nif_with_strbin/0},
+         {"Error if both Any translations and nif",
+          fun error_if_both_any_translations_and_nif/0}])).
 
 increase_timeouts({Descr, Tests}) ->
     %% Without increased timeout, the nif test frequently times
@@ -1499,6 +1501,33 @@ nif_with_strbin() ->
                 end)
       end).
 
+error_if_both_any_translations_and_nif() ->
+    %% This is expected to fail, already at option verification, ie
+    %% not produce any files at all, but should it accidentally
+    %% succeed (due to a bug or so), it is useful to have it included
+    %% under the ordinary nif handling umbrella.
+    with_tmpdir(
+      fun(_TmpDir) ->
+              DefsTxt = lf_lines(["message ntest3 {",
+                                  "    required string s = 1;",
+                                  "}"]),
+              Opts = [nif,
+                      {any_translate,[{encode,{m,e,['$1']}},
+                                      {decode,{m,d,['$1']}},
+                                      {merge,{m,m,['$1','$2']}},
+                                      {verify,{m,v,['$1','$errorf']}}]}],
+              {{return,{error, _}},
+               {output,Output1}} =
+                  compile_file_get_output(DefsTxt, Opts),
+              true = string:str(Output1, "nif") > 0,
+              true = string:str(Output1, "any_translate") > 0,
+
+              {{return,{error, _, []}},
+               {output,""}} =
+                  compile_file_get_output(DefsTxt, Opts ++ [return]),
+
+              ok
+      end).
 
 compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
     compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, []).
