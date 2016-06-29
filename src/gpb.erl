@@ -37,6 +37,32 @@
 -include("../include/gpb.hrl").
 -include("../include/gpb_version.hrl").
 
+%% +infinity, -infinity, not a number:
+%% +Inf: sign: 0    exponent: all ones, fraction: all zeros
+%% -Inf: sign: 1    exponent: all ones, fraction: all zeros
+%% NaN:  sign: 0|1, exponent: all ones, fraction: anything but all zero bits
+%% (so one must match for +-inf first and nan lastly)
+%%
+%% float:  1 bit sign, 8 bits exponent,  23 bits fraction
+%% double: 1 bit sign, 11 bits exponent, 52 bits fraction
+%%
+%% Also, byte order is little endian so all octets are reversed (but not the
+%% bits within the octet), so we get the following bit patterns:
+%%
+%% low frac bits:16, low exp bit:1,  high frac bits:7, sign:1, high exp bits:7
+%% low frac bits:48, low exp bits:4, high frac bits:4, sign:1, high exp bits:7
+%%
+%%                                 frac  exp     frac  sign  exp
+-define(PLUS_INF_32le_BITPATTERN,  0:16, 1:1,     0:7,  0:1, 2#1111111:7).
+-define(MINUS_INF_32le_BITPATTERN, 0:16, 1:1,     0:7,  1:1, 2#1111111:7).
+-define(NAN_32le_BITPATTERN_match, _:16, 1:1,     _:7,  _:1, 2#1111111:7).
+-define(NAN_32le_BITPATTERN_make,  0:16, 1:1,    64:7,  0:1, 2#1111111:7).
+
+-define(PLUS_INF_64le_BITPATTERN,  0:48, 2#1111:4,0:4,  0:1,2#1111111:7).
+-define(MINUS_INF_64le_BITPATTERN, 0:48, 2#1111:4,0:4,  1:1,2#1111111:7).
+-define(NAN_64le_BITPATTERN_match, _:48, 2#1111:4,_:4,  _:1,2#1111111:7).
+-define(NAN_64le_BITPATTERN_make,  0:48, 2#1111:4,8:4,  0:1,2#1111111:7).
+
 %% TODO
 %%
 %% * Add a new_default_msg that sets default values according to
@@ -295,8 +321,16 @@ decode_type(FieldType, Bin, MsgDefs) ->
             <<N:64/little-signed, Rest/binary>> = Bin,
             {N, Rest};
         double ->
-            <<N:64/little-float, Rest/binary>> = Bin,
-            {N, Rest};
+            case Bin of
+                <<?PLUS_INF_64le_BITPATTERN, Rest/binary>> ->
+                    {infinity, Rest};
+                <<?MINUS_INF_64le_BITPATTERN, Rest/binary>> ->
+                    {'-infinity', Rest};
+                <<?NAN_64le_BITPATTERN_match, Rest/binary>> ->
+                    {nan, Rest};
+                <<N:64/little-float, Rest/binary>> ->
+                    {N, Rest}
+            end;
         string ->
             {Len, Rest} = decode_varint(Bin, 64),
             <<Utf8Str:Len/binary, Rest2/binary>> = Rest,
@@ -316,8 +350,16 @@ decode_type(FieldType, Bin, MsgDefs) ->
             <<N:32/little-signed, Rest/binary>> = Bin,
             {N, Rest};
         float ->
-            <<N:32/little-float, Rest/binary>> = Bin,
-            {N, Rest};
+            case Bin of
+                <<?PLUS_INF_32le_BITPATTERN, Rest/binary>> ->
+                    {infinity, Rest};
+                <<?MINUS_INF_32le_BITPATTERN, Rest/binary>> ->
+                    {'-infinity', Rest};
+                <<?NAN_32le_BITPATTERN_match, Rest/binary>> ->
+                    {nan, Rest};
+                <<N:32/little-float, Rest/binary>> ->
+                    {N, Rest}
+            end;
         {map,KeyType,ValueType} ->
             MsgDefs1 = [map_item_tmp_def(KeyType, ValueType) | MsgDefs],
             MsgName = map_item_tmp_name(),
@@ -326,7 +368,7 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {{Key,Value}, Rest2}
         end.
 
-add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
+add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record)                    ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
     %% the same value appears multiple times, the parser accepts the
     %% last value it sees." But what about bytes?
@@ -346,7 +388,7 @@ add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
         #?gpb_field{rnum = RNum, occurrence = repeated} ->
             append_to_element(RNum, Value, Record)
     end;
-add_field(Value, FieldDef, true=_IsOneof, MsgDefs, Record) ->
+add_field(Value, FieldDef, true=_IsOneof, MsgDefs, Record)                     ->
     #?gpb_field{rnum=RNum, name=Name} = FieldDef,
     case FieldDef of
         #?gpb_field{type={msg,_SubMsgType}} ->
@@ -361,7 +403,7 @@ add_field(Value, FieldDef, true=_IsOneof, MsgDefs, Record) ->
             setelement(RNum, Record, {Name, Value})
     end.
 
-merge_field(RNum, NewMsg, Record, MsgDefs) ->
+merge_field(RNum, NewMsg, Record, MsgDefs)                                     ->
     case element(RNum, Record) of
         undefined ->
             setelement(RNum, Record, NewMsg);
@@ -370,11 +412,11 @@ merge_field(RNum, NewMsg, Record, MsgDefs) ->
             setelement(RNum, Record, MergedMsg)
     end.
 
-append_to_element(RNum, NewElem, Record) ->
+append_to_element(RNum, NewElem, Record)                                       ->
     PrevElems = element(RNum, Record),
     setelement(RNum, Record, [NewElem | PrevElems]).
 
-append_to_map(RNum, {Key, _Value}=NewItem, Record) ->
+append_to_map(RNum, {Key, _Value}=NewItem, Record)                             ->
     PrevElems = element(RNum, Record),
     NewElems = lists:keystore(Key, 1, PrevElems, NewItem),
     setelement(RNum, Record, NewElems).
@@ -448,7 +490,7 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
       MsgDef).
 
 
-encode_msg(Msg, MsgDefs) ->
+encode_msg(Msg, MsgDefs)                                                       ->
     MsgName = element(1, Msg),
     MsgDef = keyfetch({msg, MsgName}, MsgDefs),
     encode_2(MsgDef, Msg, MsgDefs, <<>>).
@@ -462,7 +504,7 @@ encode_2([#?gpb_field{occurrence=Occurrence}=Field | Rest], Msg, MsgDefs, Acc) -
                 encode_field(Field, Msg, MsgDefs)
         end,
     encode_2(Rest, Msg, MsgDefs, <<Acc/binary, EncodedField/binary>>);
-encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc) ->
+encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc)     ->
     case element(RNum, Msg) of
         {Name, Value} ->
             Field = lists:keyfind(Name, #?gpb_field.name, Fields),
@@ -472,10 +514,10 @@ encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc) ->
         undefined ->
             encode_2(Rest, Msg, MsgDefs, Acc)
     end;
-encode_2([], _Msg, _MsgDefs, Acc) ->
+encode_2([], _Msg, _MsgDefs, Acc)                                              ->
     Acc.
 
-encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
+encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs)      ->
     case element(RNum, Msg) of
         []    ->
             <<>>;
@@ -486,10 +528,10 @@ encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
               PackedFields/binary>>
     end.
 
-encode_packed_2([Elem | Rest], Type, MsgDefs, Acc) ->
+encode_packed_2([Elem | Rest], Type, MsgDefs, Acc)                             ->
     NewAcc = <<Acc/binary, (encode_value(Elem, Type, MsgDefs))/binary>>,
     encode_packed_2(Rest, Type, MsgDefs, NewAcc);
-encode_packed_2([], _Type, _MsgDefs, Acc) ->
+encode_packed_2([], _Type, _MsgDefs, Acc)                                      ->
     Acc.
 
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
@@ -512,21 +554,21 @@ encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=repeated},
              Msg, MsgDefs) ->
     encode_repeated(element(RNum, Msg), FNum, Type, MsgDefs, <<>>).
 
-encode_repeated([Elem | Rest], FNum, Type, MsgDefs, Acc) ->
+encode_repeated([Elem | Rest], FNum, Type, MsgDefs, Acc)                       ->
     EncodedValue = encode_field_value(Elem, FNum, Type, MsgDefs),
     NewAcc = <<Acc/binary, EncodedValue/binary>>,
     encode_repeated(Rest, FNum, Type, MsgDefs, NewAcc);
-encode_repeated([], _FNum, _Type, _MsgDefs, Acc) ->
+encode_repeated([], _FNum, _Type, _MsgDefs, Acc)                               ->
     Acc.
 
-encode_field_value(Value, FNum, Type, MsgDefs) ->
+encode_field_value(Value, FNum, Type, MsgDefs)                                 ->
     <<(encode_fnum_type(FNum, Type))/binary,
       (encode_value(Value, Type, MsgDefs))/binary>>.
 
-encode_fnum_type(FNum, Type) ->
+encode_fnum_type(FNum, Type)                                                   ->
     encode_varint((FNum bsl 3) bor encode_wiretype(Type)).
 
-encode_value(Value, Type, MsgDefs) ->
+encode_value(Value, Type, MsgDefs)                                             ->
     case Type of
         sint32 ->
             encode_varint(encode_zigzag(Value));
@@ -566,7 +608,12 @@ encode_value(Value, Type, MsgDefs) ->
         sfixed64 ->
             <<Value:64/signed-little>>;
         double ->
-            <<Value:64/float-little>>;
+            case Value of
+                nan         -> <<?NAN_64le_BITPATTERN_make>>;
+                infinity    -> <<?PLUS_INF_64le_BITPATTERN>>;
+                '-infinity' -> <<?MINUS_INF_64le_BITPATTERN>>;
+                _           -> <<Value:64/float-little>>
+            end;
         string ->
             Utf8 = unicode:characters_to_binary(Value),
             <<(encode_varint(byte_size(Utf8)))/binary, Utf8/binary>>;
@@ -580,7 +627,12 @@ encode_value(Value, Type, MsgDefs) ->
         sfixed32 ->
             <<Value:32/signed-little>>;
         float ->
-            <<Value:32/float-little>>;
+            case Value of
+                nan         -> <<?NAN_32le_BITPATTERN_make>>;
+                infinity    -> <<?PLUS_INF_32le_BITPATTERN>>;
+                '-infinity' -> <<?MINUS_INF_32le_BITPATTERN>>;
+                _           -> <<Value:32/float-little>>
+            end;
         {map,KeyType,ValueType} ->
             {Key,Value1} = Value,
             MsgName = map_item_tmp_name(),
@@ -740,6 +792,9 @@ verify_bool(V, Path) ->
 
 verify_float(V, _) when is_float(V) -> ok;
 verify_float(V, _) when is_integer(V) -> ok;
+verify_float(nan, _) -> ok;
+verify_float(infinity, _) -> ok;
+verify_float('-infinity', _) -> ok;
 verify_float(V, Path) ->
     mk_type_error(bad_floating_point_value, V, Path).
 

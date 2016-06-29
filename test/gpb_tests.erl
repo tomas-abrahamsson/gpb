@@ -594,6 +594,54 @@ encode_double_test() ->
                                             type=double, occurrence=required,
                                             opts=[]}]}]).
 
+-ifndef(gpb_compile_common_tests). % not yet implemented in gpb_compile
+'+inf,-inf,nan_double_test'() ->
+    Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                    type=double, occurrence=repeated,
+                                    opts=[packed]}]},
+            {{msg,m2}, [#?gpb_field{name=b, fnum=1, rnum=#m2.b,
+                                    type=double, occurrence=required,
+                                    opts=[]}]}],
+    Msg = #m1{a = [infinity, '-infinity', nan]},
+    <<10,24,
+      0:48,16#f0,16#7f,
+      0:48,16#f0,16#ff,
+      0:48,16#f8,16#7f>> = B = encode_msg(Msg, Defs),
+    Msg = decode_msg(B, m1, Defs),
+    Msg2 = #m2{b = infinity},
+    <<9,0:48,16#f0,16#7f>> = B2 = encode_msg(Msg2, Defs),
+    Msg2 = decode_msg(B2, m2, Defs),
+    %% check that decode also recognizes other forms of NaN:
+    %% Both sets of fraction bits /= 0, and also sign bit /= 0:
+    B3 = <<10, 8, 4711:48, 16#ff, 16#ff>>,
+    #m1{a = [nan]} = decode_msg(B3, m1, Defs),
+    B4 = <<9, 4711:48, 16#ff, 16#ff>>,
+    #m2{b = nan} = decode_msg(B4, m2, Defs).
+
+'+inf,-inf,nan_float_test'() ->
+    Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                    type=float, occurrence=repeated,
+                                    opts=[packed]}]},
+            {{msg,m2}, [#?gpb_field{name=b, fnum=1, rnum=#m2.b,
+                                    type=float, occurrence=required,
+                                    opts=[]}]}],
+    Msg = #m1{a = [infinity, '-infinity', nan]},
+    <<10,12,
+      0:16,16#80,16#7f,
+      0:16,16#80,16#ff,
+      0:16,16#c0,16#7f>> = B = encode_msg(Msg, Defs),
+    Msg = decode_msg(B, m1, Defs),
+    Msg2 = #m2{b = infinity},
+    <<13, 0:16,16#80,16#7f>> = B2 = encode_msg(Msg2, Defs),
+    Msg2 = decode_msg(B2, m2, Defs),
+    %% check that decode also recognizes other forms of NaN:
+    %% Both sets of fraction bits /= 0, and also sign bit /= 0:
+    B3 = <<10, 4, 4711:16, 16#ff, 16#ff>>,
+    #m1{a = [nan]} = decode_msg(B3, m1, Defs),
+    B4 = <<13, 4711:16, 16#ff, 16#ff>>,
+    #m2{b = nan} = decode_msg(B4, m2, Defs).
+-endif. % gpb_compile_common_tests).
+
 encode_oneof_test() ->
     Defs = [{{msg,m1}, [#gpb_oneof{
                            name=a, rnum=#m1.a,
@@ -907,12 +955,20 @@ verify_bad_booleans_fails_test() ->
                                  occurrence=required}]}])).
 
 verify_valid_float_succeeds_test() ->
-    [ok = verify_msg(#m1{a=1.2e3},
+    [ok = verify_msg(#m1{a=Value},
                      [{{msg,m1},
                        [#?gpb_field{name=a,fnum=1,rnum=#m1.a, type=FloatType,
                                     occurrence=required}]}])
-     || FloatType <- [float, double]].
+     || FloatType <- [float, double],
+        Value <- valid_float_values()].
 
+-ifndef(gpb_compile_common_tests). % not yet implemented in gpb_compile
+valid_float_values() ->
+        [1.2e3, infinity, '-infinity', nan].
+-else.  % gpb_compile_common_tests
+valid_float_values() ->
+        [1.2e3].
+-endif. % gpb_compile_common_tests
 
 verify_bad_floats_fails_test() ->
     [?verify_gpb_err(verify_msg(#m1{a=tomato},
