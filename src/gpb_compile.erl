@@ -2098,10 +2098,10 @@ format_packed_field_encoder2(MsgName, #?gpb_field{type=Type}=FDef) ->
 
 packed_byte_size_can_be_computed(fixed32)  -> {yes, 32, [little]};
 packed_byte_size_can_be_computed(sfixed32) -> {yes, 32, [little,signed]};
-packed_byte_size_can_be_computed(float)    -> {yes, 32, [little,float]};
+packed_byte_size_can_be_computed(float)    -> {yes, 32, float};
 packed_byte_size_can_be_computed(fixed64)  -> {yes, 64, [little]};
 packed_byte_size_can_be_computed(sfixed64) -> {yes, 64, [little,signed]};
-packed_byte_size_can_be_computed(double)   -> {yes, 64, [little,float]};
+packed_byte_size_can_be_computed(double)   -> {yes, 64, double};
 packed_byte_size_can_be_computed(_)        -> no.
 
 format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
@@ -2122,16 +2122,59 @@ format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
        [splice_trees('<KeyBytes>', KeyBytes),
         replace_term('<ElemLen>', BitLen div 8),
         replace_term('<encode-packed>', PackedFnName)]),
-     gpb_codegen:format_fn(
-       PackedFnName,
-       fun([Value | Rest], Bin) ->
-               Bin2 = <<Bin/binary, Value:'<Size>'/'<BitType>'>>,
-               call_self(Rest, Bin2);
-          ([], Bin) ->
-               Bin
-       end,
-       [replace_term('<Size>', BitLen),
-        splice_trees('<BitType>', [erl_syntax:atom(T) || T <- BitType])])].
+     case BitType of
+         float ->
+             gpb_codegen:format_fn(
+               PackedFnName,
+               fun([Value | Rest], Bin) ->
+                       Bin2 = case Value of
+                                  _ when is_float(Value) ->
+                                      <<Bin/binary, Value:32/float-little>>;
+                                  infinity ->
+                                      <<Bin/binary, 0:16,128,127>>;
+                                  '-infinity' ->
+                                      <<Bin/binary, 0:16,128,255>>;
+                                  nan ->
+                                      <<Bin/binary, 0:16,192,127>>
+                              end,
+                       call_self(Rest, Bin2);
+                  ([], Bin) ->
+                       Bin
+               end,
+               []);
+         double ->
+             gpb_codegen:format_fn(
+               PackedFnName,
+               fun([Value | Rest], Bin) ->
+                       Bin2 = case Value of
+                                  _ when is_float(Value) ->
+                                      <<Bin/binary, Value:64/float-little>>;
+                                  infinity ->
+                                      <<Bin/binary, 0:48,240,127>>;
+                                  '-infinity' ->
+                                      <<Bin/binary, 0:48,240,255>>;
+                                  nan ->
+                                      <<Bin/binary, 0:48,248,127>>
+                              end,
+                       call_self(Rest, Bin2);
+                  ([], Bin) ->
+                       Bin
+               end,
+               []);
+         _ ->
+             gpb_codegen:format_fn(
+               PackedFnName,
+               fun([Value | Rest], Bin) ->
+                       Bin2 = <<Bin/binary, Value:'<Size>'/'<BitType>'>>,
+                       call_self(Rest, Bin2);
+                  ([], Bin) ->
+                       Bin
+               end,
+               [replace_term('<Size>', BitLen),
+                splice_trees('<BitType>',
+                             [erl_syntax:atom(T) || T <- BitType])])
+     end].
+
 
 format_unknownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
                                                               fnum=FNum}=FDef) ->
@@ -2184,10 +2227,10 @@ format_fixlength_field_encoders(AnRes) ->
     NeedsDouble   = needs_f_enc(double, AnRes),
     [[format_fixed_encoder(fixed32,  32, [little])        || NeedsFixed32],
      [format_fixed_encoder(sfixed32, 32, [little,signed]) || NeedsSFixed32],
-     [format_fixed_encoder(float,    32, [little,float])  || NeedsFloat],
      [format_fixed_encoder(fixed64,  64, [little])        || NeedsFixed64],
      [format_fixed_encoder(sfixed64, 64, [little,signed]) || NeedsSFixed64],
-     [format_fixed_encoder(double,   64, [little,float])  || NeedsDouble]].
+     [format_float_encoder(float) || NeedsFloat],
+     [format_double_encoder(double) || NeedsDouble]].
 
 needs_f_enc(FixedType, #anres{used_types=UsedTypes, fixlen_types=FTypes}) ->
     %% If a fixlength-type occurs _only_ as a packed repeated field,
@@ -2255,6 +2298,26 @@ format_fixed_encoder(Type, BitLen, BitType) ->
       end,
       [replace_term('<Sz>', BitLen),
        splice_trees('<T>', [erl_syntax:atom(T) || T <- BitType])]).
+
+format_float_encoder(Type) ->
+    gpb_codegen:format_fn(
+      mk_fn(e_type_, Type),
+      fun(V, Bin) when is_float(V) -> <<Bin/binary, V:32/little-float>>;
+         (infinity, Bin)           -> <<Bin/binary, 0:16,128,127>>;
+         ('-infinity', Bin)        -> <<Bin/binary, 0:16,128,255>>;
+         (nan, Bin)                -> <<Bin/binary, 0:16,192,127>>
+      end,
+      []).
+
+format_double_encoder(Type) ->
+    gpb_codegen:format_fn(
+      mk_fn(e_type_, Type),
+      fun(V, Bin) when is_float(V) -> <<Bin/binary, V:64/little-float>>;
+         (infinity, Bin)           -> <<Bin/binary, 0:48,240,127>>;
+         ('-infinity', Bin)        -> <<Bin/binary, 0:48,240,255>>;
+         (nan, Bin)                -> <<Bin/binary, 0:48,248,127>>
+      end,
+      []).
 
 format_string_encoder() ->
     gpb_codegen:format_fn(
@@ -2709,10 +2772,10 @@ format_non_packed_field_decoder(MsgName, XField, AnRes, Opts) ->
         {enum,_} -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         fixed32  -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
         sfixed32 -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
-        float    -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
+        float    -> format_float_field_decoder(MsgName, XField, AnRes, Opts);
         fixed64  -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
         sfixed64 -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
-        double   -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
+        double   -> format_double_field_decoder(MsgName, XField, AnRes, Opts);
         string   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         bytes    -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         {msg,_}  -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
@@ -2769,13 +2832,43 @@ format_packed_field_seq_decoder(MsgName, #?gpb_field{type=Type}=Field, Opts) ->
     case Type of
         fixed32  -> format_dpacked_nonvi(MsgName, Field, 32, [little]);
         sfixed32 -> format_dpacked_nonvi(MsgName, Field, 32, [little,signed]);
-        float    -> format_dpacked_nonvi(MsgName, Field, 32, [little,float]);
+        float    -> format_dpacked_nonvi(MsgName, Field, 32, float);
         fixed64  -> format_dpacked_nonvi(MsgName, Field, 64, [little]);
         sfixed64 -> format_dpacked_nonvi(MsgName, Field, 64, [little,signed]);
-        double   -> format_dpacked_nonvi(MsgName, Field, 64, [little,float]);
+        double   -> format_dpacked_nonvi(MsgName, Field, 64, double);
         _        -> format_dpacked_vi(MsgName, Field, Opts)
     end.
 
+format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 32, float) ->
+    gpb_codegen:format_fn(
+      mk_fn(d_packed_field_, MsgName, FName),
+      fun(<<0:16,128,127, Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, [infinity | AccSeq]);
+         (<<0:16,128,255, Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, ['-infinity' | AccSeq]);
+         (<<_:16,1:1,_:7,_:1,127:7, Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, [nan | AccSeq]);
+         (<<Value:32/little-float, Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, [Value | AccSeq]);
+         (<<>>, _, _, AccSeq) ->
+              AccSeq
+      end,
+      []);
+format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 64, double) ->
+    gpb_codegen:format_fn(
+      mk_fn(d_packed_field_, MsgName, FName),
+      fun(<<0:48,240,127, Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, [infinity | AccSeq]);
+         (<<0:48,240,255, Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, ['-infinity' | AccSeq]);
+         (<<_:48,15:4,_:4,_:1,127:7, Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, [nan | AccSeq]);
+         (<<Value:64/little-float, Rest/binary>>, Z1, Z2, AccSeq) ->
+              call_self(Rest, Z1, Z2, [Value | AccSeq]);
+         (<<>>, _, _, AccSeq) ->
+              AccSeq
+      end,
+      []);
 format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes) ->
     gpb_codegen:format_fn(
       mk_fn(d_packed_field_, MsgName, FName),
@@ -3172,6 +3265,64 @@ format_fixlen_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
        splice_trees('<InParams>', InParams),
        replace_term('<call-read-field>', ReadFieldDefFnName),
        splice_trees('<OutParams>', Params2)]).
+
+format_float_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
+    {#?gpb_field{name=FName}, _IsOneof} = XFieldDef,
+    Params = decoder_params(MsgName, AnRes),
+    {InParams, PrevValue} = decoder_in_params(Params, MsgName, XFieldDef,
+                                              AnRes, Opts),
+    OutParamsReplacements =
+        [splice_trees(Marker, updated_merged_params(MsgName, XFieldDef, AnRes,
+                                                    OutExpr, PrevValue, Params,
+                                                    Opts))
+         || {Marker, OutExpr} <- [{'OutParams', ?expr(Value)},
+                                  {'InfinityOutParams', ?expr(infinity)},
+                                  {'-InfinityOutParams', ?expr('-infinity')},
+                                  {'NanOutParams', ?expr(nan)}]],
+    ReadFieldDefFnName = mk_fn(dfp_read_field_def_, MsgName),
+    gpb_codegen:format_fn(
+      mk_fn(d_field_, MsgName, FName),
+      fun(<<0:16,128,127, Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, 'InfinityOutParams');
+         (<<0:16,128,255, Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, '-InfinityOutParams');
+         (<<_:16,1:1,_:7,_:1,127:7, Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, 'NanOutParams');
+         (<<Value:32/little-float, Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, 'OutParams')
+      end,
+      [splice_trees('<InParams>', InParams),
+       replace_term('<call-read-field>', ReadFieldDefFnName)] ++
+          OutParamsReplacements).
+
+format_double_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
+    {#?gpb_field{name=FName}, _IsOneof} = XFieldDef,
+    Params = decoder_params(MsgName, AnRes),
+    {InParams, PrevValue} = decoder_in_params(Params, MsgName, XFieldDef,
+                                              AnRes, Opts),
+    OutParamsReplacements =
+        [splice_trees(Marker, updated_merged_params(MsgName, XFieldDef, AnRes,
+                                                    OutExpr, PrevValue, Params,
+                                                    Opts))
+         || {Marker, OutExpr} <- [{'OutParams', ?expr(Value)},
+                                  {'InfinityOutParams', ?expr(infinity)},
+                                  {'-InfinityOutParams', ?expr('-infinity')},
+                                  {'NanOutParams', ?expr(nan)}]],
+    ReadFieldDefFnName = mk_fn(dfp_read_field_def_, MsgName),
+    gpb_codegen:format_fn(
+      mk_fn(d_field_, MsgName, FName),
+      fun(<<0:48,240,127, Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, 'InfinityOutParams');
+         (<<0:48,240,255, Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, '-InfinityOutParams');
+         (<<_:48,15:4,_:4,_:1,127:7, Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, 'NanOutParams');
+         (<<Value:64/little-float, Rest/binary>>, Z1, Z2, '<InParams>') ->
+              '<call-read-field>'(Rest, Z1, Z2, 'OutParams')
+      end,
+      [splice_trees('<InParams>', InParams),
+       replace_term('<call-read-field>', ReadFieldDefFnName)] ++
+          OutParamsReplacements).
 
 assign_to_var(Var, Expr) ->
     ?expr('<Var>' = '<Expr>',
@@ -3897,7 +4048,10 @@ format_float_verifier(FlType) ->
           %% So let verify accept integers too.
           %% When such a value is unpacked, we get a float.
           (N, _Path) when is_integer(N) -> ok;
-          (X, Path) -> mk_type_error('<bad_x_value>', X, Path)
+          (infinity, _Path)    -> ok;
+          ('-infinity', _Path) -> ok;
+          (nan, _Path)         -> ok;
+          (X, Path)            -> mk_type_error('<bad_x_value>', X, Path)
        end,
        [replace_term('<bad_x_value>', BadTypeOfValue)])].
 
@@ -4838,8 +4992,8 @@ type_to_typestr_2(fixed32, _Defs, _Opts)  -> "non_neg_integer()";
 type_to_typestr_2(fixed64, _Defs, _Opts)  -> "non_neg_integer()";
 type_to_typestr_2(sfixed32, _Defs, _Opts) -> "integer()";
 type_to_typestr_2(sfixed64, _Defs, _Opts) -> "integer()";
-type_to_typestr_2(float, _Defs, _Opts)    -> "float()";
-type_to_typestr_2(double, _Defs, _Opts)   -> "float()";
+type_to_typestr_2(float, _Defs, _Opts)    -> "float() | " ++ non_norm_floats();
+type_to_typestr_2(double, _Defs, _Opts)   -> "float() | " ++ non_norm_floats();
 type_to_typestr_2(string, _Defs, Opts)    ->
   string_to_typestr(get_strings_as_binaries_by_opts(Opts));
 type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
@@ -4852,6 +5006,9 @@ type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
         records -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
         maps    -> ?f("#{~s => ~s}", [KTStr, VTStr])
     end.
+
+non_norm_floats() ->
+    "infinity | '-infinity' | nan".
 
 msg_to_typestr(M, Opts) ->
   case get_records_or_maps_by_opts(Opts) of

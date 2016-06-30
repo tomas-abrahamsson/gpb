@@ -594,7 +594,6 @@ encode_double_test() ->
                                             type=double, occurrence=required,
                                             opts=[]}]}]).
 
--ifndef(gpb_compile_common_tests). % not yet implemented in gpb_compile
 '+inf,-inf,nan_double_test'() ->
     Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                     type=double, occurrence=repeated,
@@ -640,7 +639,6 @@ encode_double_test() ->
     #m1{a = [nan]} = decode_msg(B3, m1, Defs),
     B4 = <<13, 4711:16, 16#ff, 16#ff>>,
     #m2{b = nan} = decode_msg(B4, m2, Defs).
--endif. % gpb_compile_common_tests).
 
 encode_oneof_test() ->
     Defs = [{{msg,m1}, [#gpb_oneof{
@@ -960,15 +958,7 @@ verify_valid_float_succeeds_test() ->
                        [#?gpb_field{name=a,fnum=1,rnum=#m1.a, type=FloatType,
                                     occurrence=required}]}])
      || FloatType <- [float, double],
-        Value <- valid_float_values()].
-
--ifndef(gpb_compile_common_tests). % not yet implemented in gpb_compile
-valid_float_values() ->
-        [1.2e3, infinity, '-infinity', nan].
--else.  % gpb_compile_common_tests
-valid_float_values() ->
-        [1.2e3].
--endif. % gpb_compile_common_tests
+        Value <- [1.2e3, infinity, '-infinity', nan]].
 
 verify_bad_floats_fails_test() ->
     [?verify_gpb_err(verify_msg(#m1{a=tomato},
