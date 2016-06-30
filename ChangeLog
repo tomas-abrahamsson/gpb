@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.22.5
+2016-Jun-30
+
+	* Bugfix a regression, which was introduced in 3.22.4, so that it
+	is now again possible use integers for floating point fields, in
+	the call to encode_msg. Thanks to Ilya Khaprov for spotting this.
+
 Version 3.22.4
 2016-Jun-30
 
