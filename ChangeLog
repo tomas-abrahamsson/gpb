@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.22.4
+2016-Jun-30
+
+	* For floats, handle infinity, and not a number.  They are
+	represented as the atoms infinity, '-infinity' and nan.  Thanks to
+	Ilya Khaprov for reporting this and hinting at a solution.
+
 Version 3.22.3
 2016-Jun-15
 
