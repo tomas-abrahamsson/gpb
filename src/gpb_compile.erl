@@ -5120,7 +5120,7 @@ possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
 
 format_nif_cc(Mod, Defs, AnRes, Opts) ->
     iolist_to_binary(
-      [format_nif_cc_includes(Mod, Defs, Opts),
+      [format_nif_cc_includes(Mod, Defs, AnRes, Opts),
        format_nif_cc_oneof_version_check_if_present(Defs),
        format_nif_cc_maptype_version_check_if_present(Defs),
        format_nif_cc_proto3_version_check_if_present(Defs),
@@ -5145,10 +5145,11 @@ is_lite_rt(Defs) ->
     lists:any(fun(OptOpt) -> OptOpt == 'LITE_RUNTIME' end,
               OptimizeOpts).
 
-format_nif_cc_includes(Mod, Defs, _Opts) ->
+format_nif_cc_includes(Mod, Defs, AnRes, _Opts) ->
     IsLiteRT = is_lite_rt(Defs),
     ["#include <string.h>\n",
      "#include <string>\n",
+     ["#include <math.h>\n" || is_any_field_of_type_float_or_double(AnRes)],
      "\n",
      "#include <erl_nif.h>\n",
      "\n",
@@ -5268,6 +5269,10 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
                      true  -> MiscAtoms0 ++ [true, false];
                      false -> MiscAtoms0
                  end,
+    MiscAtoms2 = case is_any_field_of_type_float_or_double(AnRes) of
+                     true  -> MiscAtoms1 ++ [infinity, '-infinity', nan];
+                     false -> MiscAtoms1
+                 end,
     FieldAtoms = if Maps ->
                          lists:usort(
                            lists:flatten(
@@ -5276,9 +5281,9 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
                     not Maps ->
                          []
                  end,
-    MiscAtoms2 = MiscAtoms1 ++ FieldAtoms,
-    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms2),
-    AtomVars0 = [{mk_c_var(gpb_aa_, A), A} || A <- Atoms],
+    MiscAtoms3 = MiscAtoms2 ++ FieldAtoms,
+    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms3),
+    AtomVars0 = [{mk_c_var(gpb_aa_, minus_to_m(A)), A} || A <- Atoms],
     NoValue = case get_mapping_and_unset_by_opts(Opts) of
                   records -> undefined;
                   {maps, present_undefined} -> undefined;
@@ -5293,6 +5298,12 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
        || {AtomVar, Atom} <- AtomVars1],
       "}\n",
       "\n"]].
+
+minus_to_m(A) ->
+    case atom_to_list(A) of
+        "-"++Rest -> "m"++Rest;
+        _         -> A
+    end.
 
 collect_oneof_fields(Defs) ->
     lists:usort(
@@ -5320,6 +5331,10 @@ is_any_field_of_type_enum(#anres{used_types=UsedTypes}) ->
 
 is_any_field_of_type_bool(#anres{used_types=UsedTypes}) ->
     sets:is_element(bool, UsedTypes).
+
+is_any_field_of_type_float_or_double(#anres{used_types=UsedTypes}) ->
+    sets:is_element(float, UsedTypes) orelse
+        sets:is_element(double, UsedTypes).
 
 format_nif_cc_utf8_conversion_code(Opts) ->
     [case get_strings_as_binaries_by_opts(Opts) of
@@ -5813,19 +5828,31 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
            float ->
                ?f("{\n"
                   "    double v;\n"
-                  "    if (!enif_get_double(env, ~s, &v))\n"
+                  "    if (enif_is_identical(~s, gpb_aa_infinity))\n"
+                  "        v = INFINITY;\n"
+                  "    else if (enif_is_identical(~s, gpb_aa_minfinity))\n"
+                  "        v = -INFINITY;\n"
+                  "    else if (enif_is_identical(~s, gpb_aa_nan))\n"
+                  "        v = NAN;\n"
+                  "    else if (!enif_get_double(env, ~s, &v))\n"
                   "        return 0;\n"
                   "    ~s\n"
                   "}\n",
-                  [SrcVar, SetFn(["(float)v"])]);
+                  [SrcVar, SrcVar, SrcVar, SrcVar, SetFn(["(float)v"])]);
            double ->
                ?f("{\n"
                   "    double v;\n"
-                  "    if (!enif_get_double(env, ~s, &v))\n"
+                  "    if (enif_is_identical(~s, gpb_aa_infinity))\n"
+                  "        v = INFINITY;\n"
+                  "    else if (enif_is_identical(~s, gpb_aa_minfinity))\n"
+                  "        v = -INFINITY;\n"
+                  "    else if (enif_is_identical(~s, gpb_aa_nan))\n"
+                  "        v = NAN;\n"
+                  "    else if (!enif_get_double(env, ~s, &v))\n"
                   "        return 0;\n"
                   "    ~s\n"
                   "}\n",
-                  [SrcVar, SetFn(["v"])]);
+                  [SrcVar, SrcVar, SrcVar, SrcVar, SetFn(["v"])]);
            _S32 when FType == sint32;
                      FType == int32;
                      FType == sfixed32 ->
@@ -6253,11 +6280,29 @@ format_nif_cc_field_unpacker_by_field(DestVar, MsgVar, Field, Defs) ->
 format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs) ->
     case FType of
         float ->
-            [?f("~s = enif_make_double(env, (double)~s);\n",
-                [DestVar, SrcExpr])];
+            [?f("{\n"),
+             ?f("    float v = ~s;\n", [SrcExpr]),
+             ?f("    if (isnan(v))\n"),
+             ?f("        ~s = gpb_aa_nan;\n", [DestVar]),
+             ?f("    else if (isinf(v) && v < 0)\n", []),
+             ?f("        ~s = gpb_aa_minfinity;\n", [DestVar]),
+             ?f("    else if (isinf(v))\n"),
+             ?f("        ~s = gpb_aa_infinity;\n", [DestVar]),
+             ?f("    else\n", []),
+             ?f("        ~s = enif_make_double(env, (double)v);\n", [DestVar]),
+             ?f("}\n")];
         double ->
-            [?f("~s = enif_make_double(env, ~s);\n",
-                [DestVar, SrcExpr])];
+            [?f("{\n"),
+             ?f("    double v = ~s;\n", [SrcExpr]),
+             ?f("    if (isnan(v))\n"),
+             ?f("        ~s = gpb_aa_nan;\n", [DestVar]),
+             ?f("    else if (isinf(v) && v < 0)\n", []),
+             ?f("        ~s = gpb_aa_minfinity;\n", [DestVar]),
+             ?f("    else if (isinf(v))\n"),
+             ?f("        ~s = gpb_aa_infinity;\n", [DestVar]),
+             ?f("    else\n", []),
+             ?f("        ~s = enif_make_double(env, v);\n", [DestVar]),
+             ?f("}\n")];
         _S32 when FType == sint32;
                   FType == int32;
                   FType == sfixed32 ->
