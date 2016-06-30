@@ -172,7 +172,7 @@ Mapping of protocol buffer datatypes to erlang
 
     .proto type           Erlang type
     ----------------------------------------------------------------
-    double, float         floating point number
+    double, float         floating point number | infinity | '-infinity' | nan
                           when encoding, integers, too, are accepted
     ----------------------------------------------------------------
     int32, int64,

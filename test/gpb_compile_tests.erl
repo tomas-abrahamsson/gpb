@@ -1125,7 +1125,8 @@ nif_code_test_() ->
              [{"encode decode", fun nif_encode_decode_proto3/0}])),
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
-         {"Nif with strbin", fun nif_with_strbin/0}])).
+         {"Nif with strbin", fun nif_with_strbin/0},
+         {"Nif with strbin", fun nif_with_non_normal_floats/0}])).
 
 increase_timeouts({Descr, Tests}) ->
     %% Without increased timeout, the nif test frequently times
@@ -1398,6 +1399,35 @@ nif_with_strbin() ->
                         ?assertEqual(OrigMsgB, MMDecoded),
                         ?assertEqual(OrigMsgS, GMDecoded),
                         ?assertEqual(OrigMsgB, MGDecoded)
+                end)
+      end).
+
+nif_with_non_normal_floats() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_with_non_normal_floats,
+              DefsTxt = lf_lines(["message nnf1 {",
+                                  "    required float f = 1;",
+                                  "    required double d = 2;",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir,
+                                                [strings_as_binaries]),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        [begin
+                             OrigMsg = {nnf1,Item,Item},
+                             MEncoded  = M:encode_msg(OrigMsg),
+                             GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                             MMDecoded = M:decode_msg(MEncoded, nnf1),
+                             GMDecoded = gpb:decode_msg(MEncoded, nnf1, Defs),
+                             MGDecoded = M:decode_msg(GEncoded, nnf1),
+                             ?assertEqual(OrigMsg, MMDecoded),
+                             ?assertEqual(OrigMsg, GMDecoded),
+                             ?assertEqual(OrigMsg, MGDecoded)
+                         end
+                         || Item <- [infinity, '-infinity', nan]]
                 end)
       end).
 
