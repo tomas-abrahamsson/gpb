@@ -594,6 +594,31 @@ encode_double_test() ->
                                             type=double, occurrence=required,
                                             opts=[]}]}]).
 
+encode_numbers_as_floats_doubles_test() ->
+    %% 16 is an integer which is also perfectly representable as an IEEE float
+    %% (no rounding error)
+    DefsF  = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                      type=float, occurrence=required,
+                                      opts=[]}]}],
+    DefsD  = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                      type=double, occurrence=required,
+                                      opts=[]}]}],
+    DefsFP = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                      type=float, occurrence=repeated,
+                                      opts=[packed]}]}],
+    DefsDP = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                      type=double, occurrence=repeated,
+                                      opts=[packed]}]}],
+    <<13,   0:16,128,65>> = encode_msg(#m1{a=16},     DefsF),
+    <<13,   0:16,128,65>> = encode_msg(#m1{a=16.0},   DefsF),
+    << 9,   0:48,48,64>>  = encode_msg(#m1{a=16},     DefsD),
+    << 9,   0:48,48,64>>  = encode_msg(#m1{a=16.0},   DefsD),
+    <<10,4, 0:16,128,65>> = encode_msg(#m1{a=[16]},   DefsFP),
+    <<10,4, 0:16,128,65>> = encode_msg(#m1{a=[16.0]}, DefsFP),
+    <<10,8, 0:48,48,64>>  = encode_msg(#m1{a=[16]},   DefsDP),
+    <<10,8, 0:48,48,64>>  = encode_msg(#m1{a=[16.0]}, DefsDP),
+    ok.
+
 '+inf,-inf,nan_double_test'() ->
     Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                     type=double, occurrence=repeated,

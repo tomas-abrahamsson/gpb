@@ -2128,7 +2128,7 @@ format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
                PackedFnName,
                fun([Value | Rest], Bin) ->
                        Bin2 = case Value of
-                                  _ when is_float(Value) ->
+                                  _ when is_number(Value) ->
                                       <<Bin/binary, Value:32/float-little>>;
                                   infinity ->
                                       <<Bin/binary, 0:16,128,127>>;
@@ -2147,7 +2147,7 @@ format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
                PackedFnName,
                fun([Value | Rest], Bin) ->
                        Bin2 = case Value of
-                                  _ when is_float(Value) ->
+                                  _ when is_number(Value) ->
                                       <<Bin/binary, Value:64/float-little>>;
                                   infinity ->
                                       <<Bin/binary, 0:48,240,127>>;
@@ -2302,20 +2302,20 @@ format_fixed_encoder(Type, BitLen, BitType) ->
 format_float_encoder(Type) ->
     gpb_codegen:format_fn(
       mk_fn(e_type_, Type),
-      fun(V, Bin) when is_float(V) -> <<Bin/binary, V:32/little-float>>;
-         (infinity, Bin)           -> <<Bin/binary, 0:16,128,127>>;
-         ('-infinity', Bin)        -> <<Bin/binary, 0:16,128,255>>;
-         (nan, Bin)                -> <<Bin/binary, 0:16,192,127>>
+      fun(V, Bin) when is_number(V) -> <<Bin/binary, V:32/little-float>>;
+         (infinity, Bin)            -> <<Bin/binary, 0:16,128,127>>;
+         ('-infinity', Bin)         -> <<Bin/binary, 0:16,128,255>>;
+         (nan, Bin)                 -> <<Bin/binary, 0:16,192,127>>
       end,
       []).
 
 format_double_encoder(Type) ->
     gpb_codegen:format_fn(
       mk_fn(e_type_, Type),
-      fun(V, Bin) when is_float(V) -> <<Bin/binary, V:64/little-float>>;
-         (infinity, Bin)           -> <<Bin/binary, 0:48,240,127>>;
-         ('-infinity', Bin)        -> <<Bin/binary, 0:48,240,255>>;
-         (nan, Bin)                -> <<Bin/binary, 0:48,248,127>>
+      fun(V, Bin) when is_number(V) -> <<Bin/binary, V:64/little-float>>;
+         (infinity, Bin)            -> <<Bin/binary, 0:48,240,127>>;
+         ('-infinity', Bin)         -> <<Bin/binary, 0:48,240,255>>;
+         (nan, Bin)                 -> <<Bin/binary, 0:48,248,127>>
       end,
       []).
 
@@ -4992,8 +4992,8 @@ type_to_typestr_2(fixed32, _Defs, _Opts)  -> "non_neg_integer()";
 type_to_typestr_2(fixed64, _Defs, _Opts)  -> "non_neg_integer()";
 type_to_typestr_2(sfixed32, _Defs, _Opts) -> "integer()";
 type_to_typestr_2(sfixed64, _Defs, _Opts) -> "integer()";
-type_to_typestr_2(float, _Defs, _Opts)    -> "float() | " ++ non_norm_floats();
-type_to_typestr_2(double, _Defs, _Opts)   -> "float() | " ++ non_norm_floats();
+type_to_typestr_2(float, _Defs, _Opts)    -> float_spec();
+type_to_typestr_2(double, _Defs, _Opts)   -> float_spec();
 type_to_typestr_2(string, _Defs, Opts)    ->
   string_to_typestr(get_strings_as_binaries_by_opts(Opts));
 type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
@@ -5007,8 +5007,8 @@ type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
         maps    -> ?f("#{~s => ~s}", [KTStr, VTStr])
     end.
 
-non_norm_floats() ->
-    "infinity | '-infinity' | nan".
+float_spec() ->
+    "float() | integer() | infinity | '-infinity' | nan".
 
 msg_to_typestr(M, Opts) ->
   case get_records_or_maps_by_opts(Opts) of
