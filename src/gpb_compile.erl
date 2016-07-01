@@ -2124,43 +2124,9 @@ format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
         replace_term('<encode-packed>', PackedFnName)]),
      case BitType of
          float ->
-             gpb_codegen:format_fn(
-               PackedFnName,
-               fun([Value | Rest], Bin) ->
-                       Bin2 = case Value of
-                                  _ when is_number(Value) ->
-                                      <<Bin/binary, Value:32/float-little>>;
-                                  infinity ->
-                                      <<Bin/binary, 0:16,128,127>>;
-                                  '-infinity' ->
-                                      <<Bin/binary, 0:16,128,255>>;
-                                  nan ->
-                                      <<Bin/binary, 0:16,192,127>>
-                              end,
-                       call_self(Rest, Bin2);
-                  ([], Bin) ->
-                       Bin
-               end,
-               []);
+             format_packed_float_encoder(PackedFnName);
          double ->
-             gpb_codegen:format_fn(
-               PackedFnName,
-               fun([Value | Rest], Bin) ->
-                       Bin2 = case Value of
-                                  _ when is_number(Value) ->
-                                      <<Bin/binary, Value:64/float-little>>;
-                                  infinity ->
-                                      <<Bin/binary, 0:48,240,127>>;
-                                  '-infinity' ->
-                                      <<Bin/binary, 0:48,240,255>>;
-                                  nan ->
-                                      <<Bin/binary, 0:48,248,127>>
-                              end,
-                       call_self(Rest, Bin2);
-                  ([], Bin) ->
-                       Bin
-               end,
-               []);
+             format_packed_double_encoder(PackedFnName);
          _ ->
              gpb_codegen:format_fn(
                PackedFnName,
@@ -2298,6 +2264,38 @@ format_fixed_encoder(Type, BitLen, BitType) ->
       end,
       [replace_term('<Sz>', BitLen),
        splice_trees('<T>', [erl_syntax:atom(T) || T <- BitType])]).
+
+format_packed_float_encoder(FnName) ->
+    gpb_codegen:format_fn(
+      FnName,
+      fun([V | Rest], Bin) when is_number(V) ->
+              call_self(Rest, <<Bin/binary, V:32/little-float>>);
+         ([infinity | Rest], Bin) ->
+              call_self(Rest, <<Bin/binary, 0:16,128,127>>);
+         (['-infinity' | Rest], Bin) ->
+              call_self(Rest, <<Bin/binary, 0:16,128,255>>);
+         ([nan | Rest], Bin) ->
+              call_self(Rest, <<Bin/binary, 0:16,192,127>>);
+         ([], Bin) ->
+              Bin
+      end,
+      []).
+
+format_packed_double_encoder(FnName) ->
+    gpb_codegen:format_fn(
+      FnName,
+      fun([V | Rest], Bin) when is_number(V) ->
+              call_self(Rest, <<Bin/binary, V:64/float-little>>);
+         ([infinity | Rest], Bin) ->
+              call_self(Rest, <<Bin/binary, 0:48,240,127>>);
+         (['-infinity' | Rest], Bin) ->
+              call_self(Rest, <<Bin/binary, 0:48,240,255>>);
+         ([nan | Rest], Bin) ->
+              call_self(Rest, <<Bin/binary, 0:48,248,127>>);
+         ([], Bin) ->
+              Bin
+      end,
+      []).
 
 format_float_encoder(Type) ->
     gpb_codegen:format_fn(
@@ -2772,10 +2770,12 @@ format_non_packed_field_decoder(MsgName, XField, AnRes, Opts) ->
         {enum,_} -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         fixed32  -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
         sfixed32 -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
-        float    -> format_float_field_decoder(MsgName, XField, AnRes, Opts);
+        float    -> format_floating_point_field_decoder(MsgName, XField,
+                                                        float, AnRes, Opts);
         fixed64  -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
         sfixed64 -> format_fixlen_field_decoder(MsgName, XField, AnRes, Opts);
-        double   -> format_double_field_decoder(MsgName, XField, AnRes, Opts);
+        double   -> format_floating_point_field_decoder(MsgName, XField,
+                                                        double, AnRes, Opts);
         string   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         bytes    -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         {msg,_}  -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
@@ -3266,7 +3266,7 @@ format_fixlen_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
        replace_term('<call-read-field>', ReadFieldDefFnName),
        splice_trees('<OutParams>', Params2)]).
 
-format_float_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
+format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes, Opts) ->
     {#?gpb_field{name=FName}, _IsOneof} = XFieldDef,
     Params = decoder_params(MsgName, AnRes),
     {InParams, PrevValue} = decoder_in_params(Params, MsgName, XFieldDef,
@@ -3280,49 +3280,42 @@ format_float_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
                                   {'-InfinityOutParams', ?expr('-infinity')},
                                   {'NanOutParams', ?expr(nan)}]],
     ReadFieldDefFnName = mk_fn(dfp_read_field_def_, MsgName),
-    gpb_codegen:format_fn(
-      mk_fn(d_field_, MsgName, FName),
-      fun(<<0:16,128,127, Rest/binary>>, Z1, Z2, '<InParams>') ->
-              '<call-read-field>'(Rest, Z1, Z2, 'InfinityOutParams');
-         (<<0:16,128,255, Rest/binary>>, Z1, Z2, '<InParams>') ->
-              '<call-read-field>'(Rest, Z1, Z2, '-InfinityOutParams');
-         (<<_:16,1:1,_:7,_:1,127:7, Rest/binary>>, Z1, Z2, '<InParams>') ->
-              '<call-read-field>'(Rest, Z1, Z2, 'NanOutParams');
-         (<<Value:32/little-float, Rest/binary>>, Z1, Z2, '<InParams>') ->
-              '<call-read-field>'(Rest, Z1, Z2, 'OutParams')
-      end,
-      [splice_trees('<InParams>', InParams),
-       replace_term('<call-read-field>', ReadFieldDefFnName)] ++
-          OutParamsReplacements).
-
-format_double_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
-    {#?gpb_field{name=FName}, _IsOneof} = XFieldDef,
-    Params = decoder_params(MsgName, AnRes),
-    {InParams, PrevValue} = decoder_in_params(Params, MsgName, XFieldDef,
-                                              AnRes, Opts),
-    OutParamsReplacements =
-        [splice_trees(Marker, updated_merged_params(MsgName, XFieldDef, AnRes,
-                                                    OutExpr, PrevValue, Params,
-                                                    Opts))
-         || {Marker, OutExpr} <- [{'OutParams', ?expr(Value)},
-                                  {'InfinityOutParams', ?expr(infinity)},
-                                  {'-InfinityOutParams', ?expr('-infinity')},
-                                  {'NanOutParams', ?expr(nan)}]],
-    ReadFieldDefFnName = mk_fn(dfp_read_field_def_, MsgName),
-    gpb_codegen:format_fn(
-      mk_fn(d_field_, MsgName, FName),
-      fun(<<0:48,240,127, Rest/binary>>, Z1, Z2, '<InParams>') ->
-              '<call-read-field>'(Rest, Z1, Z2, 'InfinityOutParams');
-         (<<0:48,240,255, Rest/binary>>, Z1, Z2, '<InParams>') ->
-              '<call-read-field>'(Rest, Z1, Z2, '-InfinityOutParams');
-         (<<_:48,15:4,_:4,_:1,127:7, Rest/binary>>, Z1, Z2, '<InParams>') ->
-              '<call-read-field>'(Rest, Z1, Z2, 'NanOutParams');
-         (<<Value:64/little-float, Rest/binary>>, Z1, Z2, '<InParams>') ->
-              '<call-read-field>'(Rest, Z1, Z2, 'OutParams')
-      end,
-      [splice_trees('<InParams>', InParams),
-       replace_term('<call-read-field>', ReadFieldDefFnName)] ++
-          OutParamsReplacements).
+    Replacements =
+        [splice_trees('InParams', InParams),
+         replace_term('<call-read-field>', ReadFieldDefFnName)] ++
+        OutParamsReplacements,
+    case Type of
+        float ->
+            gpb_codegen:format_fn(
+              mk_fn(d_field_, MsgName, FName),
+              fun(<<0:16,128,127, Rest/binary>>, Z1, Z2, 'InParams') ->
+                      '<call-read-field>'(Rest, Z1, Z2, 'InfinityOutParams');
+                 (<<0:16,128,255, Rest/binary>>, Z1, Z2, 'InParams') ->
+                      '<call-read-field>'(Rest, Z1, Z2, '-InfinityOutParams');
+                 (<<_:16,1:1,_:7,_:1,127:7, Rest/binary>>, Z1, Z2,
+                  'InParams') ->
+                      '<call-read-field>'(Rest, Z1, Z2, 'NanOutParams');
+                 (<<Value:32/little-float, Rest/binary>>, Z1, Z2,
+                  'InParams') ->
+                      '<call-read-field>'(Rest, Z1, Z2, 'OutParams')
+              end,
+              Replacements);
+        double ->
+            gpb_codegen:format_fn(
+              mk_fn(d_field_, MsgName, FName),
+              fun(<<0:48,240,127, Rest/binary>>, Z1, Z2, 'InParams') ->
+                      '<call-read-field>'(Rest, Z1, Z2, 'InfinityOutParams');
+                 (<<0:48,240,255, Rest/binary>>, Z1, Z2, 'InParams') ->
+                      '<call-read-field>'(Rest, Z1, Z2, '-InfinityOutParams');
+                 (<<_:48,15:4,_:4,_:1,127:7, Rest/binary>>, Z1, Z2,
+                  'InParams') ->
+                      '<call-read-field>'(Rest, Z1, Z2, 'NanOutParams');
+                 (<<Value:64/little-float, Rest/binary>>, Z1, Z2,
+                  'InParams') ->
+                      '<call-read-field>'(Rest, Z1, Z2, 'OutParams')
+              end,
+              Replacements)
+    end.
 
 assign_to_var(Var, Expr) ->
     ?expr('<Var>' = '<Expr>',
