@@ -672,7 +672,6 @@ translation_of_Any_as_a_map_value_test() ->
            "  map<string,google.protobuf.Any> f1=1;",
            "}"],
           [use_packages,
-           %% The translations assume value is an atom.
            {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
                            {decode,{?MODULE,any_d_atom,['$1']}},
                            {merge,{?MODULE,any_m_atom,['$1','$2']}}, % unused
@@ -689,6 +688,59 @@ translation_of_Any_as_a_map_value_test() ->
 
     ok = M:verify_msg(R),
     ?verify_gpb_err(M:verify_msg({m, [{"a","not an atom"}]})),
+    unload_code(M).
+
+merge_callback_for_Any_is_optional_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  required google.protobuf.Any f1=1;",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    %% Expected behaviour in case of a "default" merge op is overwrite
+    {m,a} = M:decode_msg(<<10,15,?x_com_atom_1("a")>>, m),
+    {m,b} = M:decode_msg(<<10,15,?x_com_atom_1("a"),
+                           10,15,?x_com_atom_1("b")>>, % overwrite
+                         m),
+    unload_code(M).
+
+default_merge_callback_for_repeated_Any_test() ->
+    %% A merge callback for a google.protobuf.Any that is repeated,
+    %% is not needed
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  repeated google.protobuf.Any f1=1 [packed=false];",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    {m,[a,b]} = M:decode_msg(<<10,15,?x_com_atom_1("a"),
+                               10,15,?x_com_atom_1("b")>>,
+                             m),
+    {m,[a,b]} = M:merge_msgs({m,[a]}, {m,[b]}),
+    unload_code(M).
+
+verify_callback_for_Any_is_optional_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  required google.protobuf.Any f1=1;",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {merge,{?MODULE,any_m_atom,['$1','$2']}}]}]),
+    %% Expected behaviour in case of a "default" verify op to accept anything
+    ok = M:verify_msg({m,a}),
+    ok = M:verify_msg({m,"not an atom"}),
     unload_code(M).
 
 %% Translators/callbacks:

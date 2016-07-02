@@ -307,7 +307,12 @@ file(File) ->
 %% works correspondingly.
 %%
 %% The `any_translate' option can be used to provide packer and
-%% unpacker functions for `google.protobuf.Any' messages.
+%% unpacker functions for `google.protobuf.Any' messages.  The merge
+%% translator is optional, and is called either via the `merge_msgs'
+%% function in the generated code, or when the decoder sees another
+%% `Any' message. The default merge operation is to let the second
+%% element overwrite previous elements. The verify translator is
+%% optional too, since verification can be disabled.
 %% The translation calls are specified as `{Mod,Fn,ArgTemplate}' where
 %% `Mod',`Fn' is a module and function to call, `ArgTemplate' is a list
 %% of terms, containing markers, such as `$1', `$2' and so on, for where
@@ -710,7 +715,7 @@ c() ->
 %%   <dt>`-any_translate MsFs'</dt>
 %%   <dd>Call functions in `MsFs' to pack, unpack, merge and verify
 %%       `google.protobuf.Any' messages. The `MsFs' is a string on the
-%%       following format: `e=Mod:Fn,d=Mod:Fn,m=Mod:Fn,v=Mod:Fn'.
+%%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]'.
 %%       The specified modules and functinos are called and used as follows:
 %%       <dl>
 %%         <dt>e=Mod:Fn</dt>
@@ -943,7 +948,7 @@ opt_specs() ->
       "       Default is to not prepend package names for backwards\n"
       "       compatibility, but it is needed for some proto files.\n"},
      {"any_translate", fun opt_any_translate/2, any_translate,
-      " e=Mod:Fn,d=Mod:Fn,m=Mod:Fn,v=Mod:Fn\n"
+      " e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
       "       For a google.protobuf.Any message, call Mod:Fn to:\n"
       "       - encode (calls Mod:Fn(Term) -> AnyMessage to pack)\n"
       "       - decode (calls Mod:Fn(AnyMessage) -> Term to unpack)\n"
@@ -1578,23 +1583,41 @@ count_map_fields(MsgDef) ->
                        MsgDef).
 
 compute_translations(Defs, Opts) ->
-    lists:foldl(
-      fun({Name, Dict}, D) ->
-              %% For now it is an (internal) error if translations overlap,
-              %% (don't expect that to happen with current translations)
-              %% but in the future (eg with user-specified translations)
-              %% they might stack instead: ie Ts1 ++ Ts2 instead of error.
-              dict:merge(fun(Key, Ts1, Ts2) ->
-                                 error({error,{duplicate_translation,
-                                               {when_adding_transls_for,Name},
-                                               {key,Key},
-                                               {translations,Ts1,Ts2}}})
-                         end,
-                         Dict, D)
-      end,
-      dict:new(),
-      [{map_translations, compute_map_translations(Defs, Opts)},
-       {any_translations, compute_any_translations(Defs, Opts)}]).
+    remove_empty_translations(
+      remove_merge_translations_for_repeated_elements(
+        lists:foldl(
+          fun({Name, Dict}, D) ->
+                  %% For now it is an (internal) error if translations overlap,
+                  %% (don't expect that to happen with current translations)
+                  %% but in the future (eg with user-specified translations)
+                  %% they might stack instead: ie Ts1 ++ Ts2 instead of error.
+                  dict:merge(
+                    fun(Key, Ts1, Ts2) ->
+                            error({error,{duplicate_translation,
+                                          {when_adding_transls_for,Name},
+                                          {key,Key},
+                                          {translations,Ts1,Ts2}}})
+                    end,
+                    Dict, D)
+          end,
+          dict:new(),
+          [{map_translations, compute_map_translations(Defs, Opts)},
+           {any_translations, compute_any_translations(Defs, Opts)}]))).
+
+remove_merge_translations_for_repeated_elements(D) ->
+    dict:map(fun(Key, Ops) ->
+                     case is_repeated_element_path(Key) of
+                         true -> lists:keydelete(merge, 1, Ops);
+                         false -> Ops
+                     end
+             end,
+             D).
+
+is_repeated_element_path([_, _, []]) -> true;
+is_repeated_element_path(_) -> false.
+
+remove_empty_translations(D) ->
+    dict:filter(fun(_Key, Ops) -> Ops /= [] end, D).
 
 compute_map_translations(Defs, Opts) ->
     MapInfos =
@@ -1667,23 +1690,33 @@ compute_any_translations_2(Defs, AnyTranslations) ->
           Defs),
     Encode = {encode, fetch_any_translation(encode, AnyTranslations)},
     Decode = {decode, fetch_any_translation(decode, AnyTranslations)},
-    Merge  = {merge,  fetch_any_translation(merge,  AnyTranslations)},
-    Verify = {verify, fetch_any_translation(verify, AnyTranslations)},
+    Merge  = {merge,  fetch_any_translation(merge,  AnyTranslations,
+                                            default_any_merge_translator())},
+    Verify = {verify, fetch_any_translation(verify, AnyTranslations,
+                                            default_any_verify_translator())},
     dict:from_list(
       [{Path, ([Encode,Decode,Verify]
                ++ [Merge || not is_repeated_elem_path(Path)])}
        || Path <- P3AnyInfos]).
 
 fetch_any_translation(Op, Translations) ->
-    case proplists:get_value(Op, Translations) of
+    fetch_any_translation(Op, Translations, undefined).
+fetch_any_translation(Op, Translations, Default) ->
+    case proplists:get_value(Op, Translations, Default) of
         undefined ->
             error({error, {missing_any_translation, {op,Op}, Translations}});
         {M,F,ArgTempl} ->
-            {M,F,ArgTempl}
+            {M,F,ArgTempl};
+        {F,ArgTempl} ->
+            {F,ArgTempl}
     end.
 
 is_repeated_elem_path([_MsgName,_FName,[]]) -> true;
 is_repeated_elem_path(_) -> false.
+
+default_any_merge_translator() -> {any_m_overwrite,['$2']}.
+
+default_any_verify_translator() -> {any_v_no_check,['$1','$errorf']}.
 
 %% -- generating code ----------------------------------------------
 
@@ -4287,7 +4320,8 @@ format_field_op_translator(ElemPath, Op, CallTemplate) when Op /= verify ->
                 splice_trees('InArgs', InArgs),
                 splice_trees('TrArgs', TrArgs)])
      end];
-format_field_op_translator(ElemPath, verify=Op, {Mod, Fn, ArgTemplate}) ->
+format_field_op_translator(ElemPath, verify=Op, CallTemplate) ->
+    ArgTemplate = last_tuple_element(CallTemplate),
     FnName = mk_tr_fn_name(ElemPath, Op),
     [V,Path] = underscore_unused_args(args_by_op(Op), [1,errorf], ArgTemplate),
     ErrorF = ?expr(fun(Reason) ->
@@ -4305,15 +4339,27 @@ format_field_op_translator(ElemPath, verify=Op, {Mod, Fn, ArgTemplate}) ->
      %% Dialyzer might complain that "The created fun has no local return"
      %% which is true, but expected, so shut this warning down.
      nowarn_dialyzer_attr(FnName,2),
-     gpb_codegen:format_fn(
-       FnName,
-       fun('InArgs') ->
-               'Mod':'Fn'('TrArgs')
-       end,
-       [replace_term('Mod', Mod),
-        replace_term('Fn', Fn),
-        splice_trees('InArgs', [V,Path]),
-        splice_trees('TrArgs', TrArgs)])].
+     case CallTemplate of
+         {Fn, ArgTemplate} ->
+             gpb_codegen:format_fn(
+               FnName,
+               fun('InArgs') ->
+                       'Fn'('TrArgs')
+               end,
+               [replace_term('Fn', Fn),
+                splice_trees('InArgs', [V,Path]),
+                splice_trees('TrArgs', TrArgs)]);
+         {Mod, Fn, ArgTemplate} ->
+             gpb_codegen:format_fn(
+               FnName,
+               fun('InArgs') ->
+                       'Mod':'Fn'('TrArgs')
+               end,
+               [replace_term('Mod', Mod),
+                replace_term('Fn', Fn),
+                splice_trees('InArgs', [V,Path]),
+                splice_trees('TrArgs', TrArgs)])
+     end].
 
 last_tuple_element(Tuple) ->
     element(tuple_size(Tuple), Tuple).
@@ -4361,7 +4407,11 @@ format_aux_transl_helpers_used_also_with_nifs() ->
      inline_attr('erlang_++',2),
      "'erlang_++'(A, B) -> A ++ B.\n"].
 
-format_default_translators(#anres{map_types=MapTypes}=AnRes, Opts) ->
+format_default_translators(AnRes, Opts) ->
+    [format_default_map_translators(AnRes, Opts),
+     format_default_any_translators(AnRes, Opts)].
+
+format_default_map_translators(#anres{map_types=MapTypes}=AnRes, Opts) ->
     HaveMaps = sets:size(MapTypes) > 0,
     [%% Auxiliary helpers in case of fields of type map<_,_>
      [case get_records_or_maps_by_opts(Opts) of
@@ -4454,6 +4504,36 @@ format_default_merge_translators(#anres{map_types=MapTypes}, Opts) ->
               "\n"]
      end
      || HaveMaps].
+
+format_default_any_translators(#anres{translations=Translations}, _Opts) ->
+    Defaults = [{merge, default_any_merge_translator()},
+                {verify, default_any_verify_translator()}],
+    Needs = compute_needed_default_translations(Translations, Defaults),
+    [[[inline_attr(any_m_overwrite,1),
+       gpb_codegen:format_fn(
+         any_m_overwrite,
+         fun(Any2) -> Any2 end),
+       "\n"] || sets:is_element(merge, Needs)],
+     [[gpb_codegen:format_fn(
+         any_v_no_check,
+         fun(_,_) -> ok end),
+       "\n"] || sets:is_element(verify, Needs)]].
+
+compute_needed_default_translations(Translations, Defaults) ->
+    dict:fold(
+      fun(_ElemPath, Ops, Acc) ->
+              lists:foldl(
+                fun({Op, Call}, Acc2) ->
+                        case lists:member({Op, Call}, Defaults) of
+                            true  -> sets:add_element(Op, Acc2);
+                            false -> Acc2
+                        end
+                end,
+                Acc,
+                Ops)
+      end,
+      sets:new(),
+      Translations).
 
 nowarn_attrs(FnName,Arity) ->
     ?f("-compile({nowarn_unused_function,~p/~w}).~n", [FnName,Arity]).
