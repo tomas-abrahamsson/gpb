@@ -232,6 +232,17 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     unload_code(M1),
     unload_code(M2).
 
+code_generation_when_map_enum_size_is_unknown_at_compile_time_test() ->
+    %% calculation of whether e_varint is needed or not when only 
+    %% an enum needs it, when that enum is in a map
+    Defs = [{{msg,m1}, [#?gpb_field{name=a, type={map,bool,{enum,e1}},
+                                    fnum=1, rnum=2, occurrence=repeated,
+                                    opts=[]}]},
+            {{enum,e1}, [{x1,0},{x2,128}]}], %% encodes to different sizes
+    M = compile_defs(Defs),
+    true = is_binary(M:encode_msg({m1,[{true,x1}]})),
+    unload_code(M).
+
 %% --- introspection ---------------
 
 introspection_package_name_test() ->
