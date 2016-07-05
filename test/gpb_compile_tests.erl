@@ -1126,7 +1126,7 @@ nif_code_test_() ->
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
          {"Nif with strbin", fun nif_with_strbin/0},
-         {"Nif with strbin", fun nif_with_non_normal_floats/0}])).
+         {"Nif and +-Inf/NaN", fun nif_with_non_normal_floats/0}])).
 
 increase_timeouts({Descr, Tests}) ->
     %% Without increased timeout, the nif test frequently times
