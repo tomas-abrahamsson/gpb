@@ -2220,11 +2220,13 @@ any_packed_field_exists(#anres{num_packed_fields=_}) -> true.
 
 at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
     #anres{used_types=UsedTypes,
+           maps_as_msgs=MapsAsMsgs,
            known_msg_size=KnownSize} = AnRes,
     SubMsgNames = [MsgName || {msg,MsgName} <- sets:to_list(UsedTypes)],
-    lists:any(fun(SubMsgName) -> dict:fetch(SubMsgName, KnownSize) == undefined
-              end,
-              SubMsgNames).
+    MapMsgNames = [MsgName || {{msg,MsgName},_} <- MapsAsMsgs],
+    IsMsgSizeUnknown = fun(Nm) -> dict:fetch(Nm, KnownSize) == undefined end,
+    lists:any(IsMsgSizeUnknown, SubMsgNames) orelse
+        lists:any(IsMsgSizeUnknown, MapMsgNames).
 
 format_sint_encoder() ->
     gpb_codegen:format_fn(
