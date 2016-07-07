@@ -44,7 +44,7 @@
           d_field_pass_method,% :: dict:dict()  %% MsgName -> pass_as_record |
                               %                 %%            pass_as_params
           maps_as_msgs,       % :: list() % same format as `Defs'
-          map_translations,   % :: [translation()]
+          translations,       % :: dict:dict(), %% FieldPath -> TranslationOps
           map_types           % :: sets:set({map,_,_})
         }).
 
@@ -1167,7 +1167,7 @@ analyze_defs(Defs, Opts) ->
            d_field_pass_method = compute_decode_field_pass_methods(
                                    MapsAsMsgs ++ Defs, Opts),
            maps_as_msgs        = MapsAsMsgs,
-           map_translations    = compute_map_translations(Defs, Opts),
+           translations        = compute_map_translations(Defs, Opts),
            map_types           = MapTypes}.
 
 find_map_types(Defs) ->
@@ -4034,20 +4034,21 @@ can_do_dialyzer_attr() ->
 
 %% -- translators ------------------------------------------------------
 
-format_translators(_Defs, #anres{map_translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, Fn, ArgTemplate)
-       || {Op, {Fn, ArgTemplate}} <- OpTransls]
+format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
+    [[[format_field_op_translator(ElemPath, Op, CallTemplate)
+       || {Op, CallTemplate} <- OpTransls]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_translators(AnRes, Opts)].
 
-format_merge_translators(_Defs, #anres{map_translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, Fn, ArgTemplate)
-       || {Op, {Fn, ArgTemplate}} <- OpTransls,
+format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
+    [[[format_field_op_translator(ElemPath, Op, CallTemplate)
+       || {Op, CallTemplate} <- OpTransls,
           Op == merge]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_merge_translators(AnRes, Opts)].
 
-format_field_op_translator(ElemPath, Op, Fn, ArgTemplate) ->
+format_field_op_translator(ElemPath, Op, CallTemplate) ->
+    ArgTemplate = last_tuple_element(CallTemplate),
     FnName = mk_tr_fn_name(ElemPath, Op),
     InArgs = underscore_unused_args(args_by_op(Op), ArgTemplate),
     TrArgs = [case Term of
@@ -4057,14 +4058,30 @@ format_field_op_translator(ElemPath, Op, Fn, ArgTemplate) ->
               end
               || Term <- ArgTemplate],
     [inline_attr(FnName,length(InArgs)),
-     gpb_codegen:format_fn(
-       FnName,
-       fun('InArgs') ->
-               'Fn'('TrArgs')
-       end,
-       [replace_term('Fn', Fn),
-        splice_trees('InArgs', InArgs),
-        splice_trees('TrArgs', TrArgs)])].
+     case CallTemplate of
+         {Fn, ArgTemplate} ->
+             gpb_codegen:format_fn(
+               FnName,
+               fun('InArgs') ->
+                       'Fn'('TrArgs')
+               end,
+               [replace_term('Fn', Fn),
+                splice_trees('InArgs', InArgs),
+                splice_trees('TrArgs', TrArgs)]);
+         {Mod, Fn, ArgTemplate} ->
+             gpb_codegen:format_fn(
+               FnName,
+               fun('InArgs') ->
+                       'Mod':'Fn'('TrArgs')
+               end,
+               [replace_term('Mod', Mod),
+                replace_term('Fn', Fn),
+                splice_trees('InArgs', InArgs),
+                splice_trees('TrArgs', TrArgs)])
+     end].
+
+last_tuple_element(Tuple) ->
+    element(tuple_size(Tuple), Tuple).
 
 underscore_unused_args(Args, Templ) ->
     [case is_arg_used(I, Templ) of
@@ -6607,7 +6624,7 @@ is_major_version_at_least(VsnMin) when VsnMin >= 17 ->
 
 find_translation(ElemPath, Op, AnRes) ->
     find_translation(ElemPath, Op, AnRes, undefined).
-find_translation(ElemPath, Op, #anres{map_translations=Ts}, Default) ->
+find_translation(ElemPath, Op, #anres{translations=Ts}, Default) ->
     case dict:find(ElemPath, Ts) of
         {ok, OpTransls} ->
             case lists:keyfind(Op, 1, OpTransls) of
