@@ -3471,15 +3471,13 @@ format_msg_merger(MsgName, [], _AnRes, _Opts) ->
       mk_fn(merge_msg_, MsgName),
       fun(_Prev, New) -> New end);
 format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
-    MsgUndefFnClauses = compute_msg_merger_undef_clauses(MsgName, AnRes, Opts),
     {PrevMatch, NewMatch, ExtraInfo} =
         format_msg_merger_fnclause_match(MsgName, MsgDef, Opts),
     {MandatoryMergings, OptMergings} = compute_msg_field_mergers(
                                          ExtraInfo, MsgName, AnRes),
     gpb_codegen:format_fn(
       mk_fn(merge_msg_, MsgName),
-      fun('<msg-undefined-handling>', _) -> '<return-the-defined-msg>';
-         ('Prev', 'New')                 -> '<merge-it>'
+      fun('Prev', 'New')                 -> '<merge-it>'
       end,
       [replace_tree('Prev',  PrevMatch),
        replace_tree('New',   NewMatch),
@@ -3487,30 +3485,7 @@ format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
          '<merge-it>',
          do_exprs(fun render_omissible_merger/2,
                   render_field_mergers(MsgName, MandatoryMergings, Opts),
-                  OptMergings)),
-       splice_clauses('<msg-undefined-handling>', MsgUndefFnClauses)]).
-
-compute_msg_merger_undef_clauses(MsgName, AnRes, Opts) ->
-    case occurs_as_optional_submsg(MsgName, AnRes) of
-        false ->
-            %% If it cannot occur as optional sub message,
-            %% then it cannot be called with either Prev or New being
-            %% undefined. Don't layout code for it. Eg. Dialyzer will
-            %% find it and complain.
-            [];
-        true ->
-            case get_mapping_and_unset_by_opts(Opts) of
-                Y when Y == records;
-                       Y == {maps, present_undefined} ->
-                    [?fn_clause(fun(Prev, undefined) -> Prev end),
-                     ?fn_clause(fun(undefined, New)  -> New end)];
-                {maps, omitted} ->
-                    %% Similar to above: The entire map is always
-                    %% matched to a variable.
-                    %% FIXME: also if all field are non-optionals??
-                    []
-            end
-    end.
+                  OptMergings))]).
 
 format_msg_merger_fnclause_match(_MsgName, [], _Opts) ->
     {?expr(PF), ?expr(_), no_fields};
@@ -3614,7 +3589,10 @@ render_field_merger({overwrite, {PF, NF}}) ->
 render_field_merger({expr, Expr}) ->
     Expr;
 render_field_merger({merge, {{PF, NF}, Tr, MergeFn}}) ->
-    ?expr('merge'('PF', 'NF'),
+    ?expr(if 'PF' /= undefined, 'NF' /= undefined -> 'merge'('PF', 'NF');
+             'PF' == undefined -> 'NF';
+             'NF' == undefined -> 'PF'
+          end,
           [replace_tree('PF', PF),
            replace_tree('NF', NF),
            replace_term('merge', Tr(merge, MergeFn))]);
@@ -3710,15 +3688,6 @@ std_omitable_merge_transforms(PMsg, NMsg, FName, Var) ->
      replace_tree('Var#{fname=>PF}', map_set(Var, [{FName, PF}])),
      replace_tree('#{fname := NF}', map_match([{FName, NF}])),
      replace_tree('#{fname := PF}', map_match([{FName, PF}]))].
-
-occurs_as_optional_submsg(MsgName, #anres{msg_occurrences=Occurrences}=AnRes) ->
-    %% Note: order of evaluation below is important (the exprs of `andalso'):
-    %% Messages are present in Occurrences only if they are sub-messages
-    can_occur_as_sub_msg(MsgName, AnRes) andalso
-        case dict:find(MsgName, Occurrences) of
-            error       -> false; % likely only referenced from a oneof
-            {ok, MOccs} -> lists:member(optional, MOccs)
-        end.
 
 format_field_skippers(MsgName, AnRes) ->
     SkipVarintFnName = mk_fn(skip_varint_, MsgName),
@@ -7050,9 +7019,6 @@ replace_tree(Marker, NewTree) when is_atom(Marker) ->
 
 splice_trees(Marker, Trees) when is_atom(Marker) ->
     {splice_trees, Marker, Trees}.
-
-splice_clauses(Marker, Clauses) when is_atom(Marker) ->
-    {splice_clauses, Marker, Clauses}.
 
 repeat_clauses(Marker, RepetitionReplacements) ->
     {repeat_clauses, Marker, RepetitionReplacements}.
