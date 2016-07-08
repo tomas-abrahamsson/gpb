@@ -24,8 +24,11 @@ Features of gpb
    - package namespacing (optional)
    - oneof (introduced in protobuf 2.6.0)
    - map<_,_> (introduced in protobuf 3.0.0)
-   - proto3 syntax to a rudimentary level (including import of
-     well-known types)
+   - proto3 support:
+     - syntax and general semantics
+     - import of well-known types
+     - Callback functions can be specified for automatically translating
+       google.protobuf.Any messages
 
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'

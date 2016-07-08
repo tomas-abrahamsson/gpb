@@ -44,6 +44,8 @@
 %% internally used
 -export([main_in_separate_vm/1]).
 
+-export([any_e_atom/1, any_d_atom/1, any_m_atom/2, any_v_atom/2]).
+
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
 %% for gpb and for the code that gpb_compile generates.
@@ -619,6 +621,154 @@ verifies_both_strings_and_binaries_as_input_test() ->
     ?assertError(_, M:verify_msg({m1, "a", <<97,98,99,255,191>>})),
     unload_code(M).
 
+%% -- translation of google.protobuf.Any ----------
+
+-define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).
+
+'translation_of_google.protobuf.Any_test'() ->
+    %% The any.proto contains:
+    %%
+    %%     syntax = "proto3";
+    %%     ...
+    %%     message Any {
+    %%       string type_url = 1;
+    %%       bytes value = 2;
+    %%     }
+    %%
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  repeated google.protobuf.Any f1=1 [packed=false];",
+           "  repeated google.protobuf.Any f2=2 [packed=true];",
+           "  required google.protobuf.Any f3=3;",
+           "  optional google.protobuf.Any f4=4;",
+           "  oneof f5 {",
+           "    google.protobuf.Any f6=6;",
+           "  }",
+           "}"],
+          [use_packages,
+           %% The translations assume value is an atom.
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {merge,{?MODULE,any_m_atom,['$1','$2']}},
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    R = {m, [a,b,c], [d,e,f], g, h, {f6,i}},
+    <<10,15,?x_com_atom_1("a"),
+      10,15,?x_com_atom_1("b"),
+      10,15,?x_com_atom_1("c"),
+      18,48,15,?x_com_atom_1("d"),15,?x_com_atom_1("e"),15,?x_com_atom_1("f"),
+      26,15,?x_com_atom_1("g"),
+      34,15,?x_com_atom_1("h"),
+      50,15,?x_com_atom_1("i")>> = B = M:encode_msg(R),
+    R = M:decode_msg(B, m),
+
+    ok = M:verify_msg(R),
+    ?verify_gpb_err(M:verify_msg({m, ["a",b,c], [d,e,f], g, h, {f6,i}})),
+    ?verify_gpb_err(M:verify_msg({m, [a,b,c], ["d",e,f], g, h, {f6,i}})),
+    ?verify_gpb_err(M:verify_msg({m, [a,b,c], [d,e,f], "g", h, {f6,i}})),
+    ?verify_gpb_err(M:verify_msg({m, [a,b,c], [d,e,f], g, "h", {f6,i}})),
+    ?verify_gpb_err(M:verify_msg({m, [a,b,c], [d,e,f], g, h, {f6,"i"}})),
+
+    RR = {m, [a,b,c,a,b,c], [d,e,f,d,e,f], gg, hh, {f6,ii}},
+    RR = M:merge_msgs(R, R),
+    RR = M:decode_msg(<<B/binary, B/binary>>, m),
+    unload_code(M).
+
+translation_of_Any_as_a_map_value_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  map<string,google.protobuf.Any> f1=1;",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {merge,{?MODULE,any_m_atom,['$1','$2']}}, % unused
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    R = {m, MapI=[{"x",a},{"y",b}]},
+    <<10,20, % "pseudo" msg for map item
+      10,1,"x", % key=x
+      18,15,?x_com_atom_1("a"), % value=a
+      10,20,
+      10,1,"y",
+      18,15,?x_com_atom_1("b")>> = B = M:encode_msg(R),
+    {m,MapO} = M:decode_msg(B, m),
+    true = lists:sort(MapI) == lists:sort(MapO),
+
+    ok = M:verify_msg(R),
+    ?verify_gpb_err(M:verify_msg({m, [{"a","not an atom"}]})),
+    unload_code(M).
+
+merge_callback_for_Any_is_optional_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  required google.protobuf.Any f1=1;",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    %% Expected behaviour in case of a "default" merge op is overwrite
+    {m,a} = M:decode_msg(<<10,15,?x_com_atom_1("a")>>, m),
+    {m,b} = M:decode_msg(<<10,15,?x_com_atom_1("a"),
+                           10,15,?x_com_atom_1("b")>>, % overwrite
+                         m),
+    unload_code(M).
+
+default_merge_callback_for_repeated_Any_test() ->
+    %% A merge callback for a google.protobuf.Any that is repeated,
+    %% is not needed
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  repeated google.protobuf.Any f1=1 [packed=false];",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    {m,[a,b]} = M:decode_msg(<<10,15,?x_com_atom_1("a"),
+                               10,15,?x_com_atom_1("b")>>,
+                             m),
+    {m,[a,b]} = M:merge_msgs({m,[a]}, {m,[b]}),
+    unload_code(M).
+
+verify_callback_for_Any_is_optional_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  required google.protobuf.Any f1=1;",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1']}},
+                           {decode,{?MODULE,any_d_atom,['$1']}},
+                           {merge,{?MODULE,any_m_atom,['$1','$2']}}]}]),
+    %% Expected behaviour in case of a "default" verify op to accept anything
+    ok = M:verify_msg({m,a}),
+    ok = M:verify_msg({m,"not an atom"}),
+    unload_code(M).
+
+%% Translators/callbacks:
+any_e_atom(A) ->
+    {'google.protobuf.Any', "x.com/atom", list_to_binary(atom_to_list(A))}.
+
+any_d_atom({'google.protobuf.Any', "x.com/atom", B}) ->
+    list_to_atom(binary_to_list(B)).
+
+any_m_atom(A1, A2) ->
+    list_to_atom(atom_to_list(A1) ++ atom_to_list(A2)).
+
+any_v_atom(A, ErrorF) ->
+    if is_atom(A) -> ok;
+       true -> ErrorF(not_an_atom)
+    end.
+
 %% --- misc ----------
 
 only_enums_no_msgs_test() ->
@@ -1137,7 +1287,9 @@ nif_code_test_() ->
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
          {"Nif with strbin", fun nif_with_strbin/0},
-         {"Nif and +-Inf/NaN", fun nif_with_non_normal_floats/0}])).
+         {"Nif and +-Inf/NaN", fun nif_with_non_normal_floats/0},
+         {"Error if both Any translations and nif",
+          fun error_if_both_any_translations_and_nif/0}])).
 
 increase_timeouts({Descr, Tests}) ->
     %% Without increased timeout, the nif test frequently times
@@ -1442,6 +1594,33 @@ nif_with_non_normal_floats() ->
                 end)
       end).
 
+error_if_both_any_translations_and_nif() ->
+    %% This is expected to fail, already at option verification, ie
+    %% not produce any files at all, but should it accidentally
+    %% succeed (due to a bug or so), it is useful to have it included
+    %% under the ordinary nif handling umbrella.
+    with_tmpdir(
+      fun(_TmpDir) ->
+              DefsTxt = lf_lines(["message ntest3 {",
+                                  "    required string s = 1;",
+                                  "}"]),
+              Opts = [nif,
+                      {any_translate,[{encode,{m,e,['$1']}},
+                                      {decode,{m,d,['$1']}},
+                                      {merge,{m,m,['$1','$2']}},
+                                      {verify,{m,v,['$1','$errorf']}}]}],
+              {{return,{error, _}},
+               {output,Output1}} =
+                  compile_file_get_output(DefsTxt, Opts),
+              true = string:str(Output1, "nif") > 0,
+              true = string:str(Output1, "any_translate") > 0,
+
+              {{return,{error, _, []}},
+               {output,""}} =
+                  compile_file_get_output(DefsTxt, Opts ++ [return]),
+
+              ok
+      end).
 
 compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
     compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, []).
@@ -2223,10 +2402,24 @@ compile_iolist(IoList) ->
 compile_iolist(IoList, ExtraOpts) ->
     Mod = find_unused_module(),
     Contents = iolist_to_binary(IoList),
+    ModProto = f("~s.proto", [Mod]),
+    ReadFile = fun(F) -> case filename:basename(F) of
+                             ModProto -> {ok, Contents};
+                             _ -> file:read_file(F)
+                         end
+               end,
+    ReadFileInfo = fun(F) -> case filename:basename(F) of
+                                 ModProto -> {ok, #file_info{access=read}};
+                                 _ -> file:read_file_info(F)
+                             end
+                   end,
+
     {ok, Mod, Code, []} =
         gpb_compile:file(
-          f("~s.proto", [Mod]),
-          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+          ModProto,
+          [{file_op, [{read_file, ReadFile},
+                      {read_file_info, ReadFileInfo},
+                      {write_file, fun(_,_) -> ok end}]},
            {i,"."},
            binary, return_warnings | ExtraOpts]),
     load_code(Mod, Code),
