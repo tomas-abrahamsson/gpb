@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.23.0
+2016-Jul-12
+
+	* Add possibility---the any_translate option---to specify a
+	callback for translating (packing on encode and unpacking on
+	decode) google.protobuf.Any types.
+
 Version 3.22.5
 2016-Jun-30
 
