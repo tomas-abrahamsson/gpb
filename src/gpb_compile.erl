@@ -1913,6 +1913,7 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                       records -> [];
                       maps    -> [?expr(MsgName)]
                   end,
+    DoNif = proplists:get_bool(nif, Opts),
     [gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
@@ -1922,14 +1923,16 @@ format_encoders_top_function_msgs(Defs, Opts) ->
        encode_msg,
        fun(Msg, '<MsgName>', '<Opts>') ->
                '<possibly-verify-msg>',
+               'TrUserData = proplists:get_value(user_data, Opts)',
                case '<MsgOrMsgName>' of
-                   '<msg-match>' -> 'encode'(Msg)
+                   '<msg-match>' -> 'encode'(Msg, 'TrUserData')
                end
        end,
-       [replace_tree('<Opts>', case Verify of
-                                   optionally -> ?expr(Opts);
-                                   always     -> ?expr(_Opts);
-                                   never      -> ?expr(_Opts)
+       [replace_tree('<Opts>', case {DoNif, Verify} of
+                                   {true,optionally} -> ?expr(Opts);
+                                   {true,always}     -> ?expr(_Opts);
+                                   {true,never}      -> ?expr(_Opts);
+                                   {false,_}         -> ?expr(Opts)
                                end),
         splice_trees('<possibly-verify-msg>',
                      case Verify of
@@ -1943,6 +1946,11 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                          never ->
                              []
                      end),
+        splice_trees(
+          'TrUserData = proplists:get_value(user_data, Opts)',
+          if DoNif -> [];
+             true  -> [?expr(TrUserData = proplists:get_value(user_data, Opts))]
+          end),
         repeat_clauses('<msg-match>',
                        [[replace_tree('<msg-match>',
                                       case Mapping of
@@ -1955,7 +1963,10 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                                            records -> ?expr(Msg);
                                            maps    -> ?expr(MsgName)
                                        end),
-        splice_trees('<MsgName>', MsgNameVars)])].
+        splice_trees('<MsgName>', MsgNameVars),
+        splice_trees('TrUserData', if DoNif -> [];
+                                      true  -> [?expr(TrUserData)]
+                                   end)])].
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
@@ -1984,7 +1995,7 @@ format_msg_encoders(Defs, AnRes, Opts, IncludeStarter) ->
 format_msg_encoder(MsgName, [], _Defs, _AnRes, _Opts, _IncludeStarter) ->
     gpb_codegen:format_fn(
       mk_fn(e_msg_, MsgName),
-      fun(_Msg) ->
+      fun(_Msg, _TrUserData) ->
               <<>>
       end);
 format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
@@ -1992,12 +2003,14 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
     BVars = [var_b_n(I) || I <- lists:seq(1, length(FNames)-1)] ++ [last],
     MsgVar = ?expr(M),
+    TrUserDataVar = ?expr(TrUserData),
     {EncodeExprs, _} =
         lists:mapfoldl(
           fun({NewBVar, Field, FVar}, PrevBVar) when NewBVar /= last ->
                   Tr = mk_find_tr_fn(MsgName, Field, AnRes),
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
-                                              PrevBVar, Defs, Tr, AnRes, Opts,
+                                              PrevBVar, TrUserDataVar,
+                                              Defs, Tr, AnRes, Opts,
                                               p3_check_typedefaults),
                   E = ?expr('<NewB>' = '<encode-expr>',
                             [replace_tree('<NewB>', NewBVar),
@@ -2006,7 +2019,8 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
              ({last, Field, FVar}, PrevBVar) ->
                   Tr = mk_find_tr_fn(MsgName, Field, AnRes),
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
-                                              PrevBVar, Defs, Tr, AnRes, Opts,
+                                              PrevBVar, TrUserDataVar,
+                                              Defs, Tr, AnRes, Opts,
                                               p3_check_typedefaults),
                   {EncExpr, dummy}
           end,
@@ -2030,13 +2044,13 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
         end,
     [[[gpb_codegen:format_fn(
          FnName,
-         fun(Msg) ->
-                 call_self(Msg, <<>>)
+         fun(Msg, TrUserData) ->
+                 call_self(Msg, <<>>, TrUserData)
          end),
        "\n"] || IncludeStarter],
      gpb_codegen:format_fn(
        FnName,
-       fun('<msg-matching>', Bin) ->
+       fun('<msg-matching>', Bin, TrUserData) ->
                '<encode-param-exprs>'
        end,
        [replace_tree('<msg-matching>', FieldMatching),
@@ -2062,7 +2076,7 @@ zip_for_non_opt_fields([], []) ->
     [].
 
 field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
-                  FVar, PrevBVar, Defs, Tr, _AnRes, Opts,
+                  FVar, PrevBVar, TrUserDataVar, Defs, Tr, _AnRes, Opts,
                   P3TypeDefaultHandling)->
     FEncoder = mk_field_encode_fn_name(MsgName, Field),
     #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum, name=FName}=Field,
@@ -2071,6 +2085,9 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                   replace_tree('<F>', FVar),
                   replace_tree('TrF', TrFVar),
                   replace_term('Tr', Tr(encode)),
+                  replace_tree('TrUserData', TrUserDataVar),
+                  splice_trees('MaybeTrUserData',
+                               maybe_userdata_param(Field, TrUserDataVar)),
                   replace_term('<enc>', FEncoder),
                   replace_tree('<Bin>', PrevBVar),
                   splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
@@ -2083,16 +2100,18 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                        if '<F>' == undefined ->
                                '<Bin>';
                           true ->
-                               'TrF' = 'Tr'('<F>'),
-                               '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>)
+                               'TrF' = 'Tr'('<F>', 'TrUserData'),
+                               '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
+                                       'MaybeTrUserData')
                        end,
                        Transforms);
                 {maps, omitted} ->
                     ?expr(
                        case 'M' of
                            '#{fieldname := <F>}' ->
-                               'TrF' = 'Tr'('<F>'),
-                               '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>);
+                               'TrF' = 'Tr'('<F>', 'TrUserData'),
+                               '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
+                                       'MaybeTrUserData');
                            _ ->
                                '<Bin>'
                        end,
@@ -2104,9 +2123,9 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
         repeated ->
             ?expr(
                begin
-                   'TrF' = 'Tr'('<F>'),
+                   'TrF' = 'Tr'('<F>', 'TrUserData'),
                    if 'TrF' == [] -> '<Bin>';
-                      true -> '<enc>'('TrF', '<Bin>')
+                      true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
                    end
                end,
                Transforms);
@@ -2117,11 +2136,12 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                     TypeDefault = gpb:proto3_type_default(Type, Defs),
                     ?expr(
                        begin
-                           'TrF' = 'Tr'('<F>'),
+                           'TrF' = 'Tr'('<F>', 'TrUserData'),
                            if 'TrF' =:= '<TypeDefault>' ->
                                    '<Bin>';
                               true ->
-                                   '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>)
+                                   '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
+                                           'MaybeTrUserData')
                            end
                        end,
                        [replace_term('<TypeDefault>', TypeDefault)
@@ -2129,27 +2149,29 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 true when P3TypeDefaultHandling == p3_check_typedefaults,
                           Type == string ->
                     ?expr(begin
-                              'TrF' = 'Tr'('<F>'),
+                              'TrF' = 'Tr'('<F>', 'TrUserData'),
                               case iolist_size('TrF') of
                                   0 ->
                                       '<Bin>';
                                   _ ->
                                       '<enc>'('TrF',
-                                              <<'<Bin>'/binary, '<Key>'>>)
+                                              <<'<Bin>'/binary, '<Key>'>>,
+                                              'MaybeTrUserData')
                               end
                           end,
                           Transforms);
                 _not_proto3_or_no_check_for_typedefaults ->
                     ?expr(
                        begin
-                           'TrF' = 'Tr'('<F>'),
-                           '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>)
+                           'TrF' = 'Tr'('<F>', 'TrUserData'),
+                           '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
+                                   'MaybeTrUserData')
                        end,
                        Transforms)
             end
     end;
 field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
-                  FVar, PrevBVar, Defs, Tr, AnRes, Opts,
+                  FVar, PrevBVar, TrUserDataVar, Defs, Tr, AnRes, Opts,
                   _P3TypeDefaultHandling) ->
     OFVar = prefix_var("O", FVar),
     OneofClauseTransforms =
@@ -2170,7 +2192,8 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
              OField2 = OField#?gpb_field{occurrence=required},
              Tr2 = Tr({update_elem_path,Name}),
              EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
-                                         PrevBVar, Defs, Tr2, AnRes, Opts,
+                                         PrevBVar, TrUserDataVar,
+                                         Defs, Tr2, AnRes, Opts,
                                          no_typedefault_checking),
              [replace_tree('<oneof...>', MatchPattern),
               replace_tree('<expr>', EncExpr)]
@@ -2257,8 +2280,8 @@ possibly_format_mfield_encoder(MsgName,
         no ->
             gpb_codegen:format_fn(
               FnName,
-              fun(Msg, Bin) ->
-                      SubBin = '<encode-msg>'(Msg, <<>>),
+              fun(Msg, Bin, TrUserData) ->
+                      SubBin = '<encode-msg>'(Msg, <<>>, TrUserData),
                       Bin2 = e_varint(byte_size(SubBin), Bin),
                       <<Bin2/binary, SubBin/binary>>
               end,
@@ -2267,9 +2290,9 @@ possibly_format_mfield_encoder(MsgName,
             MsgSizeBytes = varint_to_binary_fields(MsgSize),
             gpb_codegen:format_fn(
               FnName,
-              fun(Msg, Bin) ->
+              fun(Msg, Bin, TrUserData) ->
                       Bin2 = <<Bin/binary, '<msg-size>'>>,
-                      '<encode-msg>'(Msg, Bin2)
+                      '<encode-msg>'(Msg, Bin2, TrUserData)
               end,
               [splice_trees('<msg-size>', MsgSizeBytes),
                replace_term('<encode-msg>', mk_fn(e_msg_, SubMsg))]);
@@ -2278,7 +2301,7 @@ possibly_format_mfield_encoder(MsgName,
             %% generated, so don't call it.
             gpb_codegen:format_fn(
               FnName,
-              fun(_Msg, Bin) -> <<Bin/binary, 0>> end)
+              fun(_Msg, Bin, _TrUserData) -> <<Bin/binary, 0>> end)
     end;
 possibly_format_mfield_encoder(MsgName,
                                #?gpb_field{type={map,KType,VType}}=FieldDef,
@@ -2307,16 +2330,19 @@ format_repeated_field_encoder2(MsgName, FDef, AnRes) ->
     Transl = find_translation(ElemPath, encode, AnRes),
     gpb_codegen:format_fn(
       FnName,
-      fun([Elem | Rest], Bin) ->
+      fun([Elem | Rest], Bin, TrUserData) ->
               Bin2 = <<Bin/binary, '<KeyBytes>'>>,
-              Bin3 = '<encode-elem>'('Tr'(Elem), Bin2),
-              call_self(Rest, Bin3);
-         ([], Bin) ->
+              Bin3 = '<encode-elem>'('Tr'(Elem, TrUserData), Bin2,
+                                     'MaybeTrUserData'),
+              call_self(Rest, Bin3, TrUserData);
+         ([], Bin, _TrUserData) ->
               Bin
       end,
       [splice_trees('<KeyBytes>', KeyBytes),
        replace_term('<encode-elem>', ElemEncoderFn),
-       replace_term('Tr', Transl)]).
+       replace_term('Tr', Transl),
+       splice_trees('MaybeTrUserData',
+                    maybe_userdata_param(FDef, ?expr(TrUserData)))]).
 
 format_packed_field_encoder2(MsgName, #?gpb_field{type=Type}=FDef, AnRes) ->
     case packed_byte_size_can_be_computed(Type) of
@@ -2343,11 +2369,11 @@ format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
     [gpb_codegen:format_fn(
        FnName,
-       fun(Elems, Bin) when Elems =/= [] ->
+       fun(Elems, Bin, _TrUserData) when Elems =/= [] ->
                Bin2 = <<Bin/binary, '<KeyBytes>'>>,
                Bin3 = e_varint(length(Elems) * '<ElemLen>', Bin2),
                '<encode-packed>'(Elems, Bin3);
-          ([], Bin) ->
+          ([], Bin, _TrUserData) ->
                Bin
        end,
        [splice_trees('<KeyBytes>', KeyBytes),
@@ -2376,36 +2402,40 @@ format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
 format_unknownsize_packed_field_encoder2(MsgName,
                                          #?gpb_field{name=FName,
                                                      fnum=FNum}=FDef,
-                                        AnRes) ->
+                                         AnRes) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     ElemEncoderFn = mk_field_encode_fn_name(
-                      MsgName, FDef#?gpb_field{occurrence=required}),
+                      MsgName,
+                      FDef#?gpb_field{occurrence=required}),
     KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = mk_fn(e_pfield_, MsgName, FName),
     ElemPath = [MsgName,FName,[]],
     Transl = find_translation(ElemPath, encode, AnRes),
     [gpb_codegen:format_fn(
        FnName,
-       fun(Elems, Bin) when Elems =/= [] ->
-               SubBin = '<encode-packed>'(Elems, <<>>),
+       fun(Elems, Bin, TrUserData) when Elems =/= [] ->
+               SubBin = '<encode-packed>'(Elems, <<>>, TrUserData),
                Bin2 = <<Bin/binary, '<KeyBytes>'>>,
                Bin3 = e_varint(byte_size(SubBin), Bin2),
                <<Bin3/binary, SubBin/binary>>;
-          ([], Bin) ->
+          ([], Bin, _TrUserData) ->
                Bin
        end,
        [splice_trees('<KeyBytes>', KeyBytes),
         replace_term('<encode-packed>', PackedFnName)]),
      gpb_codegen:format_fn(
        PackedFnName,
-       fun([Value | Rest], Bin) ->
-               Bin2 = '<encode-elem>'('Tr'(Value), Bin),
-               call_self(Rest, Bin2);
-          ([], Bin) ->
+       fun([Value | Rest], Bin, TrUserData) ->
+               Bin2 = '<encode-elem>'('Tr'(Value, TrUserData), Bin,
+                                      'MaybeTrUserData'),
+               call_self(Rest, Bin2, TrUserData);
+          ([], Bin, _TrUserData) ->
                Bin
        end,
        [replace_term('<encode-elem>', ElemEncoderFn),
-        replace_term('Tr', Transl)])].
+        replace_term('Tr', Transl),
+        splice_trees('MaybeTrUserData',
+                     maybe_userdata_param(FDef, ?expr(TrUserData)))])].
 
 format_type_encoders(AnRes) ->
     [format_varlength_field_encoders(AnRes),
@@ -2593,6 +2623,16 @@ format_msg_nif_encode_error_wrapper(MsgName) ->
               erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Msg])
       end,
       [replace_term('<msg-name>', MsgName)]).
+
+maybe_userdata_param(Field, Expr) ->
+    case is_primitive_type(Field) of
+        true -> [];
+        false -> [Expr]
+    end.
+
+is_primitive_type(#?gpb_field{type={msg,_}}) -> false;
+is_primitive_type(#?gpb_field{type={map,_,_}}) -> false;
+is_primitive_type(_) -> true.
 
 %% -- decoders -----------------------------------------------------
 
