@@ -1741,8 +1741,8 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        end,
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
        case get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-export([merge_msgs/2]).~n");
-           maps    -> ?f("-export([merge_msgs/3]).~n")
+           records -> ?f("-export([merge_msgs/2, merge_msgs/3]).~n");
+           maps    -> ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
        end,
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([verify_msg/1]).~n");
@@ -3788,14 +3788,26 @@ format_msg_merge_code_no_msgs(Opts) ->
             ["-spec merge_msgs(_, _) -> no_return().\n",
              gpb_codegen:format_fn(
                merge_msgs,
-               fun(_Prev, _New) ->
+               fun(Prev, New) ->
+                       merge_msgs(Prev, New, [])
+               end),
+             "-spec merge_msgs(_, _, _) -> no_return().\n",
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(_Prev, _New, _Opts) ->
                        erlang:error({gpb_error, no_messages})
                end)];
         maps ->
             ["-spec merge_msgs(_, _, _) -> no_return().\n",
              gpb_codegen:format_fn(
                merge_msgs,
-               fun(_Prev, _New, _MsgName) ->
+               fun(Prev, New, MsgName) ->
+                       merge_msgs(Prev, New, MsgName, [])
+               end),
+             "-spec merge_msgs(_, _, _, _) -> no_return().\n",
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(_Prev, _New, _MsgName, _Opts) ->
                        erlang:error({gpb_error, no_messages})
                end)]
     end.
@@ -3809,53 +3821,86 @@ format_msg_merge_code_msgs(Defs, AnRes, Opts) ->
 format_merge_msgs_top_level(MsgNames, Opts) ->
     case get_records_or_maps_by_opts(Opts) of
         records ->
-            gpb_codegen:format_fn(
-              merge_msgs,
-              fun(Prev, New) when element(1, Prev) =:= element(1, New) ->
-                      case Prev of
-                          '<msg-type>' -> '<merge-msg>'(Prev, New)
-                      end
-              end,
-              [repeat_clauses(
-                 '<msg-type>',
-                 [[replace_tree('<msg-type>', record_match(MsgName, [])),
-                   replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))]
-                  || MsgName <- MsgNames])]);
+            [gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New) ->
+                       merge_msgs(Prev, New, [])
+               end),
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New, Opts) when element(1, Prev) =:= element(1, New) ->
+                       TrUserData = proplists:get_value(user_data, Opts),
+                       case Prev of
+                           '<msg-type>' -> '<merge-msg>'(Prev, New, TrUserData)
+                       end
+               end,
+               [repeat_clauses(
+                  '<msg-type>',
+                  [[replace_tree('<msg-type>', record_match(MsgName, [])),
+                    replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))]
+                   || MsgName <- MsgNames])])];
         maps ->
-            gpb_codegen:format_fn(
-              merge_msgs,
-              fun(Prev, New, MsgName) ->
-                      case MsgName of
-                          '<msg-type>' -> '<merge-msg>'(Prev, New)
-                      end
-              end,
-              [repeat_clauses(
-                 '<msg-type>',
-                 [[replace_tree('<msg-type>', erl_syntax:atom(MsgName)),
-                   replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))]
-                  || MsgName <- MsgNames])])
+            [gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New, MsgName) ->
+                       merge_msgs(Prev, New, MsgName, [])
+               end),
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New, MsgName, Opts) ->
+                       TrUserData = proplists:get_value(user_data, Opts),
+                       case MsgName of
+                           '<msg-type>' -> '<merge-msg>'(Prev, New, TrUserData)
+                       end
+               end,
+               [repeat_clauses(
+                  '<msg-type>',
+                  [[replace_tree('<msg-type>', erl_syntax:atom(MsgName)),
+                    replace_term('<merge-msg>', mk_fn(merge_msg_, MsgName))]
+                   || MsgName <- MsgNames])])]
     end.
 
 format_msg_merger(MsgName, [], _AnRes, _Opts) ->
     gpb_codegen:format_fn(
       mk_fn(merge_msg_, MsgName),
-      fun(_Prev, New) -> New end);
+      fun(_Prev, New, _TrUserData) -> New end);
 format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
+    TrUserDataVar = ?expr(TrUserData),
     {PrevMatch, NewMatch, ExtraInfo} =
         format_msg_merger_fnclause_match(MsgName, MsgDef, Opts),
     {MandatoryMergings, OptMergings} = compute_msg_field_mergers(
                                          ExtraInfo, MsgName, AnRes),
     gpb_codegen:format_fn(
       mk_fn(merge_msg_, MsgName),
-      fun('Prev', 'New')                 -> '<merge-it>'
+      fun('Prev', 'New', 'MaybeTrUserData') ->
+              '<merge-it>'
       end,
       [replace_tree('Prev',  PrevMatch),
        replace_tree('New',   NewMatch),
        splice_trees(
          '<merge-it>',
-         do_exprs(fun render_omissible_merger/2,
-                  render_field_mergers(MsgName, MandatoryMergings, Opts),
-                  OptMergings))]).
+         do_exprs(fun(Elem, Var) ->
+                          render_omissible_merger(Elem, Var, TrUserDataVar)
+                  end,
+                  render_field_mergers(MsgName, MandatoryMergings,
+                                       TrUserDataVar, Opts),
+                  OptMergings)),
+       replace_tree('TrUserData', TrUserDataVar), % needed by some field mergers
+       replace_tree('MaybeTrUserData',
+                    case any_field_is_sub_msg(MsgDef)
+                        orelse any_field_is_repeated(MsgDef)
+                        orelse exists_tr_for_msg(MsgName, merge, AnRes) of
+                        true  -> TrUserDataVar;
+                        false -> ?expr(_)
+                    end)]).
+
+any_field_is_sub_msg(Fields) ->
+    lists:any(fun(#?gpb_field{type={msg,_}}) -> true;
+                 (#?gpb_field{type={map,_,_}}) -> true;
+                 (#gpb_oneof{fields=Fs}) -> any_field_is_sub_msg(Fs);
+                 (_) -> false
+              end,
+              Fields).
 
 format_msg_merger_fnclause_match(_MsgName, [], _Opts) ->
     {?expr(PF), ?expr(_), no_fields};
@@ -3911,7 +3956,7 @@ format_field_merge_expr(#?gpb_field{name=FName}=Field,
         seqadd ->
             ElemPath = [MsgName, FName],
             Append = find_translation(ElemPath, merge, AnRes, 'erlang_++'),
-            {expr, ?expr('PF++NF'('PF', 'NF'),
+            {expr, ?expr('PF++NF'('PF', 'NF', 'TrUserData'),
                          Transforms ++ [replace_term('PF++NF',Append)])};
         msgmerge ->
             Tr = mk_find_tr_fn_elem_or_default(MsgName, Field, false, AnRes),
@@ -3945,34 +3990,38 @@ reshape_cases_for_maps_find(Merges, PMsg, NMsg) ->
              end}
      || {FName, Merge} <- Merges].
 
-render_field_mergers(MsgName, Mergings, Opts) ->
-    Fields = [{FName, render_field_merger(Merge)}
+render_field_mergers(MsgName, Mergings, TrUserDataVar, Opts) ->
+    Fields = [{FName, render_field_merger(Merge, TrUserDataVar)}
               || {FName, Merge} <- Mergings],
     mapping_create(MsgName, Fields, Opts).
 
-render_field_merger({overwrite, {PF, NF}}) ->
+render_field_merger({overwrite, {PF, NF}}, _TrUserDataVar) ->
     ?expr(if 'NF' =:= undefined -> 'PF';
              true               -> 'NF'
           end,
           [replace_tree('PF', PF),
            replace_tree('NF', NF)]);
-render_field_merger({expr, Expr}) ->
+render_field_merger({expr, Expr}, _TrUserDataVar) ->
     Expr;
-render_field_merger({merge, {{PF, NF}, Tr, MergeFn}}) ->
-    ?expr(if 'PF' /= undefined, 'NF' /= undefined -> 'merge'('PF', 'NF');
+render_field_merger({merge, {{PF, NF}, Tr, MergeFn}}, TrUserDataVar) ->
+    ?expr(if 'PF' /= undefined, 'NF' /= undefined -> 'merge'('PF', 'NF',
+                                                             'TrUserData');
              'PF' == undefined -> 'NF';
              'NF' == undefined -> 'PF'
           end,
           [replace_tree('PF', PF),
            replace_tree('NF', NF),
-           replace_term('merge', Tr(merge, MergeFn))]);
-render_field_merger({oneof, {{PF, NF}, OFMerges}}) ->
+           replace_term('merge', Tr(merge, MergeFn)),
+           replace_tree('TrUserData', TrUserDataVar)]);
+render_field_merger({oneof, {{PF, NF}, OFMerges}}, TrUserDataVar) ->
     Transforms = [replace_tree('PF', PF),
                   replace_tree('NF', NF),
                   replace_tree('OPF', prefix_var("O", PF)),
-                  replace_tree('ONF', prefix_var("O", NF))],
+                  replace_tree('ONF', prefix_var("O", NF)),
+                  replace_tree('TrUserData', TrUserDataVar)],
     ?expr(case {'PF', 'NF'} of
-              '{{tag,OPF},{tag,ONF}}' -> {'tag', 'merge'('OPF','ONF')};
+              '{{tag,OPF},{tag,ONF}}' -> {'tag', 'merge'('OPF','ONF',
+                                                         'TrUserData')};
               {_, undefined}          -> 'PF';
               _                       -> 'NF'
           end,
@@ -3985,16 +4034,18 @@ render_field_merger({oneof, {{PF, NF}, OFMerges}}) ->
               || {OFName, Tr, OFMergeFn} <- OFMerges])
            | Transforms]).
 
-render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var) ->
+render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var,
+                        TrUserDataVar) ->
     ?expr(case {'PMsg', 'NMsg'} of
               {_, '#{fname := NF}'} -> 'Var#{fname=>NF}';
               {'#{fname := PF}', _} -> 'Var#{fname=>PF}';
               _                     -> 'Var'
           end,
-          std_omitable_merge_transforms(PMsg, NMsg, FName, Var));
-render_omissible_merger({FName, {merge, {{PMsg, NMsg}, Tr, MergeFn}}}, Var) ->
-    Trs = std_omitable_merge_transforms(PMsg, NMsg, FName, Var),
-    MergeCallTmpl = ?expr('merge'('PF','NF'), Trs),
+          std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar));
+render_omissible_merger({FName, {merge, {{PMsg, NMsg}, Tr, MergeFn}}}, Var,
+                        TrUserDataVar) ->
+    Trs = std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar),
+    MergeCallTmpl = ?expr('merge'('PF','NF', 'TrUserData'), Trs),
     ?expr(case {'PMsg', 'NMsg'} of
               {'#{fname := PF}', '#{fname := NF}'} ->
                   'Var#{fname=>merge(PF,NF)}';
@@ -4009,7 +4060,8 @@ render_omissible_merger({FName, {merge, {{PMsg, NMsg}, Tr, MergeFn}}}, Var) ->
                         map_set(Var, [{FName,MergeCallTmpl}]))]
           ++ Trs
           ++ [replace_term('merge', Tr(merge, MergeFn))]);
-render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
+render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var,
+                       TrUserDataVar) ->
     OPF = var("OPF~s", [FName]),
     ONF = var("ONF~s", [FName]),
     OneofTransforms = [replace_tree('OPF', OPF),
@@ -4032,7 +4084,8 @@ render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
                       ++ OneofTransforms,
                   MmO = map_match([{FName, ?expr({'tag', 'OPF'}, Trs2)}]),
                   MmN = map_match([{FName, ?expr({'tag', 'ONF'}, Trs2)}]),
-                  MergeCall = ?expr({'tag','merge'('OPF','ONF')}, Trs2),
+                  MergeCall = ?expr({'tag','merge'('OPF','ONF', 'TrUserData')},
+                                    Trs2),
                   [replace_tree(
                      '{#{fname := {tag,OPF}}, #{fname := {tag,ONF}}}',
                      ?expr({'#{fname := {tag,OPF}}', '#{fname := {tag,ONF}}'},
@@ -4043,9 +4096,10 @@ render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var) ->
                    | Trs2]
               end
               || {OFName, Tr, OFMergeFn} <- OFMerges])
-           | std_omitable_merge_transforms(PMsg, NMsg, FName, Var)]).
+           | std_omitable_merge_transforms(PMsg, NMsg, FName, Var,
+                                           TrUserDataVar)]).
 
-std_omitable_merge_transforms(PMsg, NMsg, FName, Var) ->
+std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar) ->
     PF = var("PF~s", [FName]),
     NF = var("NF~s", [FName]),
     [replace_term('fname', FName),
@@ -4057,7 +4111,8 @@ std_omitable_merge_transforms(PMsg, NMsg, FName, Var) ->
      replace_tree('Var#{fname=>NF}', map_set(Var, [{FName, NF}])),
      replace_tree('Var#{fname=>PF}', map_set(Var, [{FName, PF}])),
      replace_tree('#{fname := NF}', map_match([{FName, NF}])),
-     replace_tree('#{fname := PF}', map_match([{FName, PF}]))].
+     replace_tree('#{fname := PF}', map_match([{FName, PF}])),
+     replace_tree('TrUserData', TrUserDataVar)].
 
 format_field_skippers(MsgName, AnRes) ->
     SkipVarintFnName = mk_fn(skip_varint_, MsgName),
