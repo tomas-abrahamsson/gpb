@@ -88,10 +88,10 @@ yes_no () {
     valid_answer=false
     while [ $valid_answer = false ]
     do
-	printf "Yes/no? [yN]"
+	printf "Proceed? [Yn]"
 	read x
 	case "$x" in
-	    y|Y|yes|Yes|YES)
+	    y|Y|yes|Yes|YES|"")
 		valid_answer=true
 		"$@"
 		;;
