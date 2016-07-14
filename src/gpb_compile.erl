@@ -1714,9 +1714,10 @@ fetch_any_translation(Op, Translations, Default) ->
 is_repeated_elem_path([_MsgName,_FName,[]]) -> true;
 is_repeated_elem_path(_) -> false.
 
-default_any_merge_translator() -> {any_m_overwrite,['$2']}.
+default_any_merge_translator() -> {any_m_overwrite,['$2','$user_data']}.
 
-default_any_verify_translator() -> {any_v_no_check,['$1','$errorf']}.
+default_any_verify_translator() -> {any_v_no_check,['$1','$errorf',
+                                                    '$user_data']}.
 
 %% -- generating code ----------------------------------------------
 
@@ -1745,8 +1746,8 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
            maps    -> ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
        end,
        case get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-export([verify_msg/1]).~n");
-           maps    -> ?f("-export([verify_msg/2]).~n")
+           records -> ?f("-export([verify_msg/1, verify_msg/2]).~n");
+           maps    -> ?f("-export([verify_msg/2, verify_msg/3]).~n")
        end,
        ?f("-export([get_msg_defs/0]).~n"),
        ?f("-export([get_msg_names/0]).~n"),
@@ -4172,24 +4173,53 @@ format_msg_nif_decode_error_wrapper(MsgName) ->
 %% -- verifiers -----------------------------------------------------
 
 format_verifiers_top_function(Defs, Opts) ->
+    case {contains_messages(Defs), get_records_or_maps_by_opts(Opts)} of
+        {false, records} -> format_verifiers_top_no_msgs_r();
+        {false, maps}    -> format_verifiers_top_no_msgs_m();
+        {true,  _}       -> format_verifiers_top_with_msgs(Defs, Opts)
+    end.
+
+format_verifiers_top_no_msgs_r() ->
+    [?f("-spec verify_msg(_) -> no_return().~n", []),
+     gpb_codegen:format_fn(
+       verify_msg,
+       fun(Msg) -> call_self(Msg, []) end),
+     ?f("-spec verify_msg(_,_) -> no_return().~n", []),
+     gpb_codegen:format_fn(
+       verify_msg,
+       fun(Msg,_Opts) -> mk_type_error(not_a_known_message, Msg, []) end),
+     "\n"].
+
+format_verifiers_top_no_msgs_m() ->
+    [?f("-spec verify_msg(_,_) -> no_return().~n", []),
+     gpb_codegen:format_fn(
+       verify_msg,
+       fun(Msg, MsgName) -> call_self(Msg, MsgName, []) end),
+     ?f("-spec verify_msg(_,_,_) -> no_return().~n", []),
+     gpb_codegen:format_fn(
+       verify_msg,
+       fun(Msg, _MsgName, _Opts) ->
+               mk_type_error(not_a_known_message, Msg, [])
+       end),
+     "\n"].
+
+format_verifiers_top_with_msgs(Defs, Opts) ->
     Mapping = get_records_or_maps_by_opts(Opts),
     MsgNameVars = case Mapping of
                       records -> [];
                       maps    -> [?expr(MsgName)]
                   end,
-    SpecExtraArgs = case Mapping of
-                        records -> "";
-                        maps    -> ",_"
-                    end,
-    [case contains_messages(Defs) of
-         true  -> "";
-         false -> ?f("-spec verify_msg(_~s) -> no_return().~n", [SpecExtraArgs])
-     end,
+    [gpb_codegen:format_fn(
+       verify_msg,
+       fun(Msg, '<MsgName>') -> call_self(Msg, '<MsgName>', []) end,
+       [splice_trees('<MsgName>', MsgNameVars)]),
      gpb_codegen:format_fn(
        verify_msg,
-       fun(Msg, '<MsgName>') ->
+       fun(Msg, '<MsgName>', Opts) ->
+               TrUserData = proplists:get_value(user_data, Opts),
                case '<MsgOrMsgName>' of
-                   '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>']);
+                   '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>'],
+                                                   TrUserData);
                    _ -> mk_type_error(not_a_known_message, Msg, [])
                end
        end,
@@ -4247,25 +4277,33 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                           maps    -> true
                       end,
     FnName = mk_fn(v_msg_, MsgName),
-    [nowarn_dialyzer_attr(FnName,2),
+    TrUserDataVar = ?expr(TrUserData),
+    [nowarn_dialyzer_attr(FnName,3),
      gpb_codegen:format_fn(
        FnName,
-       fun('<msg-match>', '<Path>') ->
+       fun('<msg-match>', '<Path>', 'MaybeTrUserData') ->
                '<verify-fields>',
                ok;
-          ('<M>', Path) when is_map('<M>') ->
+          ('<M>', Path, _TrUserData) when is_map('<M>') ->
                mk_type_error(
                  {missing_fields, 'NonOptKeys'--maps:keys('<M>'), '<MsgName>'},
                  '<M>', Path);
-          ('<X>', Path) ->
+          ('<X>', Path, _TrUserData) ->
                mk_type_error({expected_msg,'<MsgName>'}, X, Path)
        end,
        [replace_tree('<msg-match>', FieldMatching),
         replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
                                   MsgDef /= [] -> ?expr(Path)
                                end),
+        replace_tree('MaybeTrUserData',
+                     case any_field_is_sub_msg(MsgDef)
+                         orelse exists_tr_for_msg(MsgName, verify, AnRes) of
+                         true  -> TrUserDataVar;
+                         false -> ?expr(_)
+                     end),
         splice_trees('<verify-fields>',
                      field_verifiers(MsgName, MsgDef, FVars, MsgVar,
+                                     TrUserDataVar,
                                      AnRes, Opts)),
         repeat_clauses('<X>', case NeedsMatchOther of
                                   true  -> [[replace_tree('<X>', ?expr(X))]];
@@ -4281,13 +4319,13 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                        end),
         replace_term('<MsgName>', MsgName)])].
 
-field_verifiers(MsgName, Fields, FVars, MsgVar, AnRes, Opts) ->
-    [field_verifier(MsgName, Field, FVar, MsgVar, AnRes, Opts)
+field_verifiers(MsgName, Fields, FVars, MsgVar, TrUserDataVar, AnRes, Opts) ->
+    [field_verifier(MsgName, Field, FVar, MsgVar, TrUserDataVar, AnRes, Opts)
      || {Field, FVar} <- lists:zip(Fields, FVars)].
 
 field_verifier(MsgName,
                #?gpb_field{name=FName, type=Type, occurrence=Occurrence}=Field,
-               FVar, MsgVar, AnRes, Opts) ->
+               FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
     FVerifierFn = case Type of
                       {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
                       {enum,EnumName} -> mk_fn(v_enum_, EnumName);
@@ -4299,7 +4337,10 @@ field_verifier(MsgName,
     Replacements = [replace_term('<verify-fn>', FVerifierFn2),
                     replace_tree('<F>', FVar),
                     replace_term('<FName>', FName),
-                    replace_term('<Type>', Type)],
+                    replace_term('<Type>', Type),
+                    replace_tree('TrUserData', TrUserDataVar),
+                    splice_trees('MaybeTrUserData',
+                                 maybe_userdata_param(Field, TrUserDataVar))],
     IsMapField = case Type of
                      {map,_,_} -> true;
                      _ -> false
@@ -4309,7 +4350,7 @@ field_verifier(MsgName,
             %% FIXME: check especially for `undefined'
             %% and if found, error out with required_field_not_set
             %% specifying expected type
-            ?expr('<verify-fn>'('<F>', ['<FName>' | Path]),
+            ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'MaybeTrUserData'),
                   Replacements);
         repeated when not IsMapField ->
             ?expr(if is_list('<F>') ->
@@ -4317,7 +4358,8 @@ field_verifier(MsgName,
                           %% "Expression produces a value of type
                           %% ['ok'], but this value is unmatched"
                           %% with the -Wunmatched_returns flag.
-                          _ = ['<verify-fn>'(Elem, ['<FName>' | Path])
+                          _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
+                                             'MaybeTrUserData')
                                || Elem <- '<F>'],
                           ok;
                      true ->
@@ -4326,20 +4368,22 @@ field_verifier(MsgName,
                   end,
                   Replacements);
         repeated when IsMapField ->
-            ?expr('<verify-fn>'('<F>', ['<FName>' | Path]),
+            ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'TrUserData'),
                   Replacements);
         optional ->
             case get_mapping_and_unset_by_opts(Opts) of
                 X when X == records;
                        X == {maps, present_undefined} ->
                     ?expr(if '<F>' == undefined -> ok;
-                             true -> '<verify-fn>'('<F>', ['<FName>' | Path])
+                             true -> '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                  'MaybeTrUserData')
                           end,
                           Replacements);
                 {maps, omitted} ->
                     ?expr(case 'M' of
                               '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path]);
+                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                'MaybeTrUserData');
                               _ ->
                                   ok
                           end,
@@ -4349,7 +4393,7 @@ field_verifier(MsgName,
             end
     end;
 field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
-               FVar, MsgVar, AnRes, Opts) ->
+               FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
     IsOneof = {true, FName},
     case get_mapping_and_unset_by_opts(Opts) of
         X when X == records;
@@ -4359,7 +4403,8 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                    undefined ->
                        ok;
                    '<oneof-pattern>' ->
-                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path]);
+                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
+                                     'MaybeTrUserData');
                    _ ->
                        mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
                end,
@@ -4383,14 +4428,17 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                                      ?expr({'<OFName>','<OFVar>'})),
                         replace_term('<verify-fn>', FVerifierFn2),
                         replace_tree('<OFVar>', OFVar),
-                        replace_term('<OFName>', OFName)]
+                        replace_term('<OFName>', OFName),
+                        splice_trees('MaybeTrUserData',
+                                     maybe_userdata_param(F, TrUserDataVar))]
                    end
                    || #?gpb_field{name=OFName, type=Type}=F <- OFields])]);
         {maps, omitted} ->
             ?expr(
                case 'M' of
                    '<oneof-pattern>' ->
-                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path]);
+                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
+                                     'MaybeTrUserData');
                    '#{<FName> := <F>}' ->
                        mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path]);
                    _ ->
@@ -4418,7 +4466,9 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                        OFPat = ?expr({'<OFName>','<OFVar>'}, Trs1),
                        [replace_tree('<oneof-pattern>',
                                      map_match([{FName, OFPat}])),
-                        replace_term('<verify-fn>', FVerifierFn2)
+                        replace_term('<verify-fn>', FVerifierFn2),
+                        splice_trees('MaybeTrUserData',
+                                     maybe_userdata_param(F, TrUserDataVar))
                         | Trs1]
                    end
                    || #?gpb_field{name=OFName, type=Type}=F <- OFields])])
@@ -4564,41 +4614,59 @@ format_map_verifier(KeyType, ValueType, RecordsOrMaps, AnRes) ->
     ValueVerifierFn2 = find_translation(ElemPath, verify, AnRes,
                                         ValueVerifierFn1),
 
-    [nowarn_dialyzer_attr(FnName, 2),
+    TrUserDataVar = ?expr(TrUserData),
+    TrUserDataReplacements =
+        case {ValueType,{ValueVerifierFn1, ValueVerifierFn2}} of
+            {{msg,_}, _} ->
+                [replace_tree('MaybeTrUserDataArg', TrUserDataVar),
+                 replace_tree('MaybeTrUserData', TrUserDataVar)];
+            {_, {X,Y}} when X /= Y ->
+                %% Translation exists
+                [replace_tree('MaybeTrUserDataArg', TrUserDataVar),
+                 replace_tree('MaybeTrUserData', TrUserDataVar)];
+            _ ->
+                [replace_tree('MaybeTrUserDataArg', ?expr(_)),
+                 splice_trees('MaybeTrUserData', [])]
+        end,
+    [nowarn_dialyzer_attr(FnName, 3),
      case RecordsOrMaps of
          records ->
              gpb_codegen:format_fn(
                FnName,
-               fun(KVs, Path) when is_list(KVs) ->
+               fun(KVs, Path, 'MaybeTrUserDataArg') when is_list(KVs) ->
                        [case X of
                             {Key, Value} ->
                                 'VerifyKey'(Key, ['key' | Path]),
-                                'VerifyValue'(Value, ['value' | Path]);
+                                'VerifyValue'(Value, ['value' | Path],
+                                             'MaybeTrUserData');
                             _ ->
                                 mk_type_error(invalid_key_value_tuple, X, Path)
                         end
                         || X <- KVs],
                        ok;
-                  (X, Path) ->
+                  (X, Path, _TrUserData) ->
                        mk_type_error(invalid_list_of_key_value_tuples, X, Path)
                end,
                [replace_term('VerifyKey', KeyVerifierFn),
-                replace_term('VerifyValue', ValueVerifierFn2)]);
+                replace_term('VerifyValue', ValueVerifierFn2)]
+               ++ TrUserDataReplacements);
          maps ->
              gpb_codegen:format_fn(
                FnName,
-               fun(M, Path) when is_map(M) ->
+               fun(M, Path, 'MaybeTrUserDataArg') when is_map(M) ->
                        [begin
                             'VerifyKey'(Key, ['key' | Path]),
-                            'VerifyValue'(Value, ['value' | Path])
+                            'VerifyValue'(Value, ['value' | Path],
+                                         'MaybeTrUserData')
                         end
                         || {Key, Value} <- maps:to_list(M)],
                        ok;
-                  (X, Path) ->
+                  (X, Path, _TrUserData) ->
                        mk_type_error(invalid_map, X, Path)
                end,
                [replace_term('VerifyKey', KeyVerifierFn),
-                replace_term('VerifyValue', ValueVerifierFn2)])
+                replace_term('VerifyValue', ValueVerifierFn2)]
+               ++ TrUserDataReplacements)
      end].
 
 format_verifier_auxiliaries(Defs) ->
