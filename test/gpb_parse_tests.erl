@@ -844,7 +844,11 @@ verify_succeeds_for_bool_in_default_test() ->
     ok = do_parse_verify_defs(
            ["message m1 { required bool f1 = 1 [default=true]; }"]),
     ok = do_parse_verify_defs(
-           ["message m1 { required bool f1 = 1 [default=false]; }"]).
+           ["message m1 { required bool f1 = 1 [default=false]; }"]),
+    ok = do_parse_verify_defs(
+           ["message m1 { required bool f1 = 1 [default=1]; }"]),
+    ok = do_parse_verify_defs(
+           ["message m1 { required bool f1 = 1 [default=0]; }"]).
 
 verify_catches_invalid_bool_in_default_1_test() ->
     {error, [_]} = Error =
@@ -863,7 +867,14 @@ verify_catches_invalid_bool_in_default_2_test() ->
 verify_catches_invalid_bool_in_default_3_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
-          ["message m1 { required bool f1 = 1 [default=1]; }"]),
+          ["message m1 { required bool f1 = 1 [default=2]; }"]),
+    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1"]).
+
+verify_catches_invalid_bool_in_default_4_test() ->
+    {error, [_]} = Error =
+        do_parse_verify_defs(
+          ["message m1 { required bool f1 = 1 [default=-1]; }"]),
     Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1"]).
 

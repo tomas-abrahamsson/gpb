@@ -596,8 +596,10 @@ encode_value(Value, Type, MsgDefs)                                             -
         uint64 ->
             encode_varint(Value);
         bool ->
-            if Value     -> encode_varint(1);
-               not Value -> encode_varint(0)
+            if Value       -> encode_varint(1);
+               not Value   -> encode_varint(0);
+               Value =:= 1 -> encode_varint(1);
+               Value =:= 0 -> encode_varint(0)
             end;
         {enum, _EnumName}=Key ->
             {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
@@ -787,6 +789,8 @@ verify_int(V, {S,Bits}, Path) ->
 
 verify_bool(true,  _) -> ok;
 verify_bool(false, _) -> ok;
+verify_bool(1,  _) -> ok;
+verify_bool(0, _) -> ok;
 verify_bool(V, Path) ->
     mk_type_error(bad_boolean_value, V, Path).
 
