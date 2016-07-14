@@ -113,7 +113,7 @@ file(File) ->
 %%                          {merge,{ModuleName,FnName,ArgTemplate}} |
 %%                          {verify,{ModuleName,FnName,ArgTemplate}}
 %%            FnName = atom()
-%%            ArgTemplate = [term()|'$1'|'$2'|'$errorf']
+%%            ArgTemplate = [term()|'$1'|'$2'|'$errorf'|'$user_data']
 %%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
@@ -343,6 +343,11 @@ file(File) ->
 %%       additionally contain the actual value of `Term' and the path
 %%       to the field.</dd>
 %% </dl>
+%% There is an additional argument marker, `$user_data', which will be
+%% replaced by the `user_data' option to the generated `encode_msg',
+%% `decode_msg', `merge_msgs' and `verify_msg' functions. If that
+%% option is not specified, the value `undefined' is substituted
+%% for `$user_data'.
 file(File, Opts0) ->
     Opts1 = normalize_alias_opts(Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
