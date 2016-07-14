@@ -1932,7 +1932,7 @@ format_encoders_top_function_msgs(Defs, Opts) ->
        end,
        [replace_tree('<Opts>', case {DoNif, Verify} of
                                    {true,optionally} -> ?expr(Opts);
-                                   {true,always}     -> ?expr(_Opts);
+                                   {true,always}     -> ?expr(Opts);
                                    {true,never}      -> ?expr(_Opts);
                                    {false,_}         -> ?expr(Opts)
                                end),
@@ -1940,11 +1940,12 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                      case Verify of
                          optionally ->
                              [?expr(case proplists:get_bool(verify, Opts) of
-                                        true  -> verify_msg(Msg, '<MsgName>');
+                                        true  -> verify_msg(Msg, '<MsgName>',
+                                                            Opts);
                                         false -> ok
                                     end)];
                          always ->
-                             [?expr(verify_msg(Msg, '<MsgName>'))];
+                             [?expr(verify_msg(Msg, '<MsgName>', Opts))];
                          never ->
                              []
                      end),
