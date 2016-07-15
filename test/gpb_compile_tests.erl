@@ -48,6 +48,8 @@
 -export([any_e_atom/1, any_d_atom/1, any_m_atom/2, any_v_atom/2]).
 %% Translators for user-data
 -export([any_e_atom/2, any_d_atom/2, any_m_atom/3, any_v_atom/3]).
+%% Translators for user-data and op
+-export([any_e_atom/3, any_d_atom/3, any_m_atom/4, any_v_atom/4]).
 
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
@@ -759,6 +761,44 @@ userdata_to_Any_callback_test() ->
     ?recv({res,ok}),
     unload_code(M).
 
+userdata_and_op_to_Any_callback_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  required google.protobuf.Any f1=1;",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1',
+                                                        '$user_data','$op']}},
+                           {decode,{?MODULE,any_d_atom,['$1',
+                                                        '$user_data','$op']}},
+                           {merge,{?MODULE,any_m_atom,['$1','$2',
+                                                       '$user_data','$op']}},
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf',
+                                                        '$user_data','$op']}}]}
+          ]),
+    R1 = {m,a},
+    Self = self(),
+    SendToSelf = fun(Result,Op) -> Self ! {{res,Result},{op,Op}} end,
+    B1 = M:encode_msg(R1,[{user_data,SendToSelf}]),
+    ?recv({{res,{'google.protobuf.Any',"x.com/atom",<<"a">>}},{op,encode}}),
+    %% When encode is called with verify, the same option list and
+    %% hence the same user data is sent to verify too, so for that
+    %% case, expect two messages back.
+    B1 = M:encode_msg(R1,[{user_data,SendToSelf},
+                          {verify,true}]),
+    ?recv({{res,{'google.protobuf.Any',"x.com/atom",<<"a">>}},{op,encode}}),
+    ?recv({{res,ok},{op,verify}}),
+    %% now for decode etc...
+    R1 = M:decode_msg(B1, m, [{user_data,SendToSelf}]),
+    ?recv({{res,a},{op,decode}}),
+    {m,aa} = M:merge_msgs(R1, R1, [{user_data,SendToSelf}]),
+    ?recv({{res,aa},{op,merge}}),
+    ok = M:verify_msg(R1, [{user_data,SendToSelf}]),
+    ?recv({{res,ok},{op,verify}}),
+    unload_code(M).
+
 default_merge_callback_for_repeated_Any_test() ->
     %% A merge callback for a google.protobuf.Any that is repeated,
     %% is not needed
@@ -817,6 +857,16 @@ any_v_atom(A, ErrorF, Fn) -> call_tr_userdata_fn(Fn, any_v_atom(A, ErrorF)).
 
 call_tr_userdata_fn(Fn, Result) ->
     Fn(Result),
+    Result.
+
+%% Translators/callbacks for user-data and op
+any_e_atom(A, Fn, Op) -> call_tr_userdata_fn(Fn, any_e_atom(A), Op).
+any_d_atom(Any, Fn, Op) -> call_tr_userdata_fn(Fn, any_d_atom(Any), Op).
+any_m_atom(A1, A2, Fn, Op) -> call_tr_userdata_fn(Fn, any_m_atom(A1, A2), Op).
+any_v_atom(A, ErrorF, Fn, Op) -> call_tr_userdata_fn(Fn, any_v_atom(A, ErrorF),
+                                                     Op).
+call_tr_userdata_fn(Fn, Result, Op) ->
+    Fn(Result, Op),
     Result.
 
 %% --- misc ----------

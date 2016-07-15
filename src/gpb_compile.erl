@@ -113,7 +113,7 @@ file(File) ->
 %%                          {merge,{ModuleName,FnName,ArgTemplate}} |
 %%                          {verify,{ModuleName,FnName,ArgTemplate}}
 %%            FnName = atom()
-%%            ArgTemplate = [term()|'$1'|'$2'|'$errorf'|'$user_data']
+%%            ArgTemplate = [term()|'$1'|'$2'|'$errorf'|'$user_data'|'$op']
 %%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
@@ -343,11 +343,22 @@ file(File) ->
 %%       additionally contain the actual value of `Term' and the path
 %%       to the field.</dd>
 %% </dl>
-%% There is an additional argument marker, `$user_data', which will be
-%% replaced by the `user_data' option to the generated `encode_msg',
-%% `decode_msg', `merge_msgs' and `verify_msg' functions. If that
-%% option is not specified, the value `undefined' is substituted
-%% for `$user_data'.
+%% There are additional translator argument markers:
+%% <dl>
+%%   <dt>`$user_data'</dt>
+%%   <dd>This will be replaced by the `user_data' option to the
+%%     generated `encode_msg', `decode_msg', `merge_msgs' and
+%%     `verify_msg' functions. If that option is not specified, the
+%%     value `undefined' is used substituted for `$user_data'.</dd>
+%%   <dt>`$op'</dt>
+%%   <dd>This will be replaced by `encode', `decode', `merge' or
+%%   `verify', depending on from which context it is actually
+%%   called. This can be useful because if the message is to be
+%%   verified on encoding (see the `verify' option), then the same
+%%   options, and thus the same user-data, are used for both
+%%   `encode_msg' and for `verify_msg'. The `$op' marker makes it
+%%   possible to tell these two call sites apart, if needed.</dd>
+%% </dl>
 file(File, Opts0) ->
     Opts1 = normalize_alias_opts(Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
@@ -4745,10 +4756,11 @@ format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
 format_field_op_translator(ElemPath, Op, CallTemplate) ->
     ArgTemplate = last_tuple_element(CallTemplate),
     FnName = mk_tr_fn_name(ElemPath, Op),
-    {InArgs, OutArgs,Relations} =
+    {InArgs, OutArgs0, Relations0} =
         if Op /= verify ->
                 Ins = Outs = tr_in_args_by_op(Op),
-                {Ins, Outs, pass_straight_through};
+                InOutNames = [Name || {Name,_Value} <- Outs],
+                {Ins, Outs, mk_pass_straight_through_rel(InOutNames)};
            Op == verify ->
                 [{_,V},{_,Path},{_,UserData}] = Ins = tr_in_args_by_op(Op),
                 ErrorF = ?expr(fun(Reason) ->
@@ -4762,6 +4774,8 @@ format_field_op_translator(ElemPath, Op, CallTemplate) ->
                         {'$user_data',['$user_data']}],
                 {Ins, Outs, Rels}
         end,
+    OutArgs = OutArgs0 ++ [{'$op', erl_syntax:abstract(Op)}],
+    Relations = Relations0 ++ [{'$op', []}],
     {InPatterns, OutParams, _UsedInNames, _UsedOutNames} =
         process_tr_params(InArgs, Relations, OutArgs, ArgTemplate),
     [inline_attr(FnName,length(InArgs)),
@@ -4801,14 +4815,11 @@ last_tuple_element(Tuple) ->
 
 %% InArgs = [{Name, SyntaxTree}] % eg: [{'$1',?expr(ToPackForEncode)}, ...]
 %%     Name = atom()
-%% InOutArgRelations = pass_straight_through |
-%%                     [{OutParamName, [InArg1, InArg2, ...]}]
+%% InOutArgRelations = [{OutParamName, [InArg1, InArg2, ...]}]
 %%     Example if InOutArgRelations (for verify translators):
 %%          [{'$1',['$1']},
 %%           {'$errorf', ['$1','$2']},
 %%           {'$user_data', ['$3']}]
-%%     pass_straight_through means:
-%%          [{'$1',['$1']}, {'$2',['$2']}, ...]
 %% Outs = [{Name, SyntaxTree}] % eg: [{'$1',?expr(ToPackForEncode)}, ...]
 %%     Name = atom()
 %% ArgsTemplate = [term()]     % eg: ['$1', '$2']
@@ -4879,8 +4890,9 @@ abstractify_tr_param_check_for_map(X, _Outs) ->
     error({translator,cant_make_abstraxt_code_for,X}).
 -endif. % NO_HAVE_MAPS.
 
-compute_used_in_args(Used, pass_straight_through) ->
-    lists:usort(Used);
+mk_pass_straight_through_rel(Names) ->
+    [{Name,[Name]} || Name <- Names].
+
 compute_used_in_args(Used, InOutArgRelations) ->
     lists:usort(
       lists:append(
