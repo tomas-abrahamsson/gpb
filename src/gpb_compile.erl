@@ -4742,101 +4742,164 @@ format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_merge_translators(AnRes, Opts)].
 
-format_field_op_translator(ElemPath, Op, CallTemplate) when Op /= verify ->
+format_field_op_translator(ElemPath, Op, CallTemplate) ->
     ArgTemplate = last_tuple_element(CallTemplate),
     FnName = mk_tr_fn_name(ElemPath, Op),
-    ArgNames = lists:seq(1,length(args_by_op2(Op))) ++ [user_data],
-    InArgs = underscore_unused_args(args_by_op(Op), ArgNames, ArgTemplate),
-    TrArgs = [case Term of
-                  '$1'         -> lists:nth(1, InArgs);
-                  '$2'         -> lists:nth(2, InArgs);
-                  '$user_data' -> lists:last(InArgs);
-                  _            -> erl_parse:abstract(Term)
-              end
-              || Term <- ArgTemplate],
+    {InArgs, OutArgs,Relations} =
+        if Op /= verify ->
+                Ins = Outs = tr_in_args_by_op(Op),
+                {Ins, Outs, pass_straight_through};
+           Op == verify ->
+                [{_,V},{_,Path},{_,UserData}] = Ins = tr_in_args_by_op(Op),
+                ErrorF = ?expr(fun(Reason) ->
+                                       mk_type_error(Reason, 'Actual', 'Path')
+                               end,
+                               [replace_tree('Actual', V),
+                                replace_tree('Path', Path)]),
+                Outs = [{'$1',V},{'$errorf',ErrorF},{'$user_data',UserData}],
+                Rels = [{'$1',['$1']},
+                        {'$errorf',['$1','$2']}, % $errorf uses in-args $1,$2
+                        {'$user_data',['$user_data']}],
+                {Ins, Outs, Rels}
+        end,
+    {InPatterns, OutParams, _UsedInNames, _UsedOutNames} =
+        process_tr_params(InArgs, Relations, OutArgs, ArgTemplate),
     [inline_attr(FnName,length(InArgs)),
+     if Op == verify ->
+             %% Dialyzer might complain that "The created fun has no
+             %% local return" which is true, but also not surprising,
+             %% so shut this warning down.
+             nowarn_dialyzer_attr(FnName,length(InArgs));
+        true ->
+             ""
+     end,
      case CallTemplate of
          {Fn, ArgTemplate} ->
              gpb_codegen:format_fn(
                FnName,
-               fun('InArgs') ->
-                       'Fn'('TrArgs')
+               fun('$$InPatterns') ->
+                       '$$Fn'('$$OutParams')
                end,
-               [replace_term('Fn', Fn),
-                splice_trees('InArgs', InArgs),
-                splice_trees('TrArgs', TrArgs)]);
+               [replace_term('$$Fn', Fn),
+                splice_trees('$$InPatterns', InPatterns),
+                splice_trees('$$OutParams', OutParams)]);
          {Mod, Fn, ArgTemplate} ->
              gpb_codegen:format_fn(
                FnName,
-               fun('InArgs') ->
-                       'Mod':'Fn'('TrArgs')
+               fun('$$InPatterns') ->
+                       '$$Mod':'$$Fn'('$$OutParams')
                end,
-               [replace_term('Mod', Mod),
-                replace_term('Fn', Fn),
-                splice_trees('InArgs', InArgs),
-                splice_trees('TrArgs', TrArgs)])
-     end];
-format_field_op_translator(ElemPath, verify=Op, CallTemplate) ->
-    ArgTemplate = last_tuple_element(CallTemplate),
-    FnName = mk_tr_fn_name(ElemPath, Op),
-    ArgNames = [1,errorf,user_data],
-    [V,Path,TrUserDataVar] =
-        underscore_unused_args(args_by_op(Op), ArgNames, ArgTemplate),
-    ErrorF = ?expr(fun(Reason) ->
-                           mk_type_error(Reason, 'ActualValue', 'Path')
-                   end,
-                   [replace_tree('ActualValue', V),
-                    replace_tree('Path', Path)]),
-    TrArgs = [case Term of
-                  '$1'         -> V;
-                  '$errorf'    -> ErrorF;
-                  '$user_data' -> TrUserDataVar;
-                  _            -> erl_parse:abstract(Term)
-              end
-              || Term <- ArgTemplate],
-    [inline_attr(FnName,3),
-     %% Dialyzer might complain that "The created fun has no local return"
-     %% which is true, but expected, so shut this warning down.
-     nowarn_dialyzer_attr(FnName,3),
-     case CallTemplate of
-         {Fn, ArgTemplate} ->
-             gpb_codegen:format_fn(
-               FnName,
-               fun('InArgs') ->
-                       'Fn'('TrArgs')
-               end,
-               [replace_term('Fn', Fn),
-                splice_trees('InArgs', [V,Path,TrUserDataVar]),
-                splice_trees('TrArgs', TrArgs)]);
-         {Mod, Fn, ArgTemplate} ->
-             gpb_codegen:format_fn(
-               FnName,
-               fun('InArgs') ->
-                       'Mod':'Fn'('TrArgs')
-               end,
-               [replace_term('Mod', Mod),
-                replace_term('Fn', Fn),
-                splice_trees('InArgs', [V,Path,TrUserDataVar]),
-                splice_trees('TrArgs', TrArgs)])
+               [replace_term('$$Mod', Mod),
+                replace_term('$$Fn', Fn),
+                splice_trees('$$InPatterns', InPatterns),
+                splice_trees('$$OutParams', OutParams)])
      end].
+
 
 last_tuple_element(Tuple) ->
     element(tuple_size(Tuple), Tuple).
 
-underscore_unused_args(Args, Names, Templ) ->
-    [case is_arg_used(Name, Templ) of
-         true  -> Arg;
+%% InArgs = [{Name, SyntaxTree}] % eg: [{'$1',?expr(ToPackForEncode)}, ...]
+%%     Name = atom()
+%% InOutArgRelations = pass_straight_through |
+%%                     [{OutParamName, [InArg1, InArg2, ...]}]
+%%     Example if InOutArgRelations (for verify translators):
+%%          [{'$1',['$1']},
+%%           {'$errorf', ['$1','$2']},
+%%           {'$user_data', ['$3']}]
+%%     pass_straight_through means:
+%%          [{'$1',['$1']}, {'$2',['$2']}, ...]
+%% Outs = [{Name, SyntaxTree}] % eg: [{'$1',?expr(ToPackForEncode)}, ...]
+%%     Name = atom()
+%% ArgsTemplate = [term()]     % eg: ['$1', '$2']
+%%          ff                 % or  ['$user_data', ['$1', '$2', a, 4711]]
+%% -> {InParams      :: [syntax_tree()],
+%%     OutArgs       :: [syntax_tree()],
+%%     UsedInArgs    :: [atom()],
+%%     UsedOutParams :: [atom()]}
+process_tr_params(InArgs, InOutArgRelations, Outs, ArgsTemplate) ->
+    {OutArgs, UsedOutNames} =
+        lists:mapfoldl(
+          fun(ArgTempl, Used) ->
+                  {Out, MoreUsed} = abstractify_tr_param(ArgTempl, Outs),
+                  {Out, lists:usort(MoreUsed ++ Used)}
+          end,
+          [],
+          ArgsTemplate),
+    UsedInArgs = compute_used_in_args(UsedOutNames, InOutArgRelations),
+    InParams = underscore_unused_params(InArgs, UsedInArgs),
+    {InParams, OutArgs, UsedInArgs, UsedOutNames}.
+
+abstractify_tr_param([H|T], Outs) ->
+    {AbsH, UsedH} = abstractify_tr_param(H, Outs),
+    {AbsT, UsedT} = abstractify_tr_param(T, Outs),
+    {erl_syntax:cons(AbsH, AbsT), lists:usort(UsedH ++ UsedT)};
+abstractify_tr_param([], _Outs) ->
+    {erl_syntax:nil(), []};
+abstractify_tr_param(Tuple, Outs) when is_tuple(Tuple) ->
+    {AElems, AUsed} = lists:unzip([abstractify_tr_param(Elem, Outs)
+                                   || Elem <- tuple_to_list(Tuple)]),
+    {erl_syntax:tuple(AElems), lists:usort(lists:append(AUsed))};
+abstractify_tr_param(I, _Outs) when is_integer(I) ->
+    {erl_syntax:integer(I), []};
+abstractify_tr_param(F, _Outs) when is_float(F) ->
+    {erl_syntax:float(F), []};
+abstractify_tr_param(A, Outs) when is_atom(A) ->
+    case lists:keyfind(A, 1, Outs) of
+        {A,Abstr} -> {Abstr, [A]};
+        false     -> {erl_syntax:atom(A), []}
+    end;
+abstractify_tr_param(B, _Outs) when is_binary(B) ->
+    {erl_syntax:abstract(B), []};
+abstractify_tr_param(B, _Outs) when is_bitstring(B) ->
+    %% Current version of erl_syntax (Erlang-18.3) can't do bitstrings,
+    %% but erl_parse can. Maybe future erl_syntax versions will...
+    try erl_syntax:abstract(B) of
+        STree -> {STree, []}
+    catch error:{badarg,_} ->
+            erl_parse:abstract(B)
+    end;
+abstractify_tr_param(X, Outs) ->
+    abstractify_tr_param_check_for_map(X, Outs).
+
+-ifdef(NO_HAVE_MAPS).
+abstractify_tr_param_check_for_map(X, _Outs) ->
+    error({translator,cant_make_abstraxt_code_for,X}).
+-else.
+abstractify_tr_param_check_for_map(M, Outs) when is_map(M) ->
+    {MItems, MUsed} =
+        lists:unzip([begin
+                         {AK,UK} = abstractify_tr_param(K, Outs),
+                         {AV,UV} = abstractify_tr_param(V, Outs),
+                         {erl_syntax:map_field_assoc(AK, AV), UK ++ UV}
+                     end
+                     || {K,V} <- maps:to_list(M)]),
+    {erl_syntax:map_expr(MItems), lists:usort(lists:append(MUsed))};
+abstractify_tr_param_check_for_map(X, _Outs) ->
+    error({translator,cant_make_abstraxt_code_for,X}).
+-endif. % NO_HAVE_MAPS.
+
+compute_used_in_args(Used, pass_straight_through) ->
+    lists:usort(Used);
+compute_used_in_args(Used, InOutArgRelations) ->
+    lists:usort(
+      lists:append(
+        [proplists:get_value(U, InOutArgRelations)
+         || U <- Used])).
+
+underscore_unused_params(InArgs, UsedInArgs) ->
+    [case lists:member(InName, UsedInArgs) of
+         true  -> InExpr;
          false -> ?expr(_)
      end
-     || {Name, Arg} <- lists:zip(Names, Args)].
+     || {InName, InExpr} <- InArgs].
 
-is_arg_used(Name, Templ) ->
-    lists:member(dollar_name(Name), Templ).
-
-dollar_name(Name) ->
+dollar_i(Name) ->
     list_to_atom(?ff("$~w", [Name])).
 
-args_by_op(Op) -> args_by_op2(Op) ++ [?expr(TrUserData)].
+tr_in_args_by_op(Op) ->
+    [{dollar_i(I), A} || {I,A} <- index_seq(args_by_op2(Op))]
+        ++ [{'$user_data', ?expr(TrUserData)}].
 
 args_by_op2(encode)                   -> [?expr(X)];
 args_by_op2(decode)                   -> [?expr(X)];
