@@ -177,7 +177,7 @@ file(File) ->
 %% be returned from decoding as strings (list of Unicode code points),
 %% or as binaries (UTF-8 encoded). The `copy_bytes' option applies
 %% to strings as well, when the `strings_as_binaries' option is set.
-%% Upon encoding, both binaries and lists are accepted.
+%% Upon encoding, both binaries and iolists are accepted.
 %%
 %% The `defs_as_proplists' option changes the generated introspection
 %% functions `find_msg_def' and `get_msg_defs' to return the description
@@ -5351,9 +5351,9 @@ msg_to_typestr(M, Opts) ->
 %% when the strings_as_binaries option is requested the corresponding
 %% typespec should be spec'ed
 string_to_typestr(true) ->
-  "binary()";
+  "binary() | iolist()";
 string_to_typestr(false) ->
-  "string()".
+  "iolist()".
 
 enum_typestr(E, Defs) ->
     {value, {{enum,E}, Enumerations}} = lists:keysearch({enum,E}, 1, Defs),
