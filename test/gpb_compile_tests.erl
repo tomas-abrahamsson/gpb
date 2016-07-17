@@ -44,7 +44,10 @@
 %% internally used
 -export([main_in_separate_vm/1]).
 
+%% Translators for without user-data
 -export([any_e_atom/1, any_d_atom/1, any_m_atom/2, any_v_atom/2]).
+%% Translators for user-data
+-export([any_e_atom/2, any_d_atom/2, any_m_atom/3, any_v_atom/3]).
 
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
@@ -719,6 +722,43 @@ merge_callback_for_Any_is_optional_test() ->
                          m),
     unload_code(M).
 
+-define(recv(Pattern),
+        (fun() -> receive Pattern=__V -> __V
+                  after 4000 ->
+                          error({receive_timed_out,
+                                 {pattern,??Pattern},
+                                 {message_queue,
+                                  element(2,process_info(self(),messages))}})
+                  end
+         end)()).
+
+userdata_to_Any_callback_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  required google.protobuf.Any f1=1;",
+           "}"],
+          [use_packages,
+           {any_translate,[{encode,{?MODULE,any_e_atom,['$1','$user_data']}},
+                           {decode,{?MODULE,any_d_atom,['$1','$user_data']}},
+                           {merge,{?MODULE,any_m_atom,['$1','$2',
+                                                       '$user_data']}},
+                           {verify,{?MODULE,any_v_atom,['$1','$errorf',
+                                                        '$user_data']}}]}]),
+    R1 = {m,a},
+    Self = self(),
+    SendToSelf = fun(Result) -> Self ! {res,Result} end,
+    B1 = M:encode_msg(R1,[{user_data,SendToSelf}]),
+    ?recv({res,{'google.protobuf.Any',"x.com/atom",<<"a">>}}),
+    R1 = M:decode_msg(B1, m, [{user_data,SendToSelf}]),
+    ?recv({res,a}),
+    {m,aa} = M:merge_msgs(R1, R1, [{user_data,SendToSelf}]),
+    ?recv({res,aa}),
+    ok = M:verify_msg(R1, [{user_data,SendToSelf}]),
+    ?recv({res,ok}),
+    unload_code(M).
+
 default_merge_callback_for_repeated_Any_test() ->
     %% A merge callback for a google.protobuf.Any that is repeated,
     %% is not needed
@@ -768,6 +808,16 @@ any_v_atom(A, ErrorF) ->
     if is_atom(A) -> ok;
        true -> ErrorF(not_an_atom)
     end.
+
+%% Translators/callbacks for user-data
+any_e_atom(A, Fn) -> call_tr_userdata_fn(Fn, any_e_atom(A)).
+any_d_atom(Any, Fn) -> call_tr_userdata_fn(Fn, any_d_atom(Any)).
+any_m_atom(A1, A2, Fn) -> call_tr_userdata_fn(Fn, any_m_atom(A1, A2)).
+any_v_atom(A, ErrorF, Fn) -> call_tr_userdata_fn(Fn, any_v_atom(A, ErrorF)).
+
+call_tr_userdata_fn(Fn, Result) ->
+    Fn(Result),
+    Result.
 
 %% --- misc ----------
 
