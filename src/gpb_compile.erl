@@ -1651,7 +1651,7 @@ compute_map_translations(Defs, Opts) ->
                        [{encode, {mt_map_to_list_m,['$1']}},
                         {decode_init_default, {mt_empty_map_m,[]}},
                         {decode_repeated_add_elem,{mt_add_item_m,['$1','$2']}},
-                        {decode_repeated_finalize,{id,['$1']}},
+                        {decode_repeated_finalize,{id,['$1','$user_data']}},
                         {merge, {mt_merge_maps_m,['$1','$2']}}]}]
              end
          end
@@ -4440,11 +4440,13 @@ format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
 format_field_op_translator(ElemPath, Op, CallTemplate) when Op /= verify ->
     ArgTemplate = last_tuple_element(CallTemplate),
     FnName = mk_tr_fn_name(ElemPath, Op),
-    InArgs = underscore_unused_args(args_by_op(Op), ArgTemplate),
+    ArgNames = lists:seq(1,length(args_by_op2(Op))) ++ [user_data],
+    InArgs = underscore_unused_args(args_by_op(Op), ArgNames, ArgTemplate),
     TrArgs = [case Term of
-                  '$1' -> lists:nth(1, InArgs);
-                  '$2' -> lists:nth(2, InArgs);
-                  _ -> erl_parse:abstract(Term)
+                  '$1'         -> lists:nth(1, InArgs);
+                  '$2'         -> lists:nth(2, InArgs);
+                  '$user_data' -> lists:last(InArgs);
+                  _            -> erl_parse:abstract(Term)
               end
               || Term <- ArgTemplate],
     [inline_attr(FnName,length(InArgs)),
@@ -4472,22 +4474,25 @@ format_field_op_translator(ElemPath, Op, CallTemplate) when Op /= verify ->
 format_field_op_translator(ElemPath, verify=Op, CallTemplate) ->
     ArgTemplate = last_tuple_element(CallTemplate),
     FnName = mk_tr_fn_name(ElemPath, Op),
-    [V,Path] = underscore_unused_args(args_by_op(Op), [1,errorf], ArgTemplate),
+    ArgNames = [1,errorf,user_data],
+    [V,Path,TrUserDataVar] =
+        underscore_unused_args(args_by_op(Op), ArgNames, ArgTemplate),
     ErrorF = ?expr(fun(Reason) ->
                            mk_type_error(Reason, 'ActualValue', 'Path')
                    end,
                    [replace_tree('ActualValue', V),
                     replace_tree('Path', Path)]),
     TrArgs = [case Term of
-                  '$1'      -> V;
-                  '$errorf' -> ErrorF;
-                  _         -> erl_parse:abstract(Term)
+                  '$1'         -> V;
+                  '$errorf'    -> ErrorF;
+                  '$user_data' -> TrUserDataVar;
+                  _            -> erl_parse:abstract(Term)
               end
               || Term <- ArgTemplate],
-    [inline_attr(FnName,2),
+    [inline_attr(FnName,3),
      %% Dialyzer might complain that "The created fun has no local return"
      %% which is true, but expected, so shut this warning down.
-     nowarn_dialyzer_attr(FnName,2),
+     nowarn_dialyzer_attr(FnName,3),
      case CallTemplate of
          {Fn, ArgTemplate} ->
              gpb_codegen:format_fn(
@@ -4496,7 +4501,7 @@ format_field_op_translator(ElemPath, verify=Op, CallTemplate) ->
                        'Fn'('TrArgs')
                end,
                [replace_term('Fn', Fn),
-                splice_trees('InArgs', [V,Path]),
+                splice_trees('InArgs', [V,Path,TrUserDataVar]),
                 splice_trees('TrArgs', TrArgs)]);
          {Mod, Fn, ArgTemplate} ->
              gpb_codegen:format_fn(
@@ -4506,16 +4511,12 @@ format_field_op_translator(ElemPath, verify=Op, CallTemplate) ->
                end,
                [replace_term('Mod', Mod),
                 replace_term('Fn', Fn),
-                splice_trees('InArgs', [V,Path]),
+                splice_trees('InArgs', [V,Path,TrUserDataVar]),
                 splice_trees('TrArgs', TrArgs)])
      end].
 
 last_tuple_element(Tuple) ->
     element(tuple_size(Tuple), Tuple).
-
-underscore_unused_args(Args, Templ) ->
-    Names = lists:seq(1, length(Args)),
-    underscore_unused_args(Args, Names, Templ).
 
 underscore_unused_args(Args, Names, Templ) ->
     [case is_arg_used(Name, Templ) of
@@ -4530,31 +4531,33 @@ is_arg_used(Name, Templ) ->
 dollar_name(Name) ->
     list_to_atom(?ff("$~w", [Name])).
 
-args_by_op(encode)                   -> [?expr(X)];
-args_by_op(decode)                   -> [?expr(X)];
-args_by_op(decode_init_default)      -> [?expr(InitialValue)];
-args_by_op(decode_repeated_add_elem) -> [?expr(Elem), ?expr(L)];
-args_by_op(decode_repeated_finalize) -> [?expr(L)];
-args_by_op(merge)                    -> [?expr(X1), ?expr(X2)];
-args_by_op(verify)                   -> [?expr(V), ?expr(Path)].
+args_by_op(Op) -> args_by_op2(Op) ++ [?expr(TrUserData)].
+
+args_by_op2(encode)                   -> [?expr(X)];
+args_by_op2(decode)                   -> [?expr(X)];
+args_by_op2(decode_init_default)      -> [?expr(InitialValue)];
+args_by_op2(decode_repeated_add_elem) -> [?expr(Elem), ?expr(L)];
+args_by_op2(decode_repeated_finalize) -> [?expr(L)];
+args_by_op2(merge)                    -> [?expr(X1), ?expr(X2)];
+args_by_op2(verify)                   -> [?expr(V), ?expr(Path)].
 
 format_aux_transl_helpers() ->
-    [nowarn_attrs(id,1),
-     inline_attr(id,1),
-     "id(X) -> X.\n",
+    [nowarn_attrs(id,2),
+     inline_attr(id,2),
+     "id(X, _TrUserData) -> X.\n",
      "\n",
-     nowarn_attrs(cons,2),
-     inline_attr(cons,2),
-     "cons(Elem, Acc) -> [Elem | Acc].\n",
+     nowarn_attrs(cons,3),
+     inline_attr(cons,3),
+     "cons(Elem, Acc, _TrUserData) -> [Elem | Acc].\n",
      "\n",
-     nowarn_attrs('lists_reverse',1),
-     inline_attr('lists_reverse',1),
-     "'lists_reverse'(L) -> lists:reverse(L).\n"].
+     nowarn_attrs('lists_reverse',2),
+     inline_attr('lists_reverse',2),
+     "'lists_reverse'(L, _TrUserData) -> lists:reverse(L).\n"].
 
 format_aux_transl_helpers_used_also_with_nifs() ->
-    [nowarn_attrs('erlang_++',2),
-     inline_attr('erlang_++',2),
-     "'erlang_++'(A, B) -> A ++ B.\n"].
+    [nowarn_attrs('erlang_++',3),
+     inline_attr('erlang_++',3),
+     "'erlang_++'(A, B, _TrUserData) -> A ++ B.\n"].
 
 format_default_translators(AnRes, Opts) ->
     [format_default_map_translators(AnRes, Opts),
@@ -4658,14 +4661,14 @@ format_default_any_translators(#anres{translations=Translations}, _Opts) ->
     Defaults = [{merge, default_any_merge_translator()},
                 {verify, default_any_verify_translator()}],
     Needs = compute_needed_default_translations(Translations, Defaults),
-    [[[inline_attr(any_m_overwrite,1),
+    [[[inline_attr(any_m_overwrite,2),
        gpb_codegen:format_fn(
          any_m_overwrite,
-         fun(Any2) -> Any2 end),
+         fun(Any2,_) -> Any2 end),
        "\n"] || sets:is_element(merge, Needs)],
      [[gpb_codegen:format_fn(
          any_v_no_check,
-         fun(_,_) -> ok end),
+         fun(_,_,_) -> ok end),
        "\n"] || sets:is_element(verify, Needs)]].
 
 compute_needed_default_translations(Translations, Defaults) ->
