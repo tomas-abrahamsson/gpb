@@ -10,7 +10,7 @@ do
 	f) force=true;;
     esac
 done
-shift $OPTIND
+shift $(($OPTIND - 1))
 
 cd "$scriptdir"
 src_dir="$scriptdir/git-hooks"

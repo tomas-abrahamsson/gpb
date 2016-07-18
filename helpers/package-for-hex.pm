@@ -30,7 +30,7 @@ do
 	m) moist_run=true;;
     esac
 done
-shift $OPTIND
+shift $((OPTIND - 1))
 
 # we must execute from inside the gpb repo, or else the
 # version retrieval will fail.
