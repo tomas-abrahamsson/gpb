@@ -89,6 +89,18 @@ encode_msgs([], _, _) ->
 
 
 run_test(Description, DataSize, Action) ->
+    {P,M} = spawn_monitor(
+              fun() ->
+                      run_test_aux(Description, DataSize, Action)
+              end),
+    receive
+        {'DOWN',M,process,P,normal} ->
+            ok;
+        {'DOWN',M,process,P,Other} ->
+            error({aux_died,Other})
+    end.
+
+run_test_aux(Description, DataSize, Action) ->
     MinSampleTime = 2, %% seconds
     TargetTime = 30,   %% seconds
     {Elapsed, NumIterations} = iterate_until_elapsed(MinSampleTime, Action),
