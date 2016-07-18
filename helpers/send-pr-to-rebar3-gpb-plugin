@@ -1,0 +1,184 @@
+#! /bin/bash
+
+show_usage() {
+    cat <<EOF
+`basename "$0"` -- send a PR to the rebar3_gpb_plugin project
+Usage: `basename "$0"` [options]
+Options:
+    -h      Show this help
+    -U USER Name of your github user
+    -c NAME Name of your rebar3_gpb_plugin clone/fork on github
+    -u URL  Name of the upstream rebar3_gpb_plugin repo on github
+    -n      Dry-run do not send anything
+    -m      Almost dry-run (moist) This will disable the
+            version format check, but will not send anything
+EOF
+}
+
+repo_name=rebar3_gpb_plugin
+upstream_url=git://github.com/lrascao/${repo_name}.git
+default_br=develop
+github_user=$(git config --get github.user)
+
+dry_run=false
+moist_run=false
+while getopts "hc:u:U:nm" opt
+do
+    case "$opt" in
+	h) show_usage; exit 0;;
+	c) repo_name="$OPTARG";;
+	u) upstream_url="$OPTARG";;
+	U) github_user="$OPTARG";;
+	n) dry_run=true;;
+	m) moist_run=true;;
+    esac
+done
+shift $(($OPTIND - 1))
+
+upstream_owner=$(echo "$upstream_url" | cut -d/ -f4)
+upstream_repo=$(echo "$upstream_url" | cut -d/ -f5 | sed -e 's/\.git$//')
+
+echo "$upstream_owner=$upstream_owner"
+echo "$upstream_repo=$upstream_repo"
+
+# we must execute from inside the gpb repo, or else the
+# version retrieval will fail.
+#
+
+script_dir="$(dirname "$0")"
+script_path="$(cd "$script_dir"; pwd)"
+cd "$script_dir"
+repo_top=$(git rev-parse --show-toplevel)
+cd "$repo_top"
+repo_path="$(pwd)"
+
+# Use the git name/email of this repo
+git_name=$(git config --get user.name)
+git_email=$(git config --get user.email)
+
+[ -z "$github_user" ] && {
+    echo "Failed to determine your corresponding github user id" 2>&1
+    exit 1
+}
+echo "Your github user appears to be: $github_user"
+
+d="$(mktemp -d "tmp-pr-for-$repo_name-XXXXXXX")"
+cleanup () { /bin/rm -rf "$repo_path/$d"; }
+trap 'xc=$?; cleanup; exit $xc' EXIT INT QUIT TERM
+
+vsn="$(git describe --always --tags --match '[0-9]*.[0-9]*')"
+if [ $dry_run = false -a $moist_run = false ]
+then
+    if ! (echo "$vsn" | egrep '^[0-9]+(\.[0-9]+)*$' >/dev/null)
+    then
+	echo "ERROR: bad version \"$vsn\", will only publish versions" >&2
+	echo "that are dotted numbers only." >&2
+	echo "Aborting." >&2
+	cleanup
+	exit 1
+    fi
+fi
+echo "Version of gpb: $vsn"
+
+set -e
+cd "$d"
+
+yes_no () {
+    echo "Run?" "$@"
+    valid_answer=false
+    while [ $valid_answer = false ]
+    do
+	printf "Proceed? [Yn]"
+	read x
+	case "$x" in
+	    y|Y|yes|Yes|YES|"")
+		valid_answer=true
+		"$@"
+		;;
+	    n|N|no|No|NO)
+		valid_answer=true
+		echo "Not running that command"
+		;;
+	    *)
+		:
+		;;
+	esac
+    done
+}
+
+pr_br=pr-for-version-"$vsn"
+echo "Cloning your $repo_name from github"
+git clone -q git@github.com:"$github_user"/"$repo_name"
+(
+    cd "$repo_name"
+    git config user.name "$git_name"
+    git config user.email "$git_email"
+    echo "Fetching upstream $repo_name from github"
+    git remote add upstream "$upstream_url"
+    git fetch -q upstream $default_br
+    git reset -q --hard upstream/$default_br
+    echo "Updating your github $repo_name"
+    if [ $dry_run = true -o $moist_run = true ]
+    then
+	echo "Dry run: not pushing to update your github repo"
+    else
+	git push -q --tags origin $default_br
+    fi
+
+    git checkout -b "$pr_br"
+    # Grep for rebar / omit README.md because it contains line number references
+    # likely to get wrong if we substitute version numbers in that too:
+    # https://github.com/tomas-abrahamsson/gpb/blob/3.19.0/src/gpb_compile.erl#L66-L93
+    for f in $(git grep -l -E 'gpb.*[0-9]+\.[0-9]+\.[0-9]+' | grep rebar)
+    do
+	tmpf=$(mktemp "$f.tmp-XXXXXXX")
+	cp "$f" "$tmpf"
+	sed -e 's/^\(.*gpb.*\)[0-9]\+\.[0-9]\+\.[0-9]\+/\1'"$vsn"'/' \
+	    < "$tmpf" \
+	    > "$f"
+	rm "$tmpf"
+	git add "$f"
+    done
+    git commit -q -m "Bump gpb to $vsn"
+    echo "This is the change:-----------------------------------"
+    PAGER=cat git log -p -1
+    echo "------------------------------------------------------"
+
+    if [ $dry_run = true -o $moist_run = true ]
+    then
+	echo "Dry run: not pushing to update your github repo"
+    else
+	echo "Pushing the change to your github repo"
+	git push -q origin "$pr_br"
+    fi
+
+    # Json structure, fields:
+    #    title, body  -- title, body text of the pr
+    #    head         -- name of the branch where the changes are
+    #    base         -- name of the branch you want your changes pulled into
+    changelog_url="https://github.com/$github_user/gpb/blob/$vsn/ChangeLog"
+    title="New version of gpb: $vsn"
+    body="New version of gpb: [$vsn]($changelog_url)"
+    head="$github_user:$pr_br"
+    base="$default_br"
+    data='{
+            "title": "'"$title"'",
+            "body":  "'"$body"'",
+            "head":  "'"$head"'",
+            "base": "'"$base"'"
+          }'
+
+    if [ $dry_run = true -o $moist_run = true ]
+    then
+	maybe_dry=echo
+    else
+	maybe_dry=yes_no
+    fi
+    
+    $maybe_dry \
+     curl --request POST \
+     -H "Accept: application/vnd.github.v3+json" \
+     --user "$github_user" \
+     --data "$data" \
+     https://api.github.com/repos/"$upstream_owner"/"$upstream_repo"/pulls
+)
