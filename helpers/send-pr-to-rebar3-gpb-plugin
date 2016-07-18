@@ -33,7 +33,7 @@ do
 	m) moist_run=true;;
     esac
 done
-shift $OPTIND
+shift $(($OPTIND - 1))
 
 upstream_owner=$(echo "$upstream_url" | cut -d/ -f4)
 upstream_repo=$(echo "$upstream_url" | cut -d/ -f5 | sed -e 's/\.git$//')
