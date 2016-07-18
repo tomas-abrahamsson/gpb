@@ -1,5 +1,16 @@
 -*- coding: utf-8 -*-
 
+Version 3.23.1
+2016-Jul-19
+
+	* It is now possible to pass user-data---via an option to the
+	generated encode_msg, decode_msg, merge_msgs and verify_msg
+	functions---to translators for google.protobuf.Any messages.
+	* Type specs for strings now say iolist, because this is what they
+	accept on encoding. On decoding, they always return strings or
+	binaries depending on the strings_as_binary (-strbin) option.
+	* Correct benchmark measurements.
+
 Version 3.23.0
 2016-Jul-12
 
