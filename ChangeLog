@@ -1,5 +1,10 @@
 -*- coding: utf-8 -*-
 
+Version 3.23.2
+2016-Jul-19
+
+	* Bugfix compilation error with rebar on Erlang R16 and earlier.
+
 Version 3.23.1
 2016-Jul-19
 
