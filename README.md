@@ -113,9 +113,6 @@ Features of gpb
    would have to either rewrite the grammar, or stop using yecc.
    (maybe rewrite it all as a protoc plugin?)
 
-   The gpb will fail to decode floats that are NaN, +Inf and -Inf,
-   and there is no possibility to encode such floats.
-
 Performance
 -----------
 
