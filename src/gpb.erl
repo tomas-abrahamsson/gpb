@@ -618,7 +618,12 @@ encode_value(Value, Type, MsgDefs)                                             -
             Utf8 = unicode:characters_to_binary(Value),
             <<(encode_varint(byte_size(Utf8)))/binary, Utf8/binary>>;
         bytes ->
-            <<(encode_varint(byte_size(Value)))/binary, Value/binary>>;
+            if is_binary(Value) ->
+                   <<(encode_varint(byte_size(Value)))/binary, Value/binary>>;
+               is_list(Value) ->
+                   ValueBin = iolist_to_binary(Value),
+                   <<(encode_varint(byte_size(ValueBin)))/binary, ValueBin/binary>>
+            end;
         {msg,_MsgName} ->
             SubMsg = encode_msg(Value, MsgDefs),
             <<(encode_varint(byte_size(SubMsg)))/binary, SubMsg/binary>>;

@@ -2616,9 +2616,13 @@ format_string_encoder() ->
 format_bytes_encoder() ->
     gpb_codegen:format_fn(
       e_type_bytes,
-      fun(Bytes, Bin) ->
+      fun(Bytes, Bin) when is_binary(Bytes) ->
               Bin2 = e_varint(byte_size(Bytes), Bin),
-              <<Bin2/binary, Bytes/binary>>
+              <<Bin2/binary, Bytes/binary>>;
+         (Bytes, Bin) when is_list(Bytes) ->
+              BytesBin = iolist_to_binary(Bytes),
+              Bin2 = e_varint(byte_size(BytesBin), Bin),
+              <<Bin2/binary, BytesBin/binary>>
       end).
 
 format_varint_encoder() ->
@@ -4608,6 +4612,8 @@ format_bytes_verifier() ->
      gpb_codegen:format_fn(
        FnName,
        fun(B, _Path) when is_binary(B) ->
+               ok;
+          (B, _Path) when is_list(B) ->
                ok;
           (X, Path) ->
                mk_type_error(bad_binary_value, X, Path)
@@ -6664,12 +6670,20 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
            bytes ->
                ?f("{\n"
                   "    ErlNifBinary b;\n"
-                  "    if (!enif_inspect_binary(env, ~s, &b))\n"
+                  "    if (enif_inspect_binary(env, ~s, &b)) {\n"
+                  "        ~s\n"
+                  "    } else if (enif_is_list(env, ~s)) {\n"
+                  "        if (enif_inspect_iolist_as_binary(env, ~s, &b)) {\n"
+                  "            ~s\n"
+                  "        } else {\n"
+                  "            return 0;\n"
+                  "        }\n"
+                  "    } else {\n"
                   "        return 0;\n"
-                  "    ~s\n"
+                  "    }\n"
                   "}\n",
-                  [SrcVar,
-                   SetFn(["reinterpret_cast<char *>(b.data)", "b.size"])]);
+                  [SrcVar, SetFn(["reinterpret_cast<char *>(b.data)", "b.size"]),
+                   SrcVar, SrcVar, SetFn(["reinterpret_cast<char *>(b.data)", "b.size"])]);
            {msg, Msg2Name} ->
                CMsg2Type = mk_cctype_name(FType, Defs),
                PackFnName = mk_c_fn(p_msg_, Msg2Name),
