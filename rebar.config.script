@@ -17,7 +17,7 @@ NoHaveMapsOpts = try maps:size(maps:new()) of
   ]},
 
  %% Erlang compiler options
- {erl_opts, [debug_info]},
+ {erl_opts, [debug_info] ++ NoHaveMapsOpts},
 
  %% This line is useful if you have gpb_eqc.erl symlinked to
  %% the symlink in the test/ directory.
