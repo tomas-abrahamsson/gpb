@@ -137,6 +137,12 @@ parses_and_generates_good_code_also_for_empty_msgs_test() ->
     ?assertMatch({m1}, M:decode_msg(M:encode_msg({m1}), m1)),
     unload_code(M).
 
+parses_and_generates_good_code_for_epb_compatibility_test() ->
+    M = compile_iolist(["message m1 { }\n"]),
+    ?assertMatch(true, is_binary(M:encode({m1}))),
+    ?assertMatch({m1}, M:decode(m1, M:encode({m1}))),
+    unload_code(M).
+
 field_pass_as_params_test() ->
     MsgDef = ["message m2 { required uint32 f22 = 1; }"
               "message m1 { required uint32  f1 = 1;",

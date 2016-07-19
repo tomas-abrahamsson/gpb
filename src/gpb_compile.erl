@@ -1756,11 +1756,13 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
            records -> ?f("-export([encode_msg/1, encode_msg/2]).~n");
            maps    -> ?f("-export([encode_msg/2, encode_msg/3]).~n")
        end,
+       ?f("-export([encode/1]). %% epb compatibility~n"),
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([merge_msgs/2, merge_msgs/3]).~n");
            maps    -> ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
        end,
+       ?f("-export([decode/2]). %% epb compatibility~n"),
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([verify_msg/1, verify_msg/2]).~n");
            maps    -> ?f("-export([verify_msg/2, verify_msg/3]).~n")
@@ -1922,7 +1924,14 @@ format_encoders_top_function_no_msgs(Opts) ->
        fun(_Msg, '<MsgName>', _Opts) ->
                erlang:error({gpb_error, no_messages})
        end,
-       [splice_trees('<MsgName>', MsgNameVars)])].
+       [splice_trees('<MsgName>', MsgNameVars)]),
+     "\n",
+     ?f("%% epb compatibility\n"),
+     ?f("-spec encode(_~s) -> no_return().\n", [SpecExtraArgs]),
+     gpb_codegen:format_fn(
+      encode,
+      fun(_Msg, '<MsgName>') -> erlang:error({gpb_error, no_messages}) end,
+      [splice_trees('<MsgName>', MsgNameVars)])].
 
 format_encoders_top_function_msgs(Defs, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
@@ -1932,11 +1941,17 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                       maps    -> [?expr(MsgName)]
                   end,
     DoNif = proplists:get_bool(nif, Opts),
-    [gpb_codegen:format_fn(
+    SpecExtraArgs = case Mapping of
+                      records -> "";
+                      maps    -> ",atom()"
+                  end,
+    [?f("-spec encode_msg(_~s) -> binary().~n", [SpecExtraArgs]),
+     gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
+     ?f("-spec encode_msg(_~s, []) -> binary().~n", [SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>', '<Opts>') ->
@@ -1985,7 +2000,24 @@ format_encoders_top_function_msgs(Defs, Opts) ->
         splice_trees('<MsgName>', MsgNameVars),
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]
-                                   end)])].
+                                   end)]),
+     "\n",
+     ?f("%% epb compatibility\n"),
+     case Mapping of
+         records ->
+             ?f("-spec encode(_) -> binary().~n"),
+             gpb_codegen:format_fn(
+               encode,
+               fun(Msg) -> encode_msg(Msg) end);
+         maps ->
+             ?f("-spec encode(_) -> no_return().~n"),
+             gpb_codegen:format_fn(
+               encode,
+               fun(_Msg) ->
+                       erlang:error(
+                         {gpb_error, epb_compat_not_possible_with_maps})
+               end)
+     end].
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
@@ -2673,7 +2705,15 @@ format_decoders_top_function_no_msgs() ->
       decode_msg,
       fun(Bin, _MsgName, _Opts) when is_binary(Bin) ->
               erlang:error({gpb_error, no_messages})
-      end)].
+      end),
+     "\n",
+     "%% epb compatibility\n",
+     ?f("-spec decode(atom(), binary()) -> no_return().\n"),
+     gpb_codegen:format_fn(
+       decode,
+       fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+               erlang:error({gpb_error, no_messages})
+       end)].
 
 format_decoders_top_function_msgs(Defs, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
@@ -2708,7 +2748,24 @@ format_decoders_top_function_msgs(Defs, Opts) ->
                         || {{msg,MsgName}, _Fields} <- Defs]),
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]
-                                   end)])].
+                                   end)]),
+     "\n",
+     "%% epb compatibility\n",
+     case get_records_or_maps_by_opts(Opts) of
+         records ->
+             gpb_codegen:format_fn(
+               decode,
+               fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+                       decode_msg(Bin, MsgName)
+               end);
+         maps ->
+             gpb_codegen:format_fn(
+               decode,
+               fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+                       erlang:error(
+                         {gpb_error, epb_compat_not_possible_with_maps})
+               end)
+     end].
 
 format_aux_decoders(Defs, AnRes, _Opts) ->
     format_enum_decoders(Defs, AnRes).
