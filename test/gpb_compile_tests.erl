@@ -1373,7 +1373,9 @@ generates_nif_as_binary_and_file_test() ->
 nif_code_test_() ->
     increase_timeouts(
       nif_tests_check_prerequisites(
-        [{"Nif compiles", fun nif_compiles/0},
+        [{"Verify errors in sepatarate vm are caught",
+          fun verify_errors_in_separate_vm_are_caught/0},
+         {"Nif compiles", fun nif_compiles/0},
          {"Nif encode decode", fun nif_encode_decode/0},
          increase_timeouts(
            nif_oneof_tests_check_prerequisites(
@@ -1425,6 +1427,27 @@ nif_proto3_tests_check_prerequisites(Tests) ->
         true  -> {"Nif with proto3", Tests};
         false -> {"Protoc < 3.0.0, not testing nifs with proto3", []}
     end.
+
+verify_errors_in_separate_vm_are_caught() ->
+    %% Sanity check of the machinery for running tests in a separate vm
+    %% Verify that any errors emanating from "the other side" are caught
+    ?assertError({in_separate_vm, bad_badness},
+                 with_tmpdir(
+                   fun(TmpDir) ->
+                           M = gpb_in_separate_vm_test_env_check,
+                           Code = create_dummy_module(M),
+                           in_separate_vm(
+                             TmpDir, M, Code,
+                             fun() ->
+                                     erlang:error(bad_badness)
+                             end)
+                   end)).
+
+create_dummy_module(MName) ->
+    {ok,Toks,_} = erl_scan:string(f("-module(~p).~n", [MName])),
+    {ok,Form} = erl_parse:parse_form(Toks),
+    {ok,MName,Code} = compile:forms([Form]),
+    Code.
 
 nif_compiles() ->
     with_tmpdir(
@@ -1923,7 +1946,7 @@ analyze_output_from_separate_vm({ExitCode, Output}, ResultFile) ->
     case file:read_file(ResultFile) of
         {ok, B} ->
             case binary_to_term(B) of
-                {'EXIT',Class,Reason,StackTrace} ->
+                {'EXIT',{Class,Reason,StackTrace}} ->
                     erlang:raise(Class, {in_separate_vm,Reason}, StackTrace);
                 _Result ->
                     %% Anything not a crash is success, just like usual
