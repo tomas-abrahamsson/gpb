@@ -1766,11 +1766,13 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
            records -> ?f("-export([encode_msg/1, encode_msg/2]).~n");
            maps    -> ?f("-export([encode_msg/2, encode_msg/3]).~n")
        end,
+       ?f("-export([encode/1]). %% epb compatibility~n"),
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([merge_msgs/2, merge_msgs/3]).~n");
            maps    -> ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
        end,
+       ?f("-export([decode/2]). %% epb compatibility~n"),
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([verify_msg/1, verify_msg/2]).~n");
            maps    -> ?f("-export([verify_msg/2, verify_msg/3]).~n")
@@ -1932,7 +1934,14 @@ format_encoders_top_function_no_msgs(Opts) ->
        fun(_Msg, '<MsgName>', _Opts) ->
                erlang:error({gpb_error, no_messages})
        end,
-       [splice_trees('<MsgName>', MsgNameVars)])].
+       [splice_trees('<MsgName>', MsgNameVars)]),
+     "\n",
+     ?f("%% epb compatibility\n"),
+     ?f("-spec encode(_~s) -> no_return().\n", [SpecExtraArgs]),
+     gpb_codegen:format_fn(
+      encode,
+      fun(_Msg, '<MsgName>') -> erlang:error({gpb_error, no_messages}) end,
+      [splice_trees('<MsgName>', MsgNameVars)])].
 
 format_encoders_top_function_msgs(Defs, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
@@ -1942,11 +1951,17 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                       maps    -> [?expr(MsgName)]
                   end,
     DoNif = proplists:get_bool(nif, Opts),
-    [gpb_codegen:format_fn(
+    SpecExtraArgs = case Mapping of
+                      records -> "";
+                      maps    -> ",atom()"
+                  end,
+    [?f("-spec encode_msg(_~s) -> binary().~n", [SpecExtraArgs]),
+     gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
+     ?f("-spec encode_msg(_~s, []) -> binary().~n", [SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>', '<Opts>') ->
@@ -1995,7 +2010,24 @@ format_encoders_top_function_msgs(Defs, Opts) ->
         splice_trees('<MsgName>', MsgNameVars),
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]
-                                   end)])].
+                                   end)]),
+     "\n",
+     ?f("%% epb compatibility\n"),
+     case Mapping of
+         records ->
+             ?f("-spec encode(_) -> binary().~n"),
+             gpb_codegen:format_fn(
+               encode,
+               fun(Msg) -> encode_msg(Msg) end);
+         maps ->
+             ?f("-spec encode(_) -> no_return().~n"),
+             gpb_codegen:format_fn(
+               encode,
+               fun(_Msg) ->
+                       erlang:error(
+                         {gpb_error, epb_compat_not_possible_with_maps})
+               end)
+     end].
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
@@ -2550,7 +2582,9 @@ format_bool_encoder() ->
     gpb_codegen:format_fn(
       e_type_bool,
       fun(true, Bin)  -> <<Bin/binary, 1>>;
-         (false, Bin) -> <<Bin/binary, 0>>
+         (false, Bin) -> <<Bin/binary, 0>>;
+         (1, Bin) -> <<Bin/binary, 1>>;
+         (0, Bin) -> <<Bin/binary, 0>>
       end).
 
 format_fixed_encoder(Type, BitLen, BitType) ->
@@ -2626,9 +2660,13 @@ format_string_encoder() ->
 format_bytes_encoder() ->
     gpb_codegen:format_fn(
       e_type_bytes,
-      fun(Bytes, Bin) ->
+      fun(Bytes, Bin) when is_binary(Bytes) ->
               Bin2 = e_varint(byte_size(Bytes), Bin),
-              <<Bin2/binary, Bytes/binary>>
+              <<Bin2/binary, Bytes/binary>>;
+         (Bytes, Bin) when is_list(Bytes) ->
+              BytesBin = iolist_to_binary(Bytes),
+              Bin2 = e_varint(byte_size(BytesBin), Bin),
+              <<Bin2/binary, BytesBin/binary>>
       end).
 
 format_varint_encoder() ->
@@ -2683,7 +2721,15 @@ format_decoders_top_function_no_msgs() ->
       decode_msg,
       fun(Bin, _MsgName, _Opts) when is_binary(Bin) ->
               erlang:error({gpb_error, no_messages})
-      end)].
+      end),
+     "\n",
+     "%% epb compatibility\n",
+     ?f("-spec decode(atom(), binary()) -> no_return().\n"),
+     gpb_codegen:format_fn(
+       decode,
+       fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+               erlang:error({gpb_error, no_messages})
+       end)].
 
 format_decoders_top_function_msgs(Defs, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
@@ -2718,7 +2764,24 @@ format_decoders_top_function_msgs(Defs, Opts) ->
                         || {{msg,MsgName}, _Fields} <- Defs]),
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]
-                                   end)])].
+                                   end)]),
+     "\n",
+     "%% epb compatibility\n",
+     case get_records_or_maps_by_opts(Opts) of
+         records ->
+             gpb_codegen:format_fn(
+               decode,
+               fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+                       decode_msg(Bin, MsgName)
+               end);
+         maps ->
+             gpb_codegen:format_fn(
+               decode,
+               fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+                       erlang:error(
+                         {gpb_error, epb_compat_not_possible_with_maps})
+               end)
+     end].
 
 format_aux_decoders(Defs, AnRes, _Opts) ->
     format_enum_decoders(Defs, AnRes).
@@ -4572,6 +4635,8 @@ format_bool_verifier() ->
        FnName,
        fun(false, _Path) -> ok;
           (true, _Path)  -> ok;
+          (0, _Path)  -> ok;
+          (1, _Path)  -> ok;
           (X, Path) -> mk_type_error(bad_boolean_value, X, Path)
        end)].
 
@@ -4618,6 +4683,8 @@ format_bytes_verifier() ->
      gpb_codegen:format_fn(
        FnName,
        fun(B, _Path) when is_binary(B) ->
+               ok;
+          (B, _Path) when is_list(B) ->
                ok;
           (X, Path) ->
                mk_type_error(bad_binary_value, X, Path)
@@ -5713,7 +5780,7 @@ type_to_typestr_2(int32, _Defs, _Opts)    -> "integer()";
 type_to_typestr_2(int64, _Defs, _Opts)    -> "integer()";
 type_to_typestr_2(uint32, _Defs, _Opts)   -> "non_neg_integer()";
 type_to_typestr_2(uint64, _Defs, _Opts)   -> "non_neg_integer()";
-type_to_typestr_2(bool, _Defs, _Opts)     -> "boolean()";
+type_to_typestr_2(bool, _Defs, _Opts)     -> "boolean() | 0 | 1";
 type_to_typestr_2(fixed32, _Defs, _Opts)  -> "non_neg_integer()";
 type_to_typestr_2(fixed64, _Defs, _Opts)  -> "non_neg_integer()";
 type_to_typestr_2(sfixed32, _Defs, _Opts) -> "integer()";
@@ -5852,6 +5919,7 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_proto3_version_check_if_present(Defs),
        format_nif_cc_map_api_check_if_needed(Opts),
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
+       format_nif_cc_mk_consts(Mod, Defs, AnRes, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
        format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
        format_nif_cc_encoders(Mod, Defs, Opts),
@@ -6024,6 +6092,18 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
        || {AtomVar, Atom} <- AtomVars1],
       "}\n",
       "\n"]].
+
+format_nif_cc_mk_consts(_Mod, _Defs, AnRes, _Opts) ->
+    case is_any_field_of_type_bool(AnRes) of
+        true -> ["static ERL_NIF_TERM gpb_true_int;\n"
+                 "static void install_consts(ErlNifEnv *env)\n"
+                 "{\n",
+                 "   gpb_true_int = enif_make_uint(env, 1);\n"
+                 "}\n"];
+        _ -> ["static void install_consts(ErlNifEnv *env)\n"
+             "{\n",
+             "}\n"]
+    end.
 
 minus_to_m(A) ->
     case atom_to_list(A) of
@@ -6285,6 +6365,7 @@ format_nif_cc_foot(Mod, Defs, _Opts) ->
     ["static int\n",
      "load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)\n",
      "{\n",
+     "    install_consts(env);\n"
      "    install_atoms(env);\n"
      "    return 0;\n",
      "}\n",
@@ -6621,10 +6702,12 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                ?f("{\n"
                   "    if (enif_is_identical(~s, gpb_aa_true))\n"
                   "        ~s\n"
+                  "    else if (enif_is_identical(~s, gpb_true_int))\n"
+                  "        ~s\n"
                   "    else\n"
                   "        ~s\n"
                   "}\n",
-                  [SrcVar, SetFn(["1"]), SetFn(["0"])]);
+                  [SrcVar, SetFn(["1"]), SrcVar, SetFn(["1"]), SetFn(["0"])]);
            {enum, EnumName} ->
                EPrefix = case is_dotted(EnumName) of
                              false -> "";
@@ -6675,12 +6758,20 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
            bytes ->
                ?f("{\n"
                   "    ErlNifBinary b;\n"
-                  "    if (!enif_inspect_binary(env, ~s, &b))\n"
+                  "    if (enif_inspect_binary(env, ~s, &b)) {\n"
+                  "        ~s\n"
+                  "    } else if (enif_is_list(env, ~s)) {\n"
+                  "        if (enif_inspect_iolist_as_binary(env, ~s, &b)) {\n"
+                  "            ~s\n"
+                  "        } else {\n"
+                  "            return 0;\n"
+                  "        }\n"
+                  "    } else {\n"
                   "        return 0;\n"
-                  "    ~s\n"
+                  "    }\n"
                   "}\n",
-                  [SrcVar,
-                   SetFn(["reinterpret_cast<char *>(b.data)", "b.size"])]);
+                  [SrcVar, SetFn(["reinterpret_cast<char *>(b.data)", "b.size"]),
+                   SrcVar, SrcVar, SetFn(["reinterpret_cast<char *>(b.data)", "b.size"])]);
            {msg, Msg2Name} ->
                CMsg2Type = mk_cctype_name(FType, Defs),
                PackFnName = mk_c_fn(p_msg_, Msg2Name),

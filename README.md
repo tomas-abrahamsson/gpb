@@ -170,34 +170,17 @@ The generated C++ core was compiled with -O3.
 Mapping of protocol buffer datatypes to erlang
 ----------------------------------------------
 
-    .proto type           Erlang type
-    ----------------------------------------------------------------
-    double, float         floating point number | infinity | '-infinity' | nan
-                          when encoding, integers, too, are accepted
-    ----------------------------------------------------------------
-    int32, int64,
-    uint32, uint64,
-    sint32, sint64,
-    fixed32, fixed64,
-    sfixed32, sfixed64    integer
-    ----------------------------------------------------------------
-    bool                  true | false
-    ----------------------------------------------------------------
-    enum                  atom
-    ----------------------------------------------------------------
-    message               record (thus tuple)
-                          or maps, if the maps (-maps) option is specified
-    ----------------------------------------------------------------
-    string                unicode string, thus list of integers
-                          or binaries, if the strings_as_binaries (-strbin)
-                          option is specified
-    ----------------------------------------------------------------
-    bytes                 binary
-    ----------------------------------------------------------------
-    oneof                 {ChosenFieldName, Value}
-    ----------------------------------------------------------------
-    map<_,_>              An unordered list of 2-tuples: [{Key,Value}]
-                          or a map, if the maps (-maps) option is specified
+`.proto` type          | Erlang type
+---------------------- | -------------------------------------------------------------
+`double`, `float`      | `float() | infinity | '-infinity' | nan`<br>  when encoding, integers, too, are accepted
+`int32`, `int64`,<br>`uint32`, `uint64`,<br>`sint32`, `sint64`,<br>`fixed32`, `fixed64`,<br>`sfixed32`, `sfixed64`|`integer()`
+`bool`                 | `true` \| `false`<br>&nbsp;&nbsp;0 and 1 may be used as input data prior to serialization<br>&nbsp;&nbsp;`gpb` will always deserialize to the atom values
+`enum`                 | `atom()`
+`message`              | record (thus `tuple()`)<br>&nbsp;&nbsp;or maps, if the maps (`-maps`) option is specified
+`string`               | unicode string, thus list of integers<br>&nbsp;&nbsp;or binaries, if the `strings_as_binaries` (`-strbin`)<br>&nbsp;&nbsp;option is specified
+`bytes`                | `binary()`
+`oneof`                | `{ChosenFieldName, Value}`
+`map<_,_>`             | An unordered list of 2-tuples: `[{Key,Value}]`<br>&nbsp;&nbsp;or a map, if the maps (`-maps`) option is specified
 
 
 Interaction with rebar

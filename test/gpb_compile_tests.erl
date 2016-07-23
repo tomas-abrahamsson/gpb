@@ -137,6 +137,12 @@ parses_and_generates_good_code_also_for_empty_msgs_test() ->
     ?assertMatch({m1}, M:decode_msg(M:encode_msg({m1}), m1)),
     unload_code(M).
 
+parses_and_generates_good_code_for_epb_compatibility_test() ->
+    M = compile_iolist(["message m1 { }\n"]),
+    ?assertMatch(true, is_binary(M:encode({m1}))),
+    ?assertMatch({m1}, M:decode(m1, M:encode({m1}))),
+    unload_code(M).
+
 field_pass_as_params_test() ->
     MsgDef = ["message m2 { required uint32 f22 = 1; }"
               "message m1 { required uint32  f1 = 1;",
@@ -490,6 +496,18 @@ assert_contains_regexp(IoData, Re) ->
     end.
 
 %% --- bytes ----------
+
+list_as_bytes_indata_test() ->
+    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
+    if HasBinary ->
+            M = compile_iolist(["message m1 { required bytes f1 = 1; }"]),
+            Data = M:encode_msg({m1, [1,2,3,4]}),
+            {m1, <<1,2,3,4>>} = M:decode_msg(Data, m1),
+            unload_code(M);
+       true ->
+            %% nothing to test
+            ok
+    end.
 
 copy_bytes_unconditionally_test() ->
     HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
@@ -1408,6 +1426,9 @@ nif_code_test_() ->
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
          {"Nif with strbin", fun nif_with_strbin/0},
+         {"Nif with booleans", fun nif_with_booleans/0},
+         {"Nif with list indata for bytes",
+          fun nif_with_list_indata_for_bytes/0},
          {"Nif and +-Inf/NaN", fun nif_with_non_normal_floats/0},
          {"Error if both Any translations and nif",
           fun error_if_both_any_translations_and_nif/0}])).
@@ -1704,6 +1725,56 @@ nif_with_strbin() ->
                         ?assertEqual(OrigMsgB, MMDecoded),
                         ?assertEqual(OrigMsgS, GMDecoded),
                         ?assertEqual(OrigMsgB, MGDecoded)
+                end)
+      end).
+
+nif_with_booleans() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_with_booleans,
+              DefsTxt = lf_lines(["message ntest3 {",
+                                  "    required bool b = 1;",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir, []),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsgInt = {ntest3,1},
+                        OrigMsgAtom = {ntest3,true},
+                        MEncoded  = M:encode_msg(OrigMsgInt),
+                        GEncoded  = gpb:encode_msg(OrigMsgInt, Defs),
+                        MMDecoded = M:decode_msg(MEncoded, ntest3),
+                        GMDecoded = gpb:decode_msg(MEncoded, ntest3, Defs),
+                        MGDecoded = M:decode_msg(GEncoded, ntest3),
+                        ?assertEqual(OrigMsgAtom, MMDecoded),
+                        ?assertEqual(OrigMsgAtom, GMDecoded),
+                        ?assertEqual(OrigMsgAtom, MGDecoded)
+                end)
+      end).
+
+nif_with_list_indata_for_bytes() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_with_list_indata_for_bytes,
+              DefsTxt = lf_lines(["message ntest5 {",
+                                  "    required bytes s = 1;",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsgList = {ntest5,[4,3,2,1]},
+                        OrigMsgBin = {ntest5,<<4,3,2,1>>},
+                        MEncoded  = M:encode_msg(OrigMsgList),
+                        GEncoded  = gpb:encode_msg(OrigMsgList, Defs),
+                        MMDecoded = M:decode_msg(MEncoded, ntest5),
+                        GMDecoded = gpb:decode_msg(MEncoded, ntest5, Defs),
+                        MGDecoded = M:decode_msg(GEncoded, ntest5),
+                        ?assertEqual(OrigMsgBin, MMDecoded),
+                        ?assertEqual(OrigMsgBin, GMDecoded),
+                        ?assertEqual(OrigMsgBin, MGDecoded)
                 end)
       end).
 

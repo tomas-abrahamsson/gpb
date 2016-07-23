@@ -596,8 +596,10 @@ encode_value(Value, Type, MsgDefs)                                             -
         uint64 ->
             encode_varint(Value);
         bool ->
-            if Value     -> encode_varint(1);
-               not Value -> encode_varint(0)
+            if Value       -> encode_varint(1);
+               not Value   -> encode_varint(0);
+               Value =:= 1 -> encode_varint(1);
+               Value =:= 0 -> encode_varint(0)
             end;
         {enum, _EnumName}=Key ->
             {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
@@ -618,7 +620,12 @@ encode_value(Value, Type, MsgDefs)                                             -
             Utf8 = unicode:characters_to_binary(Value),
             <<(encode_varint(byte_size(Utf8)))/binary, Utf8/binary>>;
         bytes ->
-            <<(encode_varint(byte_size(Value)))/binary, Value/binary>>;
+            if is_binary(Value) ->
+                   <<(encode_varint(byte_size(Value)))/binary, Value/binary>>;
+               is_list(Value) ->
+                   ValueBin = iolist_to_binary(Value),
+                   <<(encode_varint(byte_size(ValueBin)))/binary, ValueBin/binary>>
+            end;
         {msg,_MsgName} ->
             SubMsg = encode_msg(Value, MsgDefs),
             <<(encode_varint(byte_size(SubMsg)))/binary, SubMsg/binary>>;
@@ -787,6 +794,8 @@ verify_int(V, {S,Bits}, Path) ->
 
 verify_bool(true,  _) -> ok;
 verify_bool(false, _) -> ok;
+verify_bool(1,  _) -> ok;
+verify_bool(0, _) -> ok;
 verify_bool(V, Path) ->
     mk_type_error(bad_boolean_value, V, Path).
 

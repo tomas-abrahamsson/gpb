@@ -556,8 +556,18 @@ encode_msg_with_bool_field_test() ->
                    [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                             type=bool, occurrence=required,
                                             opts=[]}]}]),
+    <<8,1>> =
+        encode_msg(#m1{a = 1},
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type=bool, occurrence=required,
+                                            opts=[]}]}]),
     <<8,0>> =
         encode_msg(#m1{a = false},
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type=bool, occurrence=required,
+                                            opts=[]}]}]),
+    <<8,0>> =
+        encode_msg(#m1{a = 0},
                    [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                                             type=bool, occurrence=required,
                                             opts=[]}]}]).
