@@ -1110,7 +1110,7 @@ parse_file_and_imports(FName, AlreadyImported, Opts) ->
             %% case we get an error we don't want to try to reprocess it later
             %% (in case it is multiply imported) and get the error again.
             AlreadyImported2 = [FName | AlreadyImported],
-            case scan_and_parse_string(binary_to_list(Contents),FName,Opts) of
+            case scan_and_parse_string(Contents, FName, Opts) of
                 {ok, Defs} ->
                     Imports = gpb_parse:fetch_imports(Defs),
                     Opts2 = ensure_include_path_to_wellknown_types_if_proto3(
@@ -1180,7 +1180,7 @@ locate_import_aux([Path | Rest], Import, Opts, Tried) ->
         {ok, #file_info{access = A}} when A == read; A == read_write ->
             case file_read_file(File, Opts) of
                 {ok,B} ->
-                    {ok, B};
+                    {ok, utf8_decode(B)};
                 {error, Reason} ->
                     {error, {read_failed, File, Reason}}
             end;
@@ -1282,6 +1282,15 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
         false ->
             {[], Opts}
     end.
+
+%% Input .proto file appears to be expected to be UTF-8 by Google's protobuf.
+%% In 3.0.0, it accepts a byte order mark (BOM), but in 2.6.1 it does not.
+%% It only accepts a BOM for for UTF-8. It does not accept UTF-16 nor UTF-32
+%% input (tried both little and big endian for both, with proper BOMs).
+utf8_decode(<<16#EF,16#BB,16#BF, Rest/binary>>) ->
+    unicode:characters_to_list(Rest);
+utf8_decode(B) ->
+    unicode:characters_to_list(B).
 
 %% -- analysis -----------------------------------------------------
 

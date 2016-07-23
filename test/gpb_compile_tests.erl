@@ -626,6 +626,17 @@ verifies_both_strings_and_binaries_as_input_test() ->
     ?assertError(_, M:verify_msg({m1, "a", <<97,98,99,255,191>>})),
     unload_code(M).
 
+utf8_bom_test() ->
+    Utf8ByteOrderMark = <<239,187,191>>, % EF BB BF
+    M = compile_iolist([Utf8ByteOrderMark,
+                        "message m1 {"
+                        "  required string f1 = 1;",
+                        "}"]),
+    Data = M:encode_msg({m1, "x"}),
+    {m1, "x"} = M:decode_msg(Data, m1),
+    unload_code(M).
+
+
 %% -- translation of google.protobuf.Any ----------
 
 -define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).
