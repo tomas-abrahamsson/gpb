@@ -636,6 +636,14 @@ utf8_bom_test() ->
     {m1, "x"} = M:decode_msg(Data, m1),
     unload_code(M).
 
+nonascii_default_values_for_strings_test() ->
+    Utf8 = unicode:characters_to_binary([1000,2000,3000]),
+    M = compile_iolist(["message m1 {"
+                        "  required string f1 = 1 [default=\"",Utf8,"\"];",
+                        "}"]),
+    Data = M:encode_msg({m1, "x"}),
+    {m1, "x"} = M:decode_msg(Data, m1),
+    unload_code(M).
 
 %% -- translation of google.protobuf.Any ----------
 
