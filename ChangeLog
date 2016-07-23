@@ -1,5 +1,18 @@
 -*- coding: utf-8 -*-
 
+Version 3.24.0
+2016-Jul-23
+
+	* Several improvements for compatibility with Erlang protobuffs,
+	thanks to Luke Bakken for all of these:
+	-- bool fields: Accept also 0 and 1 on encoding
+	-- bytes fields: Accept also iolists on encoding
+	-- API: Add compatibility functions encode/1 and decode/2
+	* Accept an UTF-8 byte order mark (BOM). This is accepted by Google
+	protobuf 3.0.0. Thanks to Julius Beckmann for highlighting this.
+	* Related to the UTF-8 BOM, UTF-8-decode the input .proto files, and
+	UTF-8-encode the generated files.
+
 Version 3.23.2
 2016-Jul-19
 
