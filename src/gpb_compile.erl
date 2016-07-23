@@ -2736,11 +2736,11 @@ format_decoders_top_function_msgs(Defs, Opts) ->
     [if DoNif -> "";
         true ->
              gpb_codegen:format_fn(
-       decode_msg,
-       fun(Bin, MsgName) when is_binary(Bin) ->
-               call_self(Bin, MsgName, [])
-       end,
-       [])
+               decode_msg,
+               fun(Bin, MsgName) when is_binary(Bin) ->
+                       call_self(Bin, MsgName, [])
+               end,
+               [])
      end,
      gpb_codegen:format_fn(
        decode_msg,
