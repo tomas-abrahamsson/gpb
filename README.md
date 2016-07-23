@@ -178,7 +178,7 @@ Mapping of protocol buffer datatypes to erlang
 `enum`                 | `atom()`
 `message`              | record (thus `tuple()`)<br>&nbsp;&nbsp;or maps, if the maps (`-maps`) option is specified
 `string`               | unicode string, thus list of integers<br>&nbsp;&nbsp;or binaries, if the `strings_as_binaries` (`-strbin`)<br>&nbsp;&nbsp;option is specified
-`bytes`                | `binary()`
+`bytes`                | `binary()`<br> when encoding, iolists, too, are accepted
 `oneof`                | `{ChosenFieldName, Value}`
 `map<_,_>`             | An unordered list of 2-tuples: `[{Key,Value}]`<br>&nbsp;&nbsp;or a map, if the maps (`-maps`) option is specified
 
