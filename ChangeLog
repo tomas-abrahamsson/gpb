@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.24.2
+2016-Jul-25
+
+	* Fix parsing of rpc method options. Thanks to Tony Han for
+	reporting.
+
 Version 3.24.1
 2016-Jul-25
 
