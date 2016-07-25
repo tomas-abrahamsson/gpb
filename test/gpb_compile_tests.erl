@@ -645,6 +645,16 @@ nonascii_default_values_for_strings_test() ->
     {m1, "x"} = M:decode_msg(Data, m1),
     unload_code(M).
 
+reading_file_falls_back_to_latin1_test() ->
+    Latin1 = [255,255,255], % Not decodable as utf8
+    M = compile_iolist(["// "++Latin1++"\n",
+                        "message m1 {"
+                        "  required string f1 = 1;",
+                        "}"]),
+    Data = M:encode_msg({m1, "x"}),
+    {m1, "x"} = M:decode_msg(Data, m1),
+    unload_code(M).
+
 %% -- translation of google.protobuf.Any ----------
 
 -define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).

@@ -1180,7 +1180,12 @@ locate_import_aux([Path | Rest], Import, Opts, Tried) ->
         {ok, #file_info{access = A}} when A == read; A == read_write ->
             case file_read_file(File, Opts) of
                 {ok,B} ->
-                    {ok, utf8_decode(B)};
+                    case utf8_decode(B) of
+                        {ok, {utf8, S}} ->
+                            {ok, S};
+                        {ok, {latin1, S}} ->
+                            {ok, S}
+                    end;
                 {error, Reason} ->
                     {error, {read_failed, File, Reason}}
             end;
@@ -1288,9 +1293,14 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 %% It only accepts a BOM for for UTF-8. It does not accept UTF-16 nor UTF-32
 %% input (tried both little and big endian for both, with proper BOMs).
 utf8_decode(<<16#EF,16#BB,16#BF, Rest/binary>>) ->
-    unicode:characters_to_list(Rest);
+    utf8_decode(Rest);
 utf8_decode(B) ->
-    unicode:characters_to_list(B).
+    case unicode:characters_to_list(B) of
+        S when is_list(S) ->
+            {ok, {utf8, S}};
+        {error, _, _} ->
+            {ok, {latin1, binary_to_list(B)}}
+    end.
 
 %% -- analysis -----------------------------------------------------
 
