@@ -334,11 +334,14 @@ rpc_defs -> '$empty':                   [].
 
 rpc_def -> rpc identifier '(' name ')' returns '(' name ')' ';':
                                         {identifier_name('$2'), '$4', '$8'}.
-rpc_def -> rpc identifier '(' name ')' returns '(' name ')' '{' m_opts '}' ';':
+rpc_def -> rpc identifier '(' name ')' returns '(' name ')' '{' m_opts '}':
                                         {identifier_name('$2'), '$4', '$8'}.
 
+m_opts -> option_def ';' m_opts:        ['$1' | '$3'].
 m_opts -> ';' m_opts:                   '$2'.
 m_opts -> '$empty':                     [].
+
+
 
 Erlang code.
 

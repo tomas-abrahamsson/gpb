@@ -591,9 +591,15 @@ parses_empty_service_statement_test() ->
 
 parses_empty_service_statement_method_options_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
-                             "service s1 { rpc r1(m1) returns (m1){;;;}; }"]),
+                             "service s1 { rpc r1(m1) returns (m1){;;;}; ",
+                             "             rpc r2(m1) returns (m1); }",
+                             "service s2 { rpc r5(m1) returns (m1){}",
+                             "             rpc r6(m1) returns (m1){} }"]),
     [{{msg,m1}, _},
-     {{service,s1},[#?gpb_rpc{name=r1, input=m1, output=m1}]}] =
+     {{service,s1},[#?gpb_rpc{name=r1, input=m1, output=m1},
+                    #?gpb_rpc{name=r2, input=m1, output=m1}]},
+     {{service,s2},[#?gpb_rpc{name=r5, input=m1, output=m1},
+                    #?gpb_rpc{name=r6, input=m1, output=m1}]}] =
         do_process_sort_defs(Defs).
 
 proto3_no_occurrence_test() ->
