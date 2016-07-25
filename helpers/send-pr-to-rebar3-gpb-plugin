@@ -122,7 +122,7 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
     then
 	echo "Dry run: not pushing to update your github repo"
     else
-	git push -q --tags origin $default_br
+	yes_no git push -q --tags origin $default_br
     fi
 
     git checkout -b "$pr_br"
