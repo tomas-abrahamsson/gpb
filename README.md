@@ -58,6 +58,10 @@ Features of gpb
      function, but it is possible to avoid this dependency by using
      the also the `defs_as_proplists` or `-pldefs` option.
    - Gpb can generate code both to files and to binaries.
+   - Proto input files are expected to be UTF-8, but the file reader
+     will fall back to decode the files as latin1 in UTF-8 decode errors,
+     for backwards compatibility and behaviour that most closely
+     emulates what Google protobuf does.
 
 *  Introspection
 
