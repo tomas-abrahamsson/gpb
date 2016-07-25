@@ -655,6 +655,17 @@ reading_file_falls_back_to_latin1_test() ->
     {m1, "x"} = M:decode_msg(Data, m1),
     unload_code(M).
 
+error_for_invalid_boms_test() ->
+    [{_,{error,{utf8_decode_failed,{invalid_proto_byte_order_mark,_},_},[]}} =
+         {Bom, compile_iolist_get_errors_or_warnings(
+                 [Bom, "message m1 {"
+                  "  required string f1 = 1;",
+                  "}"])}
+     || Bom <- [<<0,0,16#FE,16#FF>>, % utf32-big endian
+                <<16#FF,16#FE,0,0>>, % utf32-little
+                <<16#FE,16#FF>>,     % utf16-big
+                <<16#FF,16#FE>>]].   % utf16-little
+
 %% -- translation of google.protobuf.Any ----------
 
 -define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).
@@ -2529,6 +2540,9 @@ compile_iolist(IoList) ->
     compile_iolist(IoList, []).
 
 compile_iolist(IoList, ExtraOpts) ->
+    compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, must_succeed).
+
+compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, OnFail) ->
     Mod = find_unused_module(),
     Contents = iolist_to_binary(IoList),
     ModProto = f("~s.proto", [Mod]),
@@ -2543,16 +2557,33 @@ compile_iolist(IoList, ExtraOpts) ->
                              end
                    end,
 
-    {ok, Mod, Code, []} =
-        gpb_compile:file(
-          ModProto,
-          [{file_op, [{read_file, ReadFile},
-                      {read_file_info, ReadFileInfo},
-                      {write_file, fun(_,_) -> ok end}]},
-           {i,"."},
-           binary, return_warnings | ExtraOpts]),
-    load_code(Mod, Code),
-    Mod.
+    CompRes = gpb_compile:file(
+                ModProto,
+                [{file_op, [{read_file, ReadFile},
+                            {read_file_info, ReadFileInfo},
+                            {write_file, fun(_,_) -> ok end}]},
+                 {i,"."},
+                 binary, return_warnings | ExtraOpts]),
+    case OnFail of
+        must_succeed ->
+            {ok, Mod, Code, []} = CompRes,
+            load_code(Mod, Code),
+            Mod;
+        get_result ->
+            case CompRes of
+                {ok, Mod, Code, Warnings} ->
+                    load_code(Mod, Code),
+                    {ok, Mod, Warnings};
+                {error, Reasons, Warnings} ->
+                    {error, Reasons, Warnings}
+            end
+    end.
+
+compile_iolist_get_errors_or_warnings(IoList) ->
+    compile_iolist_get_errors_or_warnings(IoList, []).
+
+compile_iolist_get_errors_or_warnings(IoList, ExtraOpts) ->
+    compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, get_result).
 
 load_code(Mod, Code) ->
     unload_code(Mod),

@@ -1184,7 +1184,9 @@ locate_import_aux([Path | Rest], Import, Opts, Tried) ->
                         {ok, {utf8, S}} ->
                             {ok, S};
                         {ok, {latin1, S}} ->
-                            {ok, S}
+                            {ok, S};
+                        {error, Reason} ->
+                            {error, {utf8_decode_failed, Reason, File}}
                     end;
                 {error, Reason} ->
                     {error, {read_failed, File, Reason}}
@@ -1292,14 +1294,21 @@ possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
 %% In 3.0.0, it accepts a byte order mark (BOM), but in 2.6.1 it does not.
 %% It only accepts a BOM for for UTF-8. It does not accept UTF-16 nor UTF-32
 %% input (tried both little and big endian for both, with proper BOMs).
-utf8_decode(<<16#EF,16#BB,16#BF, Rest/binary>>) ->
-    utf8_decode(Rest);
 utf8_decode(B) ->
-    case unicode:characters_to_list(B) of
-        S when is_list(S) ->
-            {ok, {utf8, S}};
-        {error, _, _} ->
-            {ok, {latin1, binary_to_list(B)}}
+    {Enc, Len} = unicode:bom_to_encoding(B),
+    <<_Bom:Len/binary, B2/binary>> = B,
+    if Enc == latin1;
+       Enc == utf8 ->
+            %% Enc == latin1 means just that no Byte order mark was seen,
+            %% it might still be UTF-8 encoded, though, so try that first.
+            case unicode:characters_to_list(B2) of
+                S when is_list(S) ->
+                    {ok, {utf8, S}};
+                {error, _, _} ->
+                    {ok, {latin1, binary_to_list(B2)}}
+            end;
+       true ->
+            {error, {invalid_proto_byte_order_mark, Enc}}
     end.
 
 %% -- analysis -----------------------------------------------------
