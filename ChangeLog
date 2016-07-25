@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 3.24.1
+2016-Jul-25
+
+	* In 3.24.0, the input encoding was effectively changed to UTF-8,
+	whereas it previously was not defined, but in practice
+	it was latin1. Now, both for backwards compatibility, and also
+	for similarity with the behaviour of Google protobuf, treat the
+	input format as UTF-8 if possible, and fallback to latin1.
+
 Version 3.24.0
 2016-Jul-23
 
