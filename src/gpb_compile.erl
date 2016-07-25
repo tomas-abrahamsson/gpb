@@ -1980,7 +1980,7 @@ format_encoders_top_function_msgs(Defs, Opts) ->
        fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
-     ?f("-spec encode_msg(_~s, []) -> binary().~n", [SpecExtraArgs]),
+     ?f("-spec encode_msg(_~s, list()) -> binary().~n", [SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>', '<Opts>') ->
