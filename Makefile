@@ -39,8 +39,8 @@
 # ERL_BATCH_FLAGS -- Flags to start the Erlang VM in batch mode
 
 
-.SUFFIXES += .erl .xrl .yrl .hrl .beam .proto
-.PHONY: all clean test doc xref
+.SUFFIXES += .erl .xrl .yrl .hrl .beam .proto .plt
+.PHONY: all clean test doc xref dialyze build_plt clean_plt
 
 SHELL = /bin/sh
 
@@ -95,6 +95,36 @@ endif
 ERLC_FLAGS += -Wall +debug_info -I$(incdir)
 
 ERL_BATCH_FLAGS = +B -noshell -noinput
+
+OTP_MAJOR_MINOR = $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+    GetVsnFromFile = \
+        fun(V) -> case lists:reverse(string:strip(V,right,$$\n)) of \
+                      "**"++Rest -> lists:reverse(Rest); \
+                      Rest -> lists:reverse(Rest) \
+                  end \
+        end, \
+    RootDir = code:root_dir(), \
+    io:format( \
+      "~s~n", \
+      [case erlang:system_info(otp_release) of \
+           "R"++_=Rel -> Rel; \
+           RStr -> \
+               lists:foldl( \
+                 fun(_,R) when R /= RStr -> R; \
+                    (F,R) -> case file:read_file(F) of \
+                                 {ok,B} -> GetVsnFromFile(binary_to_list(B));\
+                                 _ -> R \
+                             end \
+                 end, \
+                 RStr, \
+                 [filename:join([RootDir,"releases",RStr,"OTP_VERSION"]), \
+                  filename:join([RootDir,"releases","OTP_VERSION"])]) \
+       end]), \
+    halt(0).')
+
+# Use the same plt file as rebar would use, for compatibility
+plt = $(GPB_PREFIX).gpb-$(OTP_MAJOR_MINOR).plt
+
 
 ifdef NO_HAVE_MAPS
 ERLC_FLAGS += -DNO_HAVE_MAPS=true
@@ -189,6 +219,18 @@ xref: all
 		{undefined,[]}     -> halt(0); \
 		{undefined,Undefs} -> io:format(\"~p~n\",[Undefs]), halt(1) \
 	    end."
+
+dialyze: all $(plt)
+	dialyzer -q --plt $(plt) -r $(ebin)
+
+build_plt: $(plt)
+
+clean_plt:
+	$(RM) -f $(plt)
+
+$(plt):
+	dialyzer -q --build_plt --output_plt $@ --apps erts kernel stdlib
+
 
 FORCE:
 
