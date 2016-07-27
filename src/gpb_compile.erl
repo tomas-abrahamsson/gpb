@@ -334,14 +334,16 @@ file(File) ->
 %%       `merge_msgs' function. The `$2' is the lastly seen term, or
 %%       the second argument to the `merge_msgs' function.</dd>
 %%   <dt>Verify</dt>
-%%   <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
+%%   <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%       If `Term' (`$1') is valid, the function is expected to just return
 %%       any value, which is ignored and discarded.
-%%       If `Term' is invalid, the function is exptected to
-%%       call `ErrorF' (`$errorf') with one argument, the reason for
-%%       error. That function will raise an error, which will also
-%%       additionally contain the actual value of `Term' and the path
-%%       to the field.</dd>
+%%       If `Term' is invalid, the function is exptected to not
+%%       return anything, but instead either crash, call
+%%       `erlang:error/1', or `throw/1' or `exit/1'.  with the
+%%       reason for error.
+%%       (For backwards compatibility, it is also possible
+%%       to have an error function as argument, using `$errorf',
+%%       but this is deprecated.)</dd>
 %% </dl>
 %% There are additional translator argument markers:
 %% <dl>
@@ -731,7 +733,7 @@ c() ->
 %%   <dt>`-any_translate MsFs'</dt>
 %%   <dd>Call functions in `MsFs' to pack, unpack, merge and verify
 %%       `google.protobuf.Any' messages. The `MsFs' is a string on the
-%%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]'.
+%%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
 %%       The specified modules and functinos are called and used as follows:
 %%       <dl>
 %%         <dt>e=Mod:Fn</dt>
@@ -743,14 +745,20 @@ c() ->
 %%         <dt>m=Mod:Fn</dt>
 %%         <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
 %%             unpacked terms to a resulting Term3.</dd>
-%%         <dt>v=Mod:Fn</dt>
-%%         <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
+%%         <dt>V=Mod:Fn</dt>
+%%         <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%             If `Term' is valid, the function is expected to just return
 %%             any value, which is ignored and discarded.
-%%             If `Term' is invalid, the function is exptected to call `ErrorF'
-%%             with one argument, the reason for error. That function will
-%%             raise an error, which will also additionally contain the
-%%             actual value of `Term' and the path to the field.</dd>
+%%             If `Term' is invalid, the function is exptected to not
+%%             return anything, but instead either crash, call
+%%             `erlang:error/1', or `throw/1' or `exit/1'.  with the
+%%             reason for error.
+%%             If you want to use a verifier, this is the new preferred
+%%             approach.</dd>
+%%         <dt>v=Mod:Fn</dt>
+%%         <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
+%%             This exists for backwards compatibility, and its use
+%%             is deprecated.</dd>.
 %%       </dl>
 %%   </dd>
 %%   <dt>`-msgprefix Prefix'</dt>
@@ -969,7 +977,7 @@ opt_specs() ->
       "       - encode (calls Mod:Fn(Term) -> AnyMessage to pack)\n"
       "       - decode (calls Mod:Fn(AnyMessage) -> Term to unpack)\n"
       "       - merge  (calls Mod:Fn(Term,Term2) -> Term3 to merge unpacked)\n"
-      "       - verify (calls Mod:Fn(Term,ErrorF) -> _ to verify unpacked)\n"},
+      "       - verify (calls Mod:Fn(Term) -> _ to verify unpacked)\n"},
      {"msgprefix", 'string()', msg_name_prefix, "Prefix\n"
       "       Prefix each message with Prefix.\n"},
      {"modprefix", 'string()', module_name_prefix, "Prefix\n"
