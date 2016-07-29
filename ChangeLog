@@ -1,5 +1,16 @@
 -*- coding: utf-8 -*-
 
+Version 3.24.3
+2016-Jul-29
+
+	* Decode unknown enums to integers. Integers are allowed for
+	encoding, for symmetry. Thanks to Eric Meadows-Jönsson for
+	suggesting.
+	* Fix epb compat function when the .proto contained no
+	messages, and the maps option was specified.
+	* Fix a bad type spec for the generated encode_msg, to make
+	dialyzer happier again about the generated code.
+
 Version 3.24.2
 2016-Jul-25
 
