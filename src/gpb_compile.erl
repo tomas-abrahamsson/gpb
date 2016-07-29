@@ -1956,11 +1956,10 @@ format_encoders_top_function_no_msgs(Opts) ->
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
      ?f("%% epb compatibility\n"),
-     ?f("-spec encode(_~s) -> no_return().\n", [SpecExtraArgs]),
+     ?f("-spec encode(_) -> no_return().\n"),
      gpb_codegen:format_fn(
       encode,
-      fun(_Msg, '<MsgName>') -> erlang:error({gpb_error, no_messages}) end,
-      [splice_trees('<MsgName>', MsgNameVars)])].
+      fun(_Msg) -> erlang:error({gpb_error, no_messages}) end)].
 
 format_encoders_top_function_msgs(Defs, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
