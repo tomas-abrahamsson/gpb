@@ -5824,7 +5824,7 @@ type_to_typestr_2(double, _Defs, _Opts)   -> float_spec();
 type_to_typestr_2(string, _Defs, Opts)    ->
   string_to_typestr(get_strings_as_binaries_by_opts(Opts));
 type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
-type_to_typestr_2({enum,E}, Defs, _Opts)  -> enum_typestr(E, Defs);
+type_to_typestr_2({enum,E}, Defs, Opts)   -> enum_typestr(E, Defs, Opts);
 type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts);
 type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
     KTStr = type_to_typestr_2(KT, Defs, Opts),
@@ -5850,11 +5850,15 @@ string_to_typestr(true) ->
 string_to_typestr(false) ->
   "iolist()".
 
-enum_typestr(E, Defs) ->
+enum_typestr(E, Defs, Opts) ->
+    UnknownEnums = case proplists:get_bool(nif, Opts) of
+                       false -> " | integer()";
+                       true  -> ""
+                   end,
     {value, {{enum,E}, Enumerations}} = lists:keysearch({enum,E}, 1, Defs),
     string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumerations],
                 " | ")
-        ++ " | integer()".
+        ++ UnknownEnums.
 
 type_to_comment(#?gpb_field{type=Type}, true=_TypeSpec) ->
     case Type of
