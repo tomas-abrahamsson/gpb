@@ -184,6 +184,26 @@ decode_msg_with_enum_aliases_test() ->
                                 {v1, 100},
                                 {v2, 100}]}]).
 
+decode_unknown_enum_test() ->
+    #m1{a = 4711} =
+        decode_msg(<<8, 231,36>>, m1,
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type={enum,e}, occurrence=required,
+                                            opts=[]}]},
+                    {{enum,e}, [{v0, 0}]}]),
+    #m1{a = [4711]} =
+        decode_msg(<<8, 231,36>>, m1,
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type={enum,e}, occurrence=repeated,
+                                            opts=[]}]},
+                    {{enum,e}, [{v0, 0}]}]),
+    #m1{a = [4711]} =
+        decode_msg(<<10, 2, 231,36>>, m1,
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type={enum,e}, occurrence=repeated,
+                                            opts=[packed]}]},
+                    {{enum,e}, [{v0, 0}]}]).
+
 decode_msg_with_bool_field_test() ->
     #m1{a = true} =
         decode_msg(<<8,1>>,
@@ -549,6 +569,26 @@ encode_msg_with_enum_aliases_test() ->
                                 {v2, 100}]}],
     <<8,100>> = encode_msg(#m1{a = v1}, Defs),
     <<8,100>> = encode_msg(#m1{a = v2}, Defs).
+
+encode_unknown_enum_test() ->
+    <<8, 231,36>> =
+        encode_msg(#m1{a = 4711},
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type={enum,e}, occurrence=required,
+                                            opts=[]}]},
+                    {{enum,e}, [{v0, 0}]}]),
+    <<8, 231,36>> =
+        encode_msg(#m1{a = [4711]},
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type={enum,e}, occurrence=repeated,
+                                            opts=[]}]},
+                    {{enum,e}, [{v0, 0}]}]),
+    <<10, 2, 231,36>> =
+        encode_msg(#m1{a = [4711]},
+                   [{{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                            type={enum,e}, occurrence=repeated,
+                                            opts=[packed]}]},
+                    {{enum,e}, [{v0, 0}]}]).
 
 encode_msg_with_bool_field_test() ->
     <<8,1>> =
@@ -1036,6 +1076,14 @@ verify_invalid_bytes_fails_test() ->
 
 verify_valid_enum_succeeds_test() ->
     ok = verify_msg(#m1{a = e1},
+                    [{{msg,m1},
+                      [#?gpb_field{name=a,fnum=1,rnum=#m1.a,
+                                   type={enum,e},
+                                   occurrence=required}]},
+                     {{enum,e},[{e1, 1}]}]).
+
+verify_enum_as_integer_succeeds_test() ->
+    ok = verify_msg(#m1{a = 4711},
                     [{{msg,m1},
                       [#?gpb_field{name=a,fnum=1,rnum=#m1.a,
                                    type={enum,e},

@@ -2055,7 +2055,10 @@ format_aux_encoders(Defs, AnRes, _Opts) ->
 format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
     [gpb_codegen:format_fn(
        mk_fn(e_enum_, EnumName),
-       fun('<EnumSym>', Bin) -> <<Bin/binary, '<varint-bytes>'>> end,
+       fun('<EnumSym>', Bin) -> <<Bin/binary, '<varint-bytes>'>>;
+          (V, Bin) -> % integer (for yet unknown enums)
+               e_varint(V, Bin)
+       end,
        [repeat_clauses('<EnumSym>',
                        [begin
                             ViBytes = enum_to_binary_fields(EnumValue),
@@ -2557,8 +2560,16 @@ is_varint_encoder_needed(#anres{used_types=UsedTypes}=AnRes) ->
     TypesNeedingAVarintEncoder = [int32, int64, uint32, uint64, sint32, sint64,
                                   string, bytes],
     smember_any(TypesNeedingAVarintEncoder, UsedTypes) orelse
+        any_enum_field_exists(UsedTypes) orelse
         any_packed_field_exists(AnRes) orelse
         at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes).
+
+any_enum_field_exists(UsedTypes) ->
+    sets:fold(fun({enum,_}, _Acc) -> true;
+                 (_, Acc)         -> Acc
+              end,
+              false,
+              UsedTypes).
 
 any_packed_field_exists(#anres{num_packed_fields=0}) -> false;
 any_packed_field_exists(#anres{num_packed_fields=_}) -> true.
@@ -2810,7 +2821,9 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %%        from run-time to compile-time??
     [gpb_codegen:format_fn(
        mk_fn(d_enum_, EnumName),
-       fun('<EnumValue>') -> '<EnumSym>' end,
+       fun('<EnumValue>') -> '<EnumSym>';
+          (V) -> V % for yet unknown enums
+       end,
        [repeat_clauses('<EnumValue>',
                        [[replace_term('<EnumValue>', EnumValue),
                          replace_term('<EnumSym>', EnumSym)]
@@ -4597,6 +4610,7 @@ format_enum_verifier(EnumName, EnumMembers) ->
      gpb_codegen:format_fn(
        FnName,
        fun('<sym>', _Path) -> ok;
+          (V, Path) when is_integer(V) -> v_type_sint32(V, Path);
           (X, Path) -> mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
        end,
        [repeat_clauses('<sym>', [[replace_term('<sym>', EnumSym)]
@@ -4604,7 +4618,8 @@ format_enum_verifier(EnumName, EnumMembers) ->
         replace_term('<EnumName>', EnumName)])].
 
 format_type_verifiers(#anres{used_types=UsedTypes}) ->
-    [[format_int_verifier(sint32, signed, 32)   || smember(sint32, UsedTypes)],
+    [[format_int_verifier(sint32, signed, 32)
+      || smember(sint32, UsedTypes) orelse any_enum_field_exists(UsedTypes)],
      [format_int_verifier(sint64, signed, 64)   || smember(sint64, UsedTypes)],
      [format_int_verifier(int32,  signed, 32)   || smember(int32, UsedTypes)],
      [format_int_verifier(int64,  signed, 64)   || smember(int64, UsedTypes)],
@@ -5808,7 +5823,7 @@ type_to_typestr_2(double, _Defs, _Opts)   -> float_spec();
 type_to_typestr_2(string, _Defs, Opts)    ->
   string_to_typestr(get_strings_as_binaries_by_opts(Opts));
 type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
-type_to_typestr_2({enum,E}, Defs, _Opts)  -> enum_typestr(E, Defs);
+type_to_typestr_2({enum,E}, Defs, Opts)   -> enum_typestr(E, Defs, Opts);
 type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts);
 type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
     KTStr = type_to_typestr_2(KT, Defs, Opts),
@@ -5834,10 +5849,15 @@ string_to_typestr(true) ->
 string_to_typestr(false) ->
   "iolist()".
 
-enum_typestr(E, Defs) ->
+enum_typestr(E, Defs, Opts) ->
+    UnknownEnums = case proplists:get_bool(nif, Opts) of
+                       false -> " | integer()";
+                       true  -> ""
+                   end,
     {value, {{enum,E}, Enumerations}} = lists:keysearch({enum,E}, 1, Defs),
     string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumerations],
-                " | ").
+                " | ")
+        ++ UnknownEnums.
 
 type_to_comment(#?gpb_field{type=Type}, true=_TypeSpec) ->
     case Type of

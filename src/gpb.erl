@@ -312,8 +312,10 @@ decode_type(FieldType, Bin, MsgDefs) ->
         {enum, _EnumName}=Key ->
             {N, Rest} = decode_type(int32, Bin, MsgDefs),
             {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
-            {value, {EnumName, N}} = lists:keysearch(N, 2, EnumValues),
-            {EnumName, Rest};
+            case lists:keyfind(N, 2, EnumValues) of
+                {EnumName, N} -> {EnumName, Rest};
+                false         -> {N, Rest}
+            end;
         fixed64 ->
             <<N:64/little, Rest/binary>> = Bin,
             {N, Rest};
@@ -602,8 +604,13 @@ encode_value(Value, Type, MsgDefs)                                             -
                Value =:= 0 -> encode_varint(0)
             end;
         {enum, _EnumName}=Key ->
-            {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
-            {value, {Value, N}} = lists:keysearch(Value, 1, EnumValues),
+            N = if is_atom(Value) ->
+                        {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
+                        {Value, EN} = lists:keyfind(Value, 1, EnumValues),
+                        EN;
+                   is_integer(Value) ->
+                        Value
+                end,
             encode_value(N, int32, MsgDefs);
         fixed64 ->
             <<Value:64/little>>;
@@ -824,10 +831,15 @@ verify_bytes(V, Path) ->
 
 verify_enum(V, EnumName, MsgDefs, Path) ->
     EnumKey = {enum, EnumName},
-    {value, {EnumKey, Enumerations}} = lists:keysearch(EnumKey, 1, MsgDefs),
-    case lists:keymember(V, 1, Enumerations) of
-        true  -> ok;
-        false -> mk_type_error(bad_enum_value, V, Path)
+    if is_atom(V) ->
+            {EnumKey, Enumerations} = lists:keyfind(EnumKey, 1, MsgDefs),
+            case lists:keymember(V, 1, Enumerations) of
+                true  -> ok;
+                false -> mk_type_error(bad_enum_value, V, Path)
+            end;
+       is_integer(V) ->
+            %% must be 32 bit signed int, I think
+            verify_int(V, {i,32}, Path)
     end.
 
 verify_map({Key,Value}, {map, KeyType, ValueType}, MsgDefs, Path) ->
