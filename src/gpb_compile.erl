@@ -366,7 +366,9 @@ file(File) ->
 %% library. The generated extra functions are:
 %% <ul>
 %%   <li>`encode/1'</li>
+%%   <li>`encode_<MsgName>/1'</li>
 %%   <li>`decode/2'</li>
+%%   <li>`decode_<MsgName>/1'</li>
 %% </ul>
 file(File, Opts0) ->
     Opts1 = normalize_alias_opts(Opts0),
@@ -469,7 +471,7 @@ proto_defs(Mod, Defs0, Opts0) ->
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs, Opts2),
-    case verify_opts(Opts2) of
+    case verify_opts(Defs, Opts2) of
         ok ->
             Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
             return_or_report_warnings_or_errors(Res1, Warns, Opts2,
@@ -479,9 +481,9 @@ proto_defs(Mod, Defs0, Opts0) ->
                                                 get_output_format(Opts2))
     end.
 
-verify_opts(Opts) ->
+verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_any_translate_and_nif(Opts) end,
-              fun() -> verify_opts_epb_compat(Opts) end]).
+              fun() -> verify_opts_epb_compat(Defs, Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -499,7 +501,7 @@ verify_opts_any_translate_and_nif(Opts) ->
             ok
     end.
 
-verify_opts_epb_compat(Opts) ->
+verify_opts_epb_compat(Defs, Opts) ->
     while_ok(
       [fun() ->
                case {proplists:get_bool(epb_compatibility, Opts),
@@ -507,6 +509,21 @@ verify_opts_epb_compat(Opts) ->
                    {true, maps} ->
                        {error, {invalid_options, epb_compatibility,maps}};
                    _ ->
+                       ok
+               end
+       end,
+       fun() ->
+               case proplists:get_bool(epb_compatibility, Opts) of
+                   true ->
+                       MsgNames = [Nm || {{msg,Nm},_Fields} <- Defs],
+                       case lists:member(msg, MsgNames) of
+                           true ->
+                               {error, {epb_compatibility_impossible,
+                                        {with_msg_named,msg}}};
+                           false ->
+                               ok
+                       end;
+                   false ->
                        ok
                end
        end]).
@@ -687,6 +704,10 @@ fmt_err({invalid_options,any_translate,nif}) ->
     "Option error: Not supported: both any_translate and nif";
 fmt_err({invalid_options, epb_compatibility, maps}) ->
     "Option error: Not supported: both epb_compatibility and maps";
+fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
+    "Not possible to generate epb compatible functions when a message "
+        "is named 'msg' because of collision with the standard gpb functions "
+        "'encode_msg' and 'decode_msg'";
 fmt_err(X) ->
     ?f("Unexpected error ~p", [X]).
 
@@ -1039,7 +1060,7 @@ opt_specs() ->
      {"epb", undefined, epb_compatibility, "\n"
       "       Generate some functions that for api compatibility with\n"
       "       the Erlang Protobuffs library:\n"
-      "       encode/1, decode/2\n"},
+      "       encode/1, decode/2, encode_MsgName/1, decode_MsgName/1\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
@@ -1828,6 +1849,8 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
            maps    -> ?f("-export([encode_msg/2, encode_msg/3]).~n")
        end,
        [[?f("-export([encode/1]). %% epb compatibility~n"),
+         [?f("-export([~p/1]).~n", [mk_fn(encode_, MsgName)])
+          || {{msg,MsgName}, _Fields} <- Defs],
          "\n"]
         || proplists:get_bool(epb_compatibility, Opts)],
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
@@ -1836,6 +1859,8 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
            maps    -> ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
        end,
        [[?f("-export([decode/2]). %% epb compatibility~n"),
+         [?f("-export([~p/1]).~n", [mk_fn(decode_, MsgName)])
+          || {{msg,MsgName}, _Fields} <- Defs],
          "\n"]
         || proplists:get_bool(epb_compatibility, Opts)],
        case get_records_or_maps_by_opts(Opts) of
@@ -2081,7 +2106,12 @@ format_encoders_top_function_msgs(Defs, Opts) ->
        ?f("-spec encode(_) -> binary().~n"),
        gpb_codegen:format_fn(
          encode,
-         fun(Msg) -> encode_msg(Msg) end)]
+         fun(Msg) -> encode_msg(Msg) end),
+       [[?f("-spec ~p(_) -> binary().~n", [mk_fn(encode_, MsgName)]),
+         gpb_codegen:format_fn(
+           mk_fn(encode_, MsgName),
+           fun(Msg) -> encode_msg(Msg) end)]
+        || {{msg,MsgName}, _Fields} <- Defs]]
       || proplists:get_bool(epb_compatibility, Opts)]].
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
@@ -2838,7 +2868,14 @@ format_decoders_top_function_msgs(Defs, Opts) ->
          decode,
          fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
                  decode_msg(Bin, MsgName)
-         end)]
+         end),
+       [gpb_codegen:format_fn(
+          mk_fn(decode_, MsgName),
+          fun(Bin) when is_binary(Bin) ->
+                  decode_msg(Bin, 'MsgName')
+          end,
+          [replace_term('MsgName', MsgName)])
+        || {{msg,MsgName}, _Fields} <- Defs]]
       || proplists:get_bool(epb_compatibility, Opts)]].
 
 format_aux_decoders(Defs, AnRes, _Opts) ->

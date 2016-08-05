@@ -156,13 +156,17 @@ parses_and_generates_good_code_for_epb_compatibility_test() ->
     M1 = #m1{a=1234},
     B1 = Mod1:encode(M1),
     ?assertMatch(true, is_binary(B1)),
+    B1 = Mod1:encode_m1(M1),
     M1 = Mod1:decode(m1, B1),
+    M1 = Mod1:decode_m1(B1),
     unload_code(Mod1),
 
     %% verify no compatibility functions generated with no compat options
     Mod2 = compile_iolist(DefsM1, []),
     ?assertError(undef, Mod2:encode(M1)),
+    ?assertError(undef, Mod2:encode_m1(M1)),
     ?assertError(undef, Mod2:decode(m1, B1)),
+    ?assertError(undef, Mod2:decode_m1(B1)),
     unload_code(Mod2),
 
     %% verify functions generated ok when no msgs specified
