@@ -138,10 +138,38 @@ parses_and_generates_good_code_also_for_empty_msgs_test() ->
     unload_code(M).
 
 parses_and_generates_good_code_for_epb_compatibility_test() ->
-    M = compile_iolist(["message m1 { }\n"]),
-    ?assertMatch(true, is_binary(M:encode({m1}))),
-    ?assertMatch({m1}, M:decode(m1, M:encode({m1}))),
-    unload_code(M).
+    DefsM1 = "message m1 { required uint32 a = 1; }\n",
+    DefsNoMsgs = "enum ee { a = 0; }\n",
+    {error, Reason1, []} = compile_iolist_get_errors_or_warnings(
+                             DefsM1,
+                             [epb_compatibility, maps]),
+    true = is_list(gpb_compile:format_error(Reason1)),
+
+    %% Verify we get an error for epb_compatibility with a message named 'msg'
+    %% due to collision with standard gpb encode_msg/decode_msg functions
+    {error, Reason2, []} = compile_iolist_get_errors_or_warnings(
+                             "message msg { }\n",
+                             [epb_compatibility, maps]),
+    true = is_list(gpb_compile:format_error(Reason2)),
+
+    Mod1 = compile_iolist(DefsM1, [epb_compatibility]),
+    M1 = #m1{a=1234},
+    B1 = Mod1:encode(M1),
+    ?assertMatch(true, is_binary(B1)),
+    M1 = Mod1:decode(m1, B1),
+    unload_code(Mod1),
+
+    %% verify no compatibility functions generated with no compat options
+    Mod2 = compile_iolist(DefsM1, []),
+    ?assertError(undef, Mod2:encode(M1)),
+    ?assertError(undef, Mod2:decode(m1, B1)),
+    unload_code(Mod2),
+
+    %% verify functions generated ok when no msgs specified
+    Mod3 = compile_iolist(DefsNoMsgs, [epb_compatibility]),
+    _ = Mod3:module_info(),
+    unload_code(Mod3).
+
 
 field_pass_as_params_test() ->
     MsgDef = ["message m2 { required uint32 f22 = 1; }"
@@ -2551,7 +2579,8 @@ opt_test() ->
            descriptor, maps,
            msg_name_to_lower,
            help, help, version, version,
-           {erlc_compile_options, "debug_info, inline_list_funcs"}
+           {erlc_compile_options, "debug_info, inline_list_funcs"},
+           epb_compatibility
            ],
           ["x.proto", "y.proto"]}} =
         gpb_compile:parse_opts_and_args(
@@ -2585,6 +2614,7 @@ opt_test() ->
            "-h", "--help",
            "-V", "--version",
            "-erlc_compile_options", "debug_info, inline_list_funcs",
+           "-epb",
            "x.proto", "y.proto"]).
 
 %% --- auxiliaries -----------------
@@ -2657,7 +2687,7 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, OnFail) ->
                             {read_file_info, ReadFileInfo},
                             {write_file, fun(_,_) -> ok end}]},
                  {i,"."},
-                 binary, return_warnings | ExtraOpts]),
+                 binary, return_errors, return_warnings | ExtraOpts]),
     case OnFail of
         must_succeed ->
             {ok, Mod, Code, []} = CompRes,
