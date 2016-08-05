@@ -1030,6 +1030,7 @@ opt_any_translate(OptTag, [S | Rest]) ->
 opt_any_translate_mfa("e="++MF) -> {encode,opt_mf_str(MF, 1)};
 opt_any_translate_mfa("d="++MF) -> {decode,opt_mf_str(MF, 1)};
 opt_any_translate_mfa("m="++MF) -> {merge, opt_mf_str(MF, 2)};
+opt_any_translate_mfa("V="++MF) -> {verify,opt_mf_str(MF, 1)};
 opt_any_translate_mfa("v="++MF) -> {verify,opt_mf_str_verify(MF)};
 opt_any_translate_mfa(X) -> throw({badopt,"Invalid translation spec: "++X}).
 
@@ -1760,8 +1761,7 @@ is_repeated_elem_path(_) -> false.
 
 default_any_merge_translator() -> {any_m_overwrite,['$2','$user_data']}.
 
-default_any_verify_translator() -> {any_v_no_check,['$1','$errorf',
-                                                    '$user_data']}.
+default_any_verify_translator() -> {any_v_no_check,['$1', '$user_data']}.
 
 %% -- generating code ----------------------------------------------
 
@@ -4880,44 +4880,55 @@ format_field_op_translator(ElemPath, Op, CallTemplate) ->
                                 replace_tree('Path', Path)]),
                 Outs = [{'$1',V},{'$errorf',ErrorF},{'$user_data',UserData}],
                 Rels = [{'$1',['$1']},
-                        {'$errorf',['$1','$2']}, % $errorf uses in-args $1,$2
+                        %% $errorf uses $1,$2 if present, else $1,$2 are used
+                        {'$errorf',['$1','$2'], ['$1','$2']},
                         {'$user_data',['$user_data']}],
                 {Ins, Outs, Rels}
         end,
     OutArgs = OutArgs0 ++ [{'$op', erl_syntax:abstract(Op)}],
     Relations = Relations0 ++ [{'$op', []}],
-    {InPatterns, OutParams, _UsedInNames, _UsedOutNames} =
+    {InPatterns, OutParams, _UsedInNames, UsedOutNames} =
         process_tr_params(InArgs, Relations, OutArgs, ArgTemplate),
+    Call = case CallTemplate of
+               {Fn, ArgTemplate} ->
+                   ?expr('$$Fn'('$$OutParams'),
+                         [replace_term('$$Fn', Fn),
+                          splice_trees('$$OutParams', OutParams)]);
+               {Mod, Fn, ArgTemplate} ->
+                   ?expr('$$Mod':'$$Fn'('$$OutParams'),
+                         [replace_term('$$Mod', Mod),
+                          replace_term('$$Fn', Fn),
+                          splice_trees('$$OutParams', OutParams)])
+           end,
+    UsesErrorF = lists:member('$errorf', UsedOutNames),
+    Body = if Op == verify, not UsesErrorF ->
+                   [Actual,EPath|_] = InPatterns,
+                   ?expr(try '$$Call', ok
+                         catch _:Reason ->
+                                 mk_type_error(Reason,'Actual','Path')
+                         end,
+                         [replace_tree('$$Call', Call),
+                          replace_tree('Actual', Actual),
+                          replace_tree('Path', EPath)]);
+              true ->
+                   Call
+           end,
     [inline_attr(FnName,length(InArgs)),
      if Op == verify ->
              %% Dialyzer might complain that "The created fun has no
-             %% local return" which is true, but also not surprising,
-             %% so shut this warning down.
+             %% local return", for a $errorf, which is true, but also
+             %% not surprising, so shut this warning down.
              nowarn_dialyzer_attr(FnName,length(InArgs));
         true ->
              ""
      end,
-     case CallTemplate of
-         {Fn, ArgTemplate} ->
-             gpb_codegen:format_fn(
-               FnName,
-               fun('$$InPatterns') ->
-                       '$$Fn'('$$OutParams')
-               end,
-               [replace_term('$$Fn', Fn),
-                splice_trees('$$InPatterns', InPatterns),
-                splice_trees('$$OutParams', OutParams)]);
-         {Mod, Fn, ArgTemplate} ->
-             gpb_codegen:format_fn(
-               FnName,
-               fun('$$InPatterns') ->
-                       '$$Mod':'$$Fn'('$$OutParams')
-               end,
-               [replace_term('$$Mod', Mod),
-                replace_term('$$Fn', Fn),
-                splice_trees('$$InPatterns', InPatterns),
-                splice_trees('$$OutParams', OutParams)])
-     end].
+     gpb_codegen:format_fn(
+       FnName,
+       fun('$$InPatterns') ->
+               '$$Body'
+       end,
+       [splice_trees('$$InPatterns', InPatterns),
+        replace_tree('$$Body', Body)])].
 
 
 last_tuple_element(Tuple) ->
@@ -4947,7 +4958,9 @@ process_tr_params(InArgs, InOutArgRelations, Outs, ArgsTemplate) ->
           end,
           [],
           ArgsTemplate),
-    UsedInArgs = compute_used_in_args(UsedOutNames, InOutArgRelations),
+    UnusedOutNames = [N || {N,_} <- Outs] -- UsedOutNames,
+    UsedInArgs = compute_used_in_args(UsedOutNames, UnusedOutNames,
+                                      InOutArgRelations),
     InParams = underscore_unused_params(InArgs, UsedInArgs),
     {InParams, OutArgs, UsedInArgs, UsedOutNames}.
 
@@ -5003,11 +5016,23 @@ abstractify_tr_param_check_for_map(X, _Outs) ->
 mk_pass_straight_through_rel(Names) ->
     [{Name,[Name]} || Name <- Names].
 
-compute_used_in_args(Used, InOutArgRelations) ->
+compute_used_in_args(Used, Unused, InOutArgRelations) ->
     lists:usort(
       lists:append(
-        [proplists:get_value(U, InOutArgRelations)
-         || U <- Used])).
+        [lists:append(
+           [case lists:keyfind(U, 1, InOutArgRelations) of
+                {U, Ins}         -> Ins;
+                {U, Ins, _Elses} -> Ins;
+                false            -> []
+            end
+            || U <- Used]),
+         lists:append(
+           [case lists:keyfind(Uu, 1, InOutArgRelations) of
+                {Uu, _Ins}        -> [];
+                {Uu, _Ins, Elses} -> Elses;
+                false             -> []
+            end
+            || Uu <- Unused])])).
 
 underscore_unused_params(InArgs, UsedInArgs) ->
     [case lists:member(InName, UsedInArgs) of
@@ -5158,7 +5183,7 @@ format_default_any_translators(#anres{translations=Translations}, _Opts) ->
        "\n"] || sets:is_element(merge, Needs)],
      [[gpb_codegen:format_fn(
          any_v_no_check,
-         fun(_,_,_) -> ok end),
+         fun(_,_) -> ok end),
        "\n"] || sets:is_element(verify, Needs)]].
 
 compute_needed_default_translations(Translations, Defaults) ->

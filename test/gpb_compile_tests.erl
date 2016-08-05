@@ -46,6 +46,7 @@
 
 %% Translators for without user-data
 -export([any_e_atom/1, any_d_atom/1, any_m_atom/2, any_v_atom/2]).
+-export([any_v_atom/1]).
 %% Translators for user-data
 -export([any_e_atom/2, any_d_atom/2, any_m_atom/3, any_v_atom/3]).
 %% Translators for user-data and op
@@ -892,6 +893,37 @@ verify_callback_for_Any_is_optional_test() ->
     ok = M:verify_msg({m,"not an atom"}),
     unload_code(M).
 
+verify_callback_with_and_without_errorf_test() ->
+    DefsM1 = ["syntax=\"proto3\";",
+              "import \"google/protobuf/any.proto\";",
+              "message m1 {",
+              "  required google.protobuf.Any a=1;",
+              "}"],
+
+    Mod1 = compile_iolist(
+             DefsM1,
+             [use_packages,
+              {any_translate,
+               [{encode,{?MODULE,any_e_atom,['$1']}},
+                {decode,{?MODULE,any_d_atom,['$1']}},
+                {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    ok = Mod1:verify_msg(#m1{a=abc}),
+    ?assertError({gpb_type_error,{not_an_atom,[{value,123},{path,'m1.a'}]}},
+                 Mod1:verify_msg(#m1{a=123})),
+    unload_code(Mod1),
+
+    Mod2 = compile_iolist(
+             DefsM1,
+             [use_packages,
+              {any_translate,
+               [{encode,{?MODULE,any_e_atom,['$1']}},
+                {decode,{?MODULE,any_d_atom,['$1']}},
+                {verify,{?MODULE,any_v_atom,['$1']}}]}]), % no '$errorf'
+    ok = Mod2:verify_msg(#m1{a=abc}),
+    ?assertError({gpb_type_error,{oops_no_atom,[{value,123},{path,'m1.a'}]}},
+                 Mod2:verify_msg(#m1{a=123})),
+    unload_code(Mod2).
+
 %% Translators/callbacks:
 any_e_atom(A) ->
     {'google.protobuf.Any', "x.com/atom", list_to_binary(atom_to_list(A))}.
@@ -906,6 +938,9 @@ any_v_atom(A, ErrorF) ->
     if is_atom(A) -> ok;
        true -> ErrorF(not_an_atom)
     end.
+
+any_v_atom(A) when is_atom(A) -> ok;
+any_v_atom(_) -> erlang:error(oops_no_atom).
 
 %% Translators/callbacks for user-data
 any_e_atom(A, Fn) -> call_tr_userdata_fn(Fn, any_e_atom(A)).
@@ -2586,6 +2621,42 @@ opt_test() ->
            "-V", "--version",
            "-erlc_compile_options", "debug_info, inline_list_funcs",
            "x.proto", "y.proto"]).
+
+any_translation_options_test() ->
+    {ok, {[{any_translate,
+            [{encode, {me,fe,['$1']}},
+             {decode, {md,fd,['$1']}}]}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-any_translate", "e=me:fe,d=md:fd",
+           "x.proto"]),
+    %% Merge
+    {ok, {[{any_translate,
+            [{encode, {me,fe,['$1']}},
+             {decode, {md,fd,['$1']}},
+             {merge,  {mm,fm,['$1','$2']}}]}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-any_translate", "e=me:fe,d=md:fd,m=mm:fm",
+           "x.proto"]),
+    %% Verify
+    {ok, {[{any_translate,
+            [{encode, {me,fe,['$1']}},
+             {decode, {md,fd,['$1']}},
+             {verify, {mv,fv,['$1']}}]}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-any_translate", "e=me:fe,d=md:fd,V=mv:fv",
+           "x.proto"]),
+    %% old style verify
+    {ok, {[{any_translate,
+            [{encode, {me,fe,['$1']}},
+             {decode, {md,fd,['$1']}},
+             {verify, {mv,fv,['$1','$errorf']}}]}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-any_translate", "e=me:fe,d=md:fd,v=mv:fv",
+           "x.proto"]).
 
 %% --- auxiliaries -----------------
 
