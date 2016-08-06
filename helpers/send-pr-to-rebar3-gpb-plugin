@@ -117,13 +117,6 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
     git remote add upstream "$upstream_url"
     git fetch -q upstream $default_br
     git reset -q --hard upstream/$default_br
-    echo "Updating your github $repo_name"
-    if [ $dry_run = true -o $moist_run = true ]
-    then
-	echo "Dry run: not pushing to update your github repo"
-    else
-	yes_no git push -q --tags origin $default_br
-    fi
 
     git checkout -b "$pr_br"
     # Grep for rebar / omit README.md because it contains line number references
@@ -149,7 +142,7 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
 	echo "Dry run: not pushing to update your github repo"
     else
 	echo "Pushing the change to your github repo"
-	git push -q origin "$pr_br"
+	yes_no git push -q --tags origin "$default_br" "$pr_br"
     fi
 
     # Json structure, fields:
