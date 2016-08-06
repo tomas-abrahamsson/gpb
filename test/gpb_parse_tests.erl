@@ -353,7 +353,7 @@ field_opt_normalization_test() ->
                  #?gpb_field{name=f5, opts=[]},
                  #?gpb_field{name=f6, opts=[deprecated]},
                  #?gpb_field{name=f7, opts=[packed, {default,true}]}]}] =
-        do_process_sort_defs(Defs).
+        do_process_sort_several_defs([Defs]).
 
 parses_empty_msg_field_options_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1 []; }"]),
@@ -641,6 +641,57 @@ proto3_no_repeated_are_packed_by_default_test() ->
        #?gpb_field{name=f4,fnum=4,occurrence=repeated,opts=[packed]},
        #?gpb_field{name=f5,fnum=5,occurrence=repeated,opts=[packed]}
       ]}] =
+        do_process_sort_defs(Defs).
+
+proto3_only_numeric_scalars_are_packed_test() ->
+    {ok,Defs} = parse_lines(["syntax=\"proto3\";",
+                             "message m1 {",
+                             "  repeated int32            i32  = 1;",
+                             "  repeated int64            i64  = 2;",
+                             "  repeated uint32           u32  = 3;",
+                             "  repeated uint64           u64  = 4;",
+                             "  repeated sint32           s32  = 5;",
+                             "  repeated sint64           s64  = 6;",
+                             "  repeated fixed32          f32  = 7;",
+                             "  repeated fixed64          f64  = 8;",
+                             "  repeated sfixed32         sf32 = 9;",
+                             "  repeated sfixed64         sf64 = 10;",
+                             "  repeated bool             bool = 11;",
+                             "  repeated float            fl   = 12;",
+                             "  repeated double           do   = 13;",
+                             "  repeated string           str  = 14;",
+                             "  repeated bytes            by   = 15;",
+                             "  repeated ee               ef   = 16;",
+                             "  repeated subm             subf = 17;",
+                             "  map<int32,int32>          mapf = 18;",
+                             "}",
+                             "message subm { string f1 = 1; }",
+                             "enum ee { e0 = 0; }"
+                            ]),
+    [{proto3_msgs,[m1,subm]},
+     {syntax,"proto3"},
+     {{enum,ee},_},
+     {{msg,m1},
+      [#?gpb_field{name=i32,  occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=i64,  occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=u32,  occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=u64,  occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=s32,  occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=s64,  occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=f32,  occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=f64,  occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=sf32, occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=sf64, occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=bool, occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=fl,   occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=do,   occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=str,  occurrence=repeated, opts=[]},
+       #?gpb_field{name=by,   occurrence=repeated, opts=[]},
+       #?gpb_field{name=ef,   occurrence=repeated, opts=[packed]},
+       #?gpb_field{name=subf, occurrence=repeated, opts=[]},
+       #?gpb_field{name=mapf,                      opts=[]}
+      ]},
+     {{msg,subm},_}] =
         do_process_sort_defs(Defs).
 
 mixing_proto2_and_proto3_test() ->

@@ -378,13 +378,13 @@ post_process_one_file(Defs, Opts) ->
 post_process_all_files(Defs, Opts) ->
     case resolve_names(Defs) of
         {ok, Defs2} ->
-            {ok, handle_proto_syntax_version_all_files(
-                   possibly_prefix_suffix_msgs(
-                     normalize_msg_field_options(
-                       enumerate_msg_fields(
-                         reformat_names(
-                           extend_msgs(Defs2)))),
-                     Opts))};
+            {ok, normalize_msg_field_options(
+                   handle_proto_syntax_version_all_files(
+                     possibly_prefix_suffix_msgs(
+                         enumerate_msg_fields(
+                           reformat_names(
+                             extend_msgs(Defs2))),
+                       Opts)))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -686,35 +686,9 @@ handle_proto3_1(Defs) ->
     %% FIXME: Verify no 'required' occurrences
     %% FIXME: Verify enums start with 0
 
-    %% The protobuf language guide for proto3 says: "In proto3,
-    %% repeated fields of scalar numeric types use packed encoding by
-    %% default."
-    Defs1 = default_repeated_to_packed(Defs),
     %% Remember which msgs were defined using proto3 syntax,
     %% so we can treat them differently later on.
-    anno_msgs_proto3_origin(Defs1).
-
-default_repeated_to_packed([{{msg,MsgName},Fields} | Rest]) ->
-    NewDef = {{msg,MsgName}, default_repeated_fields_to_packed(Fields)},
-    [NewDef | default_repeated_to_packed(Rest)];
-default_repeated_to_packed([Other | Rest]) ->
-    [Other | default_repeated_to_packed(Rest)];
-default_repeated_to_packed([]) ->
-    [].
-
-default_repeated_fields_to_packed(Fields) ->
-    lists:map(fun(#?gpb_field{occurrence=repeated, opts=Opts}=F) ->
-                      case proplists:get_value(packed, Opts) of
-                          undefined ->
-                              NewOpts = [{packed, true} | Opts],
-                              F#?gpb_field{opts=NewOpts};
-                          _ ->
-                              F
-                      end;
-                 (F) ->
-                      F
-              end,
-              Fields).
+    anno_msgs_proto3_origin(Defs).
 
 anno_msgs_proto3_origin(Defs) ->
     anno_msgs_proto3_origin_2(Defs, []).
@@ -737,7 +711,12 @@ handle_proto_syntax_version_all_files(Defs) ->
             %% The language guide says "For message fields, the
             %% default value is null.", so making them optional ---
             %% %% rather than default --- makes more sense.
-            make_proto3_submsg_fields_optional(Defs2, Proto3Msgs)
+            Defs3 = make_proto3_submsg_fields_optional(Defs2, Proto3Msgs),
+
+            %% The protobuf language guide for proto3 says: "In proto3,
+            %% repeated fields of scalar numeric types use packed encoding by
+            %% default."
+            default_repeated_to_packed(Defs3, Proto3Msgs)
     end.
 
 make_proto3_submsg_fields_optional([Def | Rest], P3Msgs) ->
@@ -767,6 +746,52 @@ make_proto3_submsg_fields_optional([Def | Rest], P3Msgs) ->
 make_proto3_submsg_fields_optional([], _P3Msgs) ->
     [].
 
+default_repeated_to_packed(Defs, P3Msgs) ->
+    lists:map(
+      fun({{msg,MsgName},Fields}=MsgDef) ->
+              case lists:member(MsgName, P3Msgs) of
+                  true ->
+                      Fields1 = default_repeated_fields_to_packed(Fields),
+                      {{msg,MsgName}, Fields1};
+                  false ->
+                      MsgDef
+              end;
+         (Other) ->
+              Other
+      end,
+      Defs).
+
+default_repeated_fields_to_packed(Fields) ->
+    lists:map(
+      fun(#?gpb_field{occurrence=repeated, opts=Opts, type=Type}=F) ->
+              case {proplists:get_value(packed, Opts),
+                    is_scalar_numeric(Type)} of
+                  {undefined, true} ->
+                      NewOpts = [{packed, true} | Opts],
+                      F#?gpb_field{opts=NewOpts};
+                  _ ->
+                      F
+              end;
+         (F) ->
+              F
+      end,
+      Fields).
+
+is_scalar_numeric(int32)    -> true;
+is_scalar_numeric(int64)    -> true;
+is_scalar_numeric(uint32)   -> true;
+is_scalar_numeric(uint64)   -> true;
+is_scalar_numeric(sint32)   -> true;
+is_scalar_numeric(sint64)   -> true;
+is_scalar_numeric(fixed32)  -> true;
+is_scalar_numeric(fixed64)  -> true;
+is_scalar_numeric(sfixed32) -> true;
+is_scalar_numeric(sfixed64) -> true;
+is_scalar_numeric(bool)     -> true;
+is_scalar_numeric(float)    -> true;
+is_scalar_numeric(double)   -> true;
+is_scalar_numeric({enum,_}) -> true;
+is_scalar_numeric(_)        -> false. % not: string | bytes | msg | map
 
 %% Find inconsistencies
 %%

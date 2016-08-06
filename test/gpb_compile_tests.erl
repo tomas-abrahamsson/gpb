@@ -2298,18 +2298,17 @@ mk_proto3_fields() ->
     TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(
                                     EachType ++ [MsgType],
                                     repeated,
-                                    [{field_opts, [packed]}])},
+                                    [{field_opts_f, fun maybe_packed/1}])},
     OneofMsg1  = {{msg, oneof1},  mk_oneof_fields_of_type([fixed32], 1)},
-    MapMsg1    = {{msg, map1},    mk_map_fields_of_type([uint32], [string])},
     [{syntax, "proto3"},
      {proto3_msgs, [topmsg1,topmsg2,oneof1,map1,submsg1]},
-     EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, OneofMsg1, MapMsg1].
+     EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, OneofMsg1].
 
 mk_fields_of_type(Types, Occurrence) ->
     mk_fields_of_type(Types, Occurrence, []).
 
 mk_fields_of_type(Types, Occurrence, Opts) ->
-    FieldOpts = proplists:get_value(field_opts, Opts, []),
+    FieldOptsF = proplists:get_value(field_opts_f, Opts, fun(_) -> [] end),
     Offset = proplists:get_value(offset, Opts, 0),
     Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
     [#?gpb_field{name=list_to_atom(lists:concat([f, I + Offset])),
@@ -2317,7 +2316,7 @@ mk_fields_of_type(Types, Occurrence, Opts) ->
                  fnum=I + Offset,
                  type=Type,
                  occurrence=Occurrence,
-                 opts=FieldOpts}
+                 opts=FieldOptsF(Type)}
      || {I, Type} <- index_seq(Types1)].
 
 mk_oneof_fields_of_type(Types, Pos) ->
@@ -2344,6 +2343,12 @@ mk_map_fields_of_type(KeyTypes, ValueTypes) ->
      || {I, F} <- index_seq(Fs1 ++ Fs2)].
 
 index_seq(L) -> lists:zip(lists:seq(1, length(L)), L).
+
+maybe_packed({msg,_})   -> [];
+maybe_packed({map,_,_}) -> [];
+maybe_packed(string)    -> [];
+maybe_packed(bytes)     -> [];
+maybe_packed(_)         -> [packed].
 
 can_do_nif_type(Type) ->
     if Type == int64;
