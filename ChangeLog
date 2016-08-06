@@ -1,5 +1,19 @@
 -*- coding: utf-8 -*-
 
+Version 3.24.4
+2016-Aug-08
+
+	* Proto3: Fix encoding of repeated fields of types string, bytes
+	and sub messages. These were erroneously defaulted to packed.
+	* Proto3: Fix parsing of unused fields: non-repeated message
+	fields are optional, but were erroneously parsed as required,
+	thanks to Tyler Margison for fixing.
+	* A new Erlang Protobuffs option: epb_compatibility (-epb):
+	If this option is specified, generate also functions encode/1,
+	decode/1, encode_<MsgName>/1 and decode_<MsgName>/1.
+	* Simplified interface for verifying translators for
+	google.protobuf.Any messages: the '$errorf' is deprecated.
+
 Version 3.24.3
 2016-Jul-29
 
