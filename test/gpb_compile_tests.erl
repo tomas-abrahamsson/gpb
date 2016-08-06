@@ -1636,9 +1636,17 @@ nif_encode_decode_mapfields(NEDM, Defs) ->
     ?assertEqual(OrigMsg, sort_all_fields(GMDecoded)),
     ?assertEqual(OrigMsg, sort_all_fields(MGDecoded)).
 
-usort_all_fields(R) -> map_all_fields(R, fun list:usort/1).
+usort_all_fields(R) -> map_all_fields(R, fun usort_by_mapkey/1).
 
-sort_all_fields(R) -> map_all_fields(R, fun list:sort/1).
+sort_all_fields(R) -> map_all_fields(R, fun lists:sort/1).
+
+usort_by_mapkey(L) ->
+    lists:sort(key_unique(L)).
+
+key_unique([{K,V} | Rest]) ->
+    [{K,V} | key_unique([X2 || {K2,_}=X2 <- Rest, K2 =/= K])];
+key_unique([]) ->
+    [].
 
 map_all_fields(R, Fn) ->
     [RName | Fields] = tuple_to_list(R),
