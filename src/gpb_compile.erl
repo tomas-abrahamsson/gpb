@@ -95,7 +95,8 @@ file(File) ->
 %%                   {msg_name_to_lower, boolean()} |
 %%                   {module_name_prefix, string() | atom()} |
 %%                   {module_name_suffix, string() | atom()} |
-%%                   {any_translate, AnyTranslation}
+%%                   {any_translate, AnyTranslation} |
+%%                   epb_compatibility | {epb_compatibility,boolean()}
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
@@ -334,14 +335,16 @@ file(File) ->
 %%       `merge_msgs' function. The `$2' is the lastly seen term, or
 %%       the second argument to the `merge_msgs' function.</dd>
 %%   <dt>Verify</dt>
-%%   <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
+%%   <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%       If `Term' (`$1') is valid, the function is expected to just return
 %%       any value, which is ignored and discarded.
-%%       If `Term' is invalid, the function is exptected to
-%%       call `ErrorF' (`$errorf') with one argument, the reason for
-%%       error. That function will raise an error, which will also
-%%       additionally contain the actual value of `Term' and the path
-%%       to the field.</dd>
+%%       If `Term' is invalid, the function is exptected to not
+%%       return anything, but instead either crash, call
+%%       `erlang:error/1', or `throw/1' or `exit/1'.  with the
+%%       reason for error.
+%%       (For backwards compatibility, it is also possible
+%%       to have an error function as argument, using `$errorf',
+%%       but this is deprecated.)</dd>
 %% </dl>
 %% There are additional translator argument markers:
 %% <dl>
@@ -359,6 +362,16 @@ file(File) ->
 %%   `encode_msg' and for `verify_msg'. The `$op' marker makes it
 %%   possible to tell these two call sites apart, if needed.</dd>
 %% </dl>
+%%
+%% The `epb_compatibility' option will cause some functions to be
+%% generated, that are compatible with the `erlang_protobuffs'
+%% library. The generated extra functions are:
+%% <ul>
+%%   <li>`encode/1'</li>
+%%   <li>`encode_<MsgName>/1'</li>
+%%   <li>`decode/2'</li>
+%%   <li>`decode_<MsgName>/1'</li>
+%% </ul>
 file(File, Opts0) ->
     Opts1 = normalize_alias_opts(Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
@@ -460,7 +473,7 @@ proto_defs(Mod, Defs0, Opts0) ->
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
     AnRes = analyze_defs(Defs, Opts2),
-    case verify_opts(Opts2) of
+    case verify_opts(Defs, Opts2) of
         ok ->
             Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
             return_or_report_warnings_or_errors(Res1, Warns, Opts2,
@@ -470,7 +483,18 @@ proto_defs(Mod, Defs0, Opts0) ->
                                                 get_output_format(Opts2))
     end.
 
-verify_opts(Opts) ->
+verify_opts(Defs, Opts) ->
+    while_ok([fun() -> verify_opts_any_translate_and_nif(Opts) end,
+              fun() -> verify_opts_epb_compat(Defs, Opts) end]).
+
+while_ok(Funs) ->
+    lists:foldl(fun(F, ok) -> F();
+                   (_, Err) -> Err
+                end,
+                ok,
+                Funs).
+
+verify_opts_any_translate_and_nif(Opts) ->
     case {proplists:get_value(any_translate, Opts),
           proplists:get_bool(nif, Opts)} of
         {Translations, true} when Translations /= undefined ->
@@ -478,6 +502,33 @@ verify_opts(Opts) ->
         _ ->
             ok
     end.
+
+verify_opts_epb_compat(Defs, Opts) ->
+    while_ok(
+      [fun() ->
+               case {proplists:get_bool(epb_compatibility, Opts),
+                     get_records_or_maps_by_opts(Opts)} of
+                   {true, maps} ->
+                       {error, {invalid_options, epb_compatibility,maps}};
+                   _ ->
+                       ok
+               end
+       end,
+       fun() ->
+               case proplists:get_bool(epb_compatibility, Opts) of
+                   true ->
+                       MsgNames = [Nm || {{msg,Nm},_Fields} <- Defs],
+                       case lists:member(msg, MsgNames) of
+                           true ->
+                               {error, {epb_compatibility_impossible,
+                                        {with_msg_named,msg}}};
+                           false ->
+                               ok
+                       end;
+                   false ->
+                       ok
+               end
+       end]).
 
 %% @spec msg_defs(Mod, Defs) -> CompRet
 %% @equiv msg_defs(Mod, Defs, [])
@@ -653,6 +704,12 @@ fmt_err({write_failed, File, Reason}) ->
     ?f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
 fmt_err({invalid_options,any_translate,nif}) ->
     "Option error: Not supported: both any_translate and nif";
+fmt_err({invalid_options, epb_compatibility, maps}) ->
+    "Option error: Not supported: both epb_compatibility and maps";
+fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
+    "Not possible to generate epb compatible functions when a message "
+        "is named 'msg' because of collision with the standard gpb functions "
+        "'encode_msg' and 'decode_msg'";
 fmt_err(X) ->
     ?f("Unexpected error ~p", [X]).
 
@@ -731,7 +788,7 @@ c() ->
 %%   <dt>`-any_translate MsFs'</dt>
 %%   <dd>Call functions in `MsFs' to pack, unpack, merge and verify
 %%       `google.protobuf.Any' messages. The `MsFs' is a string on the
-%%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]'.
+%%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
 %%       The specified modules and functinos are called and used as follows:
 %%       <dl>
 %%         <dt>e=Mod:Fn</dt>
@@ -743,14 +800,20 @@ c() ->
 %%         <dt>m=Mod:Fn</dt>
 %%         <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
 %%             unpacked terms to a resulting Term3.</dd>
-%%         <dt>v=Mod:Fn</dt>
-%%         <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
+%%         <dt>V=Mod:Fn</dt>
+%%         <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%             If `Term' is valid, the function is expected to just return
 %%             any value, which is ignored and discarded.
-%%             If `Term' is invalid, the function is exptected to call `ErrorF'
-%%             with one argument, the reason for error. That function will
-%%             raise an error, which will also additionally contain the
-%%             actual value of `Term' and the path to the field.</dd>
+%%             If `Term' is invalid, the function is exptected to not
+%%             return anything, but instead either crash, call
+%%             `erlang:error/1', or `throw/1' or `exit/1'.  with the
+%%             reason for error.
+%%             If you want to use a verifier, this is the new preferred
+%%             approach.</dd>
+%%         <dt>v=Mod:Fn</dt>
+%%         <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
+%%             This exists for backwards compatibility, and its use
+%%             is deprecated.</dd>.
 %%       </dl>
 %%   </dd>
 %%   <dt>`-msgprefix Prefix'</dt>
@@ -786,6 +849,10 @@ c() ->
 %%   <dt>`-erlc_compile_options Options'</dt>
 %%   <dd>Specifies compilation options, in a comma separated string, to pass
 %%       along to the \-compile\(\) directive on the generated code.</dd>>
+%%   <dt>`-epb'</dt>
+%%   <dd>Generate some functions that for api compatibility with
+%%       the Erlang Protobuffs library:
+%%       encode/1, decode/2, encode_MsgName/1, decode_MsgName/1</dd>
 %%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
@@ -969,7 +1036,7 @@ opt_specs() ->
       "       - encode (calls Mod:Fn(Term) -> AnyMessage to pack)\n"
       "       - decode (calls Mod:Fn(AnyMessage) -> Term to unpack)\n"
       "       - merge  (calls Mod:Fn(Term,Term2) -> Term3 to merge unpacked)\n"
-      "       - verify (calls Mod:Fn(Term,ErrorF) -> _ to verify unpacked)\n"},
+      "       - verify (calls Mod:Fn(Term) -> _ to verify unpacked)\n"},
      {"msgprefix", 'string()', msg_name_prefix, "Prefix\n"
       "       Prefix each message with Prefix.\n"},
      {"modprefix", 'string()', module_name_prefix, "Prefix\n"
@@ -998,6 +1065,10 @@ opt_specs() ->
      {"erlc_compile_options", 'string()', erlc_compile_options, "String\n"
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
+     {"epb", undefined, epb_compatibility, "\n"
+      "       Generate some functions that for api compatibility with\n"
+      "       the Erlang Protobuffs library:\n"
+      "       encode/1, decode/2, encode_MsgName/1, decode_MsgName/1\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
@@ -1030,6 +1101,7 @@ opt_any_translate(OptTag, [S | Rest]) ->
 opt_any_translate_mfa("e="++MF) -> {encode,opt_mf_str(MF, 1)};
 opt_any_translate_mfa("d="++MF) -> {decode,opt_mf_str(MF, 1)};
 opt_any_translate_mfa("m="++MF) -> {merge, opt_mf_str(MF, 2)};
+opt_any_translate_mfa("V="++MF) -> {verify,opt_mf_str(MF, 1)};
 opt_any_translate_mfa("v="++MF) -> {verify,opt_mf_str_verify(MF)};
 opt_any_translate_mfa(X) -> throw({badopt,"Invalid translation spec: "++X}).
 
@@ -1760,8 +1832,7 @@ is_repeated_elem_path(_) -> false.
 
 default_any_merge_translator() -> {any_m_overwrite,['$2','$user_data']}.
 
-default_any_verify_translator() -> {any_v_no_check,['$1','$errorf',
-                                                    '$user_data']}.
+default_any_verify_translator() -> {any_v_no_check,['$1', '$user_data']}.
 
 %% -- generating code ----------------------------------------------
 
@@ -1785,13 +1856,21 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
            records -> ?f("-export([encode_msg/1, encode_msg/2]).~n");
            maps    -> ?f("-export([encode_msg/2, encode_msg/3]).~n")
        end,
-       ?f("-export([encode/1]). %% epb compatibility~n"),
+       [[?f("-export([encode/1]). %% epb compatibility~n"),
+         [?f("-export([~p/1]).~n", [mk_fn(encode_, MsgName)])
+          || {{msg,MsgName}, _Fields} <- Defs],
+         "\n"]
+        || proplists:get_bool(epb_compatibility, Opts)],
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([merge_msgs/2, merge_msgs/3]).~n");
            maps    -> ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
        end,
-       ?f("-export([decode/2]). %% epb compatibility~n"),
+       [[?f("-export([decode/2]). %% epb compatibility~n"),
+         [?f("-export([~p/1]).~n", [mk_fn(decode_, MsgName)])
+          || {{msg,MsgName}, _Fields} <- Defs],
+         "\n"]
+        || proplists:get_bool(epb_compatibility, Opts)],
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([verify_msg/1, verify_msg/2]).~n");
            maps    -> ?f("-export([verify_msg/2, verify_msg/3]).~n")
@@ -1938,9 +2017,9 @@ format_encoders_top_function_no_msgs(Opts) ->
                       maps    -> [?expr(_MsgName)]
                   end,
     SpecExtraArgs = case Mapping of
-                      records -> "";
-                      maps    -> ",_"
-                  end,
+                        records -> "";
+                        maps    -> ",_"
+                    end,
     [?f("-spec encode_msg(_~s) -> no_return().~n", [SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
@@ -1955,11 +2034,12 @@ format_encoders_top_function_no_msgs(Opts) ->
        end,
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
-     ?f("%% epb compatibility\n"),
-     ?f("-spec encode(_) -> no_return().\n"),
-     gpb_codegen:format_fn(
-      encode,
-      fun(_Msg) -> erlang:error({gpb_error, no_messages}) end)].
+     [[?f("%% epb compatibility\n"),
+       ?f("-spec encode(_) -> no_return().\n"),
+       gpb_codegen:format_fn(
+         encode,
+         fun(_Msg) -> erlang:error({gpb_error, no_messages}) end)]
+      || proplists:get_bool(epb_compatibility, Opts)]].
 
 format_encoders_top_function_msgs(Defs, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
@@ -1970,9 +2050,9 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                   end,
     DoNif = proplists:get_bool(nif, Opts),
     SpecExtraArgs = case Mapping of
-                      records -> "";
-                      maps    -> ",atom()"
-                  end,
+                        records -> "";
+                        maps    -> ",atom()"
+                    end,
     [?f("-spec encode_msg(_~s) -> binary().~n", [SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
@@ -2030,22 +2110,17 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                                       true  -> [?expr(TrUserData)]
                                    end)]),
      "\n",
-     ?f("%% epb compatibility\n"),
-     case Mapping of
-         records ->
-             ?f("-spec encode(_) -> binary().~n"),
-             gpb_codegen:format_fn(
-               encode,
-               fun(Msg) -> encode_msg(Msg) end);
-         maps ->
-             ?f("-spec encode(_) -> no_return().~n"),
-             gpb_codegen:format_fn(
-               encode,
-               fun(_Msg) ->
-                       erlang:error(
-                         {gpb_error, epb_compat_not_possible_with_maps})
-               end)
-     end].
+     [[?f("%% epb compatibility\n"),
+       ?f("-spec encode(_) -> binary().~n"),
+       gpb_codegen:format_fn(
+         encode,
+         fun(Msg) -> encode_msg(Msg) end),
+       [[?f("-spec ~p(_) -> binary().~n", [mk_fn(encode_, MsgName)]),
+         gpb_codegen:format_fn(
+           mk_fn(encode_, MsgName),
+           fun(Msg) -> encode_msg(Msg) end)]
+        || {{msg,MsgName}, _Fields} <- Defs]]
+      || proplists:get_bool(epb_compatibility, Opts)]].
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
@@ -2735,30 +2810,31 @@ is_primitive_type(_) -> true.
 format_decoders_top_function(Defs, Opts) ->
     case contains_messages(Defs) of
         true  -> format_decoders_top_function_msgs(Defs, Opts);
-        false -> format_decoders_top_function_no_msgs()
+        false -> format_decoders_top_function_no_msgs(Opts)
     end.
 
-format_decoders_top_function_no_msgs() ->
+format_decoders_top_function_no_msgs(Opts) ->
     ["-spec decode_msg(binary(), atom()) -> no_return().\n",
      gpb_codegen:format_fn(
-      decode_msg,
-      fun(Bin, _MsgName) when is_binary(Bin) ->
-              erlang:error({gpb_error, no_messages})
-      end),
+       decode_msg,
+       fun(Bin, _MsgName) when is_binary(Bin) ->
+               erlang:error({gpb_error, no_messages})
+       end),
      "-spec decode_msg(binary(), atom(), list()) -> no_return().\n",
      gpb_codegen:format_fn(
-      decode_msg,
-      fun(Bin, _MsgName, _Opts) when is_binary(Bin) ->
-              erlang:error({gpb_error, no_messages})
-      end),
-     "\n",
-     "%% epb compatibility\n",
-     ?f("-spec decode(atom(), binary()) -> no_return().\n"),
-     gpb_codegen:format_fn(
-       decode,
-       fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+       decode_msg,
+       fun(Bin, _MsgName, _Opts) when is_binary(Bin) ->
                erlang:error({gpb_error, no_messages})
-       end)].
+       end),
+     "\n",
+     [["%% epb compatibility\n",
+       ?f("-spec decode(atom(), binary()) -> no_return().\n"),
+       gpb_codegen:format_fn(
+         decode,
+         fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+                 erlang:error({gpb_error, no_messages})
+         end)]
+      || proplists:get_bool(epb_compatibility, Opts)]].
 
 format_decoders_top_function_msgs(Defs, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
@@ -2794,23 +2870,21 @@ format_decoders_top_function_msgs(Defs, Opts) ->
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]
                                    end)]),
-     "\n",
-     "%% epb compatibility\n",
-     case get_records_or_maps_by_opts(Opts) of
-         records ->
-             gpb_codegen:format_fn(
-               decode,
-               fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
-                       decode_msg(Bin, MsgName)
-               end);
-         maps ->
-             gpb_codegen:format_fn(
-               decode,
-               fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
-                       erlang:error(
-                         {gpb_error, epb_compat_not_possible_with_maps})
-               end)
-     end].
+     [["\n",
+       "%% epb compatibility\n",
+       gpb_codegen:format_fn(
+         decode,
+         fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
+                 decode_msg(Bin, MsgName)
+         end),
+       [gpb_codegen:format_fn(
+          mk_fn(decode_, MsgName),
+          fun(Bin) when is_binary(Bin) ->
+                  decode_msg(Bin, 'MsgName')
+          end,
+          [replace_term('MsgName', MsgName)])
+        || {{msg,MsgName}, _Fields} <- Defs]]
+      || proplists:get_bool(epb_compatibility, Opts)]].
 
 format_aux_decoders(Defs, AnRes, _Opts) ->
     format_enum_decoders(Defs, AnRes).
@@ -4880,44 +4954,55 @@ format_field_op_translator(ElemPath, Op, CallTemplate) ->
                                 replace_tree('Path', Path)]),
                 Outs = [{'$1',V},{'$errorf',ErrorF},{'$user_data',UserData}],
                 Rels = [{'$1',['$1']},
-                        {'$errorf',['$1','$2']}, % $errorf uses in-args $1,$2
+                        %% $errorf uses $1,$2 if present, else $1,$2 are used
+                        {'$errorf',['$1','$2'], ['$1','$2']},
                         {'$user_data',['$user_data']}],
                 {Ins, Outs, Rels}
         end,
     OutArgs = OutArgs0 ++ [{'$op', erl_syntax:abstract(Op)}],
     Relations = Relations0 ++ [{'$op', []}],
-    {InPatterns, OutParams, _UsedInNames, _UsedOutNames} =
+    {InPatterns, OutParams, _UsedInNames, UsedOutNames} =
         process_tr_params(InArgs, Relations, OutArgs, ArgTemplate),
+    Call = case CallTemplate of
+               {Fn, ArgTemplate} ->
+                   ?expr('$$Fn'('$$OutParams'),
+                         [replace_term('$$Fn', Fn),
+                          splice_trees('$$OutParams', OutParams)]);
+               {Mod, Fn, ArgTemplate} ->
+                   ?expr('$$Mod':'$$Fn'('$$OutParams'),
+                         [replace_term('$$Mod', Mod),
+                          replace_term('$$Fn', Fn),
+                          splice_trees('$$OutParams', OutParams)])
+           end,
+    UsesErrorF = lists:member('$errorf', UsedOutNames),
+    Body = if Op == verify, not UsesErrorF ->
+                   [Actual,EPath|_] = InPatterns,
+                   ?expr(try '$$Call', ok
+                         catch _:Reason ->
+                                 mk_type_error(Reason,'Actual','Path')
+                         end,
+                         [replace_tree('$$Call', Call),
+                          replace_tree('Actual', Actual),
+                          replace_tree('Path', EPath)]);
+              true ->
+                   Call
+           end,
     [inline_attr(FnName,length(InArgs)),
      if Op == verify ->
              %% Dialyzer might complain that "The created fun has no
-             %% local return" which is true, but also not surprising,
-             %% so shut this warning down.
+             %% local return", for a $errorf, which is true, but also
+             %% not surprising, so shut this warning down.
              nowarn_dialyzer_attr(FnName,length(InArgs));
         true ->
              ""
      end,
-     case CallTemplate of
-         {Fn, ArgTemplate} ->
-             gpb_codegen:format_fn(
-               FnName,
-               fun('$$InPatterns') ->
-                       '$$Fn'('$$OutParams')
-               end,
-               [replace_term('$$Fn', Fn),
-                splice_trees('$$InPatterns', InPatterns),
-                splice_trees('$$OutParams', OutParams)]);
-         {Mod, Fn, ArgTemplate} ->
-             gpb_codegen:format_fn(
-               FnName,
-               fun('$$InPatterns') ->
-                       '$$Mod':'$$Fn'('$$OutParams')
-               end,
-               [replace_term('$$Mod', Mod),
-                replace_term('$$Fn', Fn),
-                splice_trees('$$InPatterns', InPatterns),
-                splice_trees('$$OutParams', OutParams)])
-     end].
+     gpb_codegen:format_fn(
+       FnName,
+       fun('$$InPatterns') ->
+               '$$Body'
+       end,
+       [splice_trees('$$InPatterns', InPatterns),
+        replace_tree('$$Body', Body)])].
 
 
 last_tuple_element(Tuple) ->
@@ -4947,7 +5032,9 @@ process_tr_params(InArgs, InOutArgRelations, Outs, ArgsTemplate) ->
           end,
           [],
           ArgsTemplate),
-    UsedInArgs = compute_used_in_args(UsedOutNames, InOutArgRelations),
+    UnusedOutNames = [N || {N,_} <- Outs] -- UsedOutNames,
+    UsedInArgs = compute_used_in_args(UsedOutNames, UnusedOutNames,
+                                      InOutArgRelations),
     InParams = underscore_unused_params(InArgs, UsedInArgs),
     {InParams, OutArgs, UsedInArgs, UsedOutNames}.
 
@@ -5003,11 +5090,23 @@ abstractify_tr_param_check_for_map(X, _Outs) ->
 mk_pass_straight_through_rel(Names) ->
     [{Name,[Name]} || Name <- Names].
 
-compute_used_in_args(Used, InOutArgRelations) ->
+compute_used_in_args(Used, Unused, InOutArgRelations) ->
     lists:usort(
       lists:append(
-        [proplists:get_value(U, InOutArgRelations)
-         || U <- Used])).
+        [lists:append(
+           [case lists:keyfind(U, 1, InOutArgRelations) of
+                {U, Ins}         -> Ins;
+                {U, Ins, _Elses} -> Ins;
+                false            -> []
+            end
+            || U <- Used]),
+         lists:append(
+           [case lists:keyfind(Uu, 1, InOutArgRelations) of
+                {Uu, _Ins}        -> [];
+                {Uu, _Ins, Elses} -> Elses;
+                false             -> []
+            end
+            || Uu <- Unused])])).
 
 underscore_unused_params(InArgs, UsedInArgs) ->
     [case lists:member(InName, UsedInArgs) of
@@ -5158,7 +5257,7 @@ format_default_any_translators(#anres{translations=Translations}, _Opts) ->
        "\n"] || sets:is_element(merge, Needs)],
      [[gpb_codegen:format_fn(
          any_v_no_check,
-         fun(_,_,_) -> ok end),
+         fun(_,_) -> ok end),
        "\n"] || sets:is_element(verify, Needs)]].
 
 compute_needed_default_translations(Translations, Defaults) ->

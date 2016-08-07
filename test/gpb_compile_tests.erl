@@ -46,6 +46,7 @@
 
 %% Translators for without user-data
 -export([any_e_atom/1, any_d_atom/1, any_m_atom/2, any_v_atom/2]).
+-export([any_v_atom/1]).
 %% Translators for user-data
 -export([any_e_atom/2, any_d_atom/2, any_m_atom/3, any_v_atom/3]).
 %% Translators for user-data and op
@@ -138,10 +139,42 @@ parses_and_generates_good_code_also_for_empty_msgs_test() ->
     unload_code(M).
 
 parses_and_generates_good_code_for_epb_compatibility_test() ->
-    M = compile_iolist(["message m1 { }\n"]),
-    ?assertMatch(true, is_binary(M:encode({m1}))),
-    ?assertMatch({m1}, M:decode(m1, M:encode({m1}))),
-    unload_code(M).
+    DefsM1 = "message m1 { required uint32 a = 1; }\n",
+    DefsNoMsgs = "enum ee { a = 0; }\n",
+    {error, Reason1, []} = compile_iolist_get_errors_or_warnings(
+                             DefsM1,
+                             [epb_compatibility, maps]),
+    true = is_list(gpb_compile:format_error(Reason1)),
+
+    %% Verify we get an error for epb_compatibility with a message named 'msg'
+    %% due to collision with standard gpb encode_msg/decode_msg functions
+    {error, Reason2, []} = compile_iolist_get_errors_or_warnings(
+                             "message msg { }\n",
+                             [epb_compatibility, maps]),
+    true = is_list(gpb_compile:format_error(Reason2)),
+
+    Mod1 = compile_iolist(DefsM1, [epb_compatibility]),
+    M1 = #m1{a=1234},
+    B1 = Mod1:encode(M1),
+    ?assertMatch(true, is_binary(B1)),
+    B1 = Mod1:encode_m1(M1),
+    M1 = Mod1:decode(m1, B1),
+    M1 = Mod1:decode_m1(B1),
+    unload_code(Mod1),
+
+    %% verify no compatibility functions generated with no compat options
+    Mod2 = compile_iolist(DefsM1, []),
+    ?assertError(undef, Mod2:encode(M1)),
+    ?assertError(undef, Mod2:encode_m1(M1)),
+    ?assertError(undef, Mod2:decode(m1, B1)),
+    ?assertError(undef, Mod2:decode_m1(B1)),
+    unload_code(Mod2),
+
+    %% verify functions generated ok when no msgs specified
+    Mod3 = compile_iolist(DefsNoMsgs, [epb_compatibility]),
+    _ = Mod3:module_info(),
+    unload_code(Mod3).
+
 
 field_pass_as_params_test() ->
     MsgDef = ["message m2 { required uint32 f22 = 1; }"
@@ -892,6 +925,37 @@ verify_callback_for_Any_is_optional_test() ->
     ok = M:verify_msg({m,"not an atom"}),
     unload_code(M).
 
+verify_callback_with_and_without_errorf_test() ->
+    DefsM1 = ["syntax=\"proto3\";",
+              "import \"google/protobuf/any.proto\";",
+              "message m1 {",
+              "  required google.protobuf.Any a=1;",
+              "}"],
+
+    Mod1 = compile_iolist(
+             DefsM1,
+             [use_packages,
+              {any_translate,
+               [{encode,{?MODULE,any_e_atom,['$1']}},
+                {decode,{?MODULE,any_d_atom,['$1']}},
+                {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
+    ok = Mod1:verify_msg(#m1{a=abc}),
+    ?assertError({gpb_type_error,{not_an_atom,[{value,123},{path,'m1.a'}]}},
+                 Mod1:verify_msg(#m1{a=123})),
+    unload_code(Mod1),
+
+    Mod2 = compile_iolist(
+             DefsM1,
+             [use_packages,
+              {any_translate,
+               [{encode,{?MODULE,any_e_atom,['$1']}},
+                {decode,{?MODULE,any_d_atom,['$1']}},
+                {verify,{?MODULE,any_v_atom,['$1']}}]}]), % no '$errorf'
+    ok = Mod2:verify_msg(#m1{a=abc}),
+    ?assertError({gpb_type_error,{oops_no_atom,[{value,123},{path,'m1.a'}]}},
+                 Mod2:verify_msg(#m1{a=123})),
+    unload_code(Mod2).
+
 %% Translators/callbacks:
 any_e_atom(A) ->
     {'google.protobuf.Any', "x.com/atom", list_to_binary(atom_to_list(A))}.
@@ -906,6 +970,9 @@ any_v_atom(A, ErrorF) ->
     if is_atom(A) -> ok;
        true -> ErrorF(not_an_atom)
     end.
+
+any_v_atom(A) when is_atom(A) -> ok;
+any_v_atom(_) -> erlang:error(oops_no_atom).
 
 %% Translators/callbacks for user-data
 any_e_atom(A, Fn) -> call_tr_userdata_fn(Fn, any_e_atom(A)).
@@ -2564,7 +2631,8 @@ opt_test() ->
            descriptor, maps,
            msg_name_to_lower,
            help, help, version, version,
-           {erlc_compile_options, "debug_info, inline_list_funcs"}
+           {erlc_compile_options, "debug_info, inline_list_funcs"},
+           epb_compatibility
            ],
           ["x.proto", "y.proto"]}} =
         gpb_compile:parse_opts_and_args(
@@ -2598,7 +2666,44 @@ opt_test() ->
            "-h", "--help",
            "-V", "--version",
            "-erlc_compile_options", "debug_info, inline_list_funcs",
+           "-epb",
            "x.proto", "y.proto"]).
+
+any_translation_options_test() ->
+    {ok, {[{any_translate,
+            [{encode, {me,fe,['$1']}},
+             {decode, {md,fd,['$1']}}]}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-any_translate", "e=me:fe,d=md:fd",
+           "x.proto"]),
+    %% Merge
+    {ok, {[{any_translate,
+            [{encode, {me,fe,['$1']}},
+             {decode, {md,fd,['$1']}},
+             {merge,  {mm,fm,['$1','$2']}}]}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-any_translate", "e=me:fe,d=md:fd,m=mm:fm",
+           "x.proto"]),
+    %% Verify
+    {ok, {[{any_translate,
+            [{encode, {me,fe,['$1']}},
+             {decode, {md,fd,['$1']}},
+             {verify, {mv,fv,['$1']}}]}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-any_translate", "e=me:fe,d=md:fd,V=mv:fv",
+           "x.proto"]),
+    %% old style verify
+    {ok, {[{any_translate,
+            [{encode, {me,fe,['$1']}},
+             {decode, {md,fd,['$1']}},
+             {verify, {mv,fv,['$1','$errorf']}}]}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-any_translate", "e=me:fe,d=md:fd,v=mv:fv",
+           "x.proto"]).
 
 %% --- auxiliaries -----------------
 
@@ -2670,7 +2775,7 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, OnFail) ->
                             {read_file_info, ReadFileInfo},
                             {write_file, fun(_,_) -> ok end}]},
                  {i,"."},
-                 binary, return_warnings | ExtraOpts]),
+                 binary, return_errors, return_warnings | ExtraOpts]),
     case OnFail of
         must_succeed ->
             {ok, Mod, Code, []} = CompRes,
