@@ -144,13 +144,13 @@ msg_elem -> occurrence type fidentifier '=' dec_lit '[' opt_field_opts ']' ';':
                                                     fnum=literal_value('$5'),
                                                     opts='$7'}.
 msg_elem -> type fidentifier '=' dec_lit ';': % proto3
-                                        #?gpb_field{occurrence=required,
+                                        #?gpb_field{occurrence=optional,
                                                     type='$1',
                                                     name=identifier_name('$2'),
                                                     fnum=literal_value('$4'),
                                                     opts=[]}.
 msg_elem -> type fidentifier '=' dec_lit '[' opt_field_opts ']' ';': % proto3
-                                        #?gpb_field{occurrence=required,
+                                        #?gpb_field{occurrence=optional,
                                                     type='$1',
                                                     name=identifier_name('$2'),
                                                     fnum=literal_value('$4'),
@@ -711,43 +711,12 @@ handle_proto_syntax_version_all_files(Defs) ->
             Proto3Msgs = lists:append([Msgs || {proto3_msgs,Msgs} <- P3Items]),
             Defs1 = Defs -- P3Items,
             Defs2 = Defs1 ++ [{proto3_msgs, lists:sort(Proto3Msgs)}],
-            %% The language guide says "For message fields, the
-            %% default value is null.", so making them optional ---
-            %% %% rather than default --- makes more sense.
-            Defs3 = make_proto3_submsg_fields_optional(Defs2, Proto3Msgs),
 
             %% The protobuf language guide for proto3 says: "In proto3,
             %% repeated fields of scalar numeric types use packed encoding by
             %% default."
-            default_repeated_to_packed(Defs3, Proto3Msgs)
+            default_repeated_to_packed(Defs2, Proto3Msgs)
     end.
-
-make_proto3_submsg_fields_optional([Def | Rest], P3Msgs) ->
-    case Def of
-        {{msg,MsgName}, Fields} ->
-            case lists:member(MsgName, P3Msgs) of
-                true ->
-                    Fields1 =
-                        lists:map(
-                          fun(#?gpb_field{type={msg,_}, occurrence=Occ}=F) ->
-                                  case Occ of
-                                      repeated -> F; % don't change repeated
-                                      _ -> F#?gpb_field{occurrence=optional}
-                                  end;
-                             (OtherField) ->
-                                  OtherField
-                          end,
-                          Fields),
-                    Def1 = {{msg,MsgName}, Fields1},
-                    [Def1 | make_proto3_submsg_fields_optional(Rest, P3Msgs)];
-                false ->
-                    [Def | make_proto3_submsg_fields_optional(Rest, P3Msgs)]
-            end;
-        _ ->
-            [Def | make_proto3_submsg_fields_optional(Rest, P3Msgs)]
-    end;
-make_proto3_submsg_fields_optional([], _P3Msgs) ->
-    [].
 
 default_repeated_to_packed(Defs, P3Msgs) ->
     lists:map(
