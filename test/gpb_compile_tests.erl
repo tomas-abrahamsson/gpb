@@ -1047,7 +1047,7 @@ report_or_return_warnings_or_errors_test_aux() ->
                                [report_errors, return_errors]],
         WarnsAsErrsOpts    <- [[], [warnings_as_errors]],
         CompileTo          <- [to_binary, to_file, to_proto_defs],
-        SrcType            <- [from_file, from_defs],
+        SrcType            <- [from_file, from_defs, from_string],
         SrcQuality         <- [clean_code, warningful_code, erroneous_code,
                                write_fails],
         %% Exclude a few combos
@@ -1187,7 +1187,11 @@ compile_the_code(Options, CompileTo, from_defs, SrcQuality) ->
 compile_the_code(Options, CompileTo, from_file, SrcQuality) ->
     compile_file_get_output(get_proto_file(SrcQuality),
                             compute_compile_opts(Options, CompileTo,
-                                                 SrcQuality)).
+                                                 SrcQuality));
+compile_the_code(Options, CompileTo, from_string, SrcQuality) ->
+    compile_string_get_output(get_proto_file(SrcQuality),
+                              compute_compile_opts(Options, CompileTo,
+                                                   SrcQuality)).
 
 get_proto_defs(clean_code) ->
     [{{msg,m1}, [#?gpb_field{name=field11, type=uint32, occurrence=optional,
@@ -1252,6 +1256,20 @@ compile_file_get_output(Txt, Opts) ->
     Opts2 = [FileOpOpts, {i,"."} | RestOpts],
     Opts3 = ensure_file_writing_stubbed_opt(Opts2),
     capture_stdout(fun() -> gpb_compile:file("X.proto", Opts3) end).
+
+compile_string_get_output(Txt, Opts) ->
+    Opts2 = case lists:member(fail_write, Opts) of
+                false ->
+                    Opts;
+                true ->
+                    RestOpts = Opts -- [fail_write],
+                    FOpt = mk_fileop_opt([{write_file,fun(_,_) -> {error,eacces}
+                                                      end}]),
+                    [FOpt | RestOpts]
+            end,
+    Opts3 = ensure_file_writing_stubbed_opt(Opts2),
+    Txt2 = binary_to_list(iolist_to_binary(Txt)),
+    capture_stdout(fun() -> gpb_compile:string('x', Txt2, Opts3) end).
 
 ensure_file_writing_stubbed_opt(Opts) ->
     case proplists:get_value(file_op, Opts) of

@@ -20,6 +20,7 @@
 -module(gpb_compile).
 %-compile(export_all).
 -export([file/1, file/2]).
+-export([string/2, string/3]).
 -export([proto_defs/2, proto_defs/3]).
 -export([msg_defs/2, msg_defs/3]).
 -export([format_error/1, format_warning/1]).
@@ -372,17 +373,31 @@ file(File) ->
 %%   <li>`decode/2'</li>
 %%   <li>`decode_<MsgName>/1'</li>
 %% </ul>
-file(File, Opts0) ->
+file(File, Opts) ->
+    do_file_or_string(File, Opts).
+
+%% @spec string(Mod, Str) -> CompRet
+%% @equiv string(Mod, Str, [])
+string(Mod, Str) ->
+    string(Mod, Str, []).
+
+%% @spec string(Mod, Str, Opts) -> CompRet
+%%     Mod = atom()
+%%     Str = string()
+%%     Opts = list()
+%% @doc
+%% Compile a `.proto' file as string. See {@link file/2} for information
+%% on options and return values.
+string(Mod, Str, Opts) ->
+    do_file_or_string({Mod, Str}, Opts).
+
+do_file_or_string(In, Opts0) ->
     Opts1 = normalize_alias_opts(Opts0),
     Opts2 = normalize_return_report_opts(Opts1),
-    case parse_file(File, Opts2) of
+    case parse_file_or_string(In, Opts2) of
         {ok, Defs} ->
-            Ext = filename:extension(File),
-            Mod = list_to_atom(
-                    possibly_suffix_mod(
-                      possibly_prefix_mod(filename:basename(File, Ext), Opts2),
-                      Opts2)),
-            DefaultOutDir = filename:dirname(File),
+            Mod = find_out_mod(In, Opts2),
+            DefaultOutDir = find_default_out_dir(In),
             Opts3 = Opts2 ++ [{o,DefaultOutDir}],
             proto_defs(Mod, Defs, Opts3);
         {error, Reason} = Error ->
@@ -431,6 +446,16 @@ is_option_defined(Key, Opts) ->
               end,
               Opts).
 
+find_out_mod({Mod, _S}, _Opts) ->
+    Mod;
+find_out_mod(File, Opts) ->
+    Ext = filename:extension(File),
+    list_to_atom(possibly_suffix_mod(
+                   possibly_prefix_mod(
+                     filename:basename(File, Ext),
+                     Opts),
+                   Opts)).
+
 possibly_prefix_mod(BaseNameNoExt, Opts) ->
     case proplists:get_value(module_name_prefix, Opts) of
         undefined ->
@@ -447,6 +472,8 @@ possibly_suffix_mod(BaseNameNoExt, Opts) ->
             lists:concat([BaseNameNoExt, Suffix])
     end.
 
+find_default_out_dir({_Mod, _S}) -> ".";
+find_default_out_dir(File) -> filename:dirname(File).
 
 %% @spec proto_defs(Mod, Defs) -> CompRet
 %% @equiv proto_defs(Mod, Defs, [])
@@ -1159,8 +1186,8 @@ string_to_number(S) ->
             end
     end.
 
-parse_file(FName, Opts) ->
-    case parse_file_and_imports(FName, Opts) of
+parse_file_or_string(In, Opts) ->
+    case parse_file_and_imports(In, Opts) of
         {ok, {Defs1, _AllImported}} ->
             case gpb_parse:post_process_all_files(Defs1, Opts) of
                 {ok, Defs2} ->
@@ -1172,15 +1199,20 @@ parse_file(FName, Opts) ->
             {error, Reason}
     end.
 
-parse_file_and_imports(FName, Opts) ->
-    parse_file_and_imports(FName, [FName], Opts).
+parse_file_and_imports(In, Opts) ->
+    FName = file_name_from_input(In),
+    parse_file_and_imports(In, [FName], Opts).
 
-parse_file_and_imports(FName, AlreadyImported, Opts) ->
-    case locate_import(FName, Opts) of
+file_name_from_input({Mod,_S}) -> lists:concat([Mod, ".proto"]);
+file_name_from_input(FName)    -> FName.
+
+parse_file_and_imports(In, AlreadyImported, Opts) ->
+    case locate_import(In, Opts) of
         {ok, Contents} ->
             %% Add to AlreadyImported to prevent trying to import it again: in
             %% case we get an error we don't want to try to reprocess it later
             %% (in case it is multiply imported) and get the error again.
+            FName = file_name_from_input(In),
             AlreadyImported2 = [FName | AlreadyImported],
             case scan_and_parse_string(Contents, FName, Opts) of
                 {ok, Defs} ->
@@ -1214,7 +1246,6 @@ scan_and_parse_string(S, FName, Opts) ->
             {error, {scan_error, FName, Reason}}
     end.
 
-
 read_and_parse_imports([Import | Rest], AlreadyImported, Defs, Opts) ->
     case lists:member(Import, AlreadyImported) of
         true ->
@@ -1242,6 +1273,8 @@ import_it(Import, AlreadyImported, Defs, Opts) ->
             {error, Reason}
     end.
 
+locate_import({_Mod, Str}, _Opts) ->
+    {ok, Str};
 locate_import(Import, Opts) ->
     ImportPaths = [Path || {i, Path} <- Opts],
     locate_import_aux(ImportPaths, Import, Opts, []).
