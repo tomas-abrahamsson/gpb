@@ -568,7 +568,7 @@ module_msg_name_prefix_test() ->
                            {msg_name_suffix, MsgSuffix}]),
     receive
         {read, "m.proto"} -> ok;
-        {read, X} -> erlang:error("reading from odd file", X)
+        {read, X} -> erlang:error({"reading from odd file", X})
     end,
     receive
         {write, {hrl, "mp_m_xp.hrl", Hrl}} ->
