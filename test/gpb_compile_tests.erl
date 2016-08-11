@@ -91,6 +91,78 @@ parses_importing_file_test() ->
     [{{msg,'X'},_}, {{msg,'Y'},_}] = receive_filter_sort_msgs_defs().
 
 
+import_fetcher_test() ->
+    Master = self(),
+    ContentsX = iolist_to_binary(
+                  ["import \"Y.proto\";\n"
+                   "message X { required Y f1 = 1; }\n"]),
+    ContentsY = iolist_to_binary(
+                  ["message Y { required uint32 f1 = 1; }\n"]),
+    FileReadOpt = mk_fileop_opt([{read_file,
+                                  fun("X.proto") ->
+                                          Master ! {read,"X.proto"},
+                                          {ok, ContentsX};
+                                     ("Y.proto") ->
+                                          Master ! {read,"Y.proto"},
+                                          {ok, ContentsY}
+                                  end}]),
+    %% Importer returns `from_file'
+    ok = gpb_compile:file(
+           "X.proto",
+           [{import_fetcher, fun(F) -> Master ! {redir_to_file,F},
+                                       from_file
+                             end},
+            FileReadOpt, {i,"."}]),
+    [{redir_to_file,"X.proto"},
+     {read,"X.proto"},
+     {redir_to_file,"Y.proto"},
+     {read,"Y.proto"}] = flush_msgs(),
+
+    %% Importer returns contents
+    ok = gpb_compile:file(
+           "X.proto",
+           [{import_fetcher, fun(F) ->
+                                     Master ! {fetched,F},
+                                     {ok, binary_to_list(
+                                            case F of
+                                                "X.proto" -> ContentsX;
+                                                "Y.proto" -> ContentsY
+                                            end)}
+                             end},
+            FileReadOpt, {i,"."}]),
+    [{fetched,"X.proto"},
+     {fetched,"Y.proto"}] = flush_msgs(),
+
+    %% Importer returns error
+    {error,{fetcher_issue,"Y.proto",reason_for_y}} =
+        gpb_compile:file(
+          "X.proto",
+          [{import_fetcher, fun(F) ->
+                                    case F of
+                                        "X.proto" -> from_file;
+                                        "Y.proto" -> {error,reason_for_y}
+                                    end
+                            end},
+           FileReadOpt, {i,"."}]),
+
+    %% Make sure we've flushed every message, synchronously
+    ok = gpb_compile:string(x, binary_to_list(ContentsY),
+                            [mk_defs_probe_sender_opt(self()),
+                             mk_fileop_opt([])]),
+    [_|_] = receive_filter_sort_msgs_defs(),
+    flush_msgs(),
+    ok.
+
+
+
+flush_msgs() ->
+    receive
+        M ->
+             [M | flush_msgs()]
+    after 0 ->
+            []
+    end.
+
 parses_file_to_binary_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
     {ok, 'X', Code, []} =

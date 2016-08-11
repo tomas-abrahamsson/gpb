@@ -97,7 +97,8 @@ file(File) ->
 %%                   {module_name_prefix, string() | atom()} |
 %%                   {module_name_suffix, string() | atom()} |
 %%                   {any_translate, AnyTranslation} |
-%%                   epb_compatibility | {epb_compatibility,boolean()}
+%%                   epb_compatibility | {epb_compatibility,boolean()} |
+%%                   {import_fetcher, fun((File) -> FetcherRet)}
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
 %%            BinRet = {ok, ModuleName, Code} |
@@ -116,6 +117,7 @@ file(File) ->
 %%                          {verify,{ModuleName,FnName,ArgTemplate}}
 %%            FnName = atom()
 %%            ArgTemplate = [term()|'$1'|'$2'|'$errorf'|'$user_data'|'$op']
+%%            FetcherRet = from_file | {ok, string()} | {error, term()}
 %%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
@@ -373,6 +375,12 @@ file(File) ->
 %%   <li>`decode/2'</li>
 %%   <li>`decode_<MsgName>/1'</li>
 %% </ul>
+%%
+%% The `import_fetcher' option can be used to catch imports. The
+%% option value must be a function taking one argument, the name of
+%% the file to import. It must return either `from_file', letting this
+%% file pass through the normal file import, or `{ok,string()}' if it
+%% has fetched the file itself, or `{error,term()}'.
 file(File, Opts) ->
     do_file_or_string(File, Opts).
 
@@ -723,6 +731,8 @@ fmt_err({import_not_found, Import, Tried}) ->
                   true -> ", tried:"
                end,
     ?f("Could not find import file ~p~s~s", [Import, TriedTxt, PrettyTried]);
+fmt_err({fetcher_issue, File, Reason}) ->
+    ?f("Failed to import file ~p using fetcher, ~p", [File, Reason]);
 fmt_err({read_failed, File, Reason}) ->
     ?f("failed to read ~p: ~s (~p)", [File, file:format_error(Reason), Reason]);
 fmt_err({post_process, Reasons}) ->
@@ -1277,7 +1287,28 @@ locate_import({_Mod, Str}, _Opts) ->
     {ok, Str};
 locate_import(Import, Opts) ->
     ImportPaths = [Path || {i, Path} <- Opts],
-    locate_import_aux(ImportPaths, Import, Opts, []).
+    case proplists:get_value(import_fetcher, Opts) of
+        undefined ->
+            locate_import_aux(ImportPaths, Import, Opts, []);
+        Importer when is_function(Importer, 1) ->
+            case Importer(Import) of
+                from_file ->
+                    locate_import_aux(ImportPaths, Import, Opts, []);
+                {ok, Contents} when is_list(Contents) ->
+                    case lists:all(fun is_integer/1, Contents) of
+                        true ->
+                            {ok, Contents};
+                        false ->
+                            error({bad_fetcher_return,
+                                   {not_a_string, Contents},
+                                   Import})
+                    end;
+                {error, Reason} ->
+                    {error, {fetcher_issue, Import, Reason}};
+                X ->
+                    error({bad_fetcher_return, Import, X})
+            end
+    end.
 
 locate_import_aux([Path | Rest], Import, Opts, Tried) ->
     File = filename:join(Path, Import),
