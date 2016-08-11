@@ -210,7 +210,7 @@ parses_and_generates_good_code_also_for_empty_msgs_test() ->
     ?assertMatch({m1}, M:decode_msg(M:encode_msg({m1}), m1)),
     unload_code(M).
 
-parses_and_generates_good_code_for_epb_compatibility_test() ->
+encoding_decoding_functions_for_epb_compatibility_test() ->
     DefsM1 = "message m1 { required uint32 a = 1; }\n",
     DefsNoMsgs = "enum ee { a = 0; }\n",
     {error, Reason1, []} = compile_iolist_get_errors_or_warnings(
@@ -247,6 +247,30 @@ parses_and_generates_good_code_for_epb_compatibility_test() ->
     _ = Mod3:module_info(),
     unload_code(Mod3).
 
+epb_compatibility_opt_implies_pb_modsuffix_test() ->
+    Contents = <<"message m { required uint32 f = 1; }\n">>,
+    T = self(),
+    ok = gpb_compile:file(
+           "X.proto",
+           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end},
+                           {write_file, fun(Nm, _) -> T ! {file_name, Nm},
+                                                      ok
+                                        end}]),
+            {i,"."},
+            epb_compatibility]),
+    ["X_pb.erl", "X_pb.hrl"] =
+        lists:sort([receive {file_name, Nm1} -> Nm1 end,
+                    receive {file_name, Nm2} -> Nm2 end]).
+
+epb_compatibility_opt_implies_msg_name_to_lower_test() ->
+    Contents = <<"message SomeMsg { required uint32 f = 1; }\n">>,
+    ok = gpb_compile:file(
+           "X.proto",
+           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+            mk_defs_probe_sender_opt(self()),
+            {i,"."},
+            epb_compatibility]),
+    [{{msg,somemsg},_}] = receive_filter_sort_msgs_defs().
 
 field_pass_as_params_test() ->
     MsgDef = ["message m2 { required uint32 f22 = 1; }"
@@ -2868,14 +2892,17 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, OnFail) ->
                  binary, return_errors, return_warnings | ExtraOpts]),
     case OnFail of
         must_succeed ->
-            {ok, Mod, Code, []} = CompRes,
-            load_code(Mod, Code),
-            Mod;
+            %% Mod1 instead of Mod, since some options can change the
+            %% module name (module_name_suffix, or epb_compatibility,
+            %% for instance)
+            {ok, Mod1, Code, []} = CompRes,
+            load_code(Mod1, Code),
+            Mod1;
         get_result ->
             case CompRes of
-                {ok, Mod, Code, Warnings} ->
-                    load_code(Mod, Code),
-                    {ok, Mod, Warnings};
+                {ok, Mod1, Code, Warnings} -> % Mod1 insead of Mod, see above
+                    load_code(Mod1, Code),
+                    {ok, Mod1, Warnings};
                 {error, Reasons, Warnings} ->
                     {error, Reasons, Warnings}
             end

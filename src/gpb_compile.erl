@@ -308,7 +308,8 @@ file(File) ->
 %%
 %% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to the generated code and definition files. The `{module_name_suffix,Suffix}'
-%% works correspondingly.
+%% works correspondingly. For the case of compatibility with Erlang Protobuffs,
+%% the `epb_compatibility' option implies `{module_name_suffix,"_pb"}'
 %%
 %% The `any_translate' option can be used to provide packer and
 %% unpacker functions for `google.protobuf.Any' messages.  The merge
@@ -366,14 +367,17 @@ file(File) ->
 %%   possible to tell these two call sites apart, if needed.</dd>
 %% </dl>
 %%
-%% The `epb_compatibility' option will cause some functions to be
-%% generated, that are compatible with the `erlang_protobuffs'
-%% library. The generated extra functions are:
+%% The `epb_compatibility' option means this:
 %% <ul>
-%%   <li>`encode/1'</li>
-%%   <li>`encode_<MsgName>/1'</li>
-%%   <li>`decode/2'</li>
-%%   <li>`decode_<MsgName>/1'</li>
+%%   <li>It will generate the following compatibility functions:
+%%       <ul>
+%%         <li>`encode/1'</li>
+%%         <li>`encode_<MsgName>/1'</li>
+%%         <li>`decode/2'</li>
+%%         <li>`decode_<MsgName>/1'</li>
+%%       </ul></li>
+%%   <li>Implies `{module_name_suffix,"_pb"}'</li>
+%%   <li>Implies `{msg_name_to_lower,true}'</li>
 %% </ul>
 %%
 %% The `import_fetcher' option can be used to catch imports. The
@@ -417,11 +421,23 @@ do_file_or_string(In, Opts0) ->
     end.
 
 normalize_alias_opts(Opts) ->
+    lists:foldl(fun(F, OptsAcc) -> F(OptsAcc) end,
+                Opts,
+                [fun norm_opt_alias_to_msg_proto_defs/1,
+                 fun norm_opt_epb_compat_opt/1]).
+
+norm_opt_alias_to_msg_proto_defs(Opts) ->
     lists:map(fun(to_msg_defs)         -> to_proto_defs;
                  ({to_msg_defs, Bool}) -> {to_proto_defs, Bool};
                  (Opt)                 -> Opt
               end,
               Opts).
+
+norm_opt_epb_compat_opt(Opts) ->
+    proplists:expand([{epb_compatibility, [epb_compatibility,
+                                           {module_name_suffix,"_pb"},
+                                           {msg_name_to_lower, true}]}],
+                     Opts).
 
 normalize_return_report_opts(Opts1) ->
     Opts2 = expand_opt(return, [return_warnings, return_errors], Opts1),
@@ -887,9 +903,13 @@ c() ->
 %%   <dd>Specifies compilation options, in a comma separated string, to pass
 %%       along to the \-compile\(\) directive on the generated code.</dd>>
 %%   <dt>`-epb'</dt>
-%%   <dd>Generate some functions that for api compatibility with
-%%       the Erlang Protobuffs library:
-%%       encode/1, decode/2, encode_MsgName/1, decode_MsgName/1</dd>
+%%   <dd>Compatibility with the Erlang Protobuffs library:
+%%       <ul>
+%%         <li>Generate encode/1, decode/2, encode_MsgName/1, decode_MsgName/1
+%%             </li>
+%%         <li>Implies the `-modsuffix _pb' option</li>
+%%         <li>Implies the `-msgtolower' option</li>
+%%       </ul></dd>
 %%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
@@ -1103,9 +1123,11 @@ opt_specs() ->
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
      {"epb", undefined, epb_compatibility, "\n"
-      "       Generate some functions that for api compatibility with\n"
-      "       the Erlang Protobuffs library:\n"
-      "       encode/1, decode/2, encode_MsgName/1, decode_MsgName/1\n"},
+      "       Compatibility with the Erlang Protobuffs library:\n"
+      "       * Generate some API compatibility functions:\n"
+      "         encode/1, decode/2, encode_MsgName/1, decode_MsgName/1\n"
+      "       * Implies the -modsuffix _pb option\n"
+      "       * Implies the -msgtolower option\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
