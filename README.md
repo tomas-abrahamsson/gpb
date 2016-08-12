@@ -174,18 +174,58 @@ The generated C++ core was compiled with -O3.
 Mapping of protocol buffer datatypes to erlang
 ----------------------------------------------
 
-`.proto` type          | Erlang type
----------------------- | -------------------------------------------------------------
-`double`, `float`      | `float() | infinity | '-infinity' | nan`<br>  when encoding, integers, too, are accepted
-`int32`, `int64`,<br>`uint32`, `uint64`,<br>`sint32`, `sint64`,<br>`fixed32`, `fixed64`,<br>`sfixed32`, `sfixed64`|`integer()`
-`bool`                 | `true` \| `false`<br>&nbsp;&nbsp;0 and 1 may be used as input data prior to serialization<br>&nbsp;&nbsp;`gpb` will always deserialize to the atom values
-`enum`                 | `atom()`<br>unknown enums decode to `integer()`
-`message`              | record (thus `tuple()`)<br>&nbsp;&nbsp;or maps, if the maps (`-maps`) option is specified
-`string`               | unicode string, thus list of integers<br>&nbsp;&nbsp;or binaries, if the `strings_as_binaries` (`-strbin`)<br>&nbsp;&nbsp;option is specified
-`bytes`                | `binary()`<br> when encoding, iolists, too, are accepted
-`oneof`                | `{ChosenFieldName, Value}`
-`map<_,_>`             | An unordered list of 2-tuples: `[{Key,Value}]`<br>&nbsp;&nbsp;or a map, if the maps (`-maps`) option is specified
+<table>
+<thead><tr><th>Protobuf type</th><th>Erlang type</th></tr></thead>
+<tbody>
+<!-- = = = = = = = = = = = = = = = = = = = = = = = = = = = -->
+<tr><td>double, float</td>
+    <td>float() | infinity | '-infinity' | nan<br/>
+        When encoding, integers, too, are accepted</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>   int32,    int64<br/>
+          uint32,   uint64<br/>
+          sint32,   sint64<br/>
+         fixed32,  fixed64<br/>
+        sfixed32, sfixed64</td>
+    <td>integer()</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>bool</td>
+    <td>true | false<br/>
+        When encoding, the integers 1 and 0, too, are accepted</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>enum</td>
+    <td>atom()<br/>
+        unknown enums decode to `integer()`</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>message</td>
+    <td>record (thus tuple())<br/>
+        or map() if the maps (-maps) option is specified</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>string</td>
+    <td>unicode string, thus list of integers<br/>
+        or binary() if the strings_as_binaries (-strbin) option is
+        specified<br/>
+        When encoding, iolists, too, are accepted</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>bytes</td>
+    <td>binary()<br/>
+        When encoding, iolists, too, are accepted</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>oneof</td>
+    <td><tt>{ChosenFieldName, Value}</tt></td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>map<_,_></td>
+    <td>An unordered list of 2-tuples, <tt>[{Key,Value}]</tt><br/>
+        or  a map, if the maps (-maps) option is specified</td></tr>
+</tbody></table>
 
+
+Repeated fields are represented as lists.
+
+Optional fields are represented as either the value or `undefined` if
+not set. However, for maps, if the option `maps_unset_optional` is set
+to `omitted`, then unset optional values are omitted from the map,
+instead of being set to `undefined`.
 
 Interaction with rebar
 ----------------------
