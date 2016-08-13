@@ -227,6 +227,107 @@ not set. However, for maps, if the option `maps_unset_optional` is set
 to `omitted`, then unset optional values are omitted from the map,
 instead of being set to `undefined`.
 
+Examples of Erlang format for protocol buffer messages
+------------------------------------------------------
+
+#### Repeated and required fields
+
+```protobuf
+   message m1 {
+     repeated uint32 i   = 1;
+     required bool   b   = 2;
+     required eee    e   = 3;
+     required submsg sub = 4;
+   }
+   message submsg {
+     required string s = 1;
+     required bytes  b = 2;
+   }
+   enum eee {
+     INACTIVE = 0;
+     ACTIVE   = 1;
+   }
+```
+##### Corresponding Erlang
+```erlang
+   #m1{i   = [17, 4711],
+       b   = true,
+       e   = 'ACTIVE',
+       sub = #submsg{s = "abc",
+                     b = <<0,1,2,3,255>>}}
+
+   %% If compiled to with the option maps:
+   #{i   => [17, 4711],
+     b   => true,
+     e   => 'ACTIVE',
+     sub => #{s => "abc",
+              b => <<0,1,2,3,255>>}}
+```
+
+#### Optional fields
+```protobuf
+   message m2 {
+     optional uint32 i1 = 1;
+     optional uint32 i2 = 2;
+   }
+```
+##### Corresponding Erlang
+```erlang
+   #m2{i1 = 17}    % i2 is implicitly set to undefined
+
+   %% With the maps option
+   #{i1 => 17,
+     i2 => undefined}
+
+   %% With the maps option and the maps_unset_optional set to omitted:
+   #{i1 => 17}
+```
+
+#### Oneof fields
+This construct first appeared in Google protobuf version 2.6.0.
+```protobuf
+   message m3 {
+     oneof u {
+       int32  a = 1;
+       string b = 2;
+     }
+   }
+```
+##### Corresponding Erlang
+A oneof field is automatically always optional.
+```erlang
+   #m3{u = {a, 17}}
+   #m3{u = {b, "hello"}}
+   #m3{}                 % u is implicitly set to undefined
+
+   %% With the maps option
+   #{u => {a, 17}}
+   #{u => {b, "hello"}}
+   #{u => undefined}     % If maps_unset_optional = present_undefined (default)
+   #{}                   % With the maps_unset_optional set to omitted
+```
+
+#### Map fields
+Not to be confused with Erlang maps.
+This construct first appeared in Google protobuf version 3.0.0 (for
+both the `proto2` and the `proto3` syntax)
+```protobuf
+   message m4 {
+     map<uint32,string> f = 1;
+   }
+```
+##### Corresponding Erlang
+For records, the order of items is undefined when decoding.
+```erlang
+   #m4{f = []}
+   #m4{f = [{1, "a"}, {2, "b"}, {13, "hello"}]}
+
+   %% With the maps option
+   #{f => #{}}
+   #{f => #{1 => "a", 2 => "b", 13 => "hello"}}
+```
+
+
 Interaction with rebar
 ----------------------
 
