@@ -1059,60 +1059,85 @@ opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
 possibly_prefix_suffix_msgs(Defs, Opts) ->
     Prefix = proplists:get_value(msg_name_prefix, Opts, ""),
     Suffix = proplists:get_value(msg_name_suffix, Opts, ""),
-    ToLower = proplists:get_value(msg_name_to_lower, Opts, false),
+    ToLower = case proplists:get_value(msg_name_to_lower, Opts, false) of
+                  false ->
+                      false;
+                  true ->
+                      to_lower
+              end,
+    ToLowerOrSnake = case proplists:get_value(msg_name_to_snake_case, Opts, ToLower) of
+                         true ->
+                             snake_case;
+                         T ->
+                             T
+                     end,
 
-    if Prefix == "", Suffix == "", ToLower == false ->
+    if Prefix == "", Suffix == "", ToLowerOrSnake == false ->
             Defs;
        true ->
-            prefix_suffix_msgs(Prefix, Suffix, ToLower, Defs)
+            prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs)
     end.
 
 
-prefix_suffix_msgs(Prefix, Suffix, ToLower, Defs) ->
+prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
-                      {{msg,prefix_suffix_name(Prefix, Suffix, ToLower, Name)},
-                       prefix_suffix_fields(Prefix, Suffix, ToLower, Fields)};
+                      {{msg,prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name)},
+                       prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields)};
                  ({{extensions,Name}, Exts}) ->
                       {{extensions,
-                        prefix_suffix_name(Prefix, Suffix, ToLower, Name)},
+                        prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name)},
                        Exts};
                  ({{service,Name}, RPCs}) ->
-                      {{service,maybe_tolower_name(Name, ToLower)},
-                       prefix_suffix_rpcs(Prefix, Suffix, ToLower, RPCs)};
+                      {{service, maybe_tolower_or_snake_name(Name, ToLowerOrSnake)},
+                       prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs)};
                  ({package,Name}) ->
-                      {package,maybe_tolower_name(Name,ToLower)};
+                      {package, maybe_tolower_or_snake_name(Name,ToLowerOrSnake)};
                  ({proto3_msgs,Names}) ->
                       {proto3_msgs,
-                       [prefix_suffix_name(Prefix, Suffix, ToLower, Name)
+                       [prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name)
                         || Name <- Names]};
                  (OtherElem) ->
                       OtherElem
               end,
               Defs).
 
-prefix_suffix_fields(Prefix, Suffix, ToLower, Fields) ->
+prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields) ->
     lists:map(
       fun(#?gpb_field{type={msg,MsgName}}=F) ->
-              NewMsgName = prefix_suffix_name(Prefix, Suffix, ToLower, MsgName),
+              NewMsgName = prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, MsgName),
               F#?gpb_field{type={msg,NewMsgName}};
+         (#?gpb_field{type={map,KeyType,{msg,MsgName}}}=F) ->
+              NewMsgName = prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, MsgName),
+              F#?gpb_field{type={map,KeyType,{msg,NewMsgName}}};
+         (#gpb_oneof{fields=Fs}=F) ->
+              Fs2 = prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fs),
+              F#gpb_oneof{fields=Fs2};
          (#?gpb_field{}=F) ->
               F
       end,
       Fields).
 
-prefix_suffix_name(Prefix, Suffix, ToLower, Name) ->
-    Name1 = maybe_tolower_name(Name, ToLower),
+prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name) ->
+    Name1 = maybe_tolower_or_snake_name(Name, ToLowerOrSnake),
     Name2 = lists:concat([Prefix, Name1, Suffix]),
     list_to_atom(Name2).
 
-maybe_tolower_name(Name, false) -> Name;
-maybe_tolower_name(Name, true) ->
-    list_to_atom(string:to_lower(atom_to_list(Name))).
+maybe_tolower_or_snake_name(Name, false) -> Name;
+maybe_tolower_or_snake_name(Name, to_lower) ->
+    list_to_atom(string:to_lower(atom_to_list(Name)));
+maybe_tolower_or_snake_name(Name, snake_case) ->
+    NameString = atom_to_list(Name),
+    Snaked = lists:foldl(fun(RE, Snaking) ->
+                             re:replace(Snaking, RE, "\\1_\\2", [{return, list}, global])
+                         end, NameString, ["(.)([A-Z][a-z]+)",    %% uppercase followed by lowercase, except beginning
+                                           "(.)([0-9]+)",         %% any consecutive digits, except beginning
+                                           "([a-z0-9])([A-Z])"]), %% uppercase with lowercase or digit before it
+    list_to_atom(string:to_lower(Snaked)).
 
-prefix_suffix_rpcs(Prefix, Suffix, ToLower, RPCs) ->
+prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs) ->
     lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}) ->
-                      NewArg = prefix_suffix_name(Prefix, Suffix, ToLower, Arg),
-                      NewReturn = prefix_suffix_name(Prefix, Suffix, ToLower, Return),
+                      NewArg = prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Arg),
+                      NewReturn = prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Return),
                       #?gpb_rpc{name=RpcName,
                                 input=NewArg,
                                 output=NewReturn}

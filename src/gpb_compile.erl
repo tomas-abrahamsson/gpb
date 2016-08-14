@@ -92,6 +92,7 @@ file(File) ->
 %%                   {erlc_compile_options,string()} |
 %%                   {msg_name_prefix, string() | atom()} |
 %%                   {msg_name_suffix, string() | atom()} |
+%%                   {msg_name_to_snake_case, boolean()} |
 %%                   {msg_name_to_lower, boolean()} |
 %%                   {module_name_prefix, string() | atom()} |
 %%                   {module_name_suffix, string() | atom()} |

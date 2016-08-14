@@ -799,6 +799,22 @@ can_tolower_record_names_test() ->
                  output=msg2} %% .. and result msgs to be to-lower
       ]}] = do_process_sort_defs(Defs, [msg_name_to_lower]).
 
+can_to_snake_record_names_test() ->
+    {ok, Defs} = parse_lines(["message MsgName1 {required MsgName2   f1=1;}",
+                              "message MsgName2 {required uint32 g1=1;}",
+                              "service SvcName1 {",
+                              "  rpc req(MsgName1) returns (MsgName2) {};",
+                              "}",
+                              "extend Msg1 { optional uint32 fm2=2; }"]),
+    [{{msg,msg_name_1}, [#?gpb_field{name=f1, type={msg,msg_name_2}},
+                   #?gpb_field{name=fm2}]},
+     {{msg,msg_name_2}, [#?gpb_field{name=g1}]},
+     {{service,svc_name_1},
+      [#?gpb_rpc{name=req,
+                 input=msg_name_1,  %% both argument ...
+                 output=msg_name_2} %% .. and result msgs to be to-lower
+      ]}] = do_process_sort_defs(Defs, [msg_name_to_lower]).
+
 can_tolower_record_names_with_packages_test() ->
     {ok, Defs} = parse_lines(["package Pkg1;",
                               "message Msg1 {required Msg2   f1=1;}",
