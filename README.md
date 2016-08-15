@@ -174,17 +174,158 @@ The generated C++ core was compiled with -O3.
 Mapping of protocol buffer datatypes to erlang
 ----------------------------------------------
 
-`.proto` type          | Erlang type
----------------------- | -------------------------------------------------------------
-`double`, `float`      | `float() | infinity | '-infinity' | nan`<br>  when encoding, integers, too, are accepted
-`int32`, `int64`,<br>`uint32`, `uint64`,<br>`sint32`, `sint64`,<br>`fixed32`, `fixed64`,<br>`sfixed32`, `sfixed64`|`integer()`
-`bool`                 | `true` \| `false`<br>&nbsp;&nbsp;0 and 1 may be used as input data prior to serialization<br>&nbsp;&nbsp;`gpb` will always deserialize to the atom values
-`enum`                 | `atom()`<br>unknown enums decode to `integer()`
-`message`              | record (thus `tuple()`)<br>&nbsp;&nbsp;or maps, if the maps (`-maps`) option is specified
-`string`               | unicode string, thus list of integers<br>&nbsp;&nbsp;or binaries, if the `strings_as_binaries` (`-strbin`)<br>&nbsp;&nbsp;option is specified
-`bytes`                | `binary()`<br> when encoding, iolists, too, are accepted
-`oneof`                | `{ChosenFieldName, Value}`
-`map<_,_>`             | An unordered list of 2-tuples: `[{Key,Value}]`<br>&nbsp;&nbsp;or a map, if the maps (`-maps`) option is specified
+<table>
+<thead><tr><th>Protobuf type</th><th>Erlang type</th></tr></thead>
+<tbody>
+<!-- = = = = = = = = = = = = = = = = = = = = = = = = = = = -->
+<tr><td>double, float</td>
+    <td>float() | infinity | '-infinity' | nan<br/>
+        When encoding, integers, too, are accepted</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>   int32,    int64<br/>
+          uint32,   uint64<br/>
+          sint32,   sint64<br/>
+         fixed32,  fixed64<br/>
+        sfixed32, sfixed64</td>
+    <td>integer()</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>bool</td>
+    <td>true | false<br/>
+        When encoding, the integers 1 and 0, too, are accepted</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>enum</td>
+    <td>atom()<br/>
+        unknown enums decode to `integer()`</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>message</td>
+    <td>record (thus tuple())<br/>
+        or map() if the maps (-maps) option is specified</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>string</td>
+    <td>unicode string, thus list of integers<br/>
+        or binary() if the strings_as_binaries (-strbin) option is
+        specified<br/>
+        When encoding, iolists, too, are accepted</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>bytes</td>
+    <td>binary()<br/>
+        When encoding, iolists, too, are accepted</td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>oneof</td>
+    <td><tt>{ChosenFieldName, Value}</tt></td></tr>
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+<tr><td>map<_,_></td>
+    <td>An unordered list of 2-tuples, <tt>[{Key,Value}]</tt><br/>
+        or  a map, if the maps (-maps) option is specified</td></tr>
+</tbody></table>
+
+
+Repeated fields are represented as lists.
+
+Optional fields are represented as either the value or `undefined` if
+not set. However, for maps, if the option `maps_unset_optional` is set
+to `omitted`, then unset optional values are omitted from the map,
+instead of being set to `undefined`.
+
+Examples of Erlang format for protocol buffer messages
+------------------------------------------------------
+
+#### Repeated and required fields
+
+```protobuf
+   message m1 {
+     repeated uint32 i   = 1;
+     required bool   b   = 2;
+     required eee    e   = 3;
+     required submsg sub = 4;
+   }
+   message submsg {
+     required string s = 1;
+     required bytes  b = 2;
+   }
+   enum eee {
+     INACTIVE = 0;
+     ACTIVE   = 1;
+   }
+```
+##### Corresponding Erlang
+```erlang
+   #m1{i   = [17, 4711],
+       b   = true,
+       e   = 'ACTIVE',
+       sub = #submsg{s = "abc",
+                     b = <<0,1,2,3,255>>}}
+
+   %% If compiled to with the option maps:
+   #{i   => [17, 4711],
+     b   => true,
+     e   => 'ACTIVE',
+     sub => #{s => "abc",
+              b => <<0,1,2,3,255>>}}
+```
+
+#### Optional fields
+```protobuf
+   message m2 {
+     optional uint32 i1 = 1;
+     optional uint32 i2 = 2;
+   }
+```
+##### Corresponding Erlang
+```erlang
+   #m2{i1 = 17}    % i2 is implicitly set to undefined
+
+   %% With the maps option
+   #{i1 => 17,
+     i2 => undefined}
+
+   %% With the maps option and the maps_unset_optional set to omitted:
+   #{i1 => 17}
+```
+
+#### Oneof fields
+This construct first appeared in Google protobuf version 2.6.0.
+```protobuf
+   message m3 {
+     oneof u {
+       int32  a = 1;
+       string b = 2;
+     }
+   }
+```
+##### Corresponding Erlang
+A oneof field is automatically always optional.
+```erlang
+   #m3{u = {a, 17}}
+   #m3{u = {b, "hello"}}
+   #m3{}                 % u is implicitly set to undefined
+
+   %% With the maps option
+   #{u => {a, 17}}
+   #{u => {b, "hello"}}
+   #{u => undefined}     % If maps_unset_optional = present_undefined (default)
+   #{}                   % With the maps_unset_optional set to omitted
+```
+
+#### Map fields
+Not to be confused with Erlang maps.
+This construct first appeared in Google protobuf version 3.0.0 (for
+both the `proto2` and the `proto3` syntax)
+```protobuf
+   message m4 {
+     map<uint32,string> f = 1;
+   }
+```
+##### Corresponding Erlang
+For records, the order of items is undefined when decoding.
+```erlang
+   #m4{f = []}
+   #m4{f = [{1, "a"}, {2, "b"}, {13, "hello"}]}
+
+   %% With the maps option
+   #{f => #{}}
+   #{f => #{1 => "a", 2 => "b", 13 => "hello"}}
+```
 
 
 Interaction with rebar

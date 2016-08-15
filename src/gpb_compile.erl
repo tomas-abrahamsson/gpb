@@ -214,11 +214,12 @@ file(File) ->
 %% The `maps' option will generate a protobuf encoder/decoder that
 %% uses maps instead of records. It will not generate any `.hrl' file,
 %% and the functions `encode_msg', `merge_msgs' and `verify_msg' will
-%% take the message name as an additional parameter. The introspection
-%% will generate message field descriptions as maps instead of as
-%% `#field{}' records, unless, of course `defs_as_proplists' is specified,
-%% in which case they will be proplists instead. This option is not
-%% compatible with the `nif' option.
+%% take the message name as an additional parameter. The field type
+%% The value for fields of type `map<_,_>' will be a map instead of a
+%% list of 2-tuples. The introspection will generate message field
+%% descriptions as maps instead of as `#field{}' records, unless, of
+%% course `defs_as_proplists' is specified, in which case they will be
+%% proplists instead.
 %%
 %% For maps, for optional fields, if not set, the
 %% `maps_unset_optional' option specifies the Erlang-internal
@@ -894,9 +895,10 @@ c() ->
 %%   <dt>`-descr'</dt>
 %%   <dd>Generate self-description information.</dd>
 %%   <dt>`-maps'</dt>
-%%   <dd>Generate code that will accept and produce maps instead of
-%%       records. No .hrl file will be generated. See the `maps' option
-%%       for the function {@link file/2} for more info.</dd>
+%%   <dd>Generate code that will accept and produce maps for messages
+%%       instead of records. No .hrl file will be generated.
+%%       See the `maps' option for the function {@link file/2}
+%%       for more info.</dd>
 %%   <dt>`-maps_unset_optional omitted | present_undefined'</dt>
 %%   <dd>Specifies the internal format for optional fields that are unset.</dd>
 %%   <dt>`-erlc_compile_options Options'</dt>
@@ -1114,7 +1116,7 @@ opt_specs() ->
       "       Generate self-description information.\n"},
      {"maps", undefined, maps, "\n"
       "       Generate code that will accept and produce maps instead of\n"
-      "       records.\n"},
+      "       records for messages.\n"},
      {"maps_unset_optional", {omitted, present_undefined}, maps_unset_optional,
       "omitted | present_undefined\n"
       "       Specifies the internal format for optional fields\n"
