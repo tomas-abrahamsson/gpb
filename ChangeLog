@@ -1,5 +1,24 @@
 -*- coding: utf-8 -*-
 
+Version 3.25.0
+2016-Aug-16
+
+	* Fix a crash for message name prefixing and suffixing or
+	lower-casing for oneof, and also handle this for map<_,_> fields.
+	Thanks to Tristan Sloughter.
+	* Add an option, msg_name_to_snake_case, to turn SomeMsgName into
+	some_msg_name. Thanks to Tristan Sloughter.
+	* Improve rebar3 compatibility. Thanks to Tristan Sloughter.
+	* Make it possible to specify msg name prefix on a per-proto-file
+	basis using the by_proto sub-option. Thanks to Tristan Sloughter.
+	* Make the epb_compatibility option also imply the
+	msg_name_to_lower option, and a "_pb" module_name_suffix option.
+	* Add gpb_compile:string/2,3 to compile from a string
+	* Add an option, import_fetcher to make it possible to specify
+	an alternate source of imported files, instead of using the file
+	system.
+	* Add examples to the README
+
 Version 3.24.4
 2016-Aug-08
 
