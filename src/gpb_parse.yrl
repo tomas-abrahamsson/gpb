@@ -929,6 +929,9 @@ fmt_err({{bad_binary_value, Default}, {Msg, Field}}) ->
 reformat_names(Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
                       {{msg,reformat_name(Name)}, reformat_fields(Fields)};
+                 ({{msg_containment, ProtoName}, Msgs}) ->
+                      {{msg_containment,ProtoName},
+                       [reformat_name(N) || N <- Msgs]};
                  ({{enum,Name}, ENs}) ->
                       {{enum,reformat_name(Name)}, reformat_enum_opt_names(ENs)};
                  ({{extensions,Name}, Exts}) ->
@@ -1065,12 +1068,13 @@ possibly_prefix_suffix_msgs(Defs, Opts) ->
                   true ->
                       to_lower
               end,
-    ToLowerOrSnake = case proplists:get_value(msg_name_to_snake_case, Opts, ToLower) of
-                         true ->
-                             snake_case;
-                         T ->
-                             T
-                     end,
+    ToLowerOrSnake =
+        case proplists:get_value(msg_name_to_snake_case, Opts, ToLower) of
+            true ->
+                snake_case;
+            T ->
+                T
+        end,
 
     if Prefix == "", Suffix == "", ToLowerOrSnake == false ->
             Defs;
@@ -1078,39 +1082,75 @@ possibly_prefix_suffix_msgs(Defs, Opts) ->
             prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs)
     end.
 
+find_proto(_, []) ->
+    undefined;
+find_proto(Name, [{{msg_containment, Proto}, Msgs} | Rest]) ->
+      case lists:member(Name, Msgs) of
+          true ->
+              Proto;
+          false ->
+              find_proto(Name, Rest)
+      end;
+find_proto(Name, [_ | Rest]) ->
+    find_proto(Name, Rest).
+
+maybe_prefix_by_proto(Name, {by_proto, PrefixList}, Defs) ->
+    case find_proto(Name, Defs) of
+        undefined ->
+            "";
+        ProtoName ->
+            proplists:get_value(list_to_atom(ProtoName), PrefixList, "")
+    end;
+maybe_prefix_by_proto(_Name, Prefix, _Defs) ->
+    Prefix.
 
 prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
-                      {{msg,prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name)},
-                       prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields)};
+                      Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
+                      {{msg,prefix_suffix_name(Prefix1, Suffix,
+                                             ToLowerOrSnake, Name)},
+                        prefix_suffix_fields(Prefix, Suffix,
+                                             ToLowerOrSnake, Fields, Defs)};
                  ({{extensions,Name}, Exts}) ->
+                      Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
                       {{extensions,
-                        prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name)},
+                        prefix_suffix_name(Prefix1, Suffix,
+                                           ToLowerOrSnake, Name)},
                        Exts};
                  ({{service,Name}, RPCs}) ->
-                      {{service, maybe_tolower_or_snake_name(Name, ToLowerOrSnake)},
-                       prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs)};
+                      {{service, maybe_tolower_or_snake_name(Name,
+                                                             ToLowerOrSnake)},
+                        prefix_suffix_rpcs(Prefix, Suffix,
+                                           ToLowerOrSnake, RPCs, Defs)};
                  ({package,Name}) ->
-                      {package, maybe_tolower_or_snake_name(Name,ToLowerOrSnake)};
+                      {package, maybe_tolower_or_snake_name(Name,
+                                                            ToLowerOrSnake)};
                  ({proto3_msgs,Names}) ->
                       {proto3_msgs,
-                       [prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name)
-                        || Name <- Names]};
+                       [begin
+                            Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
+                            prefix_suffix_name(Prefix1, Suffix,
+                                               ToLowerOrSnake, Name)
+                        end || Name <- Names]};
                  (OtherElem) ->
                       OtherElem
               end,
               Defs).
 
-prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields) ->
+prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields, Defs) ->
     lists:map(
       fun(#?gpb_field{type={msg,MsgName}}=F) ->
-              NewMsgName = prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, MsgName),
+              Prefix1 = maybe_prefix_by_proto(MsgName, Prefix, Defs),
+              NewMsgName = prefix_suffix_name(Prefix1, Suffix,
+                                              ToLowerOrSnake, MsgName),
               F#?gpb_field{type={msg,NewMsgName}};
          (#?gpb_field{type={map,KeyType,{msg,MsgName}}}=F) ->
-              NewMsgName = prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, MsgName),
+              NewMsgName = prefix_suffix_name(Prefix, Suffix,
+                                              ToLowerOrSnake, MsgName),
               F#?gpb_field{type={map,KeyType,{msg,NewMsgName}}};
          (#gpb_oneof{fields=Fs}=F) ->
-              Fs2 = prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fs),
+              Fs2 = prefix_suffix_fields(Prefix, Suffix,
+                                         ToLowerOrSnake, Fs, Defs),
               F#gpb_oneof{fields=Fs2};
          (#?gpb_field{}=F) ->
               F
@@ -1128,16 +1168,25 @@ maybe_tolower_or_snake_name(Name, to_lower) ->
 maybe_tolower_or_snake_name(Name, snake_case) ->
     NameString = atom_to_list(Name),
     Snaked = lists:foldl(fun(RE, Snaking) ->
-                             re:replace(Snaking, RE, "\\1_\\2", [{return, list}, global])
-                         end, NameString, ["(.)([A-Z][a-z]+)",    %% uppercase followed by lowercase, except beginning
-                                           "(.)([0-9]+)",         %% any consecutive digits, except beginning
-                                           "([a-z0-9])([A-Z])"]), %% uppercase with lowercase or digit before it
+                             re:replace(Snaking, RE, "\\1_\\2", [{return, list},
+                                                                 global])
+                         end, NameString, [%% uppercase followed by lowercase
+                                          "(.)([A-Z][a-z]+)",
+                                          %% any consecutive digits
+                                          "(.)([0-9]+)",
+                                          %% uppercase with lowercase
+                                          %% or digit before it
+                                          "([a-z0-9])([A-Z])"]),
     list_to_atom(string:to_lower(Snaked)).
 
-prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs) ->
+prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
     lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}) ->
-                      NewArg = prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Arg),
-                      NewReturn = prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Return),
+                      PrefixArg = maybe_prefix_by_proto(Arg, Prefix, Defs),
+                      PrefixReturn = maybe_prefix_by_proto(Return,Prefix,Defs),
+                      NewArg = prefix_suffix_name(PrefixArg, Suffix,
+                                                  ToLowerOrSnake, Arg),
+                      NewReturn = prefix_suffix_name(PrefixReturn, Suffix,
+                                                     ToLowerOrSnake, Return),
                       #?gpb_rpc{name=RpcName,
                                 input=NewArg,
                                 output=NewReturn}

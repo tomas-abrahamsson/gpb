@@ -105,7 +105,8 @@ parses_file_to_binary_test() ->
 
 parses_file_to_msg_defs_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
-    {ok, [{{msg,'Msg'},[#?gpb_field{}]}]=MsgDefs} =
+    {ok, [{{msg,'Msg'},[#?gpb_field{}]},
+          {{msg_containment,"X"},['Msg']}]=MsgDefs} =
         gpb_compile:file(
           "X.proto",
           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
@@ -280,7 +281,7 @@ code_generation_when_submsg_size_is_known_at_compile_time_test() ->
     unload_code(M2).
 
 code_generation_when_map_enum_size_is_unknown_at_compile_time_test() ->
-    %% calculation of whether e_varint is needed or not when only 
+    %% calculation of whether e_varint is needed or not when only
     %% an enum needs it, when that enum is in a map
     Defs = [{{msg,m1}, [#?gpb_field{name=a, type={map,bool,{enum,e1}},
                                     fnum=1, rnum=2, occurrence=repeated,
@@ -350,7 +351,7 @@ introspection_defs_as_proplists_test() ->
       {opts,       []}]] = PL = M:find_msg_def(msg1),
     [{{msg, msg1}, PL}] = M:get_msg_defs(),
     [s1, s2] = M:get_service_names(),
-    {{service, s1}, [[{name, req1}, {input, 'msg1'}, {output, 'msg1'}], 
+    {{service, s1}, [[{name, req1}, {input, 'msg1'}, {output, 'msg1'}],
                      [{name, req2}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s1),
     {{service, s2}, [[{name, req2}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s2),
     [{name, req1}, {input, 'msg1'}, {output, 'msg1'}] = M:find_rpc_def(s1, req1),
