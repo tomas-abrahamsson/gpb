@@ -100,6 +100,7 @@ file(File) ->
 %%                   {module_name_suffix, string() | atom()} |
 %%                   {any_translate, AnyTranslation} |
 %%                   epb_compatibility | {epb_compatibility,boolean()} |
+%%                   epb_functions | {epb_functions,boolean()} |
 %%                   {import_fetcher, fun((File) -> FetcherRet)}
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
@@ -370,17 +371,24 @@ file(File) ->
 %%   possible to tell these two call sites apart, if needed.</dd>
 %% </dl>
 %%
-%% The `epb_compatibility' option means this:
+%% The `epb_compatibility' option is an umbrella-option for
+%% compatibility with the Erlang protobuffs library. It will expand to
+%% the options below. It will expand in-place, meaning any of these
+%% can be overridden if specified before the `epb_compatibility'
+%% option.
 %% <ul>
-%%   <li>It will generate the following compatibility functions:
-%%       <ul>
-%%         <li>`encode/1'</li>
-%%         <li>`encode_<MsgName>/1'</li>
-%%         <li>`decode/2'</li>
-%%         <li>`decode_<MsgName>/1'</li>
-%%       </ul></li>
-%%   <li>Implies `{module_name_suffix,"_pb"}'</li>
-%%   <li>Implies `{msg_name_to_lower,true}'</li>
+%%   <li>`epb_functions'</li>
+%%   <li>`{module_name_suffix,"_pb"}'</li>
+%%   <li>`{msg_name_to_lower,true}'</li>
+%% </ul>
+%%
+%% If the `epb_functions' option is specified, then for compatibility
+%% with Erlang protobuffs, the following functions will be generated:
+%% <ul>
+%%   <li>`encode/1'</li>
+%%   <li>`encode_<MsgName>/1'</li>
+%%   <li>`decode/2'</li>
+%%   <li>`decode_<MsgName>/1'</li>
 %% </ul>
 %%
 %% The `import_fetcher' option can be used to catch imports. The
@@ -437,7 +445,7 @@ norm_opt_alias_to_msg_proto_defs(Opts) ->
               Opts).
 
 norm_opt_epb_compat_opt(Opts) ->
-    proplists:expand([{epb_compatibility, [epb_compatibility,
+    proplists:expand([{epb_compatibility, [epb_functions,
                                            {module_name_suffix,"_pb"},
                                            {msg_name_to_lower, true}]}],
                      Opts).
@@ -560,21 +568,21 @@ verify_opts_any_translate_and_nif(Opts) ->
 verify_opts_epb_compat(Defs, Opts) ->
     while_ok(
       [fun() ->
-               case {proplists:get_bool(epb_compatibility, Opts),
+               case {proplists:get_bool(epb_functions, Opts),
                      get_records_or_maps_by_opts(Opts)} of
                    {true, maps} ->
-                       {error, {invalid_options, epb_compatibility,maps}};
+                       {error, {invalid_options, epb_functions,maps}};
                    _ ->
                        ok
                end
        end,
        fun() ->
-               case proplists:get_bool(epb_compatibility, Opts) of
+               case proplists:get_bool(epb_functions, Opts) of
                    true ->
                        MsgNames = [Nm || {{msg,Nm},_Fields} <- Defs],
                        case lists:member(msg, MsgNames) of
                            true ->
-                               {error, {epb_compatibility_impossible,
+                               {error, {epb_functions_impossible,
                                         {with_msg_named,msg}}};
                            false ->
                                ok
@@ -760,8 +768,9 @@ fmt_err({write_failed, File, Reason}) ->
     ?f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
 fmt_err({invalid_options,any_translate,nif}) ->
     "Option error: Not supported: both any_translate and nif";
-fmt_err({invalid_options, epb_compatibility, maps}) ->
-    "Option error: Not supported: both epb_compatibility and maps";
+fmt_err({invalid_options, epb_functions, maps}) ->
+    "Option error: Not supported: both epb_compatibility (or epb_functions) "
+        "and maps";
 fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
@@ -907,13 +916,16 @@ c() ->
 %%   <dd>Specifies compilation options, in a comma separated string, to pass
 %%       along to the \-compile\(\) directive on the generated code.</dd>>
 %%   <dt>`-epb'</dt>
-%%   <dd>Compatibility with the Erlang Protobuffs library:
+%%   <dd>Enable compatibility with the Erlang Protobuffs library:
 %%       <ul>
-%%         <li>Generate encode/1, decode/2, encode_MsgName/1, decode_MsgName/1
-%%             </li>
+%%         <li>Implies the `-epb-functions' option</li>
 %%         <li>Implies the `-modsuffix _pb' option</li>
 %%         <li>Implies the `-msgtolower' option</li>
 %%       </ul></dd>
+%%   <dt>`-epb-functions'</dt>
+%%   <dd>For compatibility with the Erlang Protobuffs library, generate also
+%%       the following functions: `encode/1', `decode/2', `encode_MsgName/1'
+%%       and `decode_MsgName/1'</dd>
 %%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
@@ -1127,11 +1139,15 @@ opt_specs() ->
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
      {"epb", undefined, epb_compatibility, "\n"
-      "       Compatibility with the Erlang Protobuffs library:\n"
-      "       * Generate some API compatibility functions:\n"
-      "         encode/1, decode/2, encode_MsgName/1, decode_MsgName/1\n"
+      "       Enable compatibility with the Erlang Protobuffs library:\n"
+      "       * Implies the -epb-functions option\n"
       "       * Implies the -modsuffix _pb option\n"
       "       * Implies the -msgtolower option\n"},
+     {"epb-functions", undefined, epb_functions, "\n"
+      "       Generate some functions for API compatibility with the "
+      "       Erlang protobuffs library:\n"
+      "       * encode/1 and encode_MsgName/1\n"
+      "       * decode/2 and decode_MsgName/1\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
@@ -1952,7 +1968,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
          [?f("-export([~p/1]).~n", [mk_fn(encode_, MsgName)])
           || {{msg,MsgName}, _Fields} <- Defs],
          "\n"]
-        || proplists:get_bool(epb_compatibility, Opts)],
+        || get_epb_functions_by_opts(Opts)],
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([merge_msgs/2, merge_msgs/3]).~n");
@@ -1962,7 +1978,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
          [?f("-export([~p/1]).~n", [mk_fn(decode_, MsgName)])
           || {{msg,MsgName}, _Fields} <- Defs],
          "\n"]
-        || proplists:get_bool(epb_compatibility, Opts)],
+        || get_epb_functions_by_opts(Opts)],
        case get_records_or_maps_by_opts(Opts) of
            records -> ?f("-export([verify_msg/1, verify_msg/2]).~n");
            maps    -> ?f("-export([verify_msg/2, verify_msg/3]).~n")
@@ -2131,7 +2147,7 @@ format_encoders_top_function_no_msgs(Opts) ->
        gpb_codegen:format_fn(
          encode,
          fun(_Msg) -> erlang:error({gpb_error, no_messages}) end)]
-      || proplists:get_bool(epb_compatibility, Opts)]].
+      || get_epb_functions_by_opts(Opts)]].
 
 format_encoders_top_function_msgs(Defs, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
@@ -2212,7 +2228,7 @@ format_encoders_top_function_msgs(Defs, Opts) ->
            mk_fn(encode_, MsgName),
            fun(Msg) -> encode_msg(Msg) end)]
         || {{msg,MsgName}, _Fields} <- Defs]]
-      || proplists:get_bool(epb_compatibility, Opts)]].
+      || get_epb_functions_by_opts(Opts)]].
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
@@ -2926,7 +2942,7 @@ format_decoders_top_function_no_msgs(Opts) ->
          fun(MsgName, Bin) when is_atom(MsgName), is_binary(Bin) ->
                  erlang:error({gpb_error, no_messages})
          end)]
-      || proplists:get_bool(epb_compatibility, Opts)]].
+      || get_epb_functions_by_opts(Opts)]].
 
 format_decoders_top_function_msgs(Defs, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
@@ -2976,7 +2992,7 @@ format_decoders_top_function_msgs(Defs, Opts) ->
           end,
           [replace_term('MsgName', MsgName)])
         || {{msg,MsgName}, _Fields} <- Defs]]
-      || proplists:get_bool(epb_compatibility, Opts)]].
+      || get_epb_functions_by_opts(Opts)]].
 
 format_aux_decoders(Defs, AnRes, _Opts) ->
     format_enum_decoders(Defs, AnRes).
@@ -8090,6 +8106,9 @@ repeat_clauses(Marker, RepetitionReplacements) ->
 
 get_strings_as_binaries_by_opts(Opts) ->
     proplists:get_bool(strings_as_binaries, Opts).
+
+get_epb_functions_by_opts(Opts) ->
+    proplists:get_bool(epb_functions, Opts).
 
 proto3_type_default(Type, Defs, Opts) ->
     if Type == string ->

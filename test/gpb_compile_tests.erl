@@ -212,21 +212,27 @@ parses_and_generates_good_code_also_for_empty_msgs_test() ->
     unload_code(M).
 
 encoding_decoding_functions_for_epb_compatibility_test() ->
+    epb_encoding_decoding_functions_aux(epb_compatibility).
+
+encoding_decoding_functions_for_epb_functions_test() ->
+    epb_encoding_decoding_functions_aux(epb_functions).
+
+epb_encoding_decoding_functions_aux(Opt) ->
     DefsM1 = "message m1 { required uint32 a = 1; }\n",
     DefsNoMsgs = "enum ee { a = 0; }\n",
     {error, Reason1, []} = compile_iolist_get_errors_or_warnings(
                              DefsM1,
-                             [epb_compatibility, maps]),
+                             [Opt, maps]),
     true = is_list(gpb_compile:format_error(Reason1)),
 
     %% Verify we get an error for epb_compatibility with a message named 'msg'
     %% due to collision with standard gpb encode_msg/decode_msg functions
     {error, Reason2, []} = compile_iolist_get_errors_or_warnings(
                              "message msg { }\n",
-                             [epb_compatibility, maps]),
+                             [Opt, maps]),
     true = is_list(gpb_compile:format_error(Reason2)),
 
-    Mod1 = compile_iolist(DefsM1, [epb_compatibility]),
+    Mod1 = compile_iolist(DefsM1, [Opt]),
     M1 = #m1{a=1234},
     B1 = Mod1:encode(M1),
     ?assertMatch(true, is_binary(B1)),
@@ -244,7 +250,7 @@ encoding_decoding_functions_for_epb_compatibility_test() ->
     unload_code(Mod2),
 
     %% verify functions generated ok when no msgs specified
-    Mod3 = compile_iolist(DefsNoMsgs, [epb_compatibility]),
+    Mod3 = compile_iolist(DefsNoMsgs, [Opt]),
     _ = Mod3:module_info(),
     unload_code(Mod3).
 
@@ -2747,7 +2753,7 @@ opt_test() ->
            msg_name_to_lower,
            help, help, version, version,
            {erlc_compile_options, "debug_info, inline_list_funcs"},
-           epb_compatibility
+           epb_compatibility, epb_functions
            ],
           ["x.proto", "y.proto"]}} =
         gpb_compile:parse_opts_and_args(
@@ -2781,7 +2787,7 @@ opt_test() ->
            "-h", "--help",
            "-V", "--version",
            "-erlc_compile_options", "debug_info, inline_list_funcs",
-           "-epb",
+           "-epb", "-epb-functions",
            "x.proto", "y.proto"]).
 
 any_translation_options_test() ->
