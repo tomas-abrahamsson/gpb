@@ -91,8 +91,10 @@ file(File) ->
 %%                   warnings_as_errors |
 %%                   include_as_lib | use_packages |
 %%                   {erlc_compile_options,string()} |
-%%                   {msg_name_prefix, string() | atom()} |
+%%                   {msg_name_prefix, string() | atom() |
+%%                                  {by_proto, [{atom(), string() | atom()}]}} |
 %%                   {msg_name_suffix, string() | atom()} |
+%%                   {msg_name_to_snake_case, boolean()} |
 %%                   {msg_name_to_lower, boolean()} |
 %%                   {module_name_prefix, string() | atom()} |
 %%                   {module_name_suffix, string() | atom()} |
@@ -1250,11 +1252,13 @@ parse_file_and_imports(In, AlreadyImported, Opts) ->
             AlreadyImported2 = [FName | AlreadyImported],
             case scan_and_parse_string(Contents, FName, Opts) of
                 {ok, Defs} ->
+                    ProtoName = filename:basename(FName, ".proto"),
                     Imports = gpb_parse:fetch_imports(Defs),
                     Opts2 = ensure_include_path_to_wellknown_types_if_proto3(
                               Defs, Imports, Opts),
+                    MsgContainment = {{msg_containment, ProtoName}, [Name || {{msg, Name}, _} <- Defs]},
                     read_and_parse_imports(Imports, AlreadyImported2,
-                                           Defs, Opts2);
+                                           [MsgContainment | Defs], Opts2);
                 {error, Reason} ->
                     {error, Reason}
             end;

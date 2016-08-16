@@ -766,6 +766,29 @@ can_prefix_record_names_test() ->
                  output=p_m2} %% ... and result msgs to be prefixed
       ]}] = do_process_sort_defs(Defs, [{msg_name_prefix, "p_"}]).
 
+can_prefix_record_names_by_proto_test() ->
+    {ok, Defs} = parse_lines(["enum    e1 {a=1; b=2;}",
+                              "message m1 {required e1 f1=1;}",
+                              "message m2 {required m1 f2=1;}",
+                              "service s1 {",
+                              "  rpc req(m1) returns (m2) {};",
+                              "}",
+                              "extend m1 { optional uint32 fm2=2; }"]),
+    Defs1 = [{{msg_containment, "proto1"}, [['.',m1]]},
+             {{msg_containment, "proto2"}, [['.',m2]]} | Defs],
+    [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+     {{msg,p1_m1}, [#?gpb_field{name=f1, type={enum,e1}}, #?gpb_field{name=fm2}]},
+     {{msg,p2_m2}, [#?gpb_field{type={msg,p1_m1}}]}, %% type is a msg: to be prefixed
+     {{msg_containment,"proto1"},[m1]},
+     {{msg_containment,"proto2"},[m2]},
+     {{service,s1}, %% not prefixed
+      [#?gpb_rpc{name=req,
+                 input=p1_m1,  %% both argument ...
+                 output=p2_m2} %% ... and result msgs to be prefixed
+      ]}] = do_process_sort_defs(Defs1, [{msg_name_prefix, {by_proto,
+                                                            [{proto1, "p1_"},
+                                                             {proto2, "p2_"}]}}]).
+
 can_suffix_record_names_test() ->
     {ok, Defs} = parse_lines(["enum    e1 {a=1; b=2;}",
                               "message m1 {required e1 f1=1;}",
@@ -798,6 +821,44 @@ can_tolower_record_names_test() ->
                  input=msg1,  %% both argument ...
                  output=msg2} %% .. and result msgs to be to-lower
       ]}] = do_process_sort_defs(Defs, [msg_name_to_lower]).
+
+can_tolower_record_names_with_oneof_test() ->
+    {ok, Defs} = parse_lines(["message Msg1 {",
+                              "  oneof u {",
+                              "    Msg1   a = 1;",
+                              "    uint32 b = 2;",
+                              "  }",
+                              "}"]),
+    [{{msg,msg1}, [#gpb_oneof{fields=[#?gpb_field{name=a,type={msg,msg1}},
+                                      #?gpb_field{name=b}]}]}] =
+        do_process_sort_defs(Defs, [msg_name_to_lower]).
+
+can_tolower_record_names_with_map_test() ->
+    {ok, Defs} = parse_lines(["message Msg1 {",
+                              "  required uint32 f = 1;",
+                              "}"
+                              "message Msg2 {"
+                              "  map<string,Msg1> m = 1;",
+                              "}"]),
+    [{{msg,msg1}, [#?gpb_field{}]},
+     {{msg,msg2}, [#?gpb_field{type={map,string,{msg,msg1}}}]}] =
+        do_process_sort_defs(Defs, [msg_name_to_lower]).
+
+can_to_snake_record_names_test() ->
+    {ok, Defs} = parse_lines(["message MsgName1 {required MsgName2   f1=1;}",
+                              "message MsgName2 {required uint32 g1=1;}",
+                              "service SvcName1 {",
+                              "  rpc req(MsgName1) returns (MsgName2) {};",
+                              "}",
+                              "extend MsgName1 { optional uint32 fm2=2; }"]),
+    [{{msg,msg_name_1}, [#?gpb_field{name=f1, type={msg,msg_name_2}},
+                   #?gpb_field{name=fm2}]},
+     {{msg,msg_name_2}, [#?gpb_field{name=g1}]},
+     {{service,svc_name_1},
+      [#?gpb_rpc{name=req,
+                 input=msg_name_1,  %% both argument ...
+                 output=msg_name_2} %% .. and result msgs to be to-lower
+      ]}] = do_process_sort_defs(Defs, [msg_name_to_snake_case]).
 
 can_tolower_record_names_with_packages_test() ->
     {ok, Defs} = parse_lines(["package Pkg1;",
