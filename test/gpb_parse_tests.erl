@@ -770,6 +770,7 @@ can_prefix_record_names_by_proto_test() ->
     {ok, Defs} = parse_lines(["enum    e1 {a=1; b=2;}",
                               "message m1 {required e1 f1=1;}",
                               "message m2 {required m1 f2=1;}",
+                              "message m3 {map<string, m1> m=1;}",
                               "service s1 {",
                               "  rpc req(m1) returns (m2) {};",
                               "}",
@@ -777,6 +778,8 @@ can_prefix_record_names_by_proto_test() ->
     Defs1 = [{{msg_containment, "proto1"}, [['.',m1]]},
              {{msg_containment, "proto2"}, [['.',m2]]} | Defs],
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+     {{msg,m3},
+      [#?gpb_field{name=m, type={map,string,{msg,p1_m1}}}]},
      {{msg,p1_m1}, [#?gpb_field{name=f1, type={enum,e1}}, #?gpb_field{name=fm2}]},
      {{msg,p2_m2}, [#?gpb_field{type={msg,p1_m1}}]}, %% type is a msg: to be prefixed
      {{msg_containment,"proto1"},[m1]},

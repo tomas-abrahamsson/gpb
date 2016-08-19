@@ -1145,7 +1145,8 @@ prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields, Defs) ->
                                               ToLowerOrSnake, MsgName),
               F#?gpb_field{type={msg,NewMsgName}};
          (#?gpb_field{type={map,KeyType,{msg,MsgName}}}=F) ->
-              NewMsgName = prefix_suffix_name(Prefix, Suffix,
+              Prefix1 = maybe_prefix_by_proto(MsgName, Prefix, Defs),
+              NewMsgName = prefix_suffix_name(Prefix1, Suffix,
                                               ToLowerOrSnake, MsgName),
               F#?gpb_field{type={map,KeyType,{msg,NewMsgName}}};
          (#gpb_oneof{fields=Fs}=F) ->
