@@ -84,16 +84,16 @@
          opts      = []     :: [term()]
         }).
 
--record(?gpb_rpc, % NB: record name is (currently) `rpc' (not `gpb_rpc')!
-        {name               :: atom(),
-         input,
-         output
-        }).
-
 -record(gpb_oneof,
         {name   :: atom(),
          rnum   :: pos_integer(),  %% field number in the record
          fields :: [#?gpb_field{}] %% all fields have the same rnum
+        }).
+
+-record(?gpb_rpc, % NB: record name is (currently) `rpc' (not `gpb_rpc')!
+        {name               :: atom(),
+         input,
+         output
         }).
 
 -endif.
