@@ -439,6 +439,9 @@ introspection_defs_as_proplists_test() ->
              "}"],
     %% With the defs_as_proplists option
     M = compile_iolist(Proto, [defs_as_proplists]),
+    NoIStr = {input_stream, false},
+    NoOStr = {output_stream, false},
+    NoOpts = {opts, []},
     [[{name,       f1},
       {fnum,       1},
       {rnum,       2},
@@ -447,11 +450,17 @@ introspection_defs_as_proplists_test() ->
       {opts,       []}]] = PL = M:find_msg_def(msg1),
     [{{msg, msg1}, PL}] = M:get_msg_defs(),
     [s1, s2] = M:get_service_names(),
-    {{service, s1}, [[{name, req1}, {input, 'msg1'}, {output, 'msg1'}],
-                     [{name, req2}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s1),
-    {{service, s2}, [[{name, req2}, {input, 'msg1'}, {output, 'msg1'}]]} = M:get_service_def(s2),
-    [{name, req1}, {input, 'msg1'}, {output, 'msg1'}] = M:find_rpc_def(s1, req1),
-    [{name, req2}, {input, 'msg1'}, {output, 'msg1'}] = M:find_rpc_def(s2, req2),
+    {{service, s1},
+     [[{name, req1}, {input, msg1}, {output, msg1}, NoIStr, NoOStr, NoOpts],
+      [{name, req2}, {input, msg1}, {output, msg1}, NoIStr, NoOStr, NoOpts]]} =
+        M:get_service_def(s1),
+    {{service, s2},
+     [[{name, req2}, {input, msg1}, {output, msg1}, NoIStr, NoOStr, NoOpts]]} =
+        M:get_service_def(s2),
+    [{name, req1}, {input, msg1}, {output, msg1}, NoIStr, NoOStr, NoOpts] =
+        M:find_rpc_def(s1, req1),
+    [{name, req2}, {input, msg1}, {output, msg1}, NoIStr, NoOStr, NoOpts] =
+        M:find_rpc_def(s2, req2),
     unload_code(M),
 
     %% No defs_as_proplists option
@@ -464,14 +473,14 @@ introspection_defs_as_proplists_test() ->
                  opts       = []}] = Fs = M:find_msg_def(msg1),
     [{{msg, msg1}, Fs}] = Defs = M:get_msg_defs(),
     {{service, s1},
-     [#?gpb_rpc{name=req1, input='msg1', output='msg1'},
-      #?gpb_rpc{name=req2, input='msg1', output='msg1'}]} =
+     [#?gpb_rpc{name=req1, input=msg1, output=msg1},
+      #?gpb_rpc{name=req2, input=msg1, output=msg1}]} =
         M:get_service_def(s1),
     {{service, s2},
-     [#?gpb_rpc{name=req2, input='msg1', output='msg1'}]} =
+     [#?gpb_rpc{name=req2, input=msg1, output=msg1}]} =
         M:get_service_def(s2),
-    #?gpb_rpc{name=req1, input='msg1', output='msg1'} = M:find_rpc_def(s1, req1),
-    #?gpb_rpc{name=req2, input='msg1', output='msg1'} = M:find_rpc_def(s2, req2),
+    #?gpb_rpc{name=req1, input=msg1, output=msg1} = M:find_rpc_def(s1, req1),
+    #?gpb_rpc{name=req2, input=msg1, output=msg1} = M:find_rpc_def(s2, req2),
     unload_code(M),
 
     %% make sure the generated erl file does not -include[_lib] "gpb.hrl"

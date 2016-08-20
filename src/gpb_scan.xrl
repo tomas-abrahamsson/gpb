@@ -66,6 +66,7 @@ reserved        : {token, {reserved,TokenLine}}.
 service         : {token, {service,TokenLine}}.
 rpc             : {token, {rpc,TokenLine}}.
 returns         : {token, {returns,TokenLine}}.
+stream          : {token, {stream,TokenLine}}.
 
 true            : {token, {bool_lit,TokenLine,true}}.
 false           : {token, {bool_lit,TokenLine,false}}.

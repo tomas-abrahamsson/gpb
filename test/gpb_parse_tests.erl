@@ -558,6 +558,28 @@ parses_multiple_services_test() ->
      {{service,s2},[#?gpb_rpc{name=req2, input=m2, output=m1}]}] =
         do_process_sort_defs(Defs).
 
+parses_rpc_streams_and_options_test() ->
+    {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
+                             "message m2 {required uint32 f1=1;}",
+                             "service s1 {",
+                             "  rpc r1(m1)        returns (m2);",
+                             "  rpc r2(stream m1) returns (m2);",
+                             "  rpc r3(m1)        returns (stream m2);",
+                             "  rpc r4(stream m1) returns (stream m2);",
+                             "  rpc ro(m1) returns (m2) { option a=1; }",
+                             "}"]),
+    [{{msg,m1}, _},
+     {{msg,m2}, _},
+     {{service,s1},
+      [#?gpb_rpc{name=r1, input_stream=false, output_stream=false},
+       #?gpb_rpc{name=r2, input_stream=true, output_stream=false},
+       #?gpb_rpc{name=r3, input_stream=false, output_stream=true},
+       #?gpb_rpc{name=r4, input_stream=true, output_stream=true},
+       #?gpb_rpc{name=ro, opts=[{a,1}]}]=Rpcs}] =
+        do_process_sort_defs(Defs),
+    %% Check all input(arg)/output(return) messages too
+    [{m1,m2}] = lists:usort([{A,R} || #?gpb_rpc{input=A,output=R} <- Rpcs]).
+
 parses_service_ignores_empty_method_option_braces_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
                              "message m2 {required uint32 f2=1;}",

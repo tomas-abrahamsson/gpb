@@ -35,7 +35,7 @@ Nonterminals
         reserved_def res_numbers res_number res_names
         oneof_def oneof_elems oneof_elem
         option_def
-        service_def rpc_defs rpc_def m_opts
+        service_def rpc_defs rpc_def rpc_arg rpc_ret m_opts
         name
         constant
         integer
@@ -56,7 +56,7 @@ Terminals
         option
         extensions extend max to reserved
         oneof
-        service rpc returns
+        service rpc returns stream
         packed deprecated
         syntax
         '.' ';' '(' ')' '{' '}' '[' ']' '=' ',' '<' '>'
@@ -208,6 +208,7 @@ fidentifier -> max:                     kw_to_identifier('$1').
 fidentifier -> to:                      kw_to_identifier('$1').
 fidentifier -> rpc:                     kw_to_identifier('$1').
 fidentifier -> returns:                 kw_to_identifier('$1').
+fidentifier -> stream:                  kw_to_identifier('$1').
 fidentifier -> packed:                  kw_to_identifier('$1').
 fidentifier -> deprecated:              kw_to_identifier('$1').
 fidentifier -> syntax:                  kw_to_identifier('$1').
@@ -332,10 +333,16 @@ rpc_defs -> rpc_def rpc_defs:           ['$1' | '$2'].
 rpc_defs -> ';' rpc_defs:               '$2'.
 rpc_defs -> '$empty':                   [].
 
-rpc_def -> rpc identifier '(' name ')' returns '(' name ')' ';':
-                                        {identifier_name('$2'), '$4', '$8'}.
-rpc_def -> rpc identifier '(' name ')' returns '(' name ')' '{' m_opts '}':
-                                        {identifier_name('$2'), '$4', '$8'}.
+rpc_def -> rpc identifier rpc_arg returns rpc_ret ';':
+                                        {identifier_name('$2'), '$3','$5',[]}.
+rpc_def -> rpc identifier rpc_arg returns rpc_ret '{' m_opts '}':
+                                        {identifier_name('$2'), '$3','$5','$7'}.
+
+rpc_arg -> '(' name ')':                {'$2', false}.
+rpc_arg -> '(' stream name ')':         {'$3', true}.
+
+rpc_ret -> '(' name ')':                {'$2', false}.
+rpc_ret -> '(' stream name ')':         {'$3', true}.
 
 m_opts -> option_def ';' m_opts:        ['$1' | '$3'].
 m_opts -> ';' m_opts:                   '$2'.
@@ -384,9 +391,9 @@ post_process_all_files(Defs, Opts) ->
             {ok, normalize_msg_field_options(
                    handle_proto_syntax_version_all_files(
                      possibly_prefix_suffix_msgs(
-                         enumerate_msg_fields(
-                           reformat_names(
-                             extend_msgs(Defs2))),
+                       enumerate_msg_fields(
+                         reformat_names(
+                           extend_msgs(Defs2))),
                        Opts)))};
         {error, Reasons} ->
             {error, Reasons}
@@ -569,14 +576,20 @@ resolve_field_refs(Fields, Defs, Root, FullName, Reasons) ->
 
 resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
     lists:mapfoldl(
-      fun({RpcName, Arg, Return}=Rpc, Acc) ->
+      fun({RpcName, {Arg, ArgIsStream}, {Return, ReturnIsStream}, Opts}=Rpc,
+          Acc) ->
               case resolve_ref(Defs, Arg, Root, FullName) of
                   {found, {msg, MArg}} ->
                       case resolve_ref(Defs, Return, Root, FullName) of
                           {found, {msg, MReturn}} ->
+                              NewOpts = [{reformat_name(Name), Value}
+                                         || {option,Name,Value} <- Opts],
                               NewRpc = #?gpb_rpc{name=RpcName,
                                                  input=MArg,
-                                                 output=MReturn},
+                                                 input_stream=ArgIsStream,
+                                                 output=MReturn,
+                                                 output_stream=ReturnIsStream,
+                                                 opts=NewOpts},
                               {NewRpc, Acc};
                           {found, {BadType, MReturn}} ->
                               Reason = {rpc_return_ref_to_non_msg,
@@ -983,10 +996,10 @@ reformat_name(Name) ->
                              ".")).
 
 reformat_rpcs(RPCs) ->
-    lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}) ->
-                      #?gpb_rpc{name=RpcName,
-                                input=reformat_name(Arg),
-                                output=reformat_name(Return)}
+    lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}=R) ->
+                      R#?gpb_rpc{name=RpcName,
+                                 input=reformat_name(Arg),
+                                 output=reformat_name(Return)}
               end,
               RPCs).
 
@@ -1180,16 +1193,16 @@ maybe_tolower_or_snake_name(Name, snake_case) ->
     list_to_atom(string:to_lower(Snaked)).
 
 prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
-    lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}) ->
+    lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}=R) ->
                       PrefixArg = maybe_prefix_by_proto(Arg, Prefix, Defs),
                       PrefixReturn = maybe_prefix_by_proto(Return,Prefix,Defs),
                       NewArg = prefix_suffix_name(PrefixArg, Suffix,
                                                   ToLowerOrSnake, Arg),
                       NewReturn = prefix_suffix_name(PrefixReturn, Suffix,
                                                      ToLowerOrSnake, Return),
-                      #?gpb_rpc{name=RpcName,
-                                input=NewArg,
-                                output=NewReturn}
+                      R#?gpb_rpc{name=RpcName,
+                                 input=NewArg,
+                                 output=NewReturn}
               end,
               RPCs).
 

@@ -93,7 +93,10 @@
 -record(?gpb_rpc, % NB: record name is (currently) `rpc' (not `gpb_rpc')!
         {name               :: atom(),
          input,
-         output
+         output,
+         input_stream       :: boolean(),
+         output_stream      :: boolean(),
+         opts               :: [term()]
         }).
 
 -endif.
