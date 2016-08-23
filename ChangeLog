@@ -1,5 +1,20 @@
 -*- coding: utf-8 -*-
 
+Version 3.25.1
+2016-Aug-24
+
+	* New option, epb_functions, to control generation of epb
+	compatibility functions encode/1, decode/2 etc. The
+	epb_compatibility option now implies also epb_functions.
+
+	* Fix for the by_proto sub-option to msg_name_prefix for map-type
+	fields. Thanks to Tristan Sloughter.
+
+	* Add parsing of stream indicator to rpc service definitions.
+
+	* Fix bug in fetch_rpc_def/2 for options maps (-maps) and
+	defs_as_proplists (-pldefs).
+
 Version 3.25.0
 2016-Aug-16
 
