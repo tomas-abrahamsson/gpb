@@ -5428,7 +5428,7 @@ format_introspection(Defs, Opts) ->
      ?f("~n"),
      [format_find_service_rpc_defs(ServiceName, Rpcs, Opts) || {{service, ServiceName}, Rpcs} <- ServiceDefs],
      ?f("~n"),
-     format_fetch_rpc_defs(ServiceDefs),
+     format_fetch_rpc_defs(ServiceDefs, Opts),
      ?f("~n"),
      format_get_package_name(Defs),
      ?f("~n"),
@@ -5688,22 +5688,32 @@ format_find_service_rpc_defs(ServiceName, Rpcs, Opts) ->
                         replace_tree('<RpcDef>', rpc_def_tree(Rpc, Opts))]
                        || #?gpb_rpc{name=RpcName} = Rpc <- Rpcs])]).
 
-format_fetch_rpc_defs([]) ->
+format_fetch_rpc_defs([], _Opts) ->
     ["-spec fetch_rpc_def(_, _) -> no_return().\n",
      gpb_codegen:format_fn(
        fetch_rpc_def,
        fun(ServiceName, RpcName) ->
                erlang:error({no_such_rpc, ServiceName, RpcName})
        end)];
-format_fetch_rpc_defs(_ServiceDefs) ->
+format_fetch_rpc_defs(_ServiceDefs, Opts) ->
     gpb_codegen:format_fn(
       fetch_rpc_def,
       fun(ServiceName, RpcName) ->
               case find_rpc_def(ServiceName, RpcName) of
-                  Def when is_tuple(Def) -> Def;
+                  Def when is_X(Def) -> Def;
                   error -> erlang:error({no_such_rpc, ServiceName, RpcName})
               end
-      end).
+      end,
+      [replace_term(is_X,
+                    case get_rpc_format_by_opts(Opts) of
+                        rpcs_as_proplists ->
+                            is_list;
+                        rpcs_as_records ->
+                            case get_records_or_maps_by_opts(Opts) of
+                                maps    -> is_map;
+                                records -> is_tuple
+                            end
+                    end)]).
 
 service_def_tree({{service, ServiceName}, Rpcs}, Opts) ->
     erl_syntax:tuple(

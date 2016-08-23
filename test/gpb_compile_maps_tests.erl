@@ -177,6 +177,14 @@ map_type_test() ->
 
     unload_code(M).
 
+fetch_rpc_def_test() ->
+    M = compile_iolist(["message m { required uint32 f = 1; };\n",
+                        "service s { rpc r(m) returns(m); }\n"],
+                       [maps, type_specs]),
+    #{name := r, input := m, output := m} = M:fetch_rpc_def(s,r),
+    ?assertError(_, M:fetch_rpc_def(s,some_bad_rpc_name)),
+    unload_code(M).
+
 %% merge ------------------------------------------------
 merge_maps_with_opts_present_undefined_test() ->
     M = compile_iolist(["message m1 {",
