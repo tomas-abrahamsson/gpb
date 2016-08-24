@@ -74,6 +74,9 @@ file(File) ->
 %%                   {defs_as_proplists, boolean()} | defs_as_proplists |
 %%                   {descriptor,boolean()} | descriptor |
 %%                   {maps,boolean()} | maps |
+%%                   {msgs_as_maps,boolean()} | msgs_as_maps |
+%%                   {mapfields_as_maps,boolean()} | mapfields_as_maps |
+%%                   {defs_as_maps,boolean()} | defs_as_maps |
 %%                   {maps_unset_optional, omitted | present_undefined} |
 %%                   {nif,boolean()} | nif |
 %%                   {load_nif, LoadNif} |
@@ -215,16 +218,24 @@ file(File) ->
 %% other file-type specific output options.
 %%
 %% The `maps' option will generate a protobuf encoder/decoder that
-%% uses maps instead of records. It will not generate any `.hrl' file,
-%% and the functions `encode_msg', `merge_msgs' and `verify_msg' will
-%% take the message name as an additional parameter. The field type
-%% The value for fields of type `map<_,_>' will be a map instead of a
-%% list of 2-tuples. The introspection will generate message field
-%% descriptions as maps instead of as `#field{}' records, unless, of
-%% course `defs_as_proplists' is specified, in which case they will be
-%% proplists instead.
+%% uses maps instead of records. This option expands to the following
+%% options:
+%% <dl>
+%%    <dt>`msgs_as_maps'</dt>
+%%    <dd>No `.hrl' file will be generated, and the functions
+%%        `encode_msg', `merge_msgs' and `verify_msg' will take the
+%%        message name as an additional parameter.</dd>
+%%    <dt>`mapfields_as_maps'</dt>
+%%    <dd>The value for fields of type `map<_,_>' will be a map
+%%        instead of a list of 2-tuples.</dd>
+%%    <dt>`defs_as_maps'</dt>
+%%    <dd>The introspection will generate message field descriptions
+%%        as maps instead of as `#field{}' records, unless, of course
+%%        `defs_as_proplists' is specified, in which case they will be
+%%        proplists instead.</dd>
+%% </dl>
 %%
-%% For maps, for optional fields, if not set, the
+%% For messages as maps, for optional fields, if not set, the
 %% `maps_unset_optional' option specifies the Erlang-internal
 %% representation; both how it is expected to be found at encoding,
 %% and how decoding will return it:
@@ -241,7 +252,6 @@ file(File) ->
 %%       and being present and set.  Encoding will assume it is unset.
 %%   </dd>
 %% </dl>
-%%
 %%
 %% The `nif' option will cause the compiler to generate nif C++ code
 %% for encoding and decoding. The generated nif C++ code can be linked
@@ -438,7 +448,8 @@ normalize_alias_opts(Opts) ->
     lists:foldl(fun(F, OptsAcc) -> F(OptsAcc) end,
                 Opts,
                 [fun norm_opt_alias_to_msg_proto_defs/1,
-                 fun norm_opt_epb_compat_opt/1]).
+                 fun norm_opt_epb_compat_opt/1,
+                 fun norm_opt_map_opts/1]).
 
 norm_opt_alias_to_msg_proto_defs(Opts) ->
     lists:map(fun(to_msg_defs)         -> to_proto_defs;
@@ -452,6 +463,16 @@ norm_opt_epb_compat_opt(Opts) ->
                                            {module_name_suffix,"_pb"},
                                            {msg_name_to_lower, true}]}],
                      Opts).
+
+norm_opt_map_opts(Opts) ->
+    proplists:expand(
+      [{maps, [msgs_as_maps,
+               mapfields_as_maps,
+               defs_as_maps]},
+       {{maps,false}, [{msgs_as_maps, false},
+                       {mapfields_as_maps, false},
+                       {defs_as_maps, false}]}],
+      Opts).
 
 normalize_return_report_opts(Opts1) ->
     Opts2 = expand_opt(return, [return_warnings, return_errors], Opts1),
@@ -912,12 +933,28 @@ c() ->
 %%   <dt>`-descr'</dt>
 %%   <dd>Generate self-description information.</dd>
 %%   <dt>`-maps'</dt>
-%%   <dd>Generate code that will accept and produce maps for messages
-%%       instead of records. No .hrl file will be generated.
+%%   <dd>This option expands to the following options:
+%%       <ul>
+%%         <li>`-msgs-as-maps'</li>
+%%         <li>`-mapfields-as-maps'</li>
+%%         <li>`-defs-as-maps'</li>
+%%       </ul>
 %%       See the `maps' option for the function {@link file/2}
 %%       for more info.</dd>
 %%   <dt>`-maps_unset_optional omitted | present_undefined'</dt>
 %%   <dd>Specifies the internal format for optional fields that are unset.</dd>
+%%   <dt>`-msgs-as-maps'</dt>
+%%   <dd>Specifies that messages should be maps. No `.hrl' file will
+%%       be generated.
+%%       Without this option, messages will be records.</dd>
+%%   <dt>`-mapfields-as-maps'</dt>
+%%   <dd>Specifies that fields of type `map<_,_>' should be maps.
+%%       Otherwise, they will be 2-tuples.</dd>
+%%   <dt>`-defs-as-maps'</dt>
+%%   <dd>Specifies that proto defintions from the generated code
+%%       are to be returned as maps. Otherwise, they will be lists
+%%       of tuples and records (or proplists if the `-pldefs' option
+%%       is specified)</dd>
 %%   <dt>`-erlc_compile_options Options'</dt>
 %%   <dd>Specifies compilation options, in a comma separated string, to pass
 %%       along to the \-compile\(\) directive on the generated code.</dd>>
@@ -1135,12 +1172,25 @@ opt_specs() ->
      {"descr", undefined, descriptor, "\n"
       "       Generate self-description information.\n"},
      {"maps", undefined, maps, "\n"
-      "       Generate code that will accept and produce maps instead of\n"
-      "       records for messages.\n"},
+      "       This will expand to the following options:\n"
+      "         -msgs-as-maps\n"
+      "         -msgfields-as-maps\n"
+      "         -defs-as-maps\n"},
      {"maps_unset_optional", {omitted, present_undefined}, maps_unset_optional,
       "omitted | present_undefined\n"
       "       Specifies the internal format for optional fields\n"
       "       that are unset.\n"},
+     {"msgs-as-maps", undefined, msgs_as_maps, "\n"
+      "        Specifies that messages should be maps.\n"
+      "        Otherwise, they will be records.\n"},
+     {"mapfields-as-maps", undefined, mapfields_as_maps, "\n"
+      "        Specifies that fields of type map<_,_> should be maps.\n"
+      "        Otherwise, they will be 2-tuples.\n"},
+     {"defs-as-maps", undefined, defs_as_maps, "\n"
+      "        Specifies that proto defintions from the generated code\n"
+      "        are to be returned as maps. Otherwise, they will be lists\n"
+      "        of tuples and records (or proplists if the -pldefs option\n"
+      "        is specified)\n"},
      {"erlc_compile_options", 'string()', erlc_compile_options, "String\n"
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
@@ -2260,8 +2310,8 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
 
 format_map_encoders(Defs, AnRes, Opts0, IncludeStarter) ->
     Opts1 = case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts0) of
-                '2tuples' -> [{maps, false} | Opts0];
-                maps      -> [{maps, true} | Opts0]
+                '2tuples' -> [{msgs_as_maps, false} | Opts0];
+                maps      -> [{msgs_as_maps, true} | Opts0]
             end,
     format_msg_encoders(Defs, AnRes, Opts1, IncludeStarter).
 
@@ -3028,8 +3078,8 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
 
 format_map_decoders(Defs, AnRes, Opts0) ->
     Opts1 = case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts0) of
-                '2tuples' -> [{maps, false} | Opts0];
-                maps      -> [{maps, true} | Opts0]
+                '2tuples' -> [{msgs_as_maps, false} | Opts0];
+                maps      -> [{msgs_as_maps, true} | Opts0]
             end,
     format_msg_decoders(Defs, AnRes, Opts1).
 
@@ -7765,7 +7815,7 @@ mapping_update(Var, RName, FieldsValues, Opts) ->
 
 get_records_or_maps_by_opts(Opts) ->
     Default = false,
-    case proplists:get_value(maps, Opts, Default) of
+    case proplists:get_value(msgs_as_maps, Opts, Default) of
         false -> records;
         true  -> maps
     end.
@@ -7780,13 +7830,20 @@ get_mapping_and_unset_by_opts(Opts) ->
     end.
 
 get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
-        records -> '2tuples';
-        maps    -> maps
+    Default = false,
+    case proplists:get_value(mapfields_as_maps, Opts, Default) of
+        true  -> maps;
+        false -> '2tuples'
     end.
 
 mk_get_defs_as_maps_or_records_fn(Opts) ->
-    fun() -> get_records_or_maps_by_opts(Opts) end.
+    fun() ->
+            Default = false,
+            case proplists:get_value(defs_as_maps, Opts, Default) of
+                false -> records;
+                true  -> maps
+            end
+    end.
 
 %% records
 record_match(RName, Fields) -> record_create_or_match(RName, Fields).
