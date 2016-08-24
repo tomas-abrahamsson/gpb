@@ -2736,34 +2736,12 @@ cmdline_parses_also_non_proto_extensions_test() ->
                                          "a.x", "y.proto"]).
 
 opt_test() ->
+    %% Include dirs + out dirs
     {ok, {[{i, "include1"},
            {i, "include2"},
            {o, "out-dir"},
            {o_erl, "o-erl-dir"},
-           {o_hrl, "o-hrl-dir"},
-           {o_nif_cc, "o-nif-cc-dir"},
-           nif,
-           {load_nif, "load-nif"},
-           {verify, optionally},
-           {verify, always},
-           {verify, never},
-           {copy_bytes, true},
-           {copy_bytes, false},
-           {copy_bytes, auto},
-           {copy_bytes, 42},
-           strings_as_binaries, defs_as_proplists,
-           use_packages,
-           {msg_name_prefix,    "msg_prefix_"},
-           {module_name_prefix, "mod_prefix_"},
-           {msg_name_suffix,    "_msg_suffix"},
-           {module_name_suffix, "_mod_suffix"},
-           include_as_lib, type_specs,
-           descriptor, maps,
-           msg_name_to_lower,
-           help, help, version, version,
-           {erlc_compile_options, "debug_info, inline_list_funcs"},
-           epb_compatibility, epb_functions
-           ],
+           {o_hrl, "o-hrl-dir"}],
           ["x.proto", "y.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-Iinclude1",
@@ -2771,33 +2749,85 @@ opt_test() ->
            "-o", "out-dir",
            "-o-erl", "o-erl-dir",
            "-o-hrl", "o-hrl-dir",
-           "-o-nif-cc", "o-nif-cc-dir",
+           "x.proto", "y.proto"]),
+    %% nif related
+    {ok, {[{o_nif_cc, "o-nif-cc-dir"},
+           nif,
+           {load_nif, "load-nif"}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-o-nif-cc", "o-nif-cc-dir",
            "-nif",
            "-load_nif", "load-nif",
-           "-v", "optionally",
+           "x.proto"]),
+    %% misc
+    {ok, {[{verify, optionally},
+           {verify, always},
+           {verify, never},
+           {copy_bytes, true},
+           {copy_bytes, false},
+           {copy_bytes, auto},
+           {copy_bytes, 42}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-v", "optionally",
            "-v", "always",
            "-v", "never",
            "-c", "true",
            "-c", "false",
            "-c", "auto",
            "-c", "42",
-           "-strbin",
-           "-pldefs",
+           "x.proto"]),
+    {ok, {[strings_as_binaries,
+           use_packages,
+           include_as_lib,
+           type_specs,
+           descriptor],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-strbin",
            "-pkgs",
-           "-msgprefix", "msg_prefix_",
-           "-modprefix", "mod_prefix_",
-           "-msgsuffix", "_msg_suffix",
-           "-modsuffix", "_mod_suffix",
            "-il",
            "-type",
            "-descr",
-           "-maps",
+           "x.proto"]),
+    {ok, {[{msg_name_prefix,    "msg_prefix_"},
+           {module_name_prefix, "mod_prefix_"},
+           {msg_name_suffix,    "_msg_suffix"},
+           {module_name_suffix, "_mod_suffix"},
+           msg_name_to_lower],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-msgprefix", "msg_prefix_",
+           "-modprefix", "mod_prefix_",
+           "-msgsuffix", "_msg_suffix",
+           "-modsuffix", "_mod_suffix",
            "-msgtolower",
-           "-h", "--help",
-           "-V", "--version",
-           "-erlc_compile_options", "debug_info, inline_list_funcs",
-           "-epb", "-epb-functions",
-           "x.proto", "y.proto"]).
+           "x.proto"]),
+    {ok, {[defs_as_proplists,
+           maps],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-pldefs",
+           "-maps",
+           "x.proto"]),
+    {ok, {[{erlc_compile_options, "debug_info, inline_list_funcs"}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-erlc_compile_options", "debug_info, inline_list_funcs",
+           "x.proto"]),
+    {ok, {[epb_compatibility, epb_functions],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-epb", "-epb-functions",
+           "x.proto"]),
+    %% Help and version
+    {ok, {[help, help,
+           version, version],
+          []}} =
+        gpb_compile:parse_opts_and_args(
+          ["-h", "--help",
+           "-V", "--version"]).
 
 any_translation_options_test() ->
     {ok, {[{any_translate,
