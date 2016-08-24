@@ -920,7 +920,7 @@ c() ->
 %%   <dd>Specifies the internal format for optional fields that are unset.</dd>
 %%   <dt>`-erlc_compile_options Options'</dt>
 %%   <dd>Specifies compilation options, in a comma separated string, to pass
-%%       along to the \-compile\(\) directive on the generated code.</dd>>
+%%       along to the `-compile(...)' directive on the generated code.</dd>
 %%   <dt>`-epb'</dt>
 %%   <dd>Enable compatibility with the Erlang Protobuffs library:
 %%       <ul>
