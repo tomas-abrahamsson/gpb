@@ -5486,7 +5486,7 @@ field_tree(#?gpb_field{}=F, Opts) ->
       ?gpb_field,
       lists:zip(FNames,
                 [erl_parse:abstract(FValue) || FValue <- FValues]),
-      Opts);
+      mk_get_defs_as_maps_or_records_fn(Opts));
 field_tree(#gpb_oneof{fields=OFields}=F, Opts) ->
     [gpb_oneof | FValues] = tuple_to_list(F),
     FNames = record_info(fields, gpb_oneof),
@@ -5496,7 +5496,7 @@ field_tree(#gpb_oneof{fields=OFields}=F, Opts) ->
           FName /= fields -> {FName, erl_parse:abstract(FValue)}
        end
        || {FName, FValue} <- lists:zip(FNames, FValues)],
-      Opts).
+      mk_get_defs_as_maps_or_records_fn(Opts)).
 
 format_fetch_msg_defs([]) ->
     ["-spec fetch_msg_def(_) -> no_return().\n",
@@ -5754,7 +5754,7 @@ rpc_record_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
       ?gpb_rpc,
       lists:zip(RNames,
                 [erl_parse:abstract(RValue) || RValue <- RValues]),
-      Opts).
+      mk_get_defs_as_maps_or_records_fn(Opts)).
 
 rpcs_def_tree(Rpcs, Opts) ->
     case get_rpc_format_by_opts(Opts) of
@@ -7743,8 +7743,11 @@ mapping_match(RName, Fields, Opts) ->
         maps    -> map_match(Fields)
     end.
 
-mapping_create(RName, Fields, Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
+mapping_create(RName, Fields, Opts) when is_list(Opts) ->
+    Fn = fun() -> get_records_or_maps_by_opts(Opts) end,
+    mapping_create(RName, Fields, Fn);
+mapping_create(RName, Fields, RecordsOrMaps) when is_function(RecordsOrMaps) ->
+    case RecordsOrMaps() of
         records -> record_create(RName, Fields);
         maps    -> map_create(Fields)
     end.
@@ -7781,6 +7784,9 @@ get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) ->
         records -> '2tuples';
         maps    -> maps
     end.
+
+mk_get_defs_as_maps_or_records_fn(Opts) ->
+    fun() -> get_records_or_maps_by_opts(Opts) end.
 
 %% records
 record_match(RName, Fields) -> record_create_or_match(RName, Fields).
