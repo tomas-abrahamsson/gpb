@@ -450,7 +450,8 @@ norm_opt_alias_to_msg_proto_defs(Opts) ->
 norm_opt_epb_compat_opt(Opts) ->
     proplists:expand([{epb_compatibility, [epb_functions,
                                            {module_name_suffix,"_pb"},
-                                           {msg_name_to_lower, true}]}],
+                                           {msg_name_to_lower, true}]},
+                      {{epb_compatibility,false}, [{epb_functions,false}]}],
                      Opts).
 
 normalize_return_report_opts(Opts1) ->
