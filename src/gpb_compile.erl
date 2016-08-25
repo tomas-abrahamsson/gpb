@@ -415,21 +415,24 @@ string(Mod, Str, Opts) ->
     do_file_or_string({Mod, Str}, Opts).
 
 do_file_or_string(In, Opts0) ->
-    Opts1 = normalize_alias_opts(Opts0),
-    Opts2 = normalize_return_report_opts(Opts1),
-    case parse_file_or_string(In, Opts2) of
+    Opts1 = normalize_opts(Opts0),
+    case parse_file_or_string(In, Opts1) of
         {ok, Defs} ->
-            Mod = find_out_mod(In, Opts2),
+            Mod = find_out_mod(In, Opts1),
             DefaultOutDir = find_default_out_dir(In),
-            Opts3 = Opts2 ++ [{o,DefaultOutDir}],
-            proto_defs(Mod, Defs, Opts3);
+            Opts2 = Opts1 ++ [{o,DefaultOutDir}],
+            do_proto_defs_aux1(Mod, Defs, Opts2);
         {error, Reason} = Error ->
-            possibly_report_error(Error, Opts2),
-            case proplists:get_bool(return_warnings, Opts2) of
+            possibly_report_error(Error, Opts1),
+            case proplists:get_bool(return_warnings, Opts1) of
                 true  -> {error, Reason, []};
                 false -> Error
             end
     end.
+
+normalize_opts(Opts0) ->
+    normalize_return_report_opts(
+      normalize_alias_opts(Opts0)).
 
 normalize_alias_opts(Opts) ->
     lists:foldl(fun(F, OptsAcc) -> F(OptsAcc) end,
@@ -529,20 +532,23 @@ proto_defs(Mod, Defs) ->
 %% @doc
 %% Compile a list of pre-parsed definitions to file or to a binary.
 %% See {@link file/2} for information on options and return values.
-proto_defs(Mod, Defs0, Opts0) ->
+proto_defs(Mod, Defs, Opts) ->
+    do_proto_defs_aux1(Mod, Defs, normalize_opts(Opts)).
+
+do_proto_defs_aux1(Mod, Defs0, Opts0) ->
     {IsAcyclic, Defs} = try_topsort_defs(Defs0),
     possibly_probe_defs(Defs, Opts0),
     {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
-    Opts2 = normalize_return_report_opts(Opts1),
-    AnRes = analyze_defs(Defs, Opts2),
-    case verify_opts(Defs, Opts2) of
+    AnRes = analyze_defs(Defs, Opts1),
+    case verify_opts(Defs, Opts1) of
         ok ->
-            Res1 = do_proto_defs(Defs, clean_module_name(Mod), AnRes, Opts2),
-            return_or_report_warnings_or_errors(Res1, Warns, Opts2,
-                                                get_output_format(Opts2));
+            Res1 = do_proto_defs_aux2(Defs, clean_module_name(Mod), AnRes,
+                                      Opts1),
+            return_or_report_warnings_or_errors(Res1, Warns, Opts1,
+                                                get_output_format(Opts1));
         {error, OptError} ->
-            return_or_report_warnings_or_errors({error, OptError}, [], Opts2,
-                                                get_output_format(Opts2))
+            return_or_report_warnings_or_errors({error, OptError}, [], Opts1,
+                                                get_output_format(Opts1))
     end.
 
 verify_opts(Defs, Opts) ->
@@ -604,7 +610,7 @@ msg_defs(Mod, Defs) ->
 msg_defs(Mod, Defs, Opts) ->
     proto_defs(Mod, Defs, Opts).
 
-do_proto_defs(Defs, Mod, AnRes, Opts) ->
+do_proto_defs_aux2(Defs, Mod, AnRes, Opts) ->
     case get_output_format(Opts) of
         proto_defs ->
             {ok, Defs};
