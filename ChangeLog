@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.25.2
+2016-Aug-25
+
+	* New options: mapfields_as_maps, defs_as_maps and msgs_as_maps
+	(-mapfields-as-maps, -defs-as-maps and -msgs-as-maps). Previously,
+	these were all the same maps option, but now the maps option
+	merely expands to the above.
+
 Version 3.25.1
 2016-Aug-24
 
