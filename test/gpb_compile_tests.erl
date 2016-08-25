@@ -1637,7 +1637,7 @@ nif_code_test_() ->
              [{"encode decode", fun nif_encode_decode_oneof/0}])),
          increase_timeouts(
            nif_mapfield_tests_check_prerequisites(
-             [{"encode decode", fun nif_encode_decode_maps/0}])),
+             [{"encode decode", fun nif_encode_decode_mapfields/0}])),
          increase_timeouts(
            nif_proto3_tests_check_prerequisites(
              [{"encode decode", fun nif_encode_decode_proto3/0}])),
@@ -1814,7 +1814,7 @@ nif_encode_decode_oneof(NEDM, Defs) ->
                   end,
                   Alts).
 
-nif_encode_decode_maps() ->
+nif_encode_decode_mapfields() ->
     with_tmpdir(
       fun(TmpDir) ->
               NEDM = gpb_nif_test_ed_mapfields1,
@@ -2500,17 +2500,18 @@ mk_one_oneof_field_of_each_type() ->
 
 mk_one_map_field_of_each_type() ->
     %% Reduced set of int types to shorten compilation times,
-    %% while still cover all code paths.
-    ValueTypes = [sint32, sint64, uint32, uint64,
+    %% while still cover all (most) code paths.
+    ValueTypes = [sint32, sint64,
                   bool,
                   double, string, bytes,
                   float, {enum, ee}, {msg, submsg1}],
+    ValueTypes2 = ValueTypes -- [sint64],
     KeyTypes   = [T || T <- ValueTypes, gpb:is_allowed_as_key_type(T)],
     %% Enum value in map must define 0 as the first value.
     EnumDef    = {{enum, ee}, [{en0, 0}, {en1, 1}, {en2, 2}]},
     SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], required)},
-    MapMsg1    = {{msg, map1},  mk_map_fields_of_type(KeyTypes, ValueTypes)},
-    [EnumDef, SubMsgDef, MapMsg1].
+    MapfldMsg1 = {{msg, map1},  mk_map_fields_of_type(KeyTypes, ValueTypes2)},
+    [EnumDef, SubMsgDef, MapfldMsg1].
 
 mk_proto3_fields() ->
     EachType   = [sint32, sint64, bool, double, string, bytes, {enum, ee}],
@@ -2565,8 +2566,9 @@ mk_map_fields_of_type(KeyTypes, ValueTypes) ->
            || VT <- ValueTypes1],
     Fs2 = [#?gpb_field{type={map,KT,VT1}, occurrence=repeated, opts=[]}
            || KT <- KeyTypes1],
+    Fs3 = tl(Fs2), % avoid KT1,VT1 twice
     [F#?gpb_field{name=list_to_atom(lists:concat([f,I])), rnum=I+1, fnum=I}
-     || {I, F} <- index_seq(Fs1 ++ Fs2)].
+     || {I, F} <- index_seq(Fs1 ++ Fs3)].
 
 index_seq(L) -> lists:zip(lists:seq(1, length(L)), L).
 
