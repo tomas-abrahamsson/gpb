@@ -2807,11 +2807,11 @@ opt_test() ->
            "-msgtolower",
            "x.proto"]),
     {ok, {[defs_as_proplists,
-           maps],
+           maps, msgs_as_maps, mapfields_as_maps, defs_as_maps],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-pldefs",
-           "-maps",
+           "-maps", "-msgs-as-maps", "-mapfields-as-maps", "-defs-as-maps",
            "x.proto"]),
     {ok, {[{erlc_compile_options, "debug_info, inline_list_funcs"}],
           ["x.proto"]}} =

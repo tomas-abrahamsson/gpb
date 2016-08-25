@@ -45,6 +45,8 @@ no_maps_tests__test() ->
 
 -define(verify_gpb_err(Expr), ?assertError({gpb_type_error, _}, Expr)).
 
+-record(m1, {a}).
+
 simple_maps_test() ->
     M = compile_iolist(["message m1 {"
                         "  required string f1 = 1;",
@@ -176,6 +178,27 @@ map_type_test() ->
     ?verify_gpb_err(M:verify_msg(#{a => #{"x" => "wrong value type"}}, m1)),
 
     unload_code(M).
+
+map_type_with_mapfields_as_maps_option_test() ->
+    %% messages are records, but map<_,_> are maps
+    M1 = compile_iolist(["message m1 { map<string,fixed32> a = 1; };"],
+                        [mapfields_as_maps]),
+    Msg1 = #m1{a = #{"x" => 17}},
+    ok = M1:verify_msg(Msg1),
+    B1 = M1:encode_msg(Msg1),
+    Msg1 = M1:decode_msg(B1, m1),
+    Msg1 = M1:merge_msgs(Msg1, Msg1),
+    unload_code(M1),
+
+    %% messages are maps, but map<_,_> are 2-tuples
+    M2 = compile_iolist(["message m2 { map<string,fixed32> a = 1; };"],
+                        [msgs_as_maps, {mapfields_as_maps, false}]),
+    Msg2 = #{a => [{"x",17}]},
+    ok = M2:verify_msg(Msg2, m2),
+    B2 = M2:encode_msg(Msg2, m2),
+    Msg2 = M2:decode_msg(B2, m2),
+    Msg2 = M2:merge_msgs(Msg2, Msg2, m2),
+    unload_code(M2).
 
 fetch_rpc_def_test() ->
     M = compile_iolist(["message m { required uint32 f = 1; };\n",
@@ -332,7 +355,8 @@ nif_test_() ->
           fun nif_encode_decode_omitted/0},
          increase_timeouts(
            nif_mapfield_tests_check_prerequisites(
-             [{"Encode decode", fun nif_encode_decode_mapfields/0}]))])).
+             [{"Encode decode", fun nif_encode_decode_mapfields/0},
+              {"mapfields_as_maps", fun nif_with_mapfields_as_maps/0}]))])).
 
 nif_encode_decode_present_undefined() ->
     ProtocCanOneof = check_protoc_can_do_oneof(),
@@ -428,6 +452,37 @@ nif_encode_decode_mapfields() ->
                         Msg2 = M:decode_msg(Bin2, x),
 
                         ok
+                end)
+      end).
+
+nif_with_mapfields_as_maps() ->
+    Defs = ["message m1 {\n",
+            "   map<fixed32,string> a = 1;\n"
+            "}"],
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_nomaps_with_mapfields_as_maps_ed1,
+              Opts = [mapfields_as_maps],
+              {ok, Code} = compile_nif_msg_defs(M, Defs, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Msg1 = #m1{a = #{11 => "aa"}},
+                        Bin1 = M:encode_msg(Msg1),
+                        Msg1 = M:decode_msg(Bin1, m1)
+                end)
+      end),
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_maps_but_not_mapfields_as_maps_ed1,
+              Opts = [msgs_as_maps, {mapfields_as_maps,false}],
+              {ok, Code} = compile_nif_msg_defs(M, Defs, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Msg1 = #{a => [{11,"aa"}]},
+                        Bin1 = M:encode_msg(Msg1, m1),
+                        Msg1 = M:decode_msg(Bin1, m1)
                 end)
       end).
 
