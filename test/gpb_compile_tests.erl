@@ -154,7 +154,6 @@ import_fetcher_test() ->
     ok.
 
 
-
 flush_msgs() ->
     receive
         M ->
@@ -162,6 +161,7 @@ flush_msgs() ->
     after 0 ->
             []
     end.
+
 
 parses_file_to_binary_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
@@ -585,6 +585,7 @@ dotted_names_gives_no_compilation_error_test() ->
     unload_code(M).
 
 %% --- module/msg name prefix/suffix ---------------
+
 module_msg_name_prefix_test() ->
     Proto = <<"message msg1 { required uint32 f1=1; }\n">>,
     Master = self(),
@@ -732,6 +733,20 @@ copy_bytes_fraction_test() ->
        true ->
             ok
     end.
+
+%% --- booleans ---------
+
+default_values_for_booleans_test() ->
+    M = compile_iolist(["message m1 {"
+                        "  required bool f1 = 1;",
+                        "  optional bool f2 = 2 [default=true];",
+                        "  optional bool f3 = 3 [default=false];",
+                        "  optional bool f4 = 4 [default=1];",
+                        "  optional bool f5 = 5 [default=0];",
+                        "}"]),
+    Data = M:encode_msg({m1, true}),
+    {m1, true, true, false, true, false} = M:decode_msg(Data, m1),
+    unload_code(M).
 
 %% --- strings ----------
 
