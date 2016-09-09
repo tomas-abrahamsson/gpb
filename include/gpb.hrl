@@ -76,7 +76,8 @@
 -record(?gpb_field, % NB: record name is (currently) `field' (not `gpb_field')!
         {name               :: atom(),
          fnum               :: integer(),
-         rnum               :: pos_integer(), % field number in the record
+         rnum               :: pos_integer() % field number in the record
+                               | undefined,  % temporarily, during parsing
          type               :: gpb_field_type() |
                                gpb_internal_intermediary_ref() |
                                gpb_internal_intermediary_map_ref(),
@@ -86,8 +87,9 @@
 
 -record(gpb_oneof,
         {name   :: atom(),
-         rnum   :: pos_integer(),  %% field number in the record
-         fields :: [#?gpb_field{}] %% all fields have the same rnum
+         rnum   :: pos_integer()   % field number in the record
+                 | undefined,      % temporarily, during parsing
+         fields :: [#?gpb_field{}] % all fields have the same rnum
         }).
 
 -record(?gpb_rpc, % NB: record name is (currently) `rpc' (not `gpb_rpc')!
