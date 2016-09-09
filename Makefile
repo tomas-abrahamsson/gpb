@@ -142,6 +142,22 @@ ERLC_FLAGS += -DNO_HAVE_MAPS=true
 endif
 endif
 
+ifdef NO_HAVE_RAND
+ERLC_FLAGS += -DNO_HAVE_RAND=true
+else
+## attempt to auto-detect
+ERL_HAS_RAND := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                             try rand:uniform() of \
+                                F when is_float(F) -> io:format("true~n") \
+                             catch error:undef -> io:format("false~n") \
+                             end, \
+                             receive after 10 -> ok end.' \
+                         -s erlang halt)
+ifeq ($(ERL_HAS_RAND),false)
+ERLC_FLAGS += -DNO_HAVE_RAND=true
+endif
+endif
+
 
 # Sorting it also eliminates duplicates
 # (eg: gpb_parse due to both .yrl and .erl on rebuild, ditto for gpb_scan)
