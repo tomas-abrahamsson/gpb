@@ -2091,11 +2091,11 @@ compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, Opts) ->
     LdFlags = get_ldflags(),
     CompileProto = f("'~s' --proto_path '~s' --cpp_out='~s' '~s'",
                      [Protoc, TmpDir, TmpDir, ProtoPath]),
-    CompileNif = f("'~s' -g -fPIC -Wall -O3 '-I~s' ~s -c -o '~s' '~s'",
+    CompileNif = f("'~s' -g -fPIC -Wall -O0 '-I~s' ~s -c -o '~s' '~s'",
                    [CC, TmpDir, CFlags, NifOPath, NifCcPath]),
-    CompilePb = f("'~s' -g -fPIC -Wall -O3 '-I~s' ~s -c -o '~s' '~s'",
+    CompilePb = f("'~s' -g -fPIC -Wall -O0 '-I~s' ~s -c -o '~s' '~s'",
                   [CC, TmpDir, CFlags, PbOPath, PbCcPath]),
-    CompileSo = f("'~s' -g -fPIC -shared -Wall -O3 ~s"
+    CompileSo = f("'~s' -g -fPIC -shared -Wall -O0 ~s"
                   "    -o '~s' '~s' '~s' -lprotobuf",
                   [CC, LdFlags, NifSoPath, NifOPath, PbOPath]),
     %% Useful if debugging the nif code, see also with_tmpdir(save, Fun)
