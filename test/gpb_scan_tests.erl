@@ -87,6 +87,13 @@ max_3_escaped_octdigits_test() ->
 max_2_escaped_hexdigits_test() ->
     {ok, [{str_lit,_,"ab3"}], _}  = gpb_scan:string("\"a\\x623\"").
 
+parses_unicode_escapes_test() ->
+    %% \u: exactly 4 following
+    {ok, [{str_lit,_,[$a,16#1234,$b]}], _} =
+        gpb_scan:string("\"a\\u1234b\""),
+    %% \U: exactly 8 following hex digits
+    {ok, [{str_lit,_,[$a,16#101234,$b]}], _} =
+        gpb_scan:string("\"a\\U00101234b\"").
 
 ignores_whitespace_test() ->
     {ok, [{dec_lit,_,_},{dec_lit,_,_},{dec_lit,_,_}], _} =

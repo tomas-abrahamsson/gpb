@@ -140,6 +140,12 @@ string_val_2([])       -> [].
 string_escape("x"++Rest) ->
     {HexChars, Rest2} = collect(fun is_hex_char/1, 2, Rest),
     [hex_to_integer(HexChars) | string_val_2(Rest2)];
+string_escape("u"++Rest) ->
+    {UnicodeCodePoint, Rest2} = collect(fun is_hex_char/1, 4, Rest),
+    [hex_to_integer(UnicodeCodePoint) | string_val_2(Rest2)];
+string_escape("U"++Rest) ->
+    {UnicodeCodePoint, Rest2} = collect(fun is_hex_char/1, 8, Rest),
+    [hex_to_integer(UnicodeCodePoint) | string_val_2(Rest2)];
 string_escape([Oct|Rest]) when ?is_octal_char(Oct) ->
     {OctChars, Rest2} = collect(fun is_oct_char/1, 3, [Oct|Rest]),
     [oct_to_integer(OctChars) | string_val_2(Rest2)];
