@@ -380,7 +380,8 @@ post_process_one_file(Defs, Opts) ->
     case find_package_def(Defs, Opts) of
         {ok, Package} ->
             {ok, handle_proto_syntax_version_one_file(
-                   flatten_qualify_defnames(Defs, Package))};
+                   convert_default_values(
+                     flatten_qualify_defnames(Defs, Package)))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -686,6 +687,30 @@ ensure_path_prepended(Pkg, Path)   ->
         false -> prepend_path(Pkg, Path);
         true ->  Path
     end.
+
+convert_default_values(Defs) ->
+    lists:map(
+      fun({{msg,Name},Fields}) ->
+              Fields2 = lists:map(fun convert_default_values_field/1, Fields),
+              {{msg,Name},Fields2};
+         (Other) ->
+              Other
+      end,
+      Defs).
+
+convert_default_values_field(#?gpb_field{type=Type, opts=Opts}=Field) ->
+    case {Type, lists:keyfind(default, 1, Opts)} of
+        {bytes, {default, Default}} when is_list(Default) ->
+            %% Default values for type bytes are written as a string
+            Default2 = list_to_binary(Default),
+            Opts2 = lists:keyreplace(default, 1, Opts, {default, Default2}),
+            Field#?gpb_field{opts=Opts2};
+        _ ->
+            Field
+    end;
+convert_default_values_field(#gpb_oneof{fields=OFs}=Field) ->
+    OFs2 = lists:map(fun convert_default_values_field/1, OFs),
+    Field#gpb_oneof{fields=OFs2}.
 
 handle_proto_syntax_version_one_file(Defs) ->
     case proplists:get_value(syntax, Defs) of

@@ -68,6 +68,18 @@ parses_default_value_test() ->
            "  optional uint32 x = 1 [default = 12];",
            "}"]).
 
+parses_default_value_for_byyes_test() ->
+    {ok, Defs} = parse_lines(
+                   ["message m {",
+                    "  optional bytes  b = 1 [default = '\001\002\003'];",
+                    "  optional string s = 2 [default = 'abc'];",
+                    "}"]),
+    [{{msg,m}, [#?gpb_field{name=b, type=bytes,
+                            opts=[{default,<<1,2,3>>}]},
+                #?gpb_field{name=s, type=string,
+                            opts=[{default,"abc"}]}]}] =
+        do_process_sort_defs(Defs).
+
 parses_string_concatenation_test() ->
     {ok, [{{msg,'Msg'}, [#?gpb_field{name=x, type=string, fnum=1,
                                      occurrence=optional,
