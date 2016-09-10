@@ -138,10 +138,10 @@ string_val_2([])       -> [].
 -define(is_octal_char(C), $0 =< C, C =< $7).
 
 string_escape("x"++Rest) ->
-    {HexChars, Rest2} = collect(fun is_hex_char/1, Rest),
+    {HexChars, Rest2} = collect(fun is_hex_char/1, 2, Rest),
     [hex_to_integer(HexChars) | string_val_2(Rest2)];
 string_escape([Oct|Rest]) when ?is_octal_char(Oct) ->
-    {OctChars, Rest2} = collect(fun is_oct_char/1, [Oct|Rest]),
+    {OctChars, Rest2} = collect(fun is_oct_char/1, 3, [Oct|Rest]),
     [oct_to_integer(OctChars) | string_val_2(Rest2)];
 string_escape([C|Rest]) ->
     [escape_char(C) | string_val_2(Rest)].
@@ -155,7 +155,15 @@ escape_char($t) -> $\t;                         %\t = TAB
 escape_char($v) -> $\v;                         %\v = VT
 escape_char(C)  -> C.
 
-collect(Pred, Str) -> lists:splitwith(Pred, Str).
+collect(Pred, MaxLen, Str) -> splitwith_len(Pred, MaxLen, Str, []).
+
+splitwith_len(Pred, N, [H|Tl], Acc) when N > 0 ->
+    case Pred(H) of
+        true  -> splitwith_len(Pred, N-1, Tl, [H|Acc]);
+        false -> {lists:reverse(Acc), [H|Tl]}
+    end;
+splitwith_len(_Pred, _N, L, Acc) ->
+    {lists:reverse(Acc), L}.
 
 is_oct_char(C) -> $0 =< C andalso C =< $7.
 is_hex_char(C) -> ($0 =< C andalso C =< $9)
@@ -181,11 +189,11 @@ str_to_float_2("+."++T)  -> str_to_float_1("0."++T);
 str_to_float_2("-."++T)  -> str_to_float_1("-0."++T).
 
 str_to_float_3(S) -> %% No decimals after `.' Possibly e+-<n> following `.'
-    {UpToDot, "."++Rest} = collect(fun isnt_dot/1, S),
+    {UpToDot, "."++Rest} = collect(fun isnt_dot/1, length(S), S),
     str_to_float_1(UpToDot++"."++"0"++Rest).
 
 str_to_float_4(S) -> %% Integer preceding e+-<n>
-    {UpToDot, Rest} = collect(fun isnt_exp_e/1, S),
+    {UpToDot, Rest} = collect(fun isnt_exp_e/1, length(S), S),
     str_to_float_1(UpToDot++"."++"0"++Rest).
 
 isnt_dot(C) -> C /= $. .

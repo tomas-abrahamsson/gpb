@@ -76,10 +76,17 @@ parses_strings_test() ->
     {ok, [{str_lit,_,"abc"}], _}  = gpb_scan:string("\"abc\""),
     {ok, [{str_lit,_,"abc"}], _}  = gpb_scan:string("'abc'"), %% single quotes
     {ok, [{str_lit,_,"a\"c"}], _} = gpb_scan:string("\"a\\\"c\""),
-    {ok, [{str_lit,_,"abz"}], _}  = gpb_scan:string("\"a\\0142z\""), % 0142=b
+    {ok, [{str_lit,_,"abz"}], _}  = gpb_scan:string("\"a\\142z\""), % 0142=b
     {ok, [{str_lit,_,"abz"}], _}  = gpb_scan:string("\"a\\x62z\""), % 0x62=b
     {ok, [{str_lit,_,"a"},{str_lit,_,"b"}], _} = gpb_scan:string("'a' 'b'"),
     ok.
+
+max_3_escaped_octdigits_test() ->
+    {ok, [{str_lit,_,"ab3"}], _}  = gpb_scan:string("\"a\\1423\"").
+
+max_2_escaped_hexdigits_test() ->
+    {ok, [{str_lit,_,"ab3"}], _}  = gpb_scan:string("\"a\\x623\"").
+
 
 ignores_whitespace_test() ->
     {ok, [{dec_lit,_,_},{dec_lit,_,_},{dec_lit,_,_}], _} =
