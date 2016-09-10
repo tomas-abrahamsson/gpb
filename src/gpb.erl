@@ -370,7 +370,7 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {{Key,Value}, Rest2}
         end.
 
-add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record)                    ->
+add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
     %% the same value appears multiple times, the parser accepts the
     %% last value it sees." But what about bytes?
@@ -390,7 +390,7 @@ add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record)                    -
         #?gpb_field{rnum = RNum, occurrence = repeated} ->
             append_to_element(RNum, Value, Record)
     end;
-add_field(Value, FieldDef, true=_IsOneof, MsgDefs, Record)                     ->
+add_field(Value, FieldDef, true=_IsOneof, MsgDefs, Record) ->
     #?gpb_field{rnum=RNum, name=Name} = FieldDef,
     case FieldDef of
         #?gpb_field{type={msg,_SubMsgType}} ->
@@ -405,7 +405,7 @@ add_field(Value, FieldDef, true=_IsOneof, MsgDefs, Record)                     -
             setelement(RNum, Record, {Name, Value})
     end.
 
-merge_field(RNum, NewMsg, Record, MsgDefs)                                     ->
+merge_field(RNum, NewMsg, Record, MsgDefs) ->
     case element(RNum, Record) of
         undefined ->
             setelement(RNum, Record, NewMsg);
@@ -414,11 +414,11 @@ merge_field(RNum, NewMsg, Record, MsgDefs)                                     -
             setelement(RNum, Record, MergedMsg)
     end.
 
-append_to_element(RNum, NewElem, Record)                                       ->
+append_to_element(RNum, NewElem, Record) ->
     PrevElems = element(RNum, Record),
     setelement(RNum, Record, [NewElem | PrevElems]).
 
-append_to_map(RNum, {Key, _Value}=NewItem, Record)                             ->
+append_to_map(RNum, {Key, _Value}=NewItem, Record) ->
     PrevElems = element(RNum, Record),
     NewElems = lists:keystore(Key, 1, PrevElems, NewItem),
     setelement(RNum, Record, NewElems).
@@ -492,7 +492,7 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
       MsgDef).
 
 
-encode_msg(Msg, MsgDefs)                                                       ->
+encode_msg(Msg, MsgDefs) ->
     MsgName = element(1, Msg),
     MsgDef = keyfetch({msg, MsgName}, MsgDefs),
     encode_2(MsgDef, Msg, MsgDefs, <<>>).
@@ -506,7 +506,7 @@ encode_2([#?gpb_field{occurrence=Occurrence}=Field | Rest], Msg, MsgDefs, Acc) -
                 encode_field(Field, Msg, MsgDefs)
         end,
     encode_2(Rest, Msg, MsgDefs, <<Acc/binary, EncodedField/binary>>);
-encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc)     ->
+encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc) ->
     case element(RNum, Msg) of
         {Name, Value} ->
             Field = lists:keyfind(Name, #?gpb_field.name, Fields),
@@ -516,10 +516,10 @@ encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc)     -
         undefined ->
             encode_2(Rest, Msg, MsgDefs, Acc)
     end;
-encode_2([], _Msg, _MsgDefs, Acc)                                              ->
+encode_2([], _Msg, _MsgDefs, Acc) ->
     Acc.
 
-encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs)      ->
+encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
     case element(RNum, Msg) of
         []    ->
             <<>>;
@@ -530,10 +530,10 @@ encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs)      -
               PackedFields/binary>>
     end.
 
-encode_packed_2([Elem | Rest], Type, MsgDefs, Acc)                             ->
+encode_packed_2([Elem | Rest], Type, MsgDefs, Acc) ->
     NewAcc = <<Acc/binary, (encode_value(Elem, Type, MsgDefs))/binary>>,
     encode_packed_2(Rest, Type, MsgDefs, NewAcc);
-encode_packed_2([], _Type, _MsgDefs, Acc)                                      ->
+encode_packed_2([], _Type, _MsgDefs, Acc) ->
     Acc.
 
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
@@ -556,21 +556,21 @@ encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=repeated},
              Msg, MsgDefs) ->
     encode_repeated(element(RNum, Msg), FNum, Type, MsgDefs, <<>>).
 
-encode_repeated([Elem | Rest], FNum, Type, MsgDefs, Acc)                       ->
+encode_repeated([Elem | Rest], FNum, Type, MsgDefs, Acc) ->
     EncodedValue = encode_field_value(Elem, FNum, Type, MsgDefs),
     NewAcc = <<Acc/binary, EncodedValue/binary>>,
     encode_repeated(Rest, FNum, Type, MsgDefs, NewAcc);
-encode_repeated([], _FNum, _Type, _MsgDefs, Acc)                               ->
+encode_repeated([], _FNum, _Type, _MsgDefs, Acc) ->
     Acc.
 
-encode_field_value(Value, FNum, Type, MsgDefs)                                 ->
+encode_field_value(Value, FNum, Type, MsgDefs) ->
     <<(encode_fnum_type(FNum, Type))/binary,
       (encode_value(Value, Type, MsgDefs))/binary>>.
 
-encode_fnum_type(FNum, Type)                                                   ->
+encode_fnum_type(FNum, Type) ->
     encode_varint((FNum bsl 3) bor encode_wiretype(Type)).
 
-encode_value(Value, Type, MsgDefs)                                             ->
+encode_value(Value, Type, MsgDefs) ->
     case Type of
         sint32 ->
             encode_varint(encode_zigzag(Value));
