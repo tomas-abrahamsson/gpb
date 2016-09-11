@@ -2339,8 +2339,7 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
                   Tr = mk_find_tr_fn(MsgName, Field, AnRes),
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
                                               PrevBVar, TrUserDataVar,
-                                              Defs, Tr, AnRes, Opts,
-                                              p3_check_typedefaults),
+                                              Defs, Tr, AnRes, Opts),
                   E = ?expr('<NewB>' = '<encode-expr>',
                             [replace_tree('<NewB>', NewBVar),
                              replace_tree('<encode-expr>', EncExpr)]),
@@ -2349,8 +2348,7 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
                   Tr = mk_find_tr_fn(MsgName, Field, AnRes),
                   EncExpr = field_encode_expr(MsgName, MsgVar, Field, FVar,
                                               PrevBVar, TrUserDataVar,
-                                              Defs, Tr, AnRes, Opts,
-                                              p3_check_typedefaults),
+                                              Defs, Tr, AnRes, Opts),
                   {EncExpr, dummy}
           end,
           ?expr(Bin),
@@ -2405,8 +2403,7 @@ zip_for_non_opt_fields([], []) ->
     [].
 
 field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
-                  FVar, PrevBVar, TrUserDataVar, Defs, Tr, _AnRes, Opts,
-                  P3TypeDefaultHandling)->
+                  FVar, PrevBVar, TrUserDataVar, Defs, Tr, _AnRes, Opts)->
     FEncoder = mk_field_encode_fn_name(MsgName, Field),
     #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum, name=FName}=Field,
     TrFVar = prefix_var("Tr", FVar),
@@ -2422,6 +2419,44 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                   splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
     case Occurrence of
         optional ->
+            EncodeExpr =
+                case gpb:is_msg_proto3(MsgName, Defs) of
+                    false ->
+                        ?expr(begin
+                                  'TrF' = 'Tr'('<F>', 'TrUserData'),
+                                  '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
+                                          'MaybeTrUserData')
+                              end,
+                              Transforms);
+                    true when Type == string ->
+                        ?expr(begin
+                                  'TrF' = 'Tr'('<F>', 'TrUserData'),
+                                  case iolist_size('TrF') of
+                                      0 ->
+                                          '<Bin>';
+                                      _ ->
+                                          '<enc>'('TrF',
+                                                  <<'<Bin>'/binary, '<Key>'>>,
+                                                  'MaybeTrUserData')
+                                  end
+                              end,
+                              Transforms);
+                    true when Type /= string ->
+                        TypeDefault = gpb:proto3_type_default(Type, Defs),
+                        ?expr(
+                           begin
+                               'TrF' = 'Tr'('<F>', 'TrUserData'),
+                               if 'TrF' =:= '<TypeDefault>' ->
+                                       '<Bin>';
+                                  true ->
+                                       '<enc>'('TrF',
+                                               <<'<Bin>'/binary, '<Key>'>>,
+                                               'MaybeTrUserData')
+                               end
+                           end,
+                           [replace_term('<TypeDefault>', TypeDefault)
+                            | Transforms])
+                end,
             case get_mapping_and_unset_by_opts(Opts) of
                 X when X == records;
                        X == {maps, present_undefined} ->
@@ -2429,24 +2464,21 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                        if '<F>' == undefined ->
                                '<Bin>';
                           true ->
-                               'TrF' = 'Tr'('<F>', 'TrUserData'),
-                               '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
-                                       'MaybeTrUserData')
+                               '<encodeit>'
                        end,
-                       Transforms);
+                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
                 {maps, omitted} ->
                     ?expr(
                        case 'M' of
                            '#{fieldname := <F>}' ->
-                               'TrF' = 'Tr'('<F>', 'TrUserData'),
-                               '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
-                                       'MaybeTrUserData');
+                               '<encodeit>';
                            _ ->
                                '<Bin>'
                        end,
                        [replace_tree('M', MsgVar),
                         replace_tree('#{fieldname := <F>}',
-                                     map_match([{FName,FVar}]))
+                                     map_match([{FName,FVar}])),
+                        replace_tree('<encodeit>', EncodeExpr)
                         | Transforms])
             end;
         repeated ->
@@ -2459,49 +2491,16 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                end,
                Transforms);
         required ->
-            case gpb:is_msg_proto3(MsgName, Defs) of
-                true when P3TypeDefaultHandling == p3_check_typedefaults,
-                          Type /= string ->
-                    TypeDefault = gpb:proto3_type_default(Type, Defs),
-                    ?expr(
-                       begin
-                           'TrF' = 'Tr'('<F>', 'TrUserData'),
-                           if 'TrF' =:= '<TypeDefault>' ->
-                                   '<Bin>';
-                              true ->
-                                   '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
-                                           'MaybeTrUserData')
-                           end
-                       end,
-                       [replace_term('<TypeDefault>', TypeDefault)
-                        | Transforms]);
-                true when P3TypeDefaultHandling == p3_check_typedefaults,
-                          Type == string ->
-                    ?expr(begin
-                              'TrF' = 'Tr'('<F>', 'TrUserData'),
-                              case iolist_size('TrF') of
-                                  0 ->
-                                      '<Bin>';
-                                  _ ->
-                                      '<enc>'('TrF',
-                                              <<'<Bin>'/binary, '<Key>'>>,
-                                              'MaybeTrUserData')
-                              end
-                          end,
-                          Transforms);
-                _not_proto3_or_no_check_for_typedefaults ->
-                    ?expr(
-                       begin
-                           'TrF' = 'Tr'('<F>', 'TrUserData'),
-                           '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
-                                   'MaybeTrUserData')
-                       end,
-                       Transforms)
-            end
+            ?expr(
+               begin
+                   'TrF' = 'Tr'('<F>', 'TrUserData'),
+                   '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
+                           'MaybeTrUserData')
+               end,
+               Transforms)
     end;
 field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
-                  FVar, PrevBVar, TrUserDataVar, Defs, Tr, AnRes, Opts,
-                  _P3TypeDefaultHandling) ->
+                  FVar, PrevBVar, TrUserDataVar, Defs, Tr, AnRes, Opts) ->
     OFVar = prefix_var("O", FVar),
     OneofClauseTransforms =
         [begin
@@ -2522,12 +2521,11 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
              Tr2 = Tr({update_elem_path,Name}),
              EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
                                          PrevBVar, TrUserDataVar,
-                                         Defs, Tr2, AnRes, Opts,
-                                         no_typedefault_checking),
+                                         Defs, Tr2, AnRes, Opts),
              [replace_tree('<oneof...>', MatchPattern),
               replace_tree('<expr>', EncExpr)]
-           end
-           || #?gpb_field{name=Name}=OField <- OFields],
+         end
+         || #?gpb_field{name=Name}=OField <- OFields],
     case get_mapping_and_unset_by_opts(Opts) of
         X when X == records;
                X == {maps, present_undefined} ->
@@ -3216,8 +3214,8 @@ msg_decoder_initial_params(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts) ->
                      end,
                  case Occurrence of
                      repeated -> {FName, m, ?expr([]),        ?expr([])};
-                     required -> {FName, o, Undefined,        Undef};
-                     optional -> {FName, o, ?expr(undefined), ?expr('$undef')}
+                     required -> {FName, o, ?expr(undefined), ?expr('$undef')};
+                     optional -> {FName, o, Undefined,        Undef}
                  end;
              #gpb_oneof{name=FName} ->
                  {FName, o, ?expr(undefined), ?expr('$undef')}

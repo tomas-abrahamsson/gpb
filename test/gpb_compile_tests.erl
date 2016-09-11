@@ -1745,7 +1745,9 @@ nif_encode_decode_test_it(NEDM, Defs) ->
                           MGDecoded = NEDM:decode_msg(GEncoded, MsgName),
                           ?assertEqual(OrigMsg, MMDecoded),
                           ?assertEqual(OrigMsg, GMDecoded),
-                          ?assertEqual(OrigMsg, MGDecoded)
+                          ?assertMatch({OrigMsg,_,_,_,_},
+                                       {MGDecoded,OrigMsg,GEncoded,MEncoded,
+                                        Variant})
                   end,
                   [{MsgName,Variant} || MsgName <- MsgNames,
                                         Variant <- Variants]).
@@ -2516,8 +2518,8 @@ mk_proto3_fields() ->
     EachType   = [sint32, sint64, bool, double, string, bytes, {enum, ee}],
     MsgType    = {msg, submsg1},
     EnumDef    = {{enum, ee}, [{en0, 0}, {en1, 1}, {en2, 2}]},
-    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], required)},
-    TopMsgDef1 = {{msg, topmsg1}, (mk_fields_of_type(EachType, required)
+    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], optional)},
+    TopMsgDef1 = {{msg, topmsg1}, (mk_fields_of_type(EachType, optional)
                                    ++ mk_fields_of_type(
                                         [MsgType], optional,
                                         [{offset, length(EachType)}]))},
@@ -2527,7 +2529,7 @@ mk_proto3_fields() ->
                                     [{field_opts_f, fun maybe_packed/1}])},
     OneofMsg1  = {{msg, oneof1},  mk_oneof_fields_of_type([fixed32], 1)},
     [{syntax, "proto3"},
-     {proto3_msgs, [topmsg1,topmsg2,oneof1,map1,submsg1]},
+     {proto3_msgs, [topmsg1,topmsg2,oneof1,submsg1]},
      EnumDef, SubMsgDef, TopMsgDef1, TopMsgDef2, OneofMsg1].
 
 mk_fields_of_type(Types, Occurrence) ->

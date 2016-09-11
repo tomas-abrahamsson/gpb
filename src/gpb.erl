@@ -179,7 +179,7 @@ new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
                            IsProto3 ->
                                 Record
                         end;
-                   (#?gpb_field{type=Type, occurrence=required, rnum=RNum},
+                   (#?gpb_field{type=Type, occurrence=optional, rnum=RNum},
                     Record) when IsProto3 ->
                         Default = proto3_type_default(Type, MsgDefs),
                         setelement(RNum, Record, Default);
@@ -510,7 +510,8 @@ encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc) ->
     case element(RNum, Msg) of
         {Name, Value} ->
             Field = lists:keyfind(Name, #?gpb_field.name, Fields),
-            NewAcc = encode_2([Field], setelement(RNum, Msg, Value), MsgDefs,
+            NewAcc = encode_2([Field#?gpb_field{occurrence=required}],
+                              setelement(RNum, Msg, Value), MsgDefs,
                               Acc),
             encode_2(Rest, Msg, MsgDefs, NewAcc);
         undefined ->
@@ -539,18 +540,20 @@ encode_packed_2([], _Type, _MsgDefs, Acc) ->
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
              Msg, MsgDefs) ->
     Value = element(RNum, Msg),
-    case is_msg_proto3(element(1, Msg), MsgDefs)
-        andalso proto3_type_default(Type, MsgDefs) =:= Value of
-        true ->
-            <<>>;
-        false ->
-            encode_field_value(Value, FNum, Type, MsgDefs)
-    end;
+    encode_field_value(Value, FNum, Type, MsgDefs);
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=optional},
              Msg, MsgDefs) ->
     case element(RNum, Msg) of
-        undefined -> <<>>;
-        Value     -> encode_field_value(Value, FNum, Type, MsgDefs)
+        undefined ->
+            <<>>;
+        Value ->
+            case is_msg_proto3(element(1, Msg), MsgDefs)
+                andalso proto3_type_default(Type, MsgDefs) =:= Value of
+                true ->
+                    <<>>;
+                false ->
+                    encode_field_value(Value, FNum, Type, MsgDefs)
+            end
     end;
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=repeated},
              Msg, MsgDefs) ->
