@@ -279,6 +279,16 @@ epb_compatibility_opt_implies_msg_name_to_lower_test() ->
             epb_compatibility]),
     [{{msg,somemsg},_}] = receive_filter_sort_msgs_defs().
 
+epb_compatibility_opt_implies_defaults_for_omitted_optionals_test() ->
+    Proto = ["message m {",
+             "  optional uint32 f = 1 [default=3];\n",
+             %% for verifying that type-defaults is not implied:
+             "  optional uint32 g = 2;\n",
+             "}\n"],
+    M = compile_iolist(Proto, [epb_compatibility]),
+    {m,3,undefined} = M:decode_msg(<<>>, m),
+    unload_code(M).
+
 field_pass_as_params_test() ->
     MsgDef = ["message m2 { required uint32 f22 = 1; }"
               "message m1 { required uint32  f1 = 1;",

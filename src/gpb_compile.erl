@@ -392,6 +392,7 @@ file(File) ->
 %% option.
 %% <ul>
 %%   <li>`epb_functions'</li>
+%%   <li>`defaults_for_omitted_optionals'</li>
 %%   <li>`{module_name_suffix,"_pb"}'</li>
 %%   <li>`{msg_name_to_lower,true}'</li>
 %% </ul>
@@ -471,11 +472,14 @@ norm_opt_alias_to_msg_proto_defs(Opts) ->
               Opts).
 
 norm_opt_epb_compat_opt(Opts) ->
-    proplists:expand([{epb_compatibility, [epb_functions,
-                                           {module_name_suffix,"_pb"},
-                                           {msg_name_to_lower, true}]},
-                      {{epb_compatibility,false}, [{epb_functions,false}]}],
-                     Opts).
+    proplists:expand(
+      [{epb_compatibility, [epb_functions,
+                            defaults_for_omitted_optionals,
+                            {module_name_suffix,"_pb"},
+                            {msg_name_to_lower, true}]},
+       {{epb_compatibility,false}, [{epb_functions,false},
+                                    {defaults_for_omitted_optionals,false}]}],
+      Opts).
 
 norm_opt_map_opts(Opts) ->
     proplists:expand(
@@ -975,6 +979,7 @@ c() ->
 %%   <dd>Enable compatibility with the Erlang Protobuffs library:
 %%       <ul>
 %%         <li>Implies the `-epb-functions' option</li>
+%%         <li>Implies the `-defaults-for-omitted-optionals' option</li>
 %%         <li>Implies the `-modsuffix _pb' option</li>
 %%         <li>Implies the `-msgtolower' option</li>
 %%       </ul></dd>
