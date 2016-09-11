@@ -7682,17 +7682,22 @@ compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
              || Ts <- FormToks],
     {AttrForms0, CodeForms} = split_forms_at_first_code(Forms),
     % extract export_type and type forms from attribute forms
-    AttrForms = lists:filter(fun ({attribute, _, export_type, _}) -> false;
-                                 ({attribute, _, type, _}) -> false;
-                                 (_) -> true
-                             end, AttrForms0),
+    AttrForms = lists:filter(fun(A) ->
+                                     case erl_syntax_lib:analyze_attribute(A) of
+                                         {export_type, _} -> false;
+                                         {type, _}        -> false;
+                                         _                -> true
+                                     end
+                             end,
+                             AttrForms0),
     TypeForms = AttrForms -- AttrForms0,
     FieldDef = field_record_to_attr_form(),
     OneofDef = oneof_record_to_attr_form(),
     RpcDef   = rpc_record_to_attr_form(),
     RecordBaseDefs = [FieldDef, OneofDef, RpcDef],
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
-    AllForms = AttrForms ++ RecordBaseDefs ++ MsgRecordForms ++ TypeForms ++ CodeForms,
+    AllForms = AttrForms ++ RecordBaseDefs ++ MsgRecordForms ++ TypeForms ++
+        CodeForms,
     combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
                                  PossibleNifCode).
 
@@ -7717,10 +7722,11 @@ is_no_dot(_)       -> true.
 
 split_forms_at_first_code(Forms) -> split_forms_at_first_code_2(Forms, []).
 
-split_forms_at_first_code_2([{attribute,_,_,_}=Attr | Rest], Acc) ->
-    split_forms_at_first_code_2(Rest, [Attr | Acc]);
-split_forms_at_first_code_2([{function, _, _Name, _, _Clauses}|_]=Code, Acc) ->
-    {lists:reverse(Acc), Code}.
+split_forms_at_first_code_2([Form | Rest], Acc) ->
+    case erl_syntax_lib:analyze_form(Form) of
+        {attribute, _Info} -> split_forms_at_first_code_2(Rest, [Form | Acc]);
+        {function, _Info}  -> {lists:reverse(Acc), [Form | Rest]}
+    end.
 
 field_record_to_attr_form() ->
     record_to_attr(?gpb_field, record_info(fields, ?gpb_field)).
@@ -7736,17 +7742,21 @@ msgdefs_to_record_attrs(Defs) ->
      || {{msg, MsgName}, Fields} <- Defs].
 
 record_to_attr(RecordName, Fields) ->
-    {attribute, 0, record,
-     {RecordName,
-      [case F of
-           {FName, Default} ->
-               {record_field, 0, {atom, 0, FName}, erl_parse:abstract(Default)};
-           {FName} ->
-               {record_field, 0, {atom, 0, FName}};
-           FName when is_atom(FName) ->
-               {record_field, 0, {atom, 0, FName}}
-       end
-       || F <- Fields]}}.
+    erl_syntax:revert(
+      erl_syntax:attribute(
+        erl_syntax:atom(record),
+        [erl_syntax:atom(RecordName),
+         erl_syntax:tuple(
+           [case F of
+                {FName, Default} ->
+                    erl_syntax:record_field(erl_syntax:atom(FName),
+                                            erl_parse:abstract(Default));
+                {FName} ->
+                    erl_syntax:record_field(erl_syntax:atom(FName), none);
+                FName when is_atom(FName) ->
+                    erl_syntax:record_field(erl_syntax:atom(FName), none)
+            end
+            || F <- Fields])])).
 
 gpb_field_to_record_field(#?gpb_field{name=FName, opts=Opts}) ->
     case proplists:get_value(default, Opts) of
