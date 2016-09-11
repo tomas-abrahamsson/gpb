@@ -26,6 +26,7 @@
 -export([map_item_pseudo_fields/2]).
 -export([is_allowed_as_key_type/1]).
 -export([is_msg_proto3/2, proto3_type_default/2]).
+-export([proto2_type_default/2]).
 -export([encode_varint/1, decode_varint/1, decode_varint/2]).
 -export([encode_wiretype/1, decode_wiretype/1]).
 -export([version_as_string/0, version_as_list/0]).
@@ -987,6 +988,17 @@ is_msg_proto3(Name, MsgDefs) ->
         false ->
             false
     end.
+
+proto2_type_default(Type, MsgDefs) ->
+    %% Type-specific defaults for proto2 are the same as for proto3,
+    %% with one slight exception, for enums. In both proto2 and
+    %% proto3, the first defined enumerator is the type-specific
+    %% default, but in proto3, the first enumerator must additionally
+    %% have value = 0, ie the (would-be) wire-value for proto3 is 0.
+    %%
+    %% We go with the proto3 type defaults, hope it does not lead to
+    %% some odd corner case.
+    proto3_type_default(Type, MsgDefs).
 
 proto3_type_default(Type, MsgDefs) ->
     case Type of

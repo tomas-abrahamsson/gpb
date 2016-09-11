@@ -104,6 +104,10 @@ file(File) ->
 %%                   {any_translate, AnyTranslation} |
 %%                   epb_compatibility | {epb_compatibility,boolean()} |
 %%                   epb_functions | {epb_functions,boolean()} |
+%%                   defaults_for_omitted_optionals |
+%%                   {defaults_for_omitted_optionals, boolean()} |
+%%                   type_defaults_for_omitted_optionals |
+%%                   {type_defaults_for_omitted_optionals, boolean()}
 %%                   {import_fetcher, fun((File) -> FetcherRet)}
 %%            CompRet = ModRet | BinRet | ErrRet
 %%            ModRet = ok | {ok, Warnings}
@@ -400,6 +404,14 @@ file(File) ->
 %%   <li>`decode/2'</li>
 %%   <li>`decode_<MsgName>/1'</li>
 %% </ul>
+%%
+%% The `defaults_for_omitted_optionals' and
+%% `type_defaults_for_omitted_optionals' options generates code that
+%% set default values or type-defaults respectively, on decoding, if
+%% an optional field is not present in the binary to decode. Normally
+%% it would otherwise have been set to `undefined'. Note that with
+%% these options it is not possible to determine after decoding
+%% whether a field was present or not.
 %%
 %% The `import_fetcher' option can be used to catch imports. The
 %% option value must be a function taking one argument, the name of
@@ -970,6 +982,12 @@ c() ->
 %%   <dd>For compatibility with the Erlang Protobuffs library, generate also
 %%       the following functions: `encode/1', `decode/2', `encode_MsgName/1'
 %%       and `decode_MsgName/1'</dd>
+%%   <dt>`-defaults-for-omitted-optionals'</dt>
+%%   <dd>For optional fields not present on decoding, set the field to
+%%       its default value, if any, instead of to `undefined'.</dd>
+%%   <dt>`-type-defaults-for-omitted-optionals'</dt>
+%%   <dd>For optional fields not present on decoding, set the field to
+%%       its type-default, instead of to `undefined'.</dd>
 %%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
@@ -1205,6 +1223,14 @@ opt_specs() ->
       "       Erlang protobuffs library:\n"
       "       * encode/1 and encode_MsgName/1\n"
       "       * decode/2 and decode_MsgName/1\n"},
+     {"defaults-for-omitted-optionals", undefined,
+      defaults_for_omitted_optionals, "\n"
+      "       For optional fields not present on decoding, set the field\n"
+      "       to its default value, if any, instead of to undefined.\n"},
+     {"type-defaults-for-omitted-optionals", undefined,
+      type_defaults_for_omitted_optionals, "\n"
+      "       For optional fields not present on decoding, set the field\n"
+      "       to its type-default, instead of to undefined.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
@@ -3200,27 +3226,38 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
                    end)]).
 
 msg_decoder_initial_params(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts) ->
+    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
+    UseDefaults = proplists:get_bool(defaults_for_omitted_optionals, Opts),
+    UseTypeDefaults = proplists:get_bool(type_defaults_for_omitted_optionals,
+                                         Opts),
     ExprInfos1 =
         [case Field of
              #?gpb_field{name=FName, occurrence=Occurrence, type=Type,
                          opts=FOpts} ->
-                 {Undefined, Undef} =
-                     case gpb:is_msg_proto3(MsgName, Defs) of
-                         true ->
+                 HasDefault = lists:keymember(default, 1, FOpts),
+                 {Undefined, Undef, P} =
+                     if IsProto3 ->
                              TD = proto3_type_default(Type, Defs, Opts),
                              ATD = erl_syntax:abstract(TD),
-                             {ATD, ATD};
-                         false ->
-                             {?expr(undefined), ?expr('$undef')}
+                             {ATD, ATD, m};
+                        UseDefaults, HasDefault ->
+                             {default,D} = lists:keyfind(default, 1, FOpts),
+                             AD = erl_syntax:abstract(D),
+                             {AD, AD, m};
+                        UseTypeDefaults ->
+                             TD = proto2_type_default(Type, Defs, Opts),
+                             ATD = erl_syntax:abstract(TD),
+                             {ATD, ATD, m};
+                        true ->
+                             Pr = if HasDefault -> d;
+                                     true -> o
+                                  end,
+                             {?expr(undefined), ?expr('$undef'), Pr}
                      end,
-                 HasDefault = lists:keymember(default, 1, FOpts),
                  case Occurrence of
                      repeated -> {FName, m, ?expr([]),        ?expr([])};
                      required -> {FName, o, ?expr(undefined), ?expr('$undef')};
-                     optional ->
-                         if HasDefault -> {FName, d, Undefined, Undef};
-                            true       -> {FName, o, Undefined, Undef}
-                         end
+                     optional -> {FName, P, Undefined,        Undef}
                  end;
              #gpb_oneof{name=FName} ->
                  {FName, o, ?expr(undefined), ?expr('$undef')}
@@ -8224,16 +8261,22 @@ get_strings_as_binaries_by_opts(Opts) ->
 get_epb_functions_by_opts(Opts) ->
     proplists:get_bool(epb_functions, Opts).
 
+proto2_type_default(Type, Defs, Opts) ->
+    type_default(Type, Defs, Opts, fun gpb:proto2_type_default/2).
+
 proto3_type_default(Type, Defs, Opts) ->
+    type_default(Type, Defs, Opts, fun gpb:proto3_type_default/2).
+
+type_default(Type, Defs, Opts, GetTypeDefault) ->
     if Type == string ->
             case get_strings_as_binaries_by_opts(Opts) of
                 true ->
-                    list_to_binary(gpb:proto3_type_default(Type, Defs));
+                    list_to_binary(GetTypeDefault(Type, Defs));
                 false ->
-                    gpb:proto3_type_default(Type, Defs)
+                    GetTypeDefault(Type, Defs)
             end;
        Type /= string ->
-            gpb:proto3_type_default(Type, Defs)
+            GetTypeDefault(Type, Defs)
     end.
 
 flatten_iolist(IoList) ->
