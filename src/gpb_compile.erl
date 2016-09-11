@@ -3202,7 +3202,8 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
 msg_decoder_initial_params(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts) ->
     ExprInfos1 =
         [case Field of
-             #?gpb_field{name=FName, occurrence=Occurrence, type=Type} ->
+             #?gpb_field{name=FName, occurrence=Occurrence, type=Type,
+                         opts=FOpts} ->
                  {Undefined, Undef} =
                      case gpb:is_msg_proto3(MsgName, Defs) of
                          true ->
@@ -3212,10 +3213,14 @@ msg_decoder_initial_params(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts) ->
                          false ->
                              {?expr(undefined), ?expr('$undef')}
                      end,
+                 HasDefault = lists:keymember(default, 1, FOpts),
                  case Occurrence of
                      repeated -> {FName, m, ?expr([]),        ?expr([])};
                      required -> {FName, o, ?expr(undefined), ?expr('$undef')};
-                     optional -> {FName, o, Undefined,        Undef}
+                     optional ->
+                         if HasDefault -> {FName, d, Undefined, Undef};
+                            true       -> {FName, o, Undefined, Undef}
+                         end
                  end;
              #gpb_oneof{name=FName} ->
                  {FName, o, ?expr(undefined), ?expr('$undef')}
@@ -3251,7 +3256,8 @@ msg_decoder_initial_params(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts) ->
                 records ->
                     [record_create(
                        MsgName,
-                       [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos2])];
+                       [{FName, Expr} || {FName, P, Expr, _} <- ExprInfos2,
+                                         P == m orelse P == d])];
                 {maps, present_undefined} ->
                     [map_create(
                        [{FName, Expr} || {FName, _, Expr, _} <- ExprInfos2])];
