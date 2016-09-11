@@ -14,7 +14,14 @@ main(Argv) ->
     end.
 
 setup_code_path() ->
-    BinDir = filename:dirname(escript:script_name()),
+    ScriptName = escript:script_name(),
+    RealScriptName =
+    case file:read_link(ScriptName) of
+        {ok, Name} -> Name;
+        _ -> ScriptName
+    end,
+
+    BinDir = filename:dirname(RealScriptName),
     EBinDir = filename:join([BinDir, "..", "ebin"]),
     %% add the gpb ebin path to we can have access to gpb_compile
     true = code:add_pathz(EBinDir).
