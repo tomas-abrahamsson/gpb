@@ -208,6 +208,37 @@ fetch_rpc_def_test() ->
     ?assertError(_, M:fetch_rpc_def(s,some_bad_rpc_name)),
     unload_code(M).
 
+%% --- default values --------------
+
+default_value_handling_test() ->
+    Proto = ["message m {",
+             "  optional uint32 f1 = 1;",
+             "  optional uint32 f2 = 2 [default=2];",
+             "}"],
+    FieldNames = [f1,f2],
+    [begin
+         AllOpts = Opts ++ OptVariation1 ++ OptVariation2 ++ [maps],
+         M = compile_iolist(Proto, AllOpts),
+         FVs = lists:zip(FieldNames, tl(tuple_to_list(BaseExpected))),
+         FVs2 = case proplists:get_value(maps_unset_optional, AllOpts) of
+                    present_undefined -> FVs;
+                    omitted           -> [{F,V} || {F,V} <- FVs, V /= undefined]
+                end,
+         Expected = maps:from_list(FVs2),
+         ?assertMatch({Expected,_}, {M:decode_msg(<<>>, m), Opts}),
+         unload_code(M)
+     end
+     || {BaseExpected, Opts} <-
+            [{{m,undefined,undefined}, []},
+             {{m,0,2},         [defaults_for_omitted_optionals,
+                                type_defaults_for_omitted_optionals]},
+             {{m,undefined,2}, [defaults_for_omitted_optionals]},
+             {{m,0,0},         [type_defaults_for_omitted_optionals]}],
+        OptVariation1 <- [[pass_as_params],
+                          [pass_as_record]],
+        OptVariation2 <- [[{maps_unset_optional,present_undefined}],
+                          [{maps_unset_optional,omitted}]]].
+
 %% merge ------------------------------------------------
 merge_maps_with_opts_present_undefined_test() ->
     M = compile_iolist(["message m1 {",

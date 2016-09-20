@@ -279,6 +279,16 @@ epb_compatibility_opt_implies_msg_name_to_lower_test() ->
             epb_compatibility]),
     [{{msg,somemsg},_}] = receive_filter_sort_msgs_defs().
 
+epb_compatibility_opt_implies_defaults_for_omitted_optionals_test() ->
+    Proto = ["message m {",
+             "  optional uint32 f = 1 [default=3];\n",
+             %% for verifying that type-defaults is not implied:
+             "  optional uint32 g = 2;\n",
+             "}\n"],
+    M = compile_iolist(Proto, [epb_compatibility]),
+    {m,3,undefined} = M:decode_msg(<<>>, m),
+    unload_code(M).
+
 field_pass_as_params_test() ->
     MsgDef = ["message m2 { required uint32 f22 = 1; }"
               "message m1 { required uint32  f1 = 1;",
@@ -391,6 +401,34 @@ code_generation_when_map_enum_size_is_unknown_at_compile_time_test() ->
             {{enum,e1}, [{x1,0},{x2,128}]}], %% encodes to different sizes
     M = compile_defs(Defs),
     true = is_binary(M:encode_msg({m1,[{true,x1}]})),
+    unload_code(M).
+
+%% --- default values --------------
+
+default_value_handling_test() ->
+    Proto = ["message m {",
+             "  optional uint32 f1 = 1;",
+             "  optional uint32 f2 = 2 [default=2];",
+             "}"],
+    [begin
+         M = compile_iolist(Proto, Opts ++ OptVariation),
+         ?assertMatch({Expected,_}, {M:decode_msg(<<>>, m), Opts}),
+         unload_code(M)
+     end
+     || {Expected, Opts} <-
+            [{{m,undefined,undefined}, []},
+             {{m,0,2},         [defaults_for_omitted_optionals,
+                                type_defaults_for_omitted_optionals]},
+             {{m,undefined,2}, [defaults_for_omitted_optionals]},
+             {{m,0,0},         [type_defaults_for_omitted_optionals]}],
+        OptVariation <- [[pass_as_params],
+                         [pass_as_record]]].
+
+type_default_option_should_be_ignored_for_proto3_test() ->
+    Proto = ["syntax=\"proto3\";\n",
+             "message m { uint32 f1 = 1; };"],
+    M = compile_iolist(Proto, [{type_defaults_for_omitted_optionals, false}]),
+    {m,0} = M:decode_msg(<<>>, m),
     unload_code(M).
 
 %% --- introspection ---------------
