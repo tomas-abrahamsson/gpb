@@ -412,7 +412,7 @@ file(File) ->
 %% an optional field is not present in the binary to decode. Normally
 %% it would otherwise have been set to `undefined'. Note that with
 %% these options it is not possible to determine after decoding
-%% whether a field was present or not.
+%% whether a field contained data in the binary message.
 %%
 %% The `import_fetcher' option can be used to catch imports. The
 %% option value must be a function taking one argument, the name of

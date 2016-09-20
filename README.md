@@ -328,8 +328,8 @@ For records, the order of items is undefined when decoding.
 ```
 
 
-Unset optionals and default
----------------------------
+Unset optionals and the `default` option
+----------------------------------------
 
 #### For proto2 syntax
 
@@ -347,16 +347,16 @@ use the syntax for records (or maps), and this leaves no good way to
 at the same time both convey whether a field was present or not and to
 read the defaults.
 
-So the approach in `gpb` is that you can have to chose: either
-or. Normally, it is possibble to see whether an optional field was
+So the approach in `gpb` is that you have to choose: either or.
+Normally, it is possible to see whether an optional field is
 present or not, eg by checking if the value is `undefined`. But there
-are options to the compiler to instead decode to defaults, but then
-you lose the ability to see whether a field was present or not. The
-options are `defaults_for_omitted_optionals` and
+are options to the compiler to instead decode to defaults, in which
+case you lose the ability to see whether a field is present or not.
+The options are `defaults_for_omitted_optionals` and
 `type_defaults_for_omitted_optionals`, for decoding to `default=<x>`
 values, or to type-specific defaults respectively.
 
-It work this way:
+It works this way:
 
 ```protobuf
 message o1 {
@@ -364,22 +364,24 @@ message o1 {
   optional uint32 b = 2; // the type-specific default is 0
 }
 ```
-Given `Input = <<>>`, that is, neither field `a` nor `b` is present,
-then the call `decode_msg(Input, o1)` would results in:
+
+Given binary data `<<>>`, that is, neither field `a` nor `b` is present,
+then the call `decode_msg(Input, o1)` results in:
+
 ```erlang
-  #o1{a=undefined, b=undefined} % None of the options
+#o1{a=undefined, b=undefined} % None of the options
 
-  #o1{a=33, b=undefined}        % with option defaults_for_omitted_optionals
+#o1{a=33, b=undefined}        % with option defaults_for_omitted_optionals
 
-  #o1{a=33, b=0}                % with both defaults_for_omitted_optionals
-                                %       and type_defaults_for_omitted_optionals
+#o1{a=33, b=0}                % with both defaults_for_omitted_optionals
+                              %       and type_defaults_for_omitted_optionals
 
-  #o1{a=0, b=0}                 % with only type_defaults_for_omitted_optionals
+#o1{a=0, b=0}                 % with only type_defaults_for_omitted_optionals
 ```
 The last of the alternatives is perhaps not very useful, but still
-possible, and documented here for completeness.
+possible, and implemented for completeness.
 
-Reference: https://developers.google.com/protocol-buffers/docs/proto#optional
+[Google's Reference](https://developers.google.com/protocol-buffers/docs/proto#optional)
 
 #### For proto3 syntax
 
@@ -388,7 +390,9 @@ For proto3, there is neither `required` nor `optional` nor
 and if missing in the binary to decode, they always decode to the
 type-specific default value. Also, it is not possible to determine
 whether a value was present---with a type-specific value---or not; no
-`has_<field>()` methods are generated (at least for scalars).
+`has_<field>()` methods are generated (at least for scalars). If you
+need detection of "missing" data, you must define `has_<field>`
+boolean fields and set them appropriately.
 
 This maps directly and naturally to Erlang.
 
