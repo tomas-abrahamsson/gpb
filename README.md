@@ -4,173 +4,6 @@ for Erlang.
 See https://developers.google.com/protocol-buffers/ for further information
 on the Google protocol buffers.
 
-Features of gpb
----------------
-
-*  Parses protocol buffer definition files and can generate:
-   - record definitions, one record for each message
-   - erlang code for encoding/decoding the messages to/from binaries
-
-*  Features of the protocol buffer definition files:
-   gpb supports:
-   - message definitions (also messages in messages)
-   - scalar types
-   - importing other proto files
-   - nested types
-   - message extensions
-   - the 'packed' and 'default' options for fields
-   - the 'allow_alias' enum option (treated as if it is always set true)
-   - generating metadata information
-   - package namespacing (optional)
-   - oneof (introduced in protobuf 2.6.0)
-   - map<_,_> (introduced in protobuf 3.0.0)
-   - proto3 support:
-     - syntax and general semantics
-     - import of well-known types
-     - Callback functions can be specified for automatically translating
-       google.protobuf.Any messages
-
-   gpb reads but ignores or throws away:
-   - options other than 'packed' or 'default'
-   - custom options
-
-   gpb does not support:
-   - groups
-   - aggregate custom options introduced in protobuf 2.4.0
-   - rpc
-   - proto3 JSON mapping
-
-*  Characteristics of gpb:
-   - Skipping over unknown message fields, when decoding, is supported
-   - Merging of messages, also recursive merging, is supported
-   - Gpb can optionally generate code for verification of values during
-     encoding this makes it easy to catch e.g integers out of range,
-     or values of the wrong type.
-   - Gpb can optionally or conditionally copying the contents of 'bytes'
-     fields, in order to let the runtime system free the larger message
-     binary.
-   - Gpb can optionally make use of the package attribute by prepending
-     the name of the package to every contained message type (if defined),
-     which is useful to avoid name clashes of message types across packages.
-   - The generated encode/decoder has no run-time dependency to gpb,
-     but there is normally a compile-time dependency for the generated
-     code: to the #field{} record in gpb.hrl the for the get_msg_defs
-     function, but it is possible to avoid this dependency by using
-     the also the `defs_as_proplists` or `-pldefs` option.
-   - Gpb can generate code both to files and to binaries.
-   - Proto input files are expected to be UTF-8, but the file reader
-     will fall back to decode the files as latin1 in UTF-8 decode errors,
-     for backwards compatibility and behaviour that most closely
-     emulates what Google protobuf does.
-
-*  Introspection
-
-   gpb generates some functions for examining messages, enums and services:
-   - `get_msg_defs()`, `get_msg_names()`, `get_enum_names()`
-   - `find_msg_def(MsgName)` and `fetch_msg_def(MsgName)`
-   - `find_enum_def(MsgName)` and `fetch_enum_def(MsgName)`
-   - `enum_symbol_by_value(EnumName, Value)`,
-   - `enum_symbol_by_value_<EnumName>(Value)`,
-     `enum_value_by_symbol(EnumName, Enum)` and
-     `enum_value_by_symbol_<EnumName>(Enum)`
-   - `get_service_names()`, `get_service_def(ServiceName)`, `get_rpc_names(ServiceName)`
-   - `find_rpc_def(ServiceName, RpcName)`, `fetch_rpc_def(ServiceName, RpcName)`
-
-   There are also some version information functions:
-
-   - `gpb:version_as_string()` and `gpb:version_as_list()`
-   - `GeneratedCode:version_as_string()` and `GeneratedCode:version_as_list()`
-   - `?gpb_version`  (in gpb_version.hrl)
-   - `?'GeneratedCode_gpb_version'`  (in GeneratedCode.hrl)
-
-   The gpb can also generate a self-description of the proto file.
-   The self-description is a description of the proto file, encoded to
-   a binary using the descriptor.proto that comes with the Google
-   protocol buffers library. Note that such an encoded self-descriptions
-   won't be byte-by-byte identical to what the Google protocol buffers
-   compiler will generate for the same proto, but should be roughly
-   equivalent.
-
-*  Erroneously encoded protobuf messages and fields will generally
-   cause the decoder to crash.  Examples of such erroneous encodings are:
-   - varints with too many bits
-   - strings, bytes, sub messages or packed repeated fields,
-     where the encoded length is longer than the remaining binary
-
-*  Maps
-
-   Gpb can generate encoders/decoders for maps.
-
-   The option `maps_unset_optional` can be used to specify behavior
-   for non-present optional fields: whether they are omitted from
-   maps, or whether they are present, but have the value `undefined`
-   like for records.
-
-*  Reporting of errors in .proto files
-
-   Gpb is not very good at error reporting, especially referencing
-   errors, such as references to messages that are not defined.
-   You might want to first verify with `protoc` that the .proto files
-   are valid before feeding them to gpb.
-
-*  Caveats
-
-   The gpb does accept reserved words as names for fields (just like
-   protoc does), but not as names for messages. To correct this, one
-   would have to either rewrite the grammar, or stop using yecc.
-   (maybe rewrite it all as a protoc plugin?)
-
-Performance
------------
-
-Here is a comparison between gpb (interpreted by the erlang vm) and
-the C++, Python and Java serializers/deserializers of protobuf-2.6.1rc1
-
-    [MB/s]        | gpb   |pb/c++ |pb/c++ | pb/c++ | pb/py |pb/java| pb/java|
-                  |       |(speed)|(size) | (lite) |       |(size) | (speed)|
-    --------------+-------+-------+-------+--------+-------+-------+--------+
-    small msgs    |       |       |       |        |       |       |        |
-      serialize   |   52  | 1240  |   85  |   750  |  6.5  |   68  |  1290  |
-      deserialize |   63  |  880  |   85  |   950  |  5.5  |   90  |   450  |
-    --------------+-------+-------+-------+--------+-------+-------+--------+
-    large msgs    |       |       |       |        |       |       |        |
-      serialize   |   36  |  950  |   72  |   670  |  4.5  |   55  |   670  |
-      deserialize |   54  |  620  |   71  |   480  |  4.0  |   60  |   360  |
-    --------------+-------+-------+-------+--------+-------+-------+--------+
-
-The performances are measured as number of processed MB/s,
-serialized form.  Higher values means better performance.
-
-The benchmarks are run with small and large messages (228 and 84584
-bytes, respectively, in serialized form)
-
-The Java benchmark is run with optimization both for code size and for
-speed. The Python implementation cannot optimize for speed.
-
-    SW: Python 2.7.11, Java 1.8.0_77 (Oracle JDK), Erlang/OTP 18.3, g++ 5.3.1
-        Linux kernel 4.4, Debian (in 64 bit mode), protobuf-2.6.1rc1
-    HW: Intel Core i7 5820k, 3.3GHz, 6x256 kB L2 cache, 15MB L3 cache
-        (CPU frequency pinned to 3.3 GHz)
-
-The benchmarks are all done with the exact same messages files and
-proto files.  The source of the benchmarks was found in the Google
-protobuf's svn repository.  The gpb does not support groups, but the
-benchmarks in the protobuf used groups, so I converted the
-google_message*.dat to use sub message structures instead.
-For protobuf, that change was only barely noticeable.
-
-For performance, the generated Erlang code avoids creating sub
-binaries as far as possible. It has to for sub messages, strings and
-bytes, but for the rest of the types, it avoids creating sub binaries,
-both during encoding and decoding (for info, compile with the
-`bin_opt_info` option)
-
-The Erlang code ran in the smp emulator, though only one CPU core
-was utilized.
-
-The generated C++ core was compiled with -O3.
-
-
 Mapping of protocol buffer datatypes to erlang
 ----------------------------------------------
 
@@ -396,6 +229,122 @@ boolean fields and set them appropriately.
 
 This maps directly and naturally to Erlang.
 
+Features of gpb
+---------------
+
+*  Parses protocol buffer definition files and can generate:
+   - record definitions, one record for each message
+   - erlang code for encoding/decoding the messages to/from binaries
+
+*  Features of the protocol buffer definition files:
+   gpb supports:
+   - message definitions (also messages in messages)
+   - scalar types
+   - importing other proto files
+   - nested types
+   - message extensions
+   - the 'packed' and 'default' options for fields
+   - the 'allow_alias' enum option (treated as if it is always set true)
+   - generating metadata information
+   - package namespacing (optional)
+   - oneof (introduced in protobuf 2.6.0)
+   - map<_,_> (introduced in protobuf 3.0.0)
+   - proto3 support:
+     - syntax and general semantics
+     - import of well-known types
+     - Callback functions can be specified for automatically translating
+       google.protobuf.Any messages
+
+   gpb reads but ignores or throws away:
+   - options other than 'packed' or 'default'
+   - custom options
+
+   gpb does not support:
+   - groups
+   - aggregate custom options introduced in protobuf 2.4.0
+   - rpc
+   - proto3 JSON mapping
+
+*  Characteristics of gpb:
+   - Skipping over unknown message fields, when decoding, is supported
+   - Merging of messages, also recursive merging, is supported
+   - Gpb can optionally generate code for verification of values during
+     encoding this makes it easy to catch e.g integers out of range,
+     or values of the wrong type.
+   - Gpb can optionally or conditionally copying the contents of 'bytes'
+     fields, in order to let the runtime system free the larger message
+     binary.
+   - Gpb can optionally make use of the package attribute by prepending
+     the name of the package to every contained message type (if defined),
+     which is useful to avoid name clashes of message types across packages.
+   - The generated encode/decoder has no run-time dependency to gpb,
+     but there is normally a compile-time dependency for the generated
+     code: to the #field{} record in gpb.hrl the for the get_msg_defs
+     function, but it is possible to avoid this dependency by using
+     the also the `defs_as_proplists` or `-pldefs` option.
+   - Gpb can generate code both to files and to binaries.
+   - Proto input files are expected to be UTF-8, but the file reader
+     will fall back to decode the files as latin1 in UTF-8 decode errors,
+     for backwards compatibility and behaviour that most closely
+     emulates what Google protobuf does.
+
+*  Introspection
+
+   gpb generates some functions for examining messages, enums and services:
+   - `get_msg_defs()`, `get_msg_names()`, `get_enum_names()`
+   - `find_msg_def(MsgName)` and `fetch_msg_def(MsgName)`
+   - `find_enum_def(MsgName)` and `fetch_enum_def(MsgName)`
+   - `enum_symbol_by_value(EnumName, Value)`,
+   - `enum_symbol_by_value_<EnumName>(Value)`,
+     `enum_value_by_symbol(EnumName, Enum)` and
+     `enum_value_by_symbol_<EnumName>(Enum)`
+   - `get_service_names()`, `get_service_def(ServiceName)`, `get_rpc_names(ServiceName)`
+   - `find_rpc_def(ServiceName, RpcName)`, `fetch_rpc_def(ServiceName, RpcName)`
+
+   There are also some version information functions:
+
+   - `gpb:version_as_string()` and `gpb:version_as_list()`
+   - `GeneratedCode:version_as_string()` and `GeneratedCode:version_as_list()`
+   - `?gpb_version`  (in gpb_version.hrl)
+   - `?'GeneratedCode_gpb_version'`  (in GeneratedCode.hrl)
+
+   The gpb can also generate a self-description of the proto file.
+   The self-description is a description of the proto file, encoded to
+   a binary using the descriptor.proto that comes with the Google
+   protocol buffers library. Note that such an encoded self-descriptions
+   won't be byte-by-byte identical to what the Google protocol buffers
+   compiler will generate for the same proto, but should be roughly
+   equivalent.
+
+*  Erroneously encoded protobuf messages and fields will generally
+   cause the decoder to crash.  Examples of such erroneous encodings are:
+   - varints with too many bits
+   - strings, bytes, sub messages or packed repeated fields,
+     where the encoded length is longer than the remaining binary
+
+*  Maps
+
+   Gpb can generate encoders/decoders for maps.
+
+   The option `maps_unset_optional` can be used to specify behavior
+   for non-present optional fields: whether they are omitted from
+   maps, or whether they are present, but have the value `undefined`
+   like for records.
+
+*  Reporting of errors in .proto files
+
+   Gpb is not very good at error reporting, especially referencing
+   errors, such as references to messages that are not defined.
+   You might want to first verify with `protoc` that the .proto files
+   are valid before feeding them to gpb.
+
+*  Caveats
+
+   The gpb does accept reserved words as names for fields (just like
+   protoc does), but not as names for messages. To correct this, one
+   would have to either rewrite the grammar, or stop using yecc.
+   (maybe rewrite it all as a protoc plugin?)
+
 Interaction with rebar
 ----------------------
 
@@ -432,6 +381,57 @@ subdirectory.  Here are some some lines for the `rebar.config` file:
      ]}.
 
     {erl_opts, [{i, "/path/to/gpb/include"}]}.
+
+
+Performance
+-----------
+
+Here is a comparison between gpb (interpreted by the erlang vm) and
+the C++, Python and Java serializers/deserializers of protobuf-2.6.1rc1
+
+    [MB/s]        | gpb   |pb/c++ |pb/c++ | pb/c++ | pb/py |pb/java| pb/java|
+                  |       |(speed)|(size) | (lite) |       |(size) | (speed)|
+    --------------+-------+-------+-------+--------+-------+-------+--------+
+    small msgs    |       |       |       |        |       |       |        |
+      serialize   |   52  | 1240  |   85  |   750  |  6.5  |   68  |  1290  |
+      deserialize |   63  |  880  |   85  |   950  |  5.5  |   90  |   450  |
+    --------------+-------+-------+-------+--------+-------+-------+--------+
+    large msgs    |       |       |       |        |       |       |        |
+      serialize   |   36  |  950  |   72  |   670  |  4.5  |   55  |   670  |
+      deserialize |   54  |  620  |   71  |   480  |  4.0  |   60  |   360  |
+    --------------+-------+-------+-------+--------+-------+-------+--------+
+
+The performances are measured as number of processed MB/s,
+serialized form.  Higher values means better performance.
+
+The benchmarks are run with small and large messages (228 and 84584
+bytes, respectively, in serialized form)
+
+The Java benchmark is run with optimization both for code size and for
+speed. The Python implementation cannot optimize for speed.
+
+    SW: Python 2.7.11, Java 1.8.0_77 (Oracle JDK), Erlang/OTP 18.3, g++ 5.3.1
+        Linux kernel 4.4, Debian (in 64 bit mode), protobuf-2.6.1rc1
+    HW: Intel Core i7 5820k, 3.3GHz, 6x256 kB L2 cache, 15MB L3 cache
+        (CPU frequency pinned to 3.3 GHz)
+
+The benchmarks are all done with the exact same messages files and
+proto files.  The source of the benchmarks was found in the Google
+protobuf's svn repository.  The gpb does not support groups, but the
+benchmarks in the protobuf used groups, so I converted the
+google_message*.dat to use sub message structures instead.
+For protobuf, that change was only barely noticeable.
+
+For performance, the generated Erlang code avoids creating sub
+binaries as far as possible. It has to for sub messages, strings and
+bytes, but for the rest of the types, it avoids creating sub binaries,
+both during encoding and decoding (for info, compile with the
+`bin_opt_info` option)
+
+The Erlang code ran in the smp emulator, though only one CPU core
+was utilized.
+
+The generated C++ core was compiled with -O3.
 
 
 Version numbering
