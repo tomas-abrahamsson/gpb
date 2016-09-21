@@ -4,6 +4,46 @@ for Erlang.
 See https://developers.google.com/protocol-buffers/ for further information
 on the Google protocol buffers.
 
+Basic example of using gpb
+--------------------------
+
+Let's say we have a protobuf file, `x.proto`
+```protobuf
+message Person {
+  required string name = 1;
+  required int32 id = 2;
+  optional string email = 3;
+}
+```
+We can generate code for this definition in a number of different
+ways. Here we use the command line tool. For info on integration with
+rebar, see further down.
+```
+# .../gpb/bin/protoc-erl -I. x.proto
+```
+Now we've got `x.erl` and `x.hrl`. First we compile it and then we can
+try it out in the Erlang shell:
+```erlang
+# erlc -I.../gpb/include x.erl
+# erl
+Erlang/OTP 19 [erts-8.0.3] [source] [64-bit] [smp:12:12] [async-threads:10] [kernel-poll:false]
+
+Eshell V8.0.3  (abort with ^G)
+1> rr("x.hrl").
+['Person']
+2> x:encode_msg(#'Person'{name="abc def", id=345, email="a@example.com"}).    
+<<10,7,97,98,99,32,100,101,102,16,217,2,26,13,97,64,101,
+  120,97,109,112,108,101,46,99,111,109>>
+3> Bin = v(-1).
+<<10,7,97,98,99,32,100,101,102,16,217,2,26,13,97,64,101,
+  120,97,109,112,108,101,46,99,111,109>>
+4> x:decode_msg(Bin, 'Person').
+#'Person'{name = "abc def",id = 345,email = "a@example.com"}
+```
+
+In the Erlang shell, the `rr("x.hrl")` reads record definitions, and
+the `v(-1)` references a value one step earlier in the history.
+
 Mapping of protocol buffer datatypes to erlang
 ----------------------------------------------
 
