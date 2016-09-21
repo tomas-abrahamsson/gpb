@@ -1,5 +1,25 @@
 -*- coding: utf-8 -*-
 
+Versiono 3.26.0
+2016-Sep-21
+
+	* New option {target_erlang_version,N}. Thanks to 
+
+	* New options defaults_for_omitted_optionals and
+	type_defaults_for_omitted_optionals.  Also improved
+	epb_compatibility when fields have [default=...] specified.
+	Thanks to Luke Bakken for finding and analyzing this.
+
+	* Fix for accessing bin/protoc-erl via symlinks. Thanks to
+	Wang Chao.
+
+	* Clarified licensing conditions. Thanks to Luke Bakken for
+	proposing this.
+
+	* Fixes for type-default handling for proto3.
+
+	* Fixes for Erlang 19 (eunit and dialyzer)
+
 Version 3.25.2
 2016-Aug-25
 
