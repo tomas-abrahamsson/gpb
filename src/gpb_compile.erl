@@ -2105,6 +2105,8 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
                                 ?f("-include(\"gpb.hrl\").~n")
                         end;
                     fields_as_proplists ->
+                        "";
+                    fields_as_maps ->
                         ""
                 end];
            maps ->
@@ -5569,7 +5571,9 @@ msg_def_tree({{msg, MsgName}, Fields}, Opts) ->
 
 fields_tree(Fields, Opts) ->
     case get_field_format_by_opts(Opts) of
-        fields_as_records   ->
+        fields_as_records ->
+            erl_syntax:list([field_tree(Field, Opts) || Field <- Fields]);
+        fields_as_maps ->
             erl_syntax:list([field_tree(Field, Opts) || Field <- Fields]);
         fields_as_proplists ->
             erl_parse:abstract(gpb:field_records_to_proplists(Fields))
@@ -5577,8 +5581,13 @@ fields_tree(Fields, Opts) ->
 
 get_field_format_by_opts(Opts) ->
     case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
-        false -> fields_as_records; %% default
-        true  -> fields_as_proplists
+        false -> %% default
+            case get_defs_as_maps_or_records(Opts) of
+                records -> fields_as_records;
+                maps    -> fields_as_maps
+            end;
+        true ->
+            fields_as_proplists
     end.
 
 field_tree(#?gpb_field{}=F, Opts) ->
@@ -7899,12 +7908,13 @@ get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) ->
     end.
 
 mk_get_defs_as_maps_or_records_fn(Opts) ->
-    fun() ->
-            Default = false,
-            case proplists:get_value(defs_as_maps, Opts, Default) of
-                false -> records;
-                true  -> maps
-            end
+    fun() -> get_defs_as_maps_or_records(Opts) end.
+
+get_defs_as_maps_or_records(Opts) ->
+    Default = false,
+    case proplists:get_value(defs_as_maps, Opts, Default) of
+        false -> records;
+        true  -> maps
     end.
 
 %% records

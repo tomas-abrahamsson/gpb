@@ -45,6 +45,16 @@ no_maps_tests__test() ->
 
 -define(verify_gpb_err(Expr), ?assertError({gpb_type_error, _}, Expr)).
 
+-define(recv(Pattern),
+        (fun() -> receive Pattern=__V -> __V
+                  after 4000 ->
+                          error({receive_timed_out,
+                                 {pattern,??Pattern},
+                                 {message_queue,
+                                  element(2,process_info(self(),messages))}})
+                  end
+         end)()).
+
 -record(m1, {a}).
 
 simple_maps_test() ->
@@ -207,6 +217,35 @@ fetch_rpc_def_test() ->
     #{name := r, input := m, output := m} = M:fetch_rpc_def(s,r),
     ?assertError(_, M:fetch_rpc_def(s,some_bad_rpc_name)),
     unload_code(M).
+
+defs_as_maps_means_no_include_of_gpb_hrl_test() ->
+    Proto = "message m1 { required uint32 f = 1; }",
+    Self = self(),
+    ok = gpb_compile:proto_defs(
+           dummy_defs_as_maps,
+           Proto,
+           [defs_as_maps,
+            {file_op, [{write_file, fun(FName,Data) ->
+                                            case filename:extension(FName) of
+                                                ".erl" -> Self ! {data, Data};
+                                                _ -> ok
+                                            end,
+                                            ok
+                                    end}]}]),
+    {data,Bin} = ?recv({data,_}),
+    %% Check that (only) one -include line is present:
+    %% "dummy_defs_as_maps.hrl" (since no option msgs_as_maps)
+    %% but not: "gpb.hrl" (since we've option defs_as_maps)
+    Lines = string:tokens(binary_to_list(Bin), "\n"),
+    [Inc] = lines_matching("-include", Lines),
+    {true,false,_} = {is_substr("dummy_defs_as_maps.hrl",Inc),
+                      is_substr("gpb.hrl", Inc),
+                      Inc}.
+
+lines_matching(Text, Lines) ->
+    [Line || Line <- Lines, is_substr(Text, Line)].
+
+is_substr(Needle, Haystack) ->  string:str(Haystack, Needle) > 0.
 
 %% --- default values --------------
 
