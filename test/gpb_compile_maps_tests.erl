@@ -221,7 +221,7 @@ fetch_rpc_def_test() ->
 defs_as_maps_means_no_include_of_gpb_hrl_test() ->
     Proto = "message m1 { required uint32 f = 1; }",
     Self = self(),
-    ok = gpb_compile:proto_defs(
+    ok = gpb_compile:string(
            dummy_defs_as_maps,
            Proto,
            [defs_as_maps,
@@ -277,6 +277,60 @@ default_value_handling_test() ->
                           [pass_as_record]],
         OptVariation2 <- [[{maps_unset_optional,present_undefined}],
                           [{maps_unset_optional,omitted}]]].
+
+%% --- target versions ----------------------------------
+
+type_syntax_for_required_fields_test() ->
+    %% In Erlang/OTP 19, required and optional fields for maps can be defined
+    %% using ":=" and "=>" respectively, like this:
+    %%
+    %%     -type m() :: #{req := integer(),
+    %%                    opt => string()}.
+    %%
+    %% For Erlang/OTP 18 and earlier, only "=>" is available, so do
+    %% the best we can, and generate type specs like this:
+    %%
+    %%     -type m() :: #{req => integer()
+    %%                    %% opt => string()
+    %%                   }.
+    %%
+    Proto = "message m { required uint32 f = 1; }",
+    CommonOpts = [type_specs, maps],
+
+    S1 = compile_to_string(Proto, [{target_erlang_version,18} | CommonOpts]),
+    T1 = get_type(S1),
+    [true, false] = [is_substr(X, T1) || X <- ["=>", ":="]],
+
+    S2 = compile_to_string(Proto, [{target_erlang_version,19} | CommonOpts]),
+    T2 = get_type(S2),
+    [false, true] = [is_substr(X, T2) || X <- ["=>", ":="]].
+
+compile_to_string(Proto, Opts) ->
+    Self = self(),
+    FileOps = [{write_file, fun(FName,Data) ->
+                                    case filename:extension(FName) of
+                                        ".erl" -> Self ! {data, Data};
+                                        _ -> ok
+                                    end,
+                                    ok
+                            end}],
+    ok = gpb_compile:string(some_module, Proto, [Opts | [{file_op, FileOps}]]),
+    {data,Bin} = ?recv({data,_}),
+    binary_to_list(Bin).
+
+get_type(S) -> get_type_2(string:tokens(S, "\n")).
+
+get_type_2(["-type"++_=S | Rest]) -> get_type_3(Rest, [S]);
+get_type_2([_ | Rest])            -> get_type_2(Rest);
+get_type_2([])                    -> "".
+
+get_type_3([Line | Rest], Acc) ->
+    case Line of
+        "  "++_ -> get_type_3(Rest, [Line | Acc]);
+        _       -> string:join(lists:reverse(Acc), "\n")
+    end;
+get_type_3([], Acc) ->
+    string:join(lists:reverse(Acc), "\n").
 
 %% merge ------------------------------------------------
 merge_maps_with_opts_present_undefined_test() ->

@@ -403,6 +403,15 @@ code_generation_when_map_enum_size_is_unknown_at_compile_time_test() ->
     true = is_binary(M:encode_msg({m1,[{true,x1}]})),
     unload_code(M).
 
+no_dialyzer_attributes_for_erlang_version_pre_18_test() ->
+    %% -dialyzer({nowarn_function,f/1}). attrs first appeared in Erlang/OTP 18
+    %% such attributes are emitted for verifiers and map translators
+    Proto = "message m { map<uint32,string> m = 1; }",
+    S1 = compile_to_string(Proto, [{target_erlang_version,17}]),
+    false = is_substr("-dialyzer(", S1),
+    S2 = compile_to_string(Proto, [{target_erlang_version,18}]),
+    true = is_substr("-dialyzer(", S2).
+
 %% --- default values --------------
 
 default_value_handling_test() ->
@@ -866,6 +875,20 @@ error_for_invalid_boms_test() ->
                 <<16#FF,16#FE,0,0>>, % utf32-little
                 <<16#FE,16#FF>>,     % utf16-big
                 <<16#FF,16#FE>>]].   % utf16-little
+
+
+generates_escaped_utf8_for_old_erlang_versions_test() ->
+    Unicode = [255],
+    Utf8 = unicode:characters_to_binary(Unicode),
+    Proto = ["message m1 {"
+             "  required string f1 = 1 [default=\"",Unicode,"\"];",
+             "}"],
+    S1 = compile_to_string_get_hrl(Proto, [{target_erlang_version,15}]),
+    true = is_substr("x{ff}", S1), %% 255 = 16#ff
+    S2 = compile_to_string_get_hrl(Proto, [{target_erlang_version,16}]),
+    true = is_substr(binary_to_list(Utf8), S2),
+    [Line1 | _] = string:tokens(S2, "\n"),
+    true = is_substr("coding: ", Line1).
 
 %% -- translation of google.protobuf.Any ----------
 
@@ -2862,6 +2885,11 @@ opt_test() ->
         gpb_compile:parse_opts_and_args(
           ["-epb", "-epb-functions",
            "x.proto"]),
+    {ok, {[{target_erlang_version,18}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-for-version", "18",
+           "x.proto"]),
     %% Help and version
     {ok, {[help, help,
            version, version],
@@ -3001,6 +3029,34 @@ compile_iolist_get_errors_or_warnings(IoList) ->
 compile_iolist_get_errors_or_warnings(IoList, ExtraOpts) ->
     compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, get_result).
 
+compile_to_string(Proto, Opts) ->
+    Self = self(),
+    FileOps = [{write_file, fun(FName,Data) ->
+                                    case filename:extension(FName) of
+                                        ".erl" -> Self ! {data, Data};
+                                        _ -> ok
+                                    end,
+                                    ok
+                            end}],
+    PS = lists:flatten(Proto),
+    ok = gpb_compile:string(some_module, PS, [Opts | [{file_op, FileOps}]]),
+    {data,Bin} = ?recv({data,_}),
+    binary_to_list(Bin).
+
+compile_to_string_get_hrl(Proto, Opts) ->
+    Self = self(),
+    FileOps = [{write_file, fun(FName,Data) ->
+                                    case filename:extension(FName) of
+                                        ".hrl" -> Self ! {data, Data};
+                                        _ -> ok
+                                    end,
+                                    ok
+                            end}],
+    PS = lists:flatten(Proto),
+    ok = gpb_compile:string(some_module, PS, [Opts | [{file_op, FileOps}]]),
+    {data,Bin} = ?recv({data,_}),
+    binary_to_list(Bin).
+
 load_code(Mod, Code) ->
     unload_code(Mod),
     {module, Mod} = code:load_binary(Mod, "<nofile>", Code),
@@ -3029,6 +3085,8 @@ id(X) -> X.
 
 f(Fmt, Args) -> lists:flatten(io_lib:format(Fmt, Args)).
 
+is_substr(Needle, Haystack) -> string:str(Haystack, Needle) > 0.
+ 
 -ifndef(NO_HAVE_RAND).
 %% Erlang 19 or later
 rand_uniform(Limit) -> rand:uniform(Limit).
@@ -3040,3 +3098,4 @@ rand_seed() ->
     {A, B, C} = os:timestamp(),
     random:seed(erlang:phash2(A+B+C), erlang:phash2(B+C), erlang:phash2(A+C)).
 -endif. % NO_HAVE_RAND
+
