@@ -46,6 +46,7 @@
                               %                 %%            pass_as_params
           maps_as_msgs,       % :: list() % same format as `Defs'
           translations,       % :: dict:dict(), %% FieldPath -> TranslationOps
+          default_transls,    % :: sets:set({FnName::atom(),Arity::integer()})
           map_types           % :: sets:set({map,_,_})
         }).
 
@@ -1606,9 +1607,10 @@ utf8_decode(B) ->
 analyze_defs(Defs, Opts) ->
     MapTypes = find_map_types(Defs),
     MapsAsMsgs = map_types_to_msgs(sets:to_list(MapTypes)),
+    Translations = compute_translations(Defs, Opts),
+    KnownMsgSize = find_msgsizes_known_at_compile_time(MapsAsMsgs ++ Defs),
     #anres{used_types          = find_used_types(Defs),
-           known_msg_size      = find_msgsizes_known_at_compile_time(
-                                   MapsAsMsgs ++ Defs),
+           known_msg_size      = KnownMsgSize,
            msg_occurrences     = find_msg_occurrences(MapsAsMsgs ++ Defs),
            fixlen_types        = find_fixlen_types(MapsAsMsgs ++ Defs),
            num_packed_fields   = find_num_packed_fields(MapsAsMsgs ++ Defs),
@@ -1616,7 +1618,9 @@ analyze_defs(Defs, Opts) ->
            d_field_pass_method = compute_decode_field_pass_methods(
                                    MapsAsMsgs ++ Defs, Opts),
            maps_as_msgs        = MapsAsMsgs,
-           translations        = compute_translations(Defs, Opts),
+           translations        = Translations,
+           default_transls     = compute_used_default_translators(
+                                   Defs, Translations, KnownMsgSize, Opts),
            map_types           = MapTypes}.
 
 find_map_types(Defs) ->
@@ -2052,6 +2056,125 @@ default_any_merge_translator() -> {any_m_overwrite,['$2','$user_data']}.
 
 default_any_verify_translator() -> {any_v_no_check,['$1', '$user_data']}.
 
+compute_used_default_translators(Defs, Translations, KnownMsgSize, Opts) ->
+    fold_fields_and_paths(
+      fun(Field, Path, _IsOneOf, Acc) ->
+              Calls = get_translations(Field,Path, Translations,
+                                       KnownMsgSize, Opts),
+              lists:foldl(
+                fun({FnName,ArgsTmpl}, A) when is_list(ArgsTmpl) ->
+                        Arity = length(ArgsTmpl),
+                        sets:add_element({FnName, Arity}, A);
+                   ({FnName,Arity}, A) when is_integer(Arity) ->
+                        sets:add_element({FnName, Arity}, A);
+                   (_, A) -> % remote call (ie: to other module)
+                        A
+                end,
+                Acc,
+                Calls)
+      end,
+      sets:new(),
+      Defs).
+
+get_translations(#gpb_oneof{}, _Path, _Translations, _KnownMsgSize, _Opts) ->
+    [];
+get_translations(#?gpb_field{type=Type, occurrence=Occ, opts=FOpts},
+                 Path, Translations, KnownMsgSize, Opts) ->
+    {IsRepeated,IsPacked,IsKnownSizeElem} =
+        if Occ == repeated ->
+                {true,
+                 lists:member(packed,FOpts),
+                 is_known_size_element(Type, KnownMsgSize)};
+           true ->
+                {false, false, false}
+        end,
+    IsElem = IsRepeated andalso lists:last(Path) == [],
+    DoNif = proplists:get_bool(nif, Opts),
+    Ops = if DoNif ->
+                  [merge, verify];
+             IsElem ->
+                  [encode,decode,merge,verify];
+             IsRepeated, IsPacked, IsKnownSizeElem ->
+                  [encode,
+                   decode_repeated_finalize,
+                   merge,
+                   verify];
+             IsRepeated, IsPacked, not IsKnownSizeElem ->
+                  [encode,
+                   decode_init_default,
+                   decode_repeated_finalize,
+                   merge,
+                   verify];
+             IsRepeated, not IsPacked ->
+                  [encode,
+                   decode_init_default,
+                   decode_repeated_add_elem,
+                   decode_repeated_finalize,
+                   merge,
+                   verify];
+             true ->
+                  [encode,decode,merge,verify]
+          end,
+    PathTransls = case dict:find(Path, Translations) of
+                      {ok, Ts} -> Ts;
+                      error    -> []
+                  end,
+    [case lists:keyfind(Op, 1, PathTransls) of
+         {Op, Transl} ->
+             Transl;
+         false ->
+             if Op == merge, IsRepeated, not IsElem ->
+                     {'erlang_++',3};
+                true ->
+                     FnName = default_fn_by_op(Op, undefined),
+                     Arity = length(args_by_op2(Op)) + 1,
+                     {FnName, Arity}
+             end
+     end
+     || Op <- Ops].
+
+is_known_size_element(fixed32, _) -> true;
+is_known_size_element(fixed64, _) -> true;
+is_known_size_element(sfixed32, _) -> true;
+is_known_size_element(sfixed64, _) -> true;
+is_known_size_element(float, _) -> true;
+is_known_size_element(double, _) -> true;
+is_known_size_element({msg,MsgName}, KnownMsgSize) ->
+    dict:find(MsgName, KnownMsgSize) /= error;
+is_known_size_element({map,KeyType,ValueType}, KnownMsgSize) ->
+    MapAsMsgName = map_type_to_msg_name(KeyType, ValueType),
+    dict:find(MapAsMsgName, KnownMsgSize) /= error;
+is_known_size_element(_Type, _) ->
+    false.
+
+fold_fields_and_paths(F, InitAcc, Defs) ->
+    lists:foldl(
+      fun({{msg, MsgName}, Fields}, Acc) ->
+              fold_field_and_path(F, [MsgName], false, Acc, Fields);
+         (_Def, Acc) ->
+              Acc
+      end,
+      InitAcc,
+      Defs).
+
+fold_field_and_path(F, Root, IsOneOf, InitAcc, Fields) ->
+    lists:foldl(
+      fun(#?gpb_field{name=FName, occurrence=repeated}=Field, Acc) ->
+              Path = Root ++ [FName],
+              EPath = Root ++ [FName, []],
+              F(Field, EPath, IsOneOf, F(Field, Path, IsOneOf, Acc));
+         (#?gpb_field{name=FName}=Field, Acc) ->
+              Path = Root ++ [FName],
+              F(Field, Path, IsOneOf, Acc);
+         (#gpb_oneof{name=CFName, fields=OFields}=Field, Acc) ->
+              Path = Root ++ [CFName],
+              fold_field_and_path(F, Path, {true, CFName},
+                                  F(Field, Path, IsOneOf, Acc),
+                                  OFields)
+      end,
+      InitAcc,
+      Fields).
+
 %% -- generating code ----------------------------------------------
 
 format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
@@ -2179,11 +2302,10 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        ?f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
        "\n",
        if not DoNif ->
-               [?f("~s~n", [format_aux_transl_helpers()]),
-                ?f("~s~n", [format_aux_transl_helpers_used_also_with_nifs()]),
+               [?f("~s~n", [format_aux_transl_helpers(AnRes)]),
                 ?f("~s~n", [format_translators(Defs, AnRes, Opts)])];
           DoNif ->
-               [?f("~s~n", [format_aux_transl_helpers_used_also_with_nifs()]),
+               [?f("~s~n", [format_aux_transl_helpers(AnRes)]),
                 ?f("~s~n", [format_merge_translators(Defs, AnRes, Opts)])]
        end,
        "\n",
@@ -5382,23 +5504,20 @@ args_by_op2(decode_repeated_finalize) -> [?expr(L)];
 args_by_op2(merge)                    -> [?expr(X1), ?expr(X2)];
 args_by_op2(verify)                   -> [?expr(V), ?expr(Path)].
 
-format_aux_transl_helpers() ->
-    [nowarn_attrs(id,2),
-     inline_attr(id,2),
-     "id(X, _TrUserData) -> X.\n",
-     "\n",
-     nowarn_attrs(cons,3),
-     inline_attr(cons,3),
-     "cons(Elem, Acc, _TrUserData) -> [Elem | Acc].\n",
-     "\n",
-     nowarn_attrs('lists_reverse',2),
-     inline_attr('lists_reverse',2),
-     "'lists_reverse'(L, _TrUserData) -> lists:reverse(L).\n"].
-
-format_aux_transl_helpers_used_also_with_nifs() ->
-    [nowarn_attrs('erlang_++',3),
-     inline_attr('erlang_++',3),
-     "'erlang_++'(A, B, _TrUserData) -> A ++ B.\n"].
+format_aux_transl_helpers(#anres{default_transls=UsedDefaultTransls}) ->
+    IsNeeded = fun(F,A) -> sets:is_element({F,A}, UsedDefaultTransls) end,
+    [[[inline_attr(id,2),
+       "id(X, _TrUserData) -> X.\n",
+       "\n"] || IsNeeded(id,2)],
+     [[inline_attr(cons,3),
+       "cons(Elem, Acc, _TrUserData) -> [Elem | Acc].\n",
+       "\n"] || IsNeeded(cons,3)],
+     [[inline_attr('lists_reverse',2),
+       "'lists_reverse'(L, _TrUserData) -> lists:reverse(L)."
+       "\n"] || IsNeeded(lists_reverse,2)],
+     [[inline_attr('erlang_++',3),
+       "'erlang_++'(A, B, _TrUserData) -> A ++ B."
+       "\n"] || IsNeeded('erlang_++',3)]].
 
 format_default_translators(AnRes, Opts) ->
     [format_default_map_translators(AnRes, Opts),
@@ -5527,9 +5646,6 @@ compute_needed_default_translations(Translations, Defaults) ->
       end,
       sets:new(),
       Translations).
-
-nowarn_attrs(FnName,Arity) ->
-    ?f("-compile({nowarn_unused_function,~p/~w}).~n", [FnName,Arity]).
 
 inline_attr(FnName,Arity) ->
     ?f("-compile({inline,~p/~w}).~n", [FnName,Arity]).

@@ -1167,6 +1167,55 @@ call_tr_userdata_fn(Fn, Result, Op) ->
     Fn(Result, Op),
     Result.
 
+never_generates_unused_translator_functions_test() ->
+    Enum   = {{enum,ee},[{a,0},{b,1}]},
+    SubMsg = {{msg,s},[#?gpb_field{type=uint32,occurrence=required,
+                                   fnum=1,rnum=2,opts=[]}]},
+    BasicTypes = [int32, int64, sint32, sint64, uint32, uint64,
+                  fixed32, fixed64, sfixed32, sfixed64,
+                  {enum,ee},
+                  bool, string, bytes, float, double,
+                  {msg,s}],
+    MapTypes = ([{map,string,VT} || VT <- BasicTypes]      % variable-sized key
+                ++ [{map,fixed32,VT} || VT <- BasicTypes]), % fixed-size key
+    Types = BasicTypes ++ MapTypes,
+    M = find_unused_module(),
+    [begin
+         Field = case OInfo of
+                     {Occ,Opts} ->
+                         #?gpb_field{type=Type,occurrence=Occ,
+                                     fnum=1,rnum=2,opts=Opts};
+                     oneof ->
+                         #gpb_oneof{
+                            name=u, rnum=2,
+                            fields=[#?gpb_field{type=Type,occurrence=optional,
+                                                fnum=1,rnum=2,opts=[]}]}
+                 end,
+         Defs = ([{{msg,m},[Field]}]
+                 ++ [Enum || needs_enum(Type)]
+                 ++ [SubMsg || needs_submsg(Type)]),
+         ?assertMatch(
+            {{ok,M,_Code,[]=_Warns},_,_},
+            {gpb_compile:proto_defs(M,Defs,[binary,return]), Type, OInfo})
+     end
+     || Type <- Types,
+        OInfo <- case Type of
+                     {map,_,_} -> [{repeated,[]}];
+                     _         -> [{repeated,[]},
+                                   {repeated,[packed]},
+                                   {required,[]},
+                                   {optional,[]},
+                                   oneof]
+                 end].
+
+needs_enum({enum,ee}) -> true;
+needs_enum({map,_,{enum,ee}}) -> true;
+needs_enum(_) -> false.
+
+needs_submsg({msg,s}) -> true;
+needs_submsg({map,_,{msg,s}}) -> true;
+needs_submsg(_) -> false.
+
 %% --- misc ----------
 
 only_enums_no_msgs_test() ->
