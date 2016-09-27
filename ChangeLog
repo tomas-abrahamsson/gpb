@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.26.1
+2016-Sep-27
+
+	* Don't generate auxiliary functions id/2, cons/3,
+	lists_reverse/2, 'erlang_++'/3 if they are not used.
+	Thanks to Tristan Sloughter for reporting.
+
 Version 3.26.0
 2016-Sep-21
 
