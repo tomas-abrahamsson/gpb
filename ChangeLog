@@ -1,9 +1,10 @@
 -*- coding: utf-8 -*-
 
-Versiono 3.26.0
+Version 3.26.0
 2016-Sep-21
 
-	* New option {target_erlang_version,N}. Thanks to 
+	* New option {target_erlang_version,N}. Thanks to Eric
+	Meadows-Jönsson for suggensting this.
 
 	* New options defaults_for_omitted_optionals and
 	type_defaults_for_omitted_optionals.  Also improved
