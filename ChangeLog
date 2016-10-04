@@ -1,5 +1,17 @@
 -*- coding: utf-8 -*-
 
+Version 3.26.2
+2016-Oct-04
+
+	* Integrate with Travis CI. Thanks to Luke Bakken
+	<lbakken@basho.com>
+
+	* Improve unit tests:
+	- increased timeouts for slow machines
+	- eunit test bug fixes for hosts running a 32 bit os
+	- bug fix for nif tests for when Google's protobuf library
+	  is not installed on the host
+
 Version 3.26.1
 2016-Sep-27
 
