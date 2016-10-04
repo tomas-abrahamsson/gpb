@@ -894,7 +894,10 @@ generates_escaped_utf8_for_old_erlang_versions_test() ->
 
 -define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).
 
-'translation_of_google.protobuf.Any_test'() ->
+'translation_of_google.protobuf.Any_test_'() ->
+    {timeout,10,fun 'translation_of_google.protobuf.Any_aux'/0}.
+
+'translation_of_google.protobuf.Any_aux'() ->
     %% The any.proto contains:
     %%
     %%     syntax = "proto3";
@@ -1167,7 +1170,10 @@ call_tr_userdata_fn(Fn, Result, Op) ->
     Fn(Result, Op),
     Result.
 
-never_generates_unused_translator_functions_test() ->
+never_generates_unused_translator_functions_test_() ->
+    {timeout,10,fun never_generates_unused_translator_functions_aux/0}.
+
+never_generates_unused_translator_functions_aux() ->
     Enum   = {{enum,ee},[{a,0},{b,1}]},
     SubMsg = {{msg,s},[#?gpb_field{type=uint32,occurrence=required,
                                    fnum=1,rnum=2,opts=[]}]},

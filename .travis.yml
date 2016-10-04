@@ -1,0 +1,17 @@
+language: erlang
+addons:
+  apt:
+    packages:
+      - libprotobuf-dev
+      - protobuf-compiler
+otp_release:
+  - 19.1
+  - 18.3
+  - 17.5
+  - R16B03
+  - R15B03
+env:
+  - VERBOSE=1
+script:
+  - make
+  - make test
