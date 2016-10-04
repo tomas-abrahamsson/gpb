@@ -894,7 +894,10 @@ generates_escaped_utf8_for_old_erlang_versions_test() ->
 
 -define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).
 
-'translation_of_google.protobuf.Any_test'() ->
+'translation_of_google.protobuf.Any_test_'() ->
+    {timeout,10,fun 'translation_of_google.protobuf.Any_aux'/0}.
+
+'translation_of_google.protobuf.Any_aux'() ->
     %% The any.proto contains:
     %%
     %%     syntax = "proto3";

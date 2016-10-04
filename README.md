@@ -4,6 +4,11 @@ for Erlang.
 See https://developers.google.com/protocol-buffers/ for further information
 on the Google protocol buffers.
 
+Build Status
+------------
+
+[![Build Status](https://travis-ci.org/tomas-abrahamsson/gpb.svg?branch=master)](https://travis-ci.org/tomas-abrahamsson/gpb)
+
 Basic example of using gpb
 --------------------------
 
