@@ -2713,7 +2713,11 @@ can_do_nif_type(Type) ->
             %% http://erlang.org/pipermail/erlang-bugs/2014-July/004513.html
             case {is_erlvm_compiled_with_gcc490_or_later(), is_32_bit_os()} of
                 {true, true} ->
-                    false;
+                    OtpVsn = get_erlang_otp_major(),
+                    if OtpVsn <  17 -> true;
+                       OtpVsn == 17 -> false; % assume bug present
+                       OtpVsn >  17 -> true   % assume fixed
+                    end;
                 _ ->
                     true
             end;
@@ -2731,6 +2735,25 @@ is_erlvm_compiled_with_gcc490_or_later() ->
 
 is_32_bit_os() ->
     erlang:system_info({wordsize,external}) == 4. %% Erlang R14+
+
+get_erlang_otp_major() ->
+    case erlang:system_info(otp_release) of
+        "R"++Rest -> % R16 or ealier
+            list_to_integer(lists:takewhile(fun is_digit/1, Rest));
+        RelStr ->
+            %% In Erlang 17 the leading "R" was dropped,
+            %% allow for some (possible?) variation
+            try list_to_integer(RelStr)
+            catch error:badarg ->
+                    [NStr | _] = string:tokens(RelStr, ".-"),
+                    try list_to_integer(NStr)
+                    catch error:badarg -> error({unexpected_otp_version,RelStr})
+                    end
+            end
+    end.
+
+is_digit(C) when $0 =< C, C =< $9 -> true;
+is_digit(_) -> false.
 
 mk_msg(MsgName, Defs, Variant) ->
     {{msg, MsgName}, Fields} = lists:keyfind({msg, MsgName}, 1, Defs),
