@@ -1167,7 +1167,11 @@ call_tr_userdata_fn(Fn, Result, Op) ->
     Fn(Result, Op),
     Result.
 
-never_generates_unused_translator_functions_test() ->
+never_generates_unused_translator_functions_test_() ->
+    %% On my slow machine (1.6 GHz Atom N270), it currently takes ~21 seconds
+    {timeout,40,fun never_generates_unused_translator_functions_aux/0}.
+
+never_generates_unused_translator_functions_aux() ->
     Enum   = {{enum,ee},[{a,0},{b,1}]},
     SubMsg = {{msg,s},[#?gpb_field{type=uint32,occurrence=required,
                                    fnum=1,rnum=2,opts=[]}]},
@@ -1237,9 +1241,8 @@ only_enums_no_msgs_test() ->
 %% ... when there are/aren't warnings/errors
 
 report_or_return_warnings_or_errors_test_() ->
-    %% Without increased timeout, this test sometimes times out
-    %% on my slow machine (1.6 GHz Atom N270)
-    {timeout,58,fun report_or_return_warnings_or_errors_test_aux/0}.
+    %% On my slow machine (1.6 GHz Atom N270), it currently takes ~61 seconds
+    {timeout,120,fun report_or_return_warnings_or_errors_test_aux/0}.
 
 report_or_return_warnings_or_errors_test_aux() ->
     [begin
@@ -1762,11 +1765,12 @@ nif_code_test_() ->
           fun error_if_both_any_translations_and_nif/0}])).
 
 increase_timeouts({Descr, Tests}) ->
-    %% Without increased timeout, the nif test frequently times
-    %% out on my slow laptop (1.6 GHz Atom N270)
+    %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
+    %% ~77 seconds to run, allow for a bit more
+    PerTestTimeout = 140,
     {Descr,
-     {timeout, 300,  %% timeout for all tests
-      [{timeout, 100, %% timeout for each test
+     {timeout, PerTestTimeout * length(Tests),  %% timeout for all tests
+      [{timeout, PerTestTimeout,
         [{TestDescr, TestFun}]}
        || {TestDescr, TestFun} <- Tests]}}.
 
