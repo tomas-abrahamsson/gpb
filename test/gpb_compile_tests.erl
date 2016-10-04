@@ -1771,27 +1771,36 @@ increase_timeouts({Descr, Tests}) ->
        || {TestDescr, TestFun} <- Tests]}}.
 
 nif_tests_check_prerequisites(Tests) ->
-    case {want_nif_tests(), find_protoc(), find_cplusplus_compiler()} of
-        {false,_,_} -> {"Nif tests not wanted", []};
-        {_,false,_} -> {"Protoc not found, not trying to compile", []};
-        {_,_,false} -> {"No C++ compiler found, not trying to compile", []};
-        {_,_,_}     -> {"nif tests", Tests}
+    case nif_verify_prerequisites() of
+        ok            -> {"nif tests", Tests};
+        {error, Text} -> {Text, []}
     end.
 
+nif_verify_prerequisites() ->
+    case {want_nif_tests(), find_protoc(), find_cplusplus_compiler()} of
+        {false,_,_} -> {error, "Nif tests not wanted"};
+        {_,false,_} -> {error, "Protoc not found, not trying to compile"};
+        {_,_,false} -> {error, "No C++ compiler found, not trying to compile"};
+        {_,_,_}     -> ok
+    end.
+
+'do_nif?'() ->
+    nif_verify_prerequisites() == ok.
+
 nif_oneof_tests_check_prerequisites(Tests) ->
-    case check_protoc_can_do_oneof() of
+    case 'do_nif?'() andalso check_protoc_can_do_oneof() of
         true  -> {"Nif with oneof fields", Tests};
         false -> {"Protoc < 2.6.0, not testing nifs with oneof", []}
     end.
 
 nif_mapfield_tests_check_prerequisites(Tests) ->
-    case check_protoc_can_do_mapfields() of
+    case 'do_nif?'() andalso check_protoc_can_do_mapfields() of
         true  -> {"Nif with map fields", Tests};
         false -> {"Protoc < 3.0.0, not testing nifs with map fields", []}
     end.
 
 nif_proto3_tests_check_prerequisites(Tests) ->
-    case check_protoc_can_do_proto3() of
+    case 'do_nif?'() andalso check_protoc_can_do_proto3() of
         true  -> {"Nif with proto3", Tests};
         false -> {"Protoc < 3.0.0, not testing nifs with proto3", []}
     end.
