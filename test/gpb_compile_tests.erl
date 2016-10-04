@@ -2642,10 +2642,9 @@ mk_proto3_fields() ->
     MsgType    = {msg, submsg1},
     EnumDef    = {{enum, ee}, [{en0, 0}, {en1, 1}, {en2, 2}]},
     SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], optional)},
-    TopMsgDef1 = {{msg, topmsg1}, (mk_fields_of_type(EachType, optional)
-                                   ++ mk_fields_of_type(
-                                        [MsgType], optional,
-                                        [{offset, length(EachType)}]))},
+    TopMsgDef1 = {{msg, topmsg1}, mk_fields_of_type(
+                                    EachType ++ [MsgType],
+                                    optional)},
     TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(
                                     EachType ++ [MsgType],
                                     repeated,
