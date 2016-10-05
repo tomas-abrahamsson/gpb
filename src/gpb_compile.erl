@@ -4474,7 +4474,11 @@ format_msg_merger_fnclause_match(_MsgName, [], _Opts) ->
     {?expr(PF), ?expr(_), no_fields};
 format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
     FNames  = [get_field_name(Field) || Field <- MsgDef],
-    PFVars  = [var("PF~s", [FName]) || FName <- FNames],
+    PFVars  = [case is_required_overwrite_merge(Field) of
+                   true  -> none;
+                   false -> var("PF~s", [get_field_name(Field)])
+               end
+               || Field <- MsgDef],
     NFVars  = [var("NF~s", [FName]) || FName <- FNames],
     PFields = lists:zip(FNames, PFVars),
     NFields = lists:zip(FNames, NFVars),
@@ -4482,14 +4486,17 @@ format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
     case get_mapping_and_unset_by_opts(Opts) of
         X when X == records;
                X == {maps, present_undefined} ->
-            P = mapping_match(MsgName, PFields, Opts),
+            PFields1 = [{FName,PFVar} || {FName,PFVar} <- PFields,
+                                         PFVar /= none],
+            P = mapping_match(MsgName, PFields1, Opts),
             N = mapping_match(MsgName, NFields, Opts),
             {P, N, {pr, Infos}};
         {maps, omitted} ->
             {OptInfos, MandInfos} = key_partition_on_optionality(4, Infos),
             PMsg = ?expr(PMsg),
             NMsg = ?expr(NMsg),
-            P = map_match([{FName, PFVar} || {FName,PFVar,_,_} <- MandInfos]),
+            P = map_match([{FName, PFVar} || {FName,PFVar,_,_} <- MandInfos,
+                                             PFVar /= none]),
             N = map_match([{FName, NFVar} || {FName,_,NFVar,_} <- MandInfos]),
             PB = match_bind_var(P, PMsg),
             NB = match_bind_var(N, NMsg),
@@ -4500,6 +4507,11 @@ format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
                 {_,  _} -> {PB, NB, XInfo}
             end
     end.
+
+is_required_overwrite_merge(#?gpb_field{occurrence=required}=Field) ->
+    classify_field_merge_action(Field) == overwrite;
+is_required_overwrite_merge(_Field) ->
+    false.
 
 compute_msg_field_mergers({pr, XInfo}, MsgName, AnRes) ->
     Merges =
@@ -4514,11 +4526,13 @@ compute_msg_field_mergers({om, {MandXInfo, OptXInfo, PMsg, NMsg}},
                                                MsgName, AnRes),
     {MandMergs, reshape_cases_for_maps_find(OptMergs, PMsg, NMsg)}.
 
-format_field_merge_expr(#?gpb_field{name=FName}=Field,
+format_field_merge_expr(#?gpb_field{name=FName, occurrence=Occur}=Field,
                         PF, NF, MsgName, AnRes)->
     Transforms = [replace_tree('PF', PF),
                   replace_tree('NF', NF)],
     case classify_field_merge_action(Field) of
+        overwrite when Occur == required ->
+            {required, {PF, NF}};
         overwrite ->
             {overwrite, {PF, NF}};
         seqadd ->
@@ -4563,6 +4577,8 @@ render_field_mergers(MsgName, Mergings, TrUserDataVar, Opts) ->
               || {FName, Merge} <- Mergings],
     mapping_create(MsgName, Fields, Opts).
 
+render_field_merger({required, {none, NF}}, _TrUserDataVar) ->
+    NF;
 render_field_merger({overwrite, {PF, NF}}, _TrUserDataVar) ->
     ?expr(if 'NF' =:= undefined -> 'PF';
              true               -> 'NF'
