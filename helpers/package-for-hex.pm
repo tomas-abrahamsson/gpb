@@ -129,7 +129,7 @@ else
 	    exit 1
 	fi
     fi
-    (LC_ALL=en_US.utf-8 MIX_EXS=package.exs mix hex.publish)
+    (LC_ALL=en_US.utf-8 MIX_EXS=package.exs mix hex.publish package)
 fi
 
 /bin/rm -rf
