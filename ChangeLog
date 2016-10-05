@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.26.3
+2016-Oct-05
+
+	* Fix dialyzer issue with Erlang 19 in the generated code.  Thanks
+	to Sargun Dhillon for reporting. The generated code for merging
+	messages unnecessarily/erroneously checked required scalar fields
+	for undefined.
+
 Version 3.26.2
 2016-Oct-04
 
