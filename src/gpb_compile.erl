@@ -146,7 +146,7 @@ file(File) ->
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
 %%
-%% The File must not include path to the .proto file. Example:
+%% The `File' argument must not include path to the .proto file. Example:
 %% "SomeDefinitions.proto" is ok, while "/path/to/SomeDefinitions.proto"
 %% is not ok.
 %%
@@ -154,11 +154,11 @@ file(File) ->
 %% `{i,directory()}' option. It is possible to specify `{i,directory()}'
 %% several times, they will be searched in the order specified.
 %%
-%% The `{type_specs,boolean()}' option enables or disables `::Type()'
-%% annotations in the generated .hrl file. Default is currently
-%% `false'. If you set it to `true', you may get into troubles for
-%% messages referencing other messages, when compiling the generated
-%% files. The `type_specs' option is equivalent to `{type_specs,true}'.
+%% The `type_specs' option enables or disables `::Type()' annotations
+%% in the generated .hrl file. Default is currently `false'. If you
+%% set it to `true', you may get into troubles for messages
+%% referencing other messages cyclically, when compiling the generated
+%% files.
 %%
 %% The `verify' option specifies whether or not to generate code
 %% that verifies, during encoding, that values are of correct type and
