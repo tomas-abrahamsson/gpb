@@ -360,6 +360,26 @@ Erlang code.
 -export([format_post_process_error/1]).
 -export([fetch_imports/1]).
 
+-type defs() :: [def()].
+-type def() :: {{msg, Name::atom()}, [field()]} |
+               {{enum, Name::atom()}, [{Sym::atom(), Value::integer()}]} |
+               {{service, Name::atom()}, [#?gpb_rpc{}]} |
+               {package, Name::atom()} |
+               {syntax, string()} | % "proto2" | "proto3"
+               {{extensions, MsgName::atom()}, [field_number_extension()]} |
+               {{extend, MsgName::atom()}, MoreFields::[field()]} |
+               {proto3_msgs, [MsgName::atom()]} |
+               {{msg_containment, ProtoName::string()},[MsgName::atom()]} |
+               {{reserved_numbers, MsgName::atom()}, [integer()]} |
+               {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
+               {import, ProtoFile::string()}.
+-type field() :: #?gpb_field{} | #gpb_oneof{}.
+-type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
+
+-export_type([defs/0, def/0]).
+-export_type([field/0]).
+
+
 verify_syntax({str_lit, _Line, "proto2"}) ->
     {syntax, "proto2"};
 verify_syntax({str_lit, _Line, "proto3"}) ->
