@@ -28,6 +28,8 @@
 -export([parse_opts_and_args/1]).
 -export([show_args/0]).
 -export([show_version/0]).
+-export([locate_import/2]).
+-export([read_import/2]).
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
@@ -1376,7 +1378,7 @@ file_name_from_input({Mod,_S}) -> lists:concat([Mod, ".proto"]);
 file_name_from_input(FName)    -> FName.
 
 parse_file_and_imports(In, AlreadyImported, Opts) ->
-    case locate_import(In, Opts) of
+    case locate_read_import_int(In, Opts) of
         {ok, Contents} ->
             %% Add to AlreadyImported to prevent trying to import it again: in
             %% case we get an error we don't want to try to reprocess it later
@@ -1444,17 +1446,16 @@ import_it(Import, AlreadyImported, Defs, Opts) ->
             {error, Reason}
     end.
 
-locate_import({_Mod, Str}, _Opts) ->
+locate_read_import_int({_Mod, Str}, _Opts) ->
     {ok, Str};
-locate_import(Import, Opts) ->
-    ImportPaths = [Path || {i, Path} <- Opts],
+locate_read_import_int(Import, Opts) ->
     case proplists:get_value(import_fetcher, Opts) of
         undefined ->
-            locate_import_aux(ImportPaths, Import, Opts, []);
+            locate_read_import_aux(Import, Opts);
         Importer when is_function(Importer, 1) ->
             case Importer(Import) of
                 from_file ->
-                    locate_import_aux(ImportPaths, Import, Opts, []);
+                    locate_read_import_aux(Import, Opts);
                 {ok, Contents} when is_list(Contents) ->
                     case lists:all(fun is_integer/1, Contents) of
                         true ->
@@ -1471,23 +1472,31 @@ locate_import(Import, Opts) ->
             end
     end.
 
+
+locate_read_import_aux(Import, Opts) ->
+    ImportPaths = [Path || {i, Path} <- Opts],
+    case locate_import_aux(ImportPaths, Import, Opts, []) of
+        {ok, File} ->
+            read_import(File, Opts);
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @doc Locate an import target.  This function might be potentially
+%% useful for instance in an intercepting `import_fetcher' fun that
+%% just wants to record the accessed imports.
+-spec locate_import(string(), opts()) -> {ok, File::string()} |
+                                         {error, reason()}.
+locate_import(ProtoFileName, Opts) ->
+    Opts1 = ensure_include_path_to_wellknown_types(Opts),
+    ImportPaths = [Path || {i, Path} <- Opts1],
+    locate_import_aux(ImportPaths, ProtoFileName, Opts1, []).
+
 locate_import_aux([Path | Rest], Import, Opts, Tried) ->
     File = filename:join(Path, Import),
     case file_read_file_info(File, Opts) of
         {ok, #file_info{access = A}} when A == read; A == read_write ->
-            case file_read_file(File, Opts) of
-                {ok,B} ->
-                    case utf8_decode(B) of
-                        {ok, {utf8, S}} ->
-                            {ok, S};
-                        {ok, {latin1, S}} ->
-                            {ok, S};
-                        {error, Reason} ->
-                            {error, {utf8_decode_failed, Reason, File}}
-                    end;
-                {error, Reason} ->
-                    {error, {read_failed, File, Reason}}
-            end;
+            {ok, File};
         {ok, #file_info{}} ->
             locate_import_aux(Rest, Import, Opts, Tried);
         {error, Reason} ->
@@ -1496,21 +1505,43 @@ locate_import_aux([Path | Rest], Import, Opts, Tried) ->
 locate_import_aux([], Import, _Opts, Tried) ->
     {error, {import_not_found, Import, Tried}}.
 
+%% @doc Read an import file.  This function might be potentially
+%% useful for instance in an intercepting `import_fetcher' fun that
+%% just wants to record the accessed imports.
+-spec read_import(string(), opts()) -> {ok, string()} | {error, reason()}.
+read_import(File, Opts) ->
+    case file_read_file(File, Opts) of
+        {ok,B} ->
+            case utf8_decode(B) of
+                {ok, {utf8, S}} ->
+                    {ok, S};
+                {ok, {latin1, S}} ->
+                    {ok, S};
+                {error, Reason} ->
+                    {error, {utf8_decode_failed, Reason, File}}
+            end;
+        {error, Reason} ->
+            {error, {read_failed, File, Reason}}
+    end.
+
 ensure_include_path_to_wellknown_types_if_proto3(Defs, Imports, Opts) ->
     case proplists:get_value(syntax, Defs) of
         "proto3" ->
             case lists:any(fun imports_wellknown/1, Imports) of
                 true ->
-                    PrivDir = get_priv_dir(),
-                    Wellknown = filename:join(PrivDir, "proto3"),
-                    sanity_check_installation_wellknown_proto3(Wellknown),
-                    add_opt_unless_present({i,Wellknown}, Opts);
+                    ensure_include_path_to_wellknown_types(Opts);
                 false ->
                     Opts
             end;
         _ ->
             Opts
     end.
+
+ensure_include_path_to_wellknown_types(Opts) ->
+    PrivDir = get_priv_dir(),
+    Wellknown = filename:join(PrivDir, "proto3"),
+    sanity_check_installation_wellknown_proto3(Wellknown),
+    add_opt_unless_present({i,Wellknown}, Opts).
 
 imports_wellknown("google/protobuf/"++_) -> true;
 imports_wellknown(_) -> false.
