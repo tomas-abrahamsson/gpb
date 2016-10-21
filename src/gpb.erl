@@ -38,6 +38,30 @@
 -include("../include/gpb.hrl").
 -include("../include/gpb_version.hrl").
 
+-type field() :: #?gpb_field{} | #gpb_oneof{}.
+
+-type proplist_defs() :: [proplist_def()].
+-type proplist_def() :: {{msg,Name::atom()}, [proplist_field()]} |
+                        term().
+-type proplist_field() :: [proplist_field_item()] | [proplist_oneof_item()].
+-type proplist_field_item() :: {name, atom()} |
+                               {fnum, integer()} |
+                               {rnum, pos_integer()} |
+                               {type, gpb_field_type()} |
+                               {occurrence, required | optional | repeated} |
+                               {opts, [term()]}.
+-type proplist_oneof_item() :: {name, atom()} |
+                               {rnum, pos_integer()} |
+                               {field, [proplist_field_item()]}.
+-type proplist_rpc() :: [proplist_rpc_item()].
+-type proplist_rpc_item() :: {name, atom()} |
+                             {input, [field()]} |
+                             {output, [field()]} |
+                             {input_stream, boolean()} |
+                             {output_stream, boolean()} |
+                             {opts, [term()]}.
+
+
 %% +infinity, -infinity, not a number:
 %% +Inf: sign: 0    exponent: all ones, fraction: all zeros
 %% -Inf: sign: 1    exponent: all ones, fraction: all zeros
@@ -89,6 +113,7 @@
 %%
 %% The format is what `git describe --always --tags' produces,
 %% given that all tags are always on the format <n>.<m>.
+-spec version_as_string() -> string().
 version_as_string() ->
     S = ?gpb_version,
     assert_version_format(S),
@@ -115,6 +140,7 @@ version_as_string() ->
 %% this holds: {2,2} < {2,1,1}, since tuples are first compared by
 %% size then element by element for tuples of the same size. For
 %% lists, it holds instead that: [2,1,1] < [2,2].)
+-spec version_as_list() -> [integer() | string()].
 version_as_list() ->
     version_as_list(version_as_string()).
 
@@ -160,6 +186,7 @@ v2l2("-"++T, Acc)                   -> [v_acc_to_int(Acc), T].
 v_acc_to_int(Acc) ->
     list_to_integer(lists:reverse(Acc)).
 
+-spec decode_msg(binary(), atom(), gpb_parse:defs()) -> tuple().
 decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
     Msg    = new_initial_msg(MsgKey, MsgDefs),
@@ -250,6 +277,8 @@ fielddef_matches_wiretype_get_packed(WireType, #?gpb_field{type=Type}=FieldDef)-
        WireType /= ExpectedWireType -> no
     end.
 
+-spec decode_wiretype(non_neg_integer()) -> varint | bits32 | bits64 |
+                                            length_delimited.
 decode_wiretype(0) -> varint;
 decode_wiretype(1) -> bits64;
 decode_wiretype(2) -> length_delimited;
@@ -424,6 +453,7 @@ append_to_map(RNum, {Key, _Value}=NewItem, Record) ->
     NewElems = lists:keystore(Key, 1, PrevElems, NewItem),
     setelement(RNum, Record, NewElems).
 
+-spec merge_msgs(tuple(), tuple(), gpb_parse:defs()) -> tuple().
 merge_msgs(PrevMsg, NewMsg, MsgDefs)
   when element(1,PrevMsg) == element(1,NewMsg) ->
     MsgName = element(1, NewMsg),
@@ -493,6 +523,7 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
       MsgDef).
 
 
+-spec encode_msg(tuple(), gpb_parse:defs()) -> binary().
 encode_msg(Msg, MsgDefs) ->
     MsgName = element(1, Msg),
     MsgDef = keyfetch({msg, MsgName}, MsgDefs),
@@ -658,7 +689,7 @@ encode_value(Value, Type, MsgDefs) ->
             encode_value({MsgName,Key,Value1}, {msg,MsgName}, MsgDefs1)
     end.
 
-
+-spec encode_wiretype(gpb_field_type()) -> non_neg_integer().
 encode_wiretype(sint32)            -> 0;
 encode_wiretype(sint64)            -> 0;
 encode_wiretype(int32)             -> 0;
@@ -678,8 +709,10 @@ encode_wiretype(sfixed32)          -> 5;
 encode_wiretype(float)             -> 5;
 encode_wiretype({map,_KT,_VT}) -> encode_wiretype({msg,map_item_tmp_name()}).
 
-
+-spec decode_varint(binary()) -> {non_neg_integer(), binary()}.
 decode_varint(Bin) -> decode_varint(Bin, 64).
+
+-spec decode_varint(binary(), pos_integer()) -> {non_neg_integer(), binary()}.
 decode_varint(Bin, MaxNumBits) -> de_vi(Bin, 0, 0, MaxNumBits).
 
 de_vi(<<1:1, X:7, Rest/binary>>, N, Acc, MaxNumBits) when N < (64-7) ->
@@ -688,6 +721,7 @@ de_vi(<<0:1, X:7, Rest/binary>>, N, Acc, MaxNumBits) ->
     Mask = (1 bsl MaxNumBits) - 1,
     {(X bsl N + Acc) band Mask, Rest}.
 
+-spec encode_varint(integer()) -> binary().
 encode_varint(N) -> en_vi(N).
 
 en_vi(N) when N =< 127 -> <<N>>;
@@ -701,6 +735,7 @@ encode_zigzag(N) when N >= 0 -> N * 2;
 encode_zigzag(N) when N <  0 -> N * -2 - 1.
 
 
+-spec verify_msg(tuple() | term(), gpb_parse:defs()) -> ok.
 verify_msg(Msg, MsgDefs) when is_tuple(Msg), tuple_size(Msg) >= 1 ->
     MsgName = element(1, Msg),
     case lists:keysearch({msg,MsgName}, 1, MsgDefs) of
@@ -761,6 +796,7 @@ verify_value(Value, Type, Occurrence, Path, MsgDefs) ->
         optional -> verify_optional(Value, Type, Path, MsgDefs)
     end.
 
+-spec check_scalar(any(), gpb_scalar()) -> ok | {error, Reason::term()}.
 check_scalar(Value, Type) when is_atom(Type) ->
     try
         verify_value_2(Value, Type, [], [])
@@ -877,6 +913,7 @@ mk_type_error(Error, ValueSeen, Path) ->
 %% Conversion functions between various forms of #?gpb_field{} and a proplist
 %% with keys being the #?gpb_field{} record's field names.
 
+-spec defs_records_to_proplists(gpb_parse:defs()) -> proplist_defs().
 defs_records_to_proplists(Defs) ->
     [case Def of
          {{msg,Msg}, Fields} ->
@@ -886,6 +923,7 @@ defs_records_to_proplists(Defs) ->
      end
      || Def <- Defs].
 
+-spec proplists_to_defs_records(proplist_defs()) -> gpb_parse:defs().
 proplists_to_defs_records(Defs) ->
     [case Def of
          {{msg,Msg}, PropList} ->
@@ -895,6 +933,7 @@ proplists_to_defs_records(Defs) ->
      end
      || Def <- Defs].
 
+-spec field_records_to_proplists([field()]) -> [proplist_field()].
 field_records_to_proplists(Fields) when is_list(Fields) ->
     [case F of
          #?gpb_field{} -> field_record_to_proplist(F);
@@ -902,6 +941,7 @@ field_records_to_proplists(Fields) when is_list(Fields) ->
      end
      || F <- Fields].
 
+-spec field_record_to_proplist(#?gpb_field{}) -> [proplist_field_item()].
 field_record_to_proplist(#?gpb_field{}=F) ->
     Names = record_info(fields, ?gpb_field),
     lists:zip(Names, tl(tuple_to_list(F))).
@@ -913,6 +953,7 @@ oneof_record_to_proplist(#gpb_oneof{}=F) ->
      end
      || {FName, FValue} <- lists:zip(Names, tl(tuple_to_list(F)))].
 
+-spec proplists_to_field_records([proplist_field()]) -> [field()].
 proplists_to_field_records(PLs) ->
     [case {is_field_pl(PL), is_oneof_pl(PL)} of
          {true, false} -> proplist_to_field_record(PL);
@@ -928,6 +969,7 @@ are_all_fields_present(FNames, PL) ->
     lists:all(fun(FName) -> lists:keymember(FName, 1, PL) end,
               FNames).
 
+-spec proplist_to_field_record([proplist_field_item()]) -> #?gpb_field{}.
 proplist_to_field_record(PL) when is_list(PL) ->
     Names = record_info(fields, ?gpb_field),
     RFields = [proplists:get_value(Name, PL) || Name <- Names],
@@ -942,13 +984,16 @@ proplist_to_oneof_record(PL) when is_list(PL) ->
                     end
                     || {N, V} <- lists:zip(Names, RFields)]]).
 
+-spec rpc_records_to_proplists([#?gpb_rpc{}]) -> [proplist_rpc()].
 rpc_records_to_proplists(Rpcs) when is_list(Rpcs) ->
     [rpc_record_to_proplist(R) || R <- Rpcs].
 
+-spec rpc_record_to_proplist(#?gpb_rpc{}) -> proplist_rpc().
 rpc_record_to_proplist(#?gpb_rpc{}=R) ->
     Names = record_info(fields, ?gpb_rpc),
     lists:zip(Names, tl(tuple_to_list(R))).
 
+-spec proplists_to_rpc_records([proplist_rpc()]) -> [#?gpb_rpc{}].
 proplists_to_rpc_records(PLs) ->
     [proplist_to_rpc_record(PL) || PL <- PLs].
 
@@ -963,12 +1008,14 @@ map_item_tmp_def(KeyType, ValueType) ->
 map_item_tmp_name() ->
     '$mapitem'.
 
+-spec map_item_pseudo_fields(gpb_map_key(), gpb_map_value()) -> [field()].
 map_item_pseudo_fields(KeyType, ValueType) ->
     [#?gpb_field{name=key, fnum=1, rnum=2,
                  occurrence=required, type=KeyType},
      #?gpb_field{name=value, fnum=2, rnum=3,
                  occurrence=required, type=ValueType}].
 
+-spec is_allowed_as_key_type(gpb_field_type()) -> boolean().
 is_allowed_as_key_type({enum,_}) -> false;
 is_allowed_as_key_type({msg,_}) -> false;
 is_allowed_as_key_type(double) -> false;
@@ -981,6 +1028,7 @@ is_allowed_as_key_type(_) -> true.
 is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
 
+-spec is_msg_proto3(atom(), gpb_parse:defs()) -> boolean().
 is_msg_proto3(Name, MsgDefs) ->
     case lists:keyfind(proto3_msgs, 1, MsgDefs) of
         {proto3_msgs, Names} ->
@@ -989,6 +1037,7 @@ is_msg_proto3(Name, MsgDefs) ->
             false
     end.
 
+-spec proto2_type_default(gpb_field_type(), gpb_parse:defs()) -> term().
 proto2_type_default(Type, MsgDefs) ->
     %% Type-specific defaults for proto2 are the same as for proto3,
     %% with one slight exception, for enums. In both proto2 and
@@ -1000,6 +1049,7 @@ proto2_type_default(Type, MsgDefs) ->
     %% some odd corner case.
     proto3_type_default(Type, MsgDefs).
 
+-spec proto3_type_default(gpb_field_type(), gpb_parse:defs()) -> term().
 proto3_type_default(Type, MsgDefs) ->
     case Type of
         sint32   -> 0;

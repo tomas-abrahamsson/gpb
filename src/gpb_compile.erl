@@ -60,81 +60,93 @@
 %% 64 - 7 = 57.
 -define(NB, 57).
 
-%% @spec file(File) -> ok | {error, Reason}
+%% -- Types -----------------------------------------------------
+
+%% Options
+-type boolean_opt(X) :: X | {X, boolean()}.% Just an option `X' means `{X,true}'
+-type directory() :: string().
+
+-type opts() :: [opt()].
+-type opt() :: boolean_opt(type_specs) |
+               {verify, optionally | always | never} |
+               {copy_bytes, true | false | auto | integer() | float()} |
+               {strings_as_binaries, boolean()} | strings_as_binaries |
+               boolean_opt(defs_as_proplists) |
+               boolean_opt(descriptor) |
+               boolean_opt(maps) |
+               boolean_opt(msgs_as_maps) |
+               boolean_opt(mapfields_as_maps) |
+               boolean_opt(defs_as_maps) |
+               {maps_unset_optional, omitted | present_undefined} |
+               boolean_opt(nif) |
+               {load_nif, string()} |
+               {i, directory()} |
+               {o, directory()} |
+               {o_erl, directory()} | {o_hrl, directory()} |
+               {o_nif_cc, directory()} |
+               binary | to_proto_defs | to_msg_defs |
+               return |
+               boolean_opt(return_warnings) | boolean_opt(return_errors) |
+               report |
+               boolean_opt(report_warnings) | boolean_opt(report_errors) |
+               boolean_opt(warnings_as_errors) |
+               boolean_opt(include_as_lib) |
+               boolean_opt(use_packages) |
+               {erlc_compile_options,string()} |
+               {msg_name_prefix,
+                string() | atom() |
+                {by_proto, [{atom(), string() | atom()}]}} |
+               {msg_name_suffix, string() | atom()} |
+               boolean_opt(msg_name_to_snake_case) |
+               boolean_opt(msg_name_to_lower) |
+               {module_name_prefix, string() | atom()} |
+               {module_name_suffix, string() | atom()} |
+               {any_translate, [translation()]} |
+               boolean_opt(epb_compatibility) |
+               boolean_opt(epb_functions) |
+               boolean_opt(defaults_for_omitted_optionals) |
+               boolean_opt(type_defaults_for_omitted_optionals) |
+               {import_fetcher, import_fetcher_fun()} |
+               {target_erlang_version, integer() | current} |
+               term().
+
+-type translation() :: {encode, mod_fn_argtemplate()} |
+                       {decode, mod_fn_argtemplate()} |
+                       {merge,  mod_fn_argtemplate()} |
+                       {verify, mod_fn_argtemplate()}.
+-type fn_name() :: atom().
+-type mod_fn_argtemplate() :: {module(), fn_name(), arg_template()}.
+-type arg_template() :: [arg()].
+-type arg() :: term() | named_arg().
+-type named_arg() :: '$1' | '$2' | '$errorf' | '$user_data' | '$op'.
+
+-type fetcher_ret() :: from_file | {ok, string()} | {error, term()}.
+-type import_fetcher_fun() :: fun((string()) -> fetcher_ret()).
+
+%% Compilation return values
+-type comp_ret() :: mod_ret() | bin_ret() | error_ret().
+-type mod_ret() :: ok | {ok, [warning()]}.
+-type bin_ret() :: {ok, module(), code()} |
+                   {ok, module(), code(), [warning()]}.
+-type error_ret() :: error | {error, reason()} | {error, reason(), [warning()]}.
+-type warning() :: term().
+-type reason() :: term().
+-type code() :: binary() | gpb_parse:defs() | [code_item()].
+-type code_item() :: {erl, ErlCode :: binary()} |
+                     {nif, NifCcText :: string()}.
+-export_type([opts/0, opt/0]).
+-export_type([comp_ret/0]).
+
+
 %% @equiv file(File, [])
+-spec file(string()) -> comp_ret().
 file(File) ->
     file(File, []).
 
-%% @spec file(File, Opts) -> CompRet
-%%            File = string()
-%%            Opts = [Opt]
-%%            Opt  = {type_specs, boolean()} | type_specs |
-%%                   {verify, optionally | always | never} |
-%%                   {copy_bytes, true | false | auto | integer() | float()} |
-%%                   {strings_as_binaries, boolean()} | strings_as_binaries |
-%%                   {defs_as_proplists, boolean()} | defs_as_proplists |
-%%                   {descriptor,boolean()} | descriptor |
-%%                   {maps,boolean()} | maps |
-%%                   {msgs_as_maps,boolean()} | msgs_as_maps |
-%%                   {mapfields_as_maps,boolean()} | mapfields_as_maps |
-%%                   {defs_as_maps,boolean()} | defs_as_maps |
-%%                   {maps_unset_optional, omitted | present_undefined} |
-%%                   {nif,boolean()} | nif |
-%%                   {load_nif, LoadNif} |
-%%                   {i, directory()} |
-%%                   {o, directory()} |
-%%                   {o_erl, directory()} | {o_hrl, directory()} |
-%%                   {o_nif_cc, directory()} |
-%%                   binary | to_proto_defs | to_msg_defs |
-%%                   return |
-%%                   return_warnings | return_errors |
-%%                   {return_warnings, boolean()} | {return_errors, boolean()} |
-%%                   report |
-%%                   report_warnings | report_errors |
-%%                   {report_warnings, boolean()} | {report_errors, boolean()} |
-%%                   warnings_as_errors |
-%%                   include_as_lib | use_packages |
-%%                   {erlc_compile_options,string()} |
-%%                   {msg_name_prefix, string() | atom() |
-%%                                  {by_proto, [{atom(), string() | atom()}]}} |
-%%                   {msg_name_suffix, string() | atom()} |
-%%                   {msg_name_to_snake_case, boolean()} |
-%%                   {msg_name_to_lower, boolean()} |
-%%                   {module_name_prefix, string() | atom()} |
-%%                   {module_name_suffix, string() | atom()} |
-%%                   {any_translate, AnyTranslation} |
-%%                   epb_compatibility | {epb_compatibility,boolean()} |
-%%                   epb_functions | {epb_functions,boolean()} |
-%%                   defaults_for_omitted_optionals |
-%%                   {defaults_for_omitted_optionals, boolean()} |
-%%                   type_defaults_for_omitted_optionals |
-%%                   {type_defaults_for_omitted_optionals, boolean()} |
-%%                   {import_fetcher, fun((File) -> FetcherRet)} |
-%%                   {target_erlang_version, integer() | current}
-%%            CompRet = ModRet | BinRet | ErrRet
-%%            ModRet = ok | {ok, Warnings}
-%%            BinRet = {ok, ModuleName, Code} |
-%%                     {ok, ModuleName, Code, Warnings}
-%%            ErrRet = error | {error, Reason} | {error,Reason,Warnings}
-%%            ModuleName  = atom()
-%%            Code = binary() | ErlAndNifCode
-%%            ErlAndNifCode = [CodeType]
-%%            CodeType = {erl, binary()} | {nif, NifCcText}
-%%            NifCcText = binary()
-%%            LoadNif = string()
-%%            AnyTranslation = [Translation]
-%%            Translation = {encode,{ModuleName,FnName,ArgTemplate}} |
-%%                          {decode,{ModuleName,FnName,ArgTemplate}} |
-%%                          {merge,{ModuleName,FnName,ArgTemplate}} |
-%%                          {verify,{ModuleName,FnName,ArgTemplate}}
-%%            FnName = atom()
-%%            ArgTemplate = [term()|'$1'|'$2'|'$errorf'|'$user_data'|'$op']
-%%            FetcherRet = from_file | {ok, string()} | {error, term()}
-%%
 %% @doc
 %% Compile a .proto file to a .erl file and to a .hrl file.
 %%
-%% The File must not include path to the .proto file. Example:
+%% The `File' argument must not include path to the .proto file. Example:
 %% "SomeDefinitions.proto" is ok, while "/path/to/SomeDefinitions.proto"
 %% is not ok.
 %%
@@ -142,11 +154,11 @@ file(File) ->
 %% `{i,directory()}' option. It is possible to specify `{i,directory()}'
 %% several times, they will be searched in the order specified.
 %%
-%% The `{type_specs,boolean()}' option enables or disables `::Type()'
-%% annotations in the generated .hrl file. Default is currently
-%% `false'. If you set it to `true', you may get into troubles for
-%% messages referencing other messages, when compiling the generated
-%% files. The `type_specs' option is equivalent to `{type_specs,true}'.
+%% The `type_specs' option enables or disables `::Type()' annotations
+%% in the generated .hrl file. Default is currently `false'. If you
+%% set it to `true', you may get into troubles for messages
+%% referencing other messages cyclically, when compiling the generated
+%% files.
 %%
 %% The `verify' option specifies whether or not to generate code
 %% that verifies, during encoding, that values are of correct type and
@@ -431,21 +443,19 @@ file(File) ->
 %% version of Erlang/OTP to generate code for. The default, `current'
 %% means that the generated code is expected to be compiled and run
 %% on the same major version as gpb runs on.
+-spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
     do_file_or_string(File, Opts).
 
-%% @spec string(Mod, Str) -> CompRet
 %% @equiv string(Mod, Str, [])
+-spec string(module(), string()) -> comp_ret().
 string(Mod, Str) ->
     string(Mod, Str, []).
 
-%% @spec string(Mod, Str, Opts) -> CompRet
-%%     Mod = atom()
-%%     Str = string()
-%%     Opts = list()
 %% @doc
 %% Compile a `.proto' file as string. See {@link file/2} for information
 %% on options and return values.
+-spec string(module(), string(), opts()) -> comp_ret().
 string(Mod, Str, Opts) ->
     do_file_or_string({Mod, Str}, Opts).
 
@@ -563,25 +573,15 @@ possibly_suffix_mod(BaseNameNoExt, Opts) ->
 find_default_out_dir({_Mod, _S}) -> ".";
 find_default_out_dir(File) -> filename:dirname(File).
 
-%% @spec proto_defs(Mod, Defs) -> CompRet
 %% @equiv proto_defs(Mod, Defs, [])
+-spec proto_defs(module(), gpb_parse:defs()) -> comp_ret().
 proto_defs(Mod, Defs) ->
     proto_defs(Mod, Defs, []).
 
-%% @spec proto_defs(Mod, Defs, Opts) -> CompRet
-%%            Mod  = atom()
-%%            Defs = [Def]
-%%            Def = {{enum, EnumName}, Enums} |
-%%                  {{msg, MsgName}, MsgFields}
-%%            EnumName = atom()
-%%            Enums = [{Name, integer()}]
-%%            Name = atom()
-%%            MsgName = atom()
-%%            MsgFields = [#field{}]
-%%
 %% @doc
 %% Compile a list of pre-parsed definitions to file or to a binary.
 %% See {@link file/2} for information on options and return values.
+-spec proto_defs(module(), gpb_parse:defs(), opts()) -> comp_ret().
 proto_defs(Mod, Defs, Opts) ->
     do_proto_defs_aux1(Mod, Defs, normalize_opts(Opts)).
 
@@ -648,15 +648,16 @@ verify_opts_epb_compat(Defs, Opts) ->
                end
        end]).
 
-%% @spec msg_defs(Mod, Defs) -> CompRet
 %% @equiv msg_defs(Mod, Defs, [])
 %% @doc Deprecated, use proto_defs/2 instead.
+-spec msg_defs(module(), gpb_parse:defs()) -> comp_ret().
 msg_defs(Mod, Defs) ->
     msg_defs(Mod, Defs, []).
 
 %% @spec msg_defs(Mod, Defs, Opts) -> CompRet
 %% @equiv proto_defs(Mod, Defs, Opts)
 %% @doc Deprecated, use proto_defs/2 instead.
+-spec msg_defs(module(), gpb_parse:defs(), opts()) -> comp_ret().
 msg_defs(Mod, Defs, Opts) ->
     proto_defs(Mod, Defs, Opts).
 
@@ -793,6 +794,8 @@ clean_module_name(Mod) ->
 %%
 %% @doc Produce a plain-text error message from a reason returned by
 %% for instance {@link file/2} or {@link proto_defs/2}.
+-spec format_error(Err) -> iolist() when
+      Err :: reason() | {error, reason()} | {error, reason(), [warning()]}.
 format_error({error, Reason, _Warns}) -> fmt_err(Reason);
 format_error({error, Reason})         -> fmt_err(Reason);
 format_error(Reason)                  -> fmt_err(Reason).
@@ -834,13 +837,11 @@ fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
 fmt_err(X) ->
     ?f("Unexpected error ~p", [X]).
 
-%% @spec format_warning(Reason) -> io_list()
-%%           Reason = term()
-%%
 %% @doc Produce a plain-text error message from a reason returned by
 %% for instance {@link file/2} or {@link proto_defs/2}.
 %% @end
 %% Note: do NOT include trailing newline (\n or ~n)
+-spec format_warning(warning()) -> iolist().
 format_warning(cyclic_message_dependencies) ->
     ?f("Warning: omitting type specs due to cyclic message references.");
 format_warning(X) ->
@@ -1045,6 +1046,7 @@ init_args_to_argv(InitArgs) ->
 
 %% Opts are expected to be on same format as accepted by file/2.
 %% passed by parse_opts_and_args/2.
+-spec c(opts(), [ProtoFileName::string()]) -> no_return().
 c(Opts, Args) ->
     case determine_cmdline_op(Opts, Args) of
         error  ->
@@ -1065,6 +1067,8 @@ c(Opts, Args) ->
             end
     end.
 
+-spec parse_opts_and_args([string()]) -> {ok, {opts(), Args::[string()]}} |
+                                         {error, Reason::string()}.
 parse_opts_and_args(Argv) ->
     do_parse_argv(Argv, [], []).
 
@@ -1332,12 +1336,14 @@ show_arg({OptDef, 'string_maybe_appended()', _, OptDoc}) ->
 show_arg({OptDef, _, _, OptDoc}) ->
     io:format("   -~s ~s", [OptDef, OptDoc]).
 
+-spec show_args() -> _. % side effect is to print valid opts/args
 show_args() ->
     io:format(
       "Recognized gpb-opts: (see the edoc for ~p for further details)~n",
       [?MODULE]),
     lists:foreach(fun show_arg/1, opt_specs()).
 
+-spec show_version() -> _. % side effect is to print version
 show_version() ->
     io:format("gpb version ~s~n", [gpb:version_as_string()]).
 
