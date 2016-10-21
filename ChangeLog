@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 3.26.4
+2016-Oct-21
+
+	* Add api functions gpb_compile:{locate,read}_import/2 and
+	gpb_parse:fetch_imports/1 to facilitate eg proto file dependency
+	tracking.
+
+	* Add -types and convert @spec doc tags to proper -specs.
+
 Version 3.26.3
 2016-Oct-05
 
