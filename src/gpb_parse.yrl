@@ -1252,6 +1252,9 @@ prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
               end,
               RPCs).
 
+%% @doc Fetch the `import'ed files.
+%% @end
 %% `Defs' is expected to be parsed, but not necessarily post_processed.
+-spec fetch_imports(defs()) -> [ProtoFile::string()].
 fetch_imports(Defs) ->
     [Path || {import,Path} <- Defs].
