@@ -26,6 +26,8 @@
 -export([test_nifs/1]). %% set whether to test nifs or not
 
 -export([compile_iolist/2]).
+-export([compile_to_string_get_hrl/2]).
+-export([compile_erl_iolist/1]).
 -export([unload_code/1]).
 
 %% NIF related
@@ -1751,6 +1753,52 @@ mk_read_file_info(_MainProtoFileName, ExtraFileOpReturnValues) ->
     end.
 
 
+%% --- hrl file tests -----------------
+
+defaults_for_proto3_fields_test() ->
+    Proto = fun(ProtoVersion) ->
+                    ["message m {",
+                     case ProtoVersion of
+                         proto2 ->
+                             ["  optional int32    o_i32   = 11;",
+                              "  optional string   o_str   = 12;",
+                              "  optional m        o_subm  = 13;"];
+                         proto3 ->
+                             ["  int32    o_i32   = 11;",
+                              "  string   o_str   = 12;",
+                              "  m        o_subm  = 13;"]
+                     end,
+                     "  repeated int32 r_i = 21;",
+                     "  oneof u { int32 u_i = 31; };",
+                     "  map<int32, int32> mii = 41;",
+                     "",
+                     "}"]
+            end,
+    MkMod = fun(ProtoVersion, GOpts) ->
+                    compile_erl_iolist(
+                      ["-export([new_m_msg/0]).\n",
+                       compile_to_string_get_hrl(
+                         ["syntax=\"",atom_to_list(ProtoVersion),"\";\n",
+                          Proto(ProtoVersion)],
+                         [strip_preprocessor_lines | GOpts]),
+                       "new_m_msg() -> #m{}.\n"])
+            end,
+    P3Ma = MkMod(proto3, [type_specs]),
+    {m, 0, "", undefined, [], undefined, []} = P3Ma:new_m_msg(),
+    unload_code(P3Ma),
+
+    P3Mb = MkMod(proto3, [type_specs, strings_as_binaries]),
+    {m, 0, <<>>, undefined, [], undefined, []} = P3Mb:new_m_msg(),
+    unload_code(P3Mb),
+
+    P3Mc = MkMod(proto3, []),
+    {m, 0, "", undefined, [], undefined, []} = P3Mc:new_m_msg(),
+    unload_code(P3Mc),
+
+    P2M = MkMod(proto2, []),
+    {m, undefined, undefined, undefined, [], undefined, []} = P2M:new_m_msg(),
+    unload_code(P2M).
+
 %% --- nif generation tests -----------------
 
 generates_nif_as_binary_and_file_test() ->
@@ -3209,7 +3257,48 @@ compile_to_string_get_hrl(Proto, Opts) ->
     PS = lists:flatten(Proto),
     ok = gpb_compile:string(some_module, PS, [Opts | [{file_op, FileOps}]]),
     {data,Bin} = ?recv({data,_}),
-    binary_to_list(Bin).
+    case proplists:get_bool(strip_preprocessor_lines, Opts) of
+        true ->
+            %% Poor man's in-memory preprocessor
+            binary_to_list(
+              iolist_to_binary(
+                [[Line,$\n] || Line <- binary:split(Bin, <<"\n">>, [global]),
+                               not is_preprocessor_line(Line)]));
+        false ->
+            binary_to_list(Bin)
+    end.
+
+is_preprocessor_line(<<"-ifndef(", _/binary>>) -> true; % ")"
+is_preprocessor_line(<<"-ifdef(", _/binary>>)  -> true; % ")"
+is_preprocessor_line(<<"-define(", _/binary>>) -> true; % ")"
+is_preprocessor_line(<<"-endif.", _/binary>>)  -> true;
+is_preprocessor_line(_) -> false.
+
+compile_erl_iolist(IoList) ->
+    compile_erl_iolist(IoList, []).
+compile_erl_iolist(IoList, ExtraOpts) ->
+    Mod = find_unused_module(),
+    Forms = iolist_to_forms([io_lib:format("-module(~p).\n",[Mod]), IoList]),
+    ErlcOpts = [binary, return | ExtraOpts],
+    {ok, Mod, Code, []} = compile:noenv_forms(Forms, ErlcOpts),
+    load_code(Mod, Code),
+    Mod.
+
+iolist_to_forms(IoList) ->
+    {ok, Toks, _End} = erl_scan:string(
+                         unicode:characters_to_list(
+                           unicode:characters_to_binary(IoList))),
+    iol_to_forms2(Toks, [], []).
+
+iol_to_forms2([{dot,_}=Dot | Rest], Curr, Acc) ->
+    {ok, Form} = erl_parse:parse_form(lists:reverse([Dot | Curr])),
+    iol_to_forms2(Rest, [], [Form | Acc]);
+iol_to_forms2([Tok | Rest], Curr, Acc) ->
+    iol_to_forms2(Rest, [Tok | Curr], Acc);
+iol_to_forms2([], [], Acc) ->
+    lists:reverse(Acc).
+
+
 
 load_code(Mod, Code) ->
     unload_code(Mod),

@@ -33,6 +33,8 @@ no_maps_tests__test() ->
 -else. %% NO_HAVE_MAPS
 
 -import(gpb_compile_tests, [compile_iolist/2]).
+-import(gpb_compile_tests, [compile_to_string_get_hrl/2]).
+-import(gpb_compile_tests, [compile_erl_iolist/1]).
 -import(gpb_compile_tests, [unload_code/1]).
 
 -import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
@@ -397,6 +399,20 @@ default_value_handling_test() ->
                           [pass_as_record]],
         OptVariation2 <- [[{maps_unset_optional,present_undefined}],
                           [{maps_unset_optional,omitted}]]].
+
+defaults_for_proto3_fields_test() ->
+    Proto = ["syntax=\"proto3\";\n",
+             "message m {",
+             "  map<int32, int32> mii = 41;",
+             "}"],
+    P3M = compile_erl_iolist(
+             ["-export([new_m_msg/0]).\n",
+              compile_to_string_get_hrl(
+                Proto,
+                [type_specs, strip_preprocessor_lines, mapfields_as_maps]),
+              "new_m_msg() -> #m{}.\n"]),
+    {m, #{}} = P3M:new_m_msg(),
+    unload_code(P3M).
 
 %% --- target versions ----------------------------------
 
