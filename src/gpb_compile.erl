@@ -1590,6 +1590,8 @@ try_topsort_defs(Defs) ->
     [digraph:add_vertex(G, M) || {{msg,M}, _Fields} <- Defs],
     fold_msg_fields(fun(From, #?gpb_field{type={msg,To}}, _) ->
                             digraph:add_edge(G, From, To);
+                       (From, #?gpb_field{type={map,_,{msg, To}}}, _) ->
+                            digraph:add_edge(G, From, To);
                        (_MsgName, _Feild, _Acc) ->
                             ok
                     end,
