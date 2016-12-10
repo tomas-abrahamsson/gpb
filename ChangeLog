@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 3.26.5
+2016-Dec-10
+
+	* Consider also messages also for map fields when calculating
+	order of messages, so that type specs for record fields come in
+	the right order. Thanks to Tristan Sloughter.
+
 Version 3.26.4
 2016-Oct-21
 
