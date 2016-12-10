@@ -126,7 +126,12 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
     do
 	tmpf=$(mktemp "$f.tmp-XXXXXXX")
 	cp "$f" "$tmpf"
-	sed -e 's/^\(.*gpb.*\)[0-9]\+\.[0-9]\+\.[0-9]\+/\1'"$vsn"'/' \
+	# the [^_] is there so we do not change lines like
+	#     {rebar3_gpb_plugin, "1.10.0"}
+	# but only lines like these:
+	#     {'gpb', "3.26.4"}
+	#     [{<<"gpb">>,{pkg,<<"gpb">>,<<"3.26.4">>},0}].
+	sed -e 's/^\(.*[^_]gpb.*\)[0-9]\+\.[0-9]\+\.[0-9]\+/\1'"$vsn"'/' \
 	    < "$tmpf" \
 	    > "$f"
 	rm "$tmpf"
