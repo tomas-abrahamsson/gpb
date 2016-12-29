@@ -6189,6 +6189,7 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                                  '$no' ->
                                      case {Occur, MapsOrRecords} of
                                          {repeated, records} -> ?f(" = []");
+                                         {required, records} -> ?f(" = erlang:error(field_~p_required)", [Name]);
                                          _        -> ""
                                      end;
                                  Default ->
@@ -6206,15 +6207,15 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                 FieldTxt0 = ?f("~s~w~s", [LineLead, Name, DefaultStr]),
                 FieldTxt1 = indent(Indent, FieldTxt0),
                 FieldTxt2 = if TypeSpecs ->
-                                    LineUp = lineup(iolist_size(FieldTxt1), 32),
+                                    LineUp = lineup(iolist_size(FieldTxt1), 72),
                                     ?f("~s~s~s ~s~s", [FieldTxt1, LineUp,
                                                        TypeSpecifierSep,
                                                        TypeStr, CommaSep]);
                                not TypeSpecs ->
                                     ?f("~s~s", [FieldTxt1, CommaSep])
                             end,
-                LineUpCol2 = if TypeSpecs -> 52;
-                                not TypeSpecs -> 40
+                LineUpCol2 = if TypeSpecs -> 92;
+                                not TypeSpecs -> 80
                              end,
                 LineUpStr2 = lineup(iolist_size(FieldTxt2), LineUpCol2),
                 TypeComment = type_to_comment(Field, TypeSpecs),
