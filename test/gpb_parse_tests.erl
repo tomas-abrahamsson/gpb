@@ -316,7 +316,7 @@ resolve_refs_with_packages_test() ->
 
 package_can_appear_anywhere_toplevelwise_test() ->
     %% The google protoc seems accepts one package specifiers anywhere
-    %% at the top-level. It must not be at the beginning,
+    %% at the top-level. It need not be at the beginning,
     %% yet it applies to all (non-imported) definitions in the proto file.
     {ok, Elems1} = parse_lines(["package p1;"
                                 "message m1 { required uint32 x = 1; }",
