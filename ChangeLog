@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.26.6
+2016-Dec-29
+
+        * Improve parser to accept keywords such as "message" also as
+        message names. This applies to enums, oneof names as well as
+        service and rpc names too. Thanks to ionuthristodorescu for
+        reporting.
+
 Version 3.26.5
 2016-Dec-10
 
