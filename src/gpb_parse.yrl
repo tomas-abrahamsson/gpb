@@ -102,7 +102,7 @@ import_def -> import str_lit ';':       {import, literal_value('$2')}.
 
 option_def -> option name '=' constant: {option, '$2', '$4'}.
 
-enum_def -> enum identifier '{' enum_fields '}':
+enum_def -> enum fidentifier '{' enum_fields '}':
                                         {{enum,identifier_name('$2')},'$4'}.
 
 enum_fields -> enum_field enum_fields:  ['$1' | '$2'].
@@ -110,9 +110,9 @@ enum_fields -> option_def enum_fields:  ['$1' | '$2'].
 enum_fields -> ';' enum_fields:         '$2'.
 enum_fields -> '$empty':                [].
 
-enum_field -> identifier '=' integer ';':
+enum_field -> fidentifier '=' integer ';':
                                         {identifier_name('$1'), '$3'}.
-enum_field -> identifier '=' integer '[' opt_enum_opts ']' ';':
+enum_field -> fidentifier '=' integer '[' opt_enum_opts ']' ';':
                                         {identifier_name('$1'), '$3'}.
 
 opt_enum_opts -> enum_opts:             '$1'.
@@ -124,7 +124,7 @@ enum_opts -> enum_opt:                  ['$1'].
 enum_opt -> name '=' constant:          {'$1', '$3'}.
 
 
-message_def -> message identifier '{' msg_elems '}':
+message_def -> message fidentifier '{' msg_elems '}':
                                         {{msg,identifier_name('$2')},'$4'}.
 
 msg_elems -> msg_elem msg_elems:        ['$1' | '$2'].
@@ -302,7 +302,7 @@ res_number -> integer to integer:       {'$1','$3'}.
 res_names -> string_expr ',' res_names: ['$1' | '$3'].
 res_names -> string_expr:               ['$1'].
 
-oneof_def -> 'oneof' identifier '{' oneof_elems '}':
+oneof_def -> 'oneof' fidentifier '{' oneof_elems '}':
                                         #gpb_oneof{name=identifier_name('$2'),
                                                    fields='$4'}.
 
@@ -326,16 +326,16 @@ extend_def -> extend name '{' msg_elems '}':
                                         {{extend,{eref1,'$2'}},'$4'}.
 
 
-service_def -> service identifier '{' rpc_defs '}':
+service_def -> service fidentifier '{' rpc_defs '}':
                                         {{service,identifier_name('$2')},'$4'}.
 
 rpc_defs -> rpc_def rpc_defs:           ['$1' | '$2'].
 rpc_defs -> ';' rpc_defs:               '$2'.
 rpc_defs -> '$empty':                   [].
 
-rpc_def -> rpc identifier rpc_arg returns rpc_ret ';':
+rpc_def -> rpc fidentifier rpc_arg returns rpc_ret ';':
                                         {identifier_name('$2'), '$3','$5',[]}.
-rpc_def -> rpc identifier rpc_arg returns rpc_ret '{' m_opts '}':
+rpc_def -> rpc fidentifier rpc_arg returns rpc_ret '{' m_opts '}':
                                         {identifier_name('$2'), '$3','$5','$7'}.
 
 rpc_arg -> '(' name ')':                {'$2', false}.
