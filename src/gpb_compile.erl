@@ -7952,7 +7952,7 @@ compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
     MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
     AllForms = AttrForms ++ RecordBaseDefs ++ MsgRecordForms ++ TypeForms ++
         CodeForms,
-    combine_erl_and_possible_nif(compile:forms(AllForms, Opts),
+    combine_erl_and_possible_nif(compile:noenv_forms(AllForms, Opts),
                                  PossibleNifCode).
 
 replace_module_macro(Code, ModAsStr) ->

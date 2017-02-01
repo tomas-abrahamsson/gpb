@@ -345,7 +345,7 @@ l(Mod, Form) ->
                mk_attr(module,Mod),
                mk_attr(compile,export_all),
                Form],
-    try compile:forms(Program) of
+    try compile:noenv_forms(Program, []) of
         {ok, Mod, Bin} ->
             unload_code(Mod),
             code:load_binary(Mod, File, Bin);
