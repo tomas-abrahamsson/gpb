@@ -24,9 +24,11 @@
 -module(gpb_codemorpher).
 
 -export([underscore_unused_vars/1]).
+-export([locate_record_param/1]).
 
 -type syntax_tree() :: erl_parse:abstract_form() | % for an af_function_decl()
                        erl_syntax:syntaxTree().
+-type pos() :: non_neg_integer().
 
 %% @doc Replace unused function params and case clause patterns with
 %% underscore Remove record field match patterns that are unused.
@@ -146,3 +148,31 @@ test_underscore(Node) ->
         underscore -> '_';
         _ -> Node
     end.
+
+%% @doc Given a syntax tree for a function, locate the parameter that is a
+%% record.  Example: For `fn(Bin, Z1, Z2, #r{f=F}=M, Tr) -> ...', return 4.
+%% If no such parameter is found, fail with badarg.
+-spec locate_record_param(Function::syntax_tree()) -> pos().
+locate_record_param(FnSTree) ->
+    function = erl_syntax:type(FnSTree), % assert
+    Clauses = erl_syntax:function_clauses(FnSTree),
+    case lists:usort(lists:append([find_r_params(C) || C <- Clauses])) of
+        [N] when is_integer(N) ->
+            N;
+        _ ->
+            error(badarg)
+    end.
+
+find_r_params(Clause) ->
+    Patterns = erl_syntax:clause_patterns(Clause),
+    [I || {I, P} <- index_seq(Patterns),
+          is_r_param(P)].
+
+is_r_param(Pattern) ->
+    erl_syntax_lib:fold(
+      fun(Node, B) -> B orelse erl_syntax:type(Node) == record_expr end,
+      false,
+      Pattern).
+
+index_seq(L) ->
+    lists:zip(lists:seq(1,length(L)), L).

@@ -64,6 +64,36 @@ remove_unused_case_clause_test() ->
     49 = M:x({x,z}),
     18 = M:x({y,17}).
 
+finds_record_param_test() ->
+    %% Direct match for record
+    1 = gpb_codemorpher:locate_record_param(parse_form(["f(#r{}) -> ok."])),
+    %% Matches field too:
+    1 = gpb_codemorpher:locate_record_param(parse_form(["f(#r{a=1}) -> ok."])),
+    1 = gpb_codemorpher:locate_record_param(parse_form(["f(#r{a=X}) -> X."])),
+    %% Match record + bind to variable:
+    2 = gpb_codemorpher:locate_record_param(
+          parse_form(["f(_, #r{}=M) -> M."])),
+    %% Not all clauses match, but same pos for those that do:
+    2 = gpb_codemorpher:locate_record_param(
+          parse_form(["f(_, #r{a=1}=M) -> M;\n"
+                      "f(_, #r{b=2}=M) -> M;\n"
+                      "f(X, Y) -> {X,Y}."])),
+    %% No param matches for record at all:
+    ?assertError(badarg, gpb_codemorpher:locate_record_param(
+                           parse_form(["f() -> ok."]))),
+    ?assertError(badarg, gpb_codemorpher:locate_record_param(
+                           parse_form(["f(_) -> ok."]))),
+    %% More than one position:
+    ?assertError(badarg,
+                 gpb_codemorpher:locate_record_param(
+                   parse_form(["f(#r{}, #r{}) -> ok."]))),
+    %% Not same position for all function clauses:
+    ?assertError(badarg,
+                 gpb_codemorpher:locate_record_param(
+                   parse_form(["f(#r{}, _) -> ok;\n"
+                               "f(_, #r{}) -> nok."]))),
+    ok.
+
 ls(Mod, FormStrs) ->
     Forms = parse_transform_form_strs(FormStrs),
     l(Mod, Forms).
@@ -135,6 +165,10 @@ parse_x(S, EndLine) ->
     {ok, Tokens, EndLine1} = erl_scan:string(lists:flatten(S), EndLine),
     {ok, Form} = erl_parse:parse_form(Tokens),
     {Form, EndLine1}.
+
+parse_form(S) ->
+    {Form, _EndLine} = parse_x(S, 1),
+    Form.
 
 get_exports_from_forms(Forms) ->
     lists:append([get_exports_from_form(Form) || Form <- Forms]).
