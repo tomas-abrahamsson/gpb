@@ -340,10 +340,13 @@ small_random_number() ->
     integer_to_list(erlang:phash2(make_ref()) rem 17).
 
 l(Mod, Form) ->
+    l(Mod, get_exports_from_form(Form), Form).
+
+l(Mod, Exports, Form) ->
     File = atom_to_list(Mod)++".erl",
     Program = [mk_attr(file,{File,1}),
                mk_attr(module,Mod),
-               mk_attr(compile,export_all),
+               mk_export_attr(Exports),
                Form],
     try compile:noenv_forms(Program, []) of
         {ok, Mod, Bin} ->
@@ -367,6 +370,13 @@ mk_attr(AttrName, AttrValue) ->
       erl_syntax:attribute(erl_syntax:atom(AttrName),
                            [erl_syntax:abstract(AttrValue)])).
 
+mk_export_attr(Exports) ->
+    Fns = [io_lib:format("~p/~w", [F,A]) || {F,A} <- Exports],
+    S = ["-export([", string:join(Fns, ","), "])."],
+    {ok,Tokens,_} = erl_scan:string(lists:flatten(S)),
+    {ok,Form} = erl_parse:parse_form(Tokens),
+    Form.
+
 ls(Mod, FormAsIoList) ->
     {ok, Tokens, _} = erl_scan:string(lists:flatten(FormAsIoList)),
     {ok, Form} = erl_parse:parse_form(Tokens),
@@ -388,3 +398,9 @@ format_form_debug(Form) ->
                   ++ "~s~n"
                   ++ "^^^^",
                   [Form, PrettyForm]).
+
+get_exports_from_form(Form) ->
+    case erl_syntax_lib:analyze_form(Form) of
+        {function,{_Name,_Arity}=Export} -> [Export];
+        _ -> []
+    end.
