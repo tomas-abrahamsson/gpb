@@ -27,6 +27,9 @@
 -export([locate_record_param/1]).
 
 -export([map_tail_exprs/2]). % intended for testing
+-export([get_call_arg/2]). % intended for testing
+-export([splice/4]). % intended for testing
+-export([splice_call_arg/4]). % intended for testing
 
 -type syntax_tree() :: erl_parse:abstract_form() | % for an af_function_decl()
                        erl_syntax:syntaxTree().
@@ -247,6 +250,45 @@ map_tails2(F, Exprs) ->
                     lists:reverse(lists:reverse(E1s, Preceding))
             end
     end.
+
+%% @doc From a syntax tree for a call, retrieve the nth argument.
+-spec get_call_arg(Call::syntax_tree(), pos()) -> syntax_tree().
+get_call_arg(CallSTree, Pos) ->
+    application = erl_syntax:type(CallSTree), % assert
+    Args = erl_syntax:application_arguments(CallSTree),
+    lists:nth(Pos, Args).
+
+%% @doc Given a list and a position, replace a number of elements with
+%% elements from a new list.
+%% Examples:
+%% ```
+%%    splice([a,b,c,d,e], 2, 1, [b1, b2]) -> [a,b1,b2,c,d,e]
+%%    splice([a,b,c,d,e], 2, 1, [])       -> [a,c,d,e]
+%%    splice([a,b,c,d,e], 2, 2, [b3, c3]) -> [a,b3,c3,d,e]
+%% '''
+-spec splice(L::list(), pos(), NToReplace, NewElems::list()) -> L2::list() when
+      NToReplace :: non_neg_integer().
+splice(List,       1, N, NewElems) -> NewElems ++ drop_n(N, List);
+splice([H | Rest], P, N, NewElems) -> [H | splice(Rest, P-1, N, NewElems)].
+
+drop_n(0, List)     -> List;
+drop_n(N, [_ | Tl]) -> drop_n(N-1, Tl).
+
+%% @doc Given a syntax tree for a call and a position, replace a number of
+%% call arguments with a list of syntax trees for new call arguments.
+%% See also {@link splice/4}.
+-spec splice_call_arg(Call::syntax_tree(),
+                      pos(), non_neg_integer(),
+                      NewArgs::[syntax_tree()]) -> Call1 when
+      Call1::syntax_tree().
+splice_call_arg(CallSTree, Pos, NumToReplace, NewArgs) ->
+    application = erl_syntax:type(CallSTree), % assert
+    Op = erl_syntax:application_operator(CallSTree),
+    Args = erl_syntax:application_arguments(CallSTree),
+    Args1 = splice(Args, Pos, NumToReplace, NewArgs),
+    erl_syntax:copy_pos(
+      CallSTree,
+      erl_syntax:application(Op, Args1)).
 
 index_seq(L) ->
     lists:zip(lists:seq(1,length(L)), L).
