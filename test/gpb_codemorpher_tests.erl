@@ -118,6 +118,72 @@ map_tail_expr_test() ->
     {x,{4}} = M:z(2),
     ok.
 
+explode_record_fields_to_params_test() ->
+    FieldNames = [a,b,c],
+    F1 = fun(FnSTree) ->
+                 gpb_codemorpher:explode_record_fields_to_params_init(
+                   FnSTree,
+                   2,
+                   {r, [{a,erl_syntax:integer(1)},
+                        {b,erl_syntax:integer(2)},
+                        {b,erl_syntax:nil()}]})
+         end,
+    F2 = fun(FnSTree) ->
+                 gpb_codemorpher:explode_record_fields_to_params(
+                   FnSTree,
+                   2,
+                   {r, FieldNames})
+         end,
+    {module,M} = ls(?dummy_mod,
+                    [["-record(r, {",
+                      string:join([atom_to_list(N) || N <- FieldNames],","),
+                      "})."],
+                     {F1, ["fn_1(Bin) ->
+                                 fn_x(Bin, #r{})."]},
+                     {F2, ["fn_x(<<N,Rest/binary>>, #r{b=B}=M) ->
+                                 NewB = N + B,
+                                 fn_x(Rest, M#r{b=NewB});
+                            fn_x(<<>>, #r{c=C}=M) ->
+                                 M#r{c=lists:reverse(C)}."]}]),
+    {r,4711,6,[42,17]} = M:fn_x(<<1,2,3>>, 4711, 0, [17,42]),
+    {r,1,5,[]}         = M:fn_1(<<0,3>>).
+
+explode_record_fields_to_params_with_passthrough_test() ->
+    FieldNames = [a,b],
+    F1 = fun(FnSTree) ->
+                 gpb_codemorpher:explode_record_fields_to_params_init(
+                   FnSTree,
+                   2,
+                   {r, [{a,erl_syntax:integer(1)},
+                        {b,erl_syntax:integer(2)}]})
+         end,
+    F2 = fun(FnSTree) ->
+                 gpb_codemorpher:underscore_unused_vars(
+                   gpb_codemorpher:explode_record_fields_to_params(
+                     FnSTree,
+                     2,
+                     {r, FieldNames}))
+         end,
+    {module,M} = ls(?dummy_mod,
+                    [["-record(r, {",
+                      string:join([atom_to_list(N) || N <- FieldNames],","),
+                      "})."],
+                     {F1, ["fn_1(Bin) ->
+                                 fastpath(Bin, #r{})."]},
+                     {F2, ["fastpath(<<17,Rest/binary>>, M) ->
+                                 fastpath(Rest, M#r{b=17});
+                            fastpath(<<>>, #r{}=M) ->
+                                 M;
+                            fastpath(Other, #r{}=M) ->
+                                 general(Other, M)."]},
+                     {F2, ["general(<<N,Rest/binary>>, #r{b=B}=M) ->
+                                 NewB = N + B,
+                                 general(Rest, M#r{b=NewB});
+                            general(<<>>, #r{c=C}=M) ->
+                                 M#r{c=lists:reverse(C)}."]}]),
+    {r,4711,6} = M:fastpath(<<1,2,3>>, 4711, 0),
+    {r,1,5}    = M:fn_1(<<0,3>>).
+
 ls(Mod, FormStrs) ->
     Forms = parse_transform_form_strs(FormStrs),
     l(Mod, Forms).

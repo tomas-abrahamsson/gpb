@@ -24,6 +24,8 @@
 -module(gpb_codemorpher).
 
 -export([underscore_unused_vars/1]).
+-export([explode_record_fields_to_params_init/3]).
+-export([explode_record_fields_to_params/3]).
 -export([locate_record_param/1]).
 
 -export([map_tail_exprs/2]). % intended for testing
@@ -153,6 +155,139 @@ test_underscore(Node) ->
         underscore -> '_';
         _ -> Node
     end.
+
+%% @doc Explode record-arguments to parameters-per-field in a tail call, like
+%% below by turning code like this (assuming record `#r{}' has fields
+%% `a', `b' and `c'):
+%% ```
+%%     fn(...) -> fn_x(..., #r{b=InitExpr2}, ...);
+%% '''
+%% into:
+%% ```
+%%     fn(...) -> fn_x(..., InitA, InitExpr2, InitC, ...);
+%% '''
+-spec explode_record_fields_to_params_init(
+        Function,
+        pos(),
+        {RName::atom(), InitFieldExprs}) -> Function when
+      Function :: syntax_tree(),
+      InitFieldExprs::[{FieldName::atom(), Expr::syntax_tree()}].
+explode_record_fields_to_params_init(FnSTree, ArgPos, {RName, InitExprs}) ->
+    function = erl_syntax:type(FnSTree), % assert
+    map_tail_exprs(
+      fun(Patterns) ->
+              {Patterns, mk_tail_expr_exploder(ArgPos, RName, InitExprs)}
+      end,
+      FnSTree).
+
+%% @doc
+%% Explode record-params/arguments to parameters-per-field like below
+%% by turning code like this:
+%% ```
+%%     fn(..., #r{b=B}=M, ...) ->
+%%         NewB = ...,
+%%         fn(..., M#r{b=NewB}, ...);
+%%     fn(..., M ...) ->
+%%         M#r{b=lists:reverse(B)}.
+%% '''
+%% into:
+%% ```
+%%     fn(..., F1, B, F3, ...) ->
+%%          NewB = ...,
+%%          fn(..., A, NewB, F3, ...);
+%%     fn(..., F1, F2, F3, ...) ->
+%%          #r{a=F1, b=lists:reverse(B), c=F3}.
+%% '''
+%% (for performance reasons, typically)
+-spec explode_record_fields_to_params(Function,
+                                      pos(),
+                                      {atom(), [atom()]}) -> Function when
+      Function :: syntax_tree().
+explode_record_fields_to_params(FnSTree, ArgPos, {RName, FieldNames}) ->
+    function = erl_syntax:type(FnSTree), % assert
+    map_tail_exprs(
+      fun(Patterns) ->
+              P = lists:nth(ArgPos, Patterns),
+              case is_r_param(P) of
+                  true ->
+                      %% We have eg: fn(..., #r{b=B}=M, ...) ->
+                      %% Change to:  fn(..., F1, B, F3, ...) ->
+                      Bs0 = get_record_field_bindings(P),
+                      Bs1 = fill_bindings(Bs0, FieldNames),
+                      {_, Params} = lists:unzip(Bs1),
+                      F2 = mk_tail_expr_exploder(ArgPos, RName, Bs1),
+                      {splice(Patterns, ArgPos, 1, Params), F2};
+                  false ->
+                      %% We have eg: fn(..., M ...) ->
+                      %% Change to:  fn(..., F1, F2, F3, ...) ->
+                      Bs1 = fill_bindings([], FieldNames),
+                      {_, Params} = lists:unzip(Bs1),
+                      F2 = mk_tail_expr_exploder(ArgPos, RName, Bs1),
+                      {splice(Patterns, ArgPos, 1, Params), F2}
+              end
+      end,
+      FnSTree).
+
+mk_tail_expr_exploder(ArgPos, RName, Binds) ->
+    fun(Expr) ->
+            case erl_syntax:type(Expr) of
+                application ->
+                    %% We have eg: call_to(..., M#r{b=NewB}, ...)
+                    %% Change to:  call_to(..., F1, NewB, F3, ...)
+                    Arg = get_call_arg(Expr, ArgPos),
+                    Bs0 = case erl_syntax:type(Arg) of
+                              record_expr -> get_record_field_updates(Arg);
+                              _           -> [] % eg pass through var
+                          end,
+                    Args = fill_args(Bs0, Binds),
+                    splice_call_arg(Expr, ArgPos, 1, Args);
+                record_expr ->
+                    %% We have eg: M#r{b=lists:reverse(B)}
+                    %% Change to:  #r{a=F1, b=lists:reverse(B), c=F3}
+                    T = erl_syntax:atom(RName),
+                    Bs0 = get_record_field_updates(Expr),
+                    Bs1 = fill_updates(Bs0, Binds),
+                    erl_syntax:copy_pos(
+                      Expr,
+                      erl_syntax:record_expr(none, T, Bs1));
+                variable ->
+                    %% We have eg: M
+                    %% Change to:  #r{a=F1, b=F2, c=F3}
+                    Bs1 = fill_updates([], Binds),
+                    T = erl_syntax:atom(RName),
+                    erl_syntax:copy_pos(
+                      Expr,
+                      erl_syntax:record_expr(none, T, Bs1))
+            end
+    end.
+
+fill_bindings(NVs, Names) ->
+    [case lists:keyfind(Name, 1, NVs) of
+         {Name, Value} ->
+             {Name, Value};
+         false ->
+             {Name, mk_var("F@_", I)}
+     end
+     || {I, Name} <- index_seq(Names)].
+
+fill_args(Updates, Binds) ->
+    [case lists:keyfind(Name, 1, Updates) of
+         {Name, Expr} ->
+             Expr;
+         false ->
+             Var
+     end
+     || {Name, Var} <- Binds].
+
+fill_updates(Updates, Binds) ->
+    [case lists:keyfind(Name, 1, Updates) of
+         {Name, Expr} ->
+             erl_syntax:record_field(erl_syntax:atom(Name), Expr);
+         false ->
+             erl_syntax:record_field(erl_syntax:atom(Name), Var)
+     end
+     || {Name, Var} <- Binds].
+
 
 %% @doc Given a syntax tree for a function, locate the parameter that is a
 %% record.  Example: For `fn(Bin, Z1, Z2, #r{f=F}=M, Tr) -> ...', return 4.
@@ -289,6 +424,44 @@ splice_call_arg(CallSTree, Pos, NumToReplace, NewArgs) ->
     erl_syntax:copy_pos(
       CallSTree,
       erl_syntax:application(Op, Args1)).
+
+%% Example: Given function parameter pattern like "#r{a=F1, b=F2}",
+%% or possibly "#r{a=F1, b=F2}=M",
+%% return [{a,<F1>}, {b,<F2>}]
+%% where <F1> and <F2> are the syntax trees
+get_record_field_bindings(STree) ->
+    case erl_syntax:type(STree) of
+        record_expr ->
+            get_record_fields(STree, [variable]);
+        match_expr ->
+            P = erl_syntax:match_expr_pattern(STree),
+            record_expr = erl_syntax:type(P), % assert
+            get_record_fields(P, [variable])
+    end.
+
+%% Example: Given expression "M#r{a=OldA + NewA}",
+%% return [{a,<OldA + NewA>}]
+%% where <OldA + NewA> is a syntax tree for the expression.
+get_record_field_updates(STree) ->
+    get_record_fields(STree, []).
+
+get_record_fields(STree, Opts) ->
+    [{FName, Expr}
+     || F <- erl_syntax:record_expr_fields(STree),
+        FName <- [erl_syntax:atom_value(erl_syntax:record_field_name(F))],
+        Expr <- [erl_syntax:record_field_value(F)],
+        test_record_field_expr(Expr, Opts)].
+
+test_record_field_expr(Expr, Opts) ->
+    case proplists:get_bool(variable, Opts) of
+        true ->
+            erl_syntax:type(Expr) == variable;
+        false ->
+            true
+    end.
+
+mk_var(Base, Suffix) ->
+    erl_syntax:variable(lists:concat([Base, Suffix])).
 
 index_seq(L) ->
     lists:zip(lists:seq(1,length(L)), L).
