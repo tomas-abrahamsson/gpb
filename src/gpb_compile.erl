@@ -1251,7 +1251,7 @@ opt_specs() ->
       "       * Implies the -modsuffix _pb option\n"
       "       * Implies the -msgtolower option\n"},
      {"epb-functions", undefined, epb_functions, "\n"
-      "       Generate some functions for API compatibility with the "
+      "       Generate some functions for API compatibility with the\n"
       "       Erlang protobuffs library:\n"
       "       * encode/1 and encode_MsgName/1\n"
       "       * decode/2 and decode_MsgName/1\n"},
@@ -1263,8 +1263,8 @@ opt_specs() ->
       type_defaults_for_omitted_optionals, "\n"
       "       For optional fields not present on decoding, set the field\n"
       "       to its type-default, instead of to undefined.\n"},
-     {"for-version", 'integer()', target_erlang_version, "\n"
-      "Generate code for Erlang/OTP version N instead of current.\n"},
+     {"for-version", 'integer()', target_erlang_version, "N\n"
+      "       Generate code for Erlang/OTP version N instead of current.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
