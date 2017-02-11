@@ -1283,7 +1283,26 @@ opt_specs() ->
       "       Show version\n"},
      {"-version", undefined, version, "\n"
       "       Show version\n"}
-    ].
+    ] ++
+        case os:getenv("GPB_DEV_OPTS") of
+            "true" ->
+                [{"fp", {pass_as_params,pass_as_record}, field_pass_method,
+                  "pass_as_params | pass_as_record\n"
+                  "        Override whether message fields are to be passed\n"
+                  "        as parameters or as a record (or map, depending\n"
+                  "        on the -maps option).  This is purely internal,\n"
+                  "        and has no impact neither on input nor output,\n"
+                  "        but there may be a performance difference.\n"
+                  "        Normally, it is calculated automatically for each\n"
+                  "        message, but during development it may be useful\n"
+                  "        to be able to force it.\n"}];
+            _ ->
+                []
+        end.
+
+
+
+
 
 opt_any_translate(OptTag, [S | Rest]) ->
     try
