@@ -184,6 +184,33 @@ explode_record_fields_to_params_with_passthrough_test() ->
     {r,4711,6} = M:fastpath(<<1,2,3>>, 4711, 0),
     {r,1,5}    = M:fn_1(<<0,3>>).
 
+-ifndef(NO_HAVE_MAPS).
+implode_to_map_exprs_test() ->
+    F = fun(FnSTree) ->
+                gpb_codemorpher:marked_map_expr_to_map_expr(
+                  gpb_codemorpher:underscore_unused_vars(
+                    gpb_codemorpher:implode_to_map_exprs(
+                      FnSTree, 2,
+                      [{a, optional},
+                       {b, optional},
+                       {c, required}],
+                      '$novalue')))
+        end,
+    {module,M} = ls(?dummy_mod,
+                    [{F, ["fn_f(<<>>, A, B, C) ->
+                               #r{a = A-1,
+                                  b = {b,B},
+                                  c = lists:reverse(C)}."]}]),
+    #{a := 0,
+      b := {b,b_b},
+      c := [3,2,1]} = Map1 = M:fn_f(<<>>, 1, b_b, [1,2,3]),
+    3 = maps:size(Map1),
+
+    #{c := [3,2,1]} = Map2 = M:fn_f(<<>>, '$novalue', '$novalue', [1,2,3]),
+    1 = maps:size(Map2).
+-endif. % NO_HAVE_MAPS
+
+
 ls(Mod, FormStrs) ->
     Forms = parse_transform_form_strs(FormStrs),
     l(Mod, Forms).

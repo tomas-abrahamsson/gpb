@@ -26,12 +26,19 @@
 -export([underscore_unused_vars/1]).
 -export([explode_record_fields_to_params_init/3]).
 -export([explode_record_fields_to_params/3]).
+-export([implode_to_map_exprs/4]).
+-export([implode_to_map_expr/1]).
 -export([locate_record_param/1]).
+-export([marked_map_expr_to_map_expr/1]).
 
 -export([map_tail_exprs/2]). % intended for testing
 -export([get_call_arg/2]). % intended for testing
 -export([splice/4]). % intended for testing
 -export([splice_call_arg/4]). % intended for testing
+
+-include("gpb_codegen.hrl").
+
+-import(gpb_lib, [replace_tree/2, replace_term/2]).
 
 -type syntax_tree() :: erl_parse:abstract_form() | % for an af_function_decl()
                        erl_syntax:syntaxTree().
@@ -460,8 +467,191 @@ test_record_field_expr(Expr, Opts) ->
             true
     end.
 
+%% @doc
+%% Given records that have been translated to exploded parameters, convert
+%% such use to map creating expressions, ie collapse it back, but to a map
+%% instead of to a record.
+%%
+%% The construction of the map is complicated somewhat by the fact that some
+%% parameter values -- for optional fields -- represent a value indicating that
+%% the field is undefined and must be omitted from the map.
+%%
+%% So construct a map creation expression that first sets the mandatory fields,
+%% then adds to the map each optional field, one at a time, unless it has the
+%% special value indicating that it is unset.
+%%
+-spec implode_to_map_exprs(Function, pos(), FieldOccurrences, Undef) ->
+                                  Function when
+      Function         :: syntax_tree(),
+      FieldOccurrences :: [{FieldName :: atom(),
+                            Occurence :: required | repeated | optional}],
+      Undef            :: term().
+implode_to_map_exprs(FnSTree, Field1ArgPos, FieldOccurrences, Undef) ->
+    map_tail_exprs(
+      fun(Params) ->
+              FieldParams = lists:sublist(Params,
+                                          Field1ArgPos,
+                                          length(FieldOccurrences)),
+              F = fun(TailNode) ->
+                          record_creation_to_map_exprs(
+                            FieldParams, TailNode, FieldOccurrences, Undef)
+                  end,
+              {Params, do_if_tail_is_record_creation(F)}
+      end,
+      FnSTree).
+
+%% For the maps_unset_optional = present_undefined case, convert records that
+%% have been translated to exploded parameters to a map creation expression.
+%% All fields can be considered mandatory/present, so just convert it to
+%% a map creation expression.
+-spec implode_to_map_expr(Function) -> Function when
+      Function :: syntax_tree().
+implode_to_map_expr(FnSTree) ->
+    map_tail_exprs(
+      fun(Params) ->
+              F = fun record_creation_to_map_expr_all_mandatory/1,
+              {Params, do_if_tail_is_record_creation(F)}
+      end,
+      FnSTree).
+
+record_creation_to_map_expr_all_mandatory(Node)->
+    erl_syntax:copy_pos(
+      Node,
+      mark_map_create(get_record_field_updates(Node))).
+
+do_if_tail_is_record_creation(F) ->
+    fun(TailNode) ->
+            case erl_syntax:type(TailNode) of
+                record_expr ->
+                    F(TailNode);
+                variable ->
+                    F(TailNode);
+                _ ->
+                    TailNode
+            end
+    end.
+
+record_creation_to_map_exprs(FieldParams, Node, FOccurrences, Undef) ->
+    Updates = get_record_field_updates(Node),
+    FPVs = [begin
+                {FName, NewVExpr} = lists:keyfind(FName, 1, Updates),
+                {FName, Param, NewVExpr}
+            end
+            || {{FName,_Occurrence}, Param} <- lists:zip(FOccurrences,
+                                                         FieldParams)],
+    {MandFPVs, OptFPVs} =
+        lists:partition(
+          fun({FName, _Param, _Expr}) ->
+                  {FName,Occurrence} = lists:keyfind(FName,1,FOccurrences),
+                  Occurrence /= optional
+          end,
+          FPVs),
+    MandFVs = [{FName, V} || {FName, _Param, V} <- MandFPVs],
+    InitExpr = erl_syntax:copy_pos(Node, mark_map_create(MandFVs)),
+    gpb_lib:do_exprs(
+      fun({FName, Param, Expr}, Var) ->
+              ?expr(if 'Param' == '$undef' -> 'Var';
+                       true -> 'Var#{FName => Expr}'
+                    end,
+                    [replace_tree('Param', Param),
+                     replace_tree('Expr', Expr),
+                     replace_term('$undef', Undef),
+                     replace_tree('Var', Var),
+                     replace_tree('Var#{FName => Expr}',
+                                  mark_map_set(Var, [{FName, Expr}]))])
+      end,
+      InitExpr,
+      OptFPVs).
+
 mk_var(Base, Suffix) ->
     erl_syntax:variable(lists:concat([Base, Suffix])).
+
+%% These functions are when generating code using maps on a pre-17 system.
+%% Generate some tuples with records instead, with a marker.
+%% But-last step is to change unused vars to _.
+%% Last step is to morph these tuples-with-markup to maps (using erl_syntax
+%% text nodes)
+mark_map_create(Fields) ->
+    erl_syntax:tuple([mk_marker(create), gpb_lib:record_create(x, Fields)]).
+
+mark_map_set(Var, Fields) ->
+    erl_syntax:tuple([mk_marker(set), gpb_lib:record_update(Var, x, Fields)]).
+
+mk_marker(Op) ->
+    erl_syntax:tuple([erl_syntax:atom(X) || X <- [?MODULE, map_op, Op]]).
+
+-spec marked_map_expr_to_map_expr(syntax_tree()) -> syntax_tree().
+marked_map_expr_to_map_expr(STree) ->
+    erl_syntax:revert(
+      erl_syntax_lib:map(
+        fun(Node) ->
+                case test_marked_map_expr(Node) of
+                    {true, {Op, Info}} ->
+                        marked_to_map_expr(Op, Info);
+                    false ->
+                        Node
+                end
+        end,
+        STree)).
+
+marked_to_map_expr(create, {_,   Fields}) -> gpb_lib:map_create(Fields);
+marked_to_map_expr(set,    {Var, Fields}) -> gpb_lib:map_set(Var, Fields).
+
+test_marked_map_expr(Node) ->
+    case test_is_tuple_of_size(Node, 2) of
+        {true, [Elem1, Elem2]} ->
+            case test_is_map_marker(Elem1) of
+                {true, Op} ->
+                    {true, {Op, record_expr_to_info(Elem2)}};
+                false ->
+                    false
+            end;
+        false ->
+            false
+    end.
+
+test_is_tuple_of_size(Node, TupleSize) ->
+    case erl_syntax:type(Node) == tuple of
+        true ->
+            case erl_syntax:tuple_size(Node) =:= TupleSize of
+                true ->
+                    {true, erl_syntax:tuple_elements(Node)};
+                false ->
+                    false
+            end;
+        false ->
+            false
+    end.
+
+test_is_map_marker(Node) ->
+    case test_is_tuple_of_size(Node, 3) of
+        {true, [Elem1, Elem2, Elem3]} ->
+            case {test_atom(Elem1), test_atom(Elem2), test_atom(Elem3)} of
+                {{true, ?MODULE}, {true, map_op}, {true, Op}} ->
+                    {true, Op};
+                _ ->
+                    false
+            end;
+        false ->
+            false
+    end.
+
+test_atom(Node) ->
+    case erl_syntax:type(Node) of
+        atom -> {true, erl_syntax:atom_value(Node)};
+        _    -> false
+    end.
+
+record_expr_to_info(Node) ->
+    Var = erl_syntax:record_expr_argument(Node),
+    Fields = [begin
+                  FNameNode = erl_syntax:record_field_name(F),
+                  FName = erl_syntax:atom_value(FNameNode),
+                  Value = erl_syntax:record_field_value(F),
+                  {FName, Value}
+              end
+              || F <- erl_syntax:record_expr_fields(Node)],
+    {Var, Fields}.
 
 index_seq(L) ->
     lists:zip(lists:seq(1,length(L)), L).
