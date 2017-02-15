@@ -28,6 +28,7 @@
 -export([explode_record_fields_to_params/3]).
 -export([implode_to_map_exprs/4]).
 -export([implode_to_map_expr/1]).
+-export([change_undef_marker_in_clauses/2]).
 -export([locate_record_param/1]).
 -export([marked_map_expr_to_map_expr/1]).
 
@@ -562,6 +563,61 @@ record_creation_to_map_exprs(FieldParams, Node, FOccurrences, Undef) ->
       end,
       InitExpr,
       OptFPVs).
+
+%% @doc Change a marker for indicating that an optional value is not defined.
+%% For records, `undefined' is used, but this is also a valid value for enums,
+%% and for maps, we can use something else, such as the atom `$undef'.
+-spec change_undef_marker_in_clauses(Function, atom()) -> Function when
+      Function :: syntax_tree().
+change_undef_marker_in_clauses(FnSTree, NewUndef) ->
+    erl_syntax_lib:map(
+      fun(Node) ->
+              case erl_syntax:type(Node) of
+                  if_expr ->
+                      Cs = erl_syntax:if_expr_clauses(Node),
+                      Cs1 = [ch_undef(C, NewUndef) || C <- Cs],
+                      erl_syntax:copy_pos(Node, erl_syntax:if_expr(Cs1));
+                  case_expr ->
+                      A = erl_syntax:case_expr_argument(Node),
+                      Cs = erl_syntax:case_expr_clauses(Node),
+                      Cs1 = [ch_undef(C, NewUndef) || C <- Cs],
+                      erl_syntax:copy_pos(Node, erl_syntax:case_expr(A, Cs1));
+                  _ ->
+                      Node
+              end
+      end,
+      FnSTree).
+
+ch_undef(Clause, NewUndef) ->
+    Patterns = erl_syntax:clause_patterns(Clause),
+    Body = erl_syntax:clause_body(Clause),
+    Guard = erl_syntax:clause_guard(Clause),
+    Patterns1 = [erl_syntax_lib:map(atom_changer(undefined, NewUndef), P)
+                 || P <- Patterns],
+    Guard1 = safe_tree_map(atom_changer(undefined, NewUndef), Guard),
+    erl_syntax:copy_pos(
+      Clause,
+      erl_syntax:clause(Patterns1, Guard1, Body)).
+
+safe_tree_map(_F, none) ->
+    none;
+safe_tree_map(F, Tree) ->
+    erl_syntax_lib:map(F, Tree).
+
+atom_changer(Old, New) ->
+    fun(Node) ->
+            case erl_syntax:type(Node) of
+                atom ->
+                    case erl_syntax:atom_value(Node) of
+                        Old ->
+                            erl_syntax:copy_pos(Node, erl_syntax:atom(New));
+                        _ ->
+                            Node
+                    end;
+                _ ->
+                    Node
+            end
+    end.
 
 mk_var(Base, Suffix) ->
     erl_syntax:variable(lists:concat([Base, Suffix])).
