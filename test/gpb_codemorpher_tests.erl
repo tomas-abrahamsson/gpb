@@ -242,8 +242,173 @@ analyze_if_clauses_test() ->
      {'_', [_]}] =
         gpb_codemorpher:analyze_if_clauses(Pat, If, undefined).
 
+-ifndef(NO_HAVE_MAPS).
+rework_clauses_for_records_to_maps_for_submsg_test() ->
+    PatS = "#r{a=Prev}=Msg.",
+    IfS  = "if Prev =:= undefined -> 'New';
+               true -> {'merge(',Prev,',New)'}
+            end.",
+    [Pat, If] = parse_exprs([PatS, IfS]),
+    {_MapPat, Reworked1} = gpb_codemorpher:rework_clauses_for_records_to_maps(
+                             Pat, If, undefined),
+    Reworked2 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked1),
+    Binds = fun(#{a := Val}=Msg) -> [{'Msg',Msg}, {'Prev', Val}];
+               (#{}=Msg)         -> [{'Msg',Msg}, {'Prev', undefined}]
+            end,
+    'New' = eval_expr(Reworked2, Binds(#{})),
+    {'merge(',x,',New)'} = eval_expr(Reworked2, Binds(#{a => x})).
+
+rework_clauses_for_records_to_maps_for_oneof_submsg_test() ->
+    PatS  = "#r{a=Prev}=Msg.",
+    %% Below is what it currently looks like:
+    CaseS = "case Prev of
+                 undefined    -> {tag,'New'};
+                 {tag,MVPrev} -> {tag,'merge(',MVPrev,',New)'};
+                 _            -> {tag,'New'}
+             end.",
+    %% Below is what it could very well be changed to look like:
+    Cas2S = "case Prev of
+                 {tag,MVPrev} -> {tag,'merge(',MVPrev,',New)'};
+                 _            -> {tag,'New'}
+             end.",
+    [Pat,Case, Case2] = [parse_expr(S) || S <- [PatS, CaseS, Cas2S]],
+    {MsgVar, Reworked1} = gpb_codemorpher:rework_clauses_for_records_to_maps(
+                            Pat, Case, undefined),
+    Reworked2 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked1),
+    Msg = erl_syntax:variable_name(MsgVar),
+    {tag,'New'} = eval_expr(Reworked2, [{Msg, #{}}]),
+    {tag,'merge(',x,',New)'} = eval_expr(Reworked2, [{Msg, #{a => {tag,x}}}]),
+    {tag,'New'} = eval_expr(Reworked2, [{Msg, #{a => {other,zz}}}]),
+    {MsgVar, Reworked3} = gpb_codemorpher:rework_clauses_for_records_to_maps(
+                            Pat, Case2, undefined),
+    Reworked4 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked3),
+    {tag,'New'} = eval_expr(Reworked4, [{Msg, #{}}]),
+    {tag,'merge(',x,',New)'} = eval_expr(Reworked4, [{Msg, #{a => {tag,x}}}]),
+    {tag,'New'} = eval_expr(Reworked4, [{Msg, #{a => {other,zz}}}]).
+
+
+rework_records_to_maps_unset_optionals_present_undefined_test() ->
+    _FieldNames = [a,b,c,d],
+    F = fun(FnSTree) ->
+                gpb_codemorpher:marked_map_expr_to_map_expr(
+                  gpb_codemorpher:rework_records_to_maps(FnSTree, 2,
+                                                         undefined))
+        end,
+    {module,M} = ls(?dummy_mod,
+                    [%%["-record(r, {",
+                     %% string:join([atom_to_list(N) || N <- FieldNames],","),
+                     %% "})."],
+                     {F, ["fn_1(Bin) ->
+                                fn_x(Bin, #r{a=undefined, b=0,
+                                             c=undefined, d=undefined})."]},
+                     {F, ["fn_x(<<1,Rest/binary>>, M) ->
+                                fn_x(Rest, M#r{a=1});
+                           fn_x(<<2,Rest/binary>>, #r{b=B}=M) ->
+                                fn_x(Rest, M#r{b=B+1});
+                           %% This one is similar to the code generated
+                           %% for merging a optional or required sub msg field
+                           fn_x(<<3,Rest/binary>>, #r{c=C}=M) ->
+                                fn_x(Rest, M#r{c=if C == undefined -> 1;
+                                                    true -> C+1
+                                                 end});
+                           fn_x(<<41,Rest/binary>>, #r{d=D}=M) ->
+                                fn_x(Rest, M#r{d=case D of
+                                                    undefined -> {u1,1};
+                                                    {u1,U} -> {u1,U+1};
+                                                    _ -> {u1,1}
+                                                 end});
+                           fn_x(<<42,Rest/binary>>, #r{d=D}=M) ->
+                                fn_x(Rest, M#r{d=case D of
+                                                    undefined -> {u2,1};
+                                                    {u2,U} -> {u2,U+1};
+                                                    _ -> {u2,1}
+                                                 end});
+                           fn_x(<<>>, #r{b=B}=M) ->
+                                M#r{b=100+B}."]}]),
+    #{b := 100} = Msg1 = M:fn_1(<<>>),
+    4 = maps:size(Msg1),
+    #{a := 1, b := 100} = Msg2 = M:fn_1(<<1>>),
+    4 = maps:size(Msg2),
+    #{b := 103} = Msg3 = M:fn_1(<<2,2,2>>),
+    4 = maps:size(Msg3),
+    #{b := 100, c := 1} = Msg4 = M:fn_1(<<3>>),
+    4 = maps:size(Msg4),
+    #{b := 100, c := 2} = Msg5 = M:fn_1(<<3,3>>),
+    4 = maps:size(Msg5),
+    #{b := 100, d := {u1,1}} = Msg6 = M:fn_1(<<41>>),
+    4 = maps:size(Msg6),
+    #{b := 100, d := {u1,2}} = Msg7 = M:fn_1(<<41,41>>),
+    4 = maps:size(Msg7),
+    #{b := 100, d := {u2,1}} = Msg8 = M:fn_1(<<41,42>>),
+    4 = maps:size(Msg8),
+    #{b := 100, d := {u2,2}} = Msg9 = M:fn_1(<<41,42,42>>),
+    4 = maps:size(Msg9),
+    ok.
+
+rework_records_to_maps_unset_optionals_omitted_test() ->
+    _FieldNames = [a,b,c,d],
+    F = fun(FnSTree) ->
+                gpb_codemorpher:marked_map_expr_to_map_expr(
+                  gpb_codemorpher:rework_records_to_maps(
+                    gpb_codemorpher:change_undef_marker_in_clauses(
+                      FnSTree, '$undef'),
+                    2, '$undef'))
+        end,
+    {module,M} = ls(?dummy_mod,
+                    [%%["-record(r, {",
+                     %% string:join([atom_to_list(N) || N <- FieldNames],","),
+                     %% "})."],
+                     {F, ["fn_1(Bin) ->
+                                fn_x(Bin, #r{b=0})."]},
+                     {F, ["fn_x(<<1,Rest/binary>>, M) ->
+                                fn_x(Rest, M#r{a=1});
+                           fn_x(<<2,Rest/binary>>, #r{b=B}=M) ->
+                                fn_x(Rest, M#r{b=B+1});
+                           %% This one is similar to the code generated
+                           %% for merging a optional or required sub msg field
+                           fn_x(<<3,Rest/binary>>, #r{c=C}=M) ->
+                                fn_x(Rest, M#r{c=if C == undefined -> 1;
+                                                    true -> C+1
+                                                 end});
+                           fn_x(<<41,Rest/binary>>, #r{d=D}=M) ->
+                                fn_x(Rest, M#r{d=case D of
+                                                    undefined -> {u1,1};
+                                                    {u1,U} -> {u1,U+1};
+                                                    _ -> {u1,1}
+                                                 end});
+                           fn_x(<<42,Rest/binary>>, #r{d=D}=M) ->
+                                fn_x(Rest, M#r{d=case D of
+                                                    undefined -> {u2,1};
+                                                    {u2,U} -> {u2,U+1};
+                                                    _ -> {u2,1}
+                                                 end});
+                           fn_x(<<>>, #r{b=B}=M) ->
+                                M#r{b=100+B}."]}]),
+    #{b := 100} = Msg1 = M:fn_1(<<>>),
+    1 = maps:size(Msg1),
+    #{a := 1, b := 100} = Msg2 = M:fn_1(<<1>>),
+    2 = maps:size(Msg2),
+    #{b := 103} = Msg3 = M:fn_1(<<2,2,2>>),
+    1 = maps:size(Msg3),
+    #{b := 100, c := 1} = Msg4 = M:fn_1(<<3>>),
+    2 = maps:size(Msg4),
+    #{b := 100, c := 2} = Msg5 = M:fn_1(<<3,3>>),
+    2 = maps:size(Msg5),
+    #{b := 100, d := {u1,1}} = Msg6 = M:fn_1(<<41>>),
+    2 = maps:size(Msg6),
+    #{b := 100, d := {u1,2}} = Msg7 = M:fn_1(<<41,41>>),
+    2 = maps:size(Msg7),
+    #{b := 100, d := {u2,1}} = Msg8 = M:fn_1(<<41,42>>),
+    2 = maps:size(Msg8),
+    #{b := 100, d := {u2,2}} = Msg9 = M:fn_1(<<41,42,42>>),
+    2 = maps:size(Msg9),
+    ok.
+
+-endif. % NO_HAVE_MAPS
+
 ls(Mod, FormStrs) ->
     Forms = parse_transform_form_strs(FormStrs),
+    format_forms_debug(Forms),
     l(Mod, Forms).
 
 l(Mod, Forms) ->
@@ -318,10 +483,25 @@ parse_form(S) ->
     {Form, _EndLine} = parse_x(S, 1),
     Form.
 
+-ifndef(NO_HAVE_MAPS). % because unused otherwise
+parse_exprs(Ss) -> [parse_expr(S) || S <- Ss].
+-endif. % NO_HAVE_MAPS
+
 parse_expr(S) ->
     {ok, Toks, _End} = erl_scan:string(S),
     {ok, [Expr]} = erl_parse:parse_exprs(Toks),
     Expr.
+
+-ifndef(NO_HAVE_MAPS). % because unused otherwise
+eval_expr(Expr, Bindings) ->
+    {value, Res, _Binds1} = erl_eval:expr(Expr, mk_bindings_struct(Bindings)),
+    Res.
+
+mk_bindings_struct(KVs) ->
+    lists:foldl(fun({K,V},BS) -> erl_eval:add_binding(K,V,BS) end,
+                erl_eval:new_bindings(),
+                KVs).
+-endif. % NO_HAVE_MAPS
 
 get_exports_from_forms(Forms) ->
     lists:append([get_exports_from_form(Form) || Form <- Forms]).

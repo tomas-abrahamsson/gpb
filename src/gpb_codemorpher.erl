@@ -30,8 +30,10 @@
 -export([implode_to_map_expr/1]).
 -export([change_undef_marker_in_clauses/2]).
 -export([locate_record_param/1]).
+-export([rework_records_to_maps/3]).
 -export([marked_map_expr_to_map_expr/1]).
 
+-export([rework_clauses_for_records_to_maps/3]). % intended for testing
 -export([analyze_case_clauses/2]). % intended for testing
 -export([analyze_if_clauses/3]). % intended for testing
 -export([map_tail_exprs/2]). % intended for testing
@@ -41,7 +43,7 @@
 
 -include("gpb_codegen.hrl").
 
--import(gpb_lib, [replace_tree/2, replace_term/2]).
+-import(gpb_lib, [replace_tree/2, replace_term/2, splice_trees/2]).
 
 -type syntax_tree() :: erl_parse:abstract_form() | % for an af_function_decl()
                        erl_syntax:syntaxTree().
@@ -638,6 +640,100 @@ atom_changer(Old, New) ->
             end
     end.
 
+%% @doc Transform records expressions to map expressions in a function.
+%% Existing field update expressions are recognized, and are converted to
+%% corresponding expressions for maps.
+%%
+%% NB: An `Undef' value of `undefined' assumes the context is
+%% maps_unset_optional = `present_undefined', otherwise assumes `omitted'.
+-spec rework_records_to_maps(Function, pos(), atom()) -> Function when
+      Function :: syntax_tree().
+rework_records_to_maps(FnSTree, RecordParamPos, Undef) ->
+    function = erl_syntax:type(FnSTree), % assert
+    FnName = erl_syntax:function_name(FnSTree),
+    Clauses = erl_syntax:function_clauses(FnSTree),
+    Clauses1 = [rework_records_to_maps_aux(C, RecordParamPos, Undef)
+                || C <- Clauses],
+    erl_syntax:copy_pos(
+      FnSTree,
+      erl_syntax:function(FnName, Clauses1)).
+
+rework_records_to_maps_aux(Clause, RecordParamPos, Undef) ->
+    Params = erl_syntax:clause_patterns(Clause),
+    RParam = nth_or_none(RecordParamPos, Params),
+    Body = erl_syntax:clause_body(Clause),
+    Guard = erl_syntax:clause_guard(Clause),
+    {Body1, MaybeNewRecordParam} =
+        mapfold_exprs(
+          fun(Node, Acc) ->
+                  case erl_syntax:type(Node) of
+                      record_expr ->
+                          rework_body_records_to_maps_2(Node, RParam, Acc,
+                                                        Undef);
+                      _ ->
+                          {Node, Acc}
+                  end
+          end,
+          none,
+          Body),
+    Params1 = if MaybeNewRecordParam == none ->
+                      [rework_param_records_to_maps_aux2(P) || P <- Params];
+                 true ->
+                      set_nth(RecordParamPos, MaybeNewRecordParam, Params)
+              end,
+    erl_syntax:copy_pos(
+      Clause,
+      erl_syntax:clause(Params1, Guard, Body1)).
+
+nth_or_none(Pos, L) when length(L) >= Pos -> lists:nth(Pos, L);
+nth_or_none(_Pos, _L) -> none.
+
+set_nth(1, New, [_ | Rest]) -> [New | Rest];
+set_nth(P, New, [H | Rest]) -> [H | set_nth(P-1, New, Rest)].
+
+mapfold_exprs(F, InitAcc, Exprs) ->
+    lists:mapfoldl(
+      fun(Expr, LAcc) -> erl_syntax_lib:mapfold(F, LAcc, Expr) end,
+      InitAcc,
+      Exprs).
+
+rework_body_records_to_maps_2(RExpr, RParam, InitAcc, Undef) ->
+    Arg = erl_syntax:record_expr_argument(RExpr),
+    Fields = get_record_fields(RExpr, []),
+    {Fields1, MaybeNewFParam} =
+        lists:mapfoldl(
+          fun({FName, Expr}, Acc) ->
+                  case erl_syntax:type(Expr) of
+                      if_expr   -> rework_rtom_3(FName, Expr, RParam, Undef);
+                      case_expr -> rework_rtom_3(FName, Expr, RParam, Undef);
+                      _         -> {{FName, Expr}, Acc}
+                  end
+          end,
+          InitAcc,
+          Fields),
+    RExpr1 = if Arg == none -> mark_map_create(Fields1);
+                Arg /= none -> mark_map_set(Arg, Fields1)
+             end,
+    {erl_syntax:copy_pos(RExpr, RExpr1), MaybeNewFParam}.
+
+rework_rtom_3(FName, Expr, RParam, Undef) ->
+    {NewPattern, Expr1} =
+        rework_clauses_for_records_to_maps(RParam, Expr, Undef),
+    {{FName, Expr1}, NewPattern}.
+
+rework_param_records_to_maps_aux2(ParamSTree) ->
+    erl_syntax_lib:map(
+      fun(Node) ->
+              case erl_syntax:type(Node) of
+                  record_expr ->
+                      Fields = get_record_fields(Node, []),
+                      erl_syntax:copy_pos(Node, mark_map_match(Fields));
+                  _ ->
+                      Node
+              end
+      end,
+      ParamSTree).
+
 %% @doc Analyze case clauses for record field match meanings,
 %% so that they can be reworked for maps.
 -spec analyze_case_clauses(syntax_tree(), atom()) -> [clause_analysis()].
@@ -670,6 +766,24 @@ analyze_clause(Pattern, Clause, Undef) ->
             case erl_syntax:type(Pattern) of
                 underscore ->
                     {'_', Body};
+                atom ->
+                    case erl_syntax:atom_value(Pattern) of
+                        Undef ->
+                            {match_undefined, Body};
+                        A ->
+                            error({unexpected_atom_case_clause,Clause,A})
+                    end;
+                tuple ->
+                    Elems = erl_syntax:tuple_elements(Pattern),
+                    case lists:zip([erl_syntax:type(Elem) || Elem <- Elems],
+                                   Elems) of
+                        [{atom,E1}, {variable,E2}] ->
+                            Tag = erl_syntax:atom_value(E1),
+                            Var = erl_syntax:variable_name(E2),
+                            {{match_tagged_variable, Tag, Var}, Body};
+                        Other ->
+                            error({unexpected_tuple_match,Other})
+                    end;
                 X ->
                     error({unexpected_case_clause,Clause,X})
             end
@@ -796,6 +910,94 @@ is_cmp_var_undefined(VarTree, Var, ATree, Undef, CmpHow) ->
             false
     end.
 
+rework_clauses_for_records_to_maps(Pattern, Expr, Undef) ->
+    match_expr = erl_syntax:type(Pattern), % assert,
+    MsgVar = erl_syntax:match_expr_body(Pattern), % the variable part
+    CAns = case erl_syntax:type(Expr) of
+               if_expr   -> {'if',analyze_if_clauses(Pattern, Expr, Undef)};
+               case_expr -> {'case',analyze_case_clauses(Expr, Undef)}
+           end,
+    case CAns of
+        {'if',[{{match_undefined,FName}, UndefBody}, {'_', DefBody}]} ->
+            %% Handle merge of message field (same for required and
+            %% optional message fields)
+            %%
+            %% d_read_field_<msg>_<field>(..., #r{field=Prev}=Msg, ...) ->
+            %%    New = ...<decode-sub-msg>(...),
+            %%    NewMsg = Msg#r{field = if Prev =:= undefined -> New;
+            %%                              true -> merge_<msg2>(Prev,New)
+            %%                           end},
+            %%    d_read_field_def_<msg>(..., NewMsg, ...).
+            %%
+            [{FName,Prev}] = get_record_field_bindings(Pattern),
+            if Undef == undefined ->
+                    %% maps_unset_optional = present_undefined
+                    NewPattern = erl_syntax:match_expr(
+                                   mark_map_match([{FName, Prev}]),
+                                   MsgVar),
+                    {NewPattern, Expr};
+               Undef /= undefined ->
+                    %% maps_unset_optional = omitted
+                    E2 = mk_case_expr(MsgVar,
+                                      [mk_matches_map_field_clause(
+                                         FName, Prev, DefBody),
+                                       mk_orelse_clause(UndefBody)]),
+                    {MsgVar, erl_syntax:revert(E2)}
+            end;
+        {'case',[{match_undefined, _UndefBody},
+                 {{match_tagged_variable,Tag,VarName}, TaggedBody},
+                 {'_', OtherBody}]} ->
+            %% Handle merge of oneof message alternative:
+            %%
+            %% d_read_field_<msg>_<f>(..., #r{f=FPrev}=Msg, ...) ->
+            %%    New = ...<decode-sub-msg>(...),
+            %%    Msg2 = Msg#r{f = case FPrev of
+            %%                         undefined -> {t,New};
+            %%                         {t,Old}   -> {t,merge(Old,New)};
+            %%                         _         -> {t,New}
+            %%                     end},
+            %%    d_read_field_def_<msg>(..., NewMsg, ...).
+            %%
+            [{FName,_Prev}] = get_record_field_bindings(Pattern),
+            Var = erl_syntax:variable(VarName),
+            E2 = mk_case_expr(MsgVar,
+                              [mk_matches_tagged_map_field_clause(
+                                 FName, Tag, Var, TaggedBody),
+                               mk_orelse_clause(OtherBody)]),
+            {MsgVar, erl_syntax:revert(E2)};
+        {'case',[{{match_tagged_variable,Tag,VarName}, TaggedBody},
+                 {'_', OtherBody}]} ->
+            [{FName,_Prev}] = get_record_field_bindings(Pattern),
+            Var = erl_syntax:variable(VarName),
+            E2 = mk_case_expr(MsgVar,
+                              [mk_matches_tagged_map_field_clause(
+                                 FName, Tag, Var, TaggedBody),
+                               mk_orelse_clause(OtherBody)]),
+            {MsgVar, erl_syntax:revert(E2)}
+    end.
+
+mk_case_expr(ArgExpr, Clauses) ->
+    erl_syntax:case_expr(ArgExpr, Clauses).
+
+mk_matches_map_field_clause(FName, Var, Body) ->
+    ?case_clause('#{fname := Var}' -> 'Body',
+                 [replace_tree('#{fname := Var}',
+                               mark_map_match([{FName,Var}])),
+                  splice_trees('Body', Body)]).
+
+mk_matches_tagged_map_field_clause(FName, Tag, Var, Body) ->
+    TaggedVar = ?expr({tag,'Var'},
+                      [replace_term(tag, Tag),
+                       replace_tree('Var', Var)]),
+    ?case_clause('#{fname := {tag,Var}}' -> 'Body',
+                 [replace_tree('#{fname := {tag,Var}}',
+                               mark_map_match([{FName, TaggedVar}])),
+                  splice_trees('Body', Body)]).
+
+mk_orelse_clause(Body) ->
+    ?case_clause(_ -> 'Body',
+                 [splice_trees('Body', Body)]).
+
 mk_var(Base, Suffix) ->
     erl_syntax:variable(lists:concat([Base, Suffix])).
 
@@ -809,6 +1011,9 @@ mark_map_create(Fields) ->
 
 mark_map_set(Var, Fields) ->
     erl_syntax:tuple([mk_marker(set), gpb_lib:record_update(Var, x, Fields)]).
+
+mark_map_match(Fields) ->
+    erl_syntax:tuple([mk_marker(match), gpb_lib:record_match(x, Fields)]).
 
 mk_marker(Op) ->
     erl_syntax:tuple([erl_syntax:atom(X) || X <- [?MODULE, map_op, Op]]).
@@ -828,7 +1033,8 @@ marked_map_expr_to_map_expr(STree) ->
         STree)).
 
 marked_to_map_expr(create, {_,   Fields}) -> gpb_lib:map_create(Fields);
-marked_to_map_expr(set,    {Var, Fields}) -> gpb_lib:map_set(Var, Fields).
+marked_to_map_expr(set,    {Var, Fields}) -> gpb_lib:map_set(Var, Fields);
+marked_to_map_expr(match,  {_,   Fields}) -> gpb_lib:map_match(Fields).
 
 test_marked_map_expr(Node) ->
     case test_is_tuple_of_size(Node, 2) of
