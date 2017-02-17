@@ -210,6 +210,37 @@ implode_to_map_exprs_test() ->
     1 = maps:size(Map2).
 -endif. % NO_HAVE_MAPS
 
+analyze_case_clauses_test() ->
+    S = "case M of
+             #r{a=undefined} -> V;
+             #r{a=N} -> merge(P,V);
+             #r{a={u1,U}} -> {u,merge(P,U)};
+             #r{a=A} when A =:= undefined -> V;
+             #r{a=A} when A =/= undefined -> V;
+             #r{a=A} when A == undefined -> V;
+             #r{a=A} when A /= undefined -> V;
+             _ -> V
+         end.\n",
+    CaseExpr = parse_expr(S),
+    [{{match_undefined,a}, [_]},
+     {{match_variable,a,'N'}, [_]},
+     {{match_tagged_variable,a,u1,'U'}, [_]},
+     {{match_undefined,a}, [_]},
+     {{match_not_undefined,a}, [_]},
+     {{match_undefined,a}, [_]},
+     {{match_not_undefined,a}, [_]},
+     {'_', [_]}] =
+        gpb_codemorpher:analyze_case_clauses(CaseExpr, undefined).
+
+analyze_if_clauses_test() ->
+    PatS = "#r{a=A}.",
+    IfS  = "if A == undefined-> V;
+               true -> V
+            end.\n",
+    [Pat, If] = [parse_expr(S) || S <- [PatS, IfS]],
+    [{{match_undefined,a}, [_]},
+     {'_', [_]}] =
+        gpb_codemorpher:analyze_if_clauses(Pat, If, undefined).
 
 ls(Mod, FormStrs) ->
     Forms = parse_transform_form_strs(FormStrs),
@@ -286,6 +317,11 @@ parse_x(S, EndLine) ->
 parse_form(S) ->
     {Form, _EndLine} = parse_x(S, 1),
     Form.
+
+parse_expr(S) ->
+    {ok, Toks, _End} = erl_scan:string(S),
+    {ok, [Expr]} = erl_parse:parse_exprs(Toks),
+    Expr.
 
 get_exports_from_forms(Forms) ->
     lists:append([get_exports_from_form(Form) || Form <- Forms]).

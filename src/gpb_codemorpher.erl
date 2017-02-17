@@ -32,6 +32,8 @@
 -export([locate_record_param/1]).
 -export([marked_map_expr_to_map_expr/1]).
 
+-export([analyze_case_clauses/2]). % intended for testing
+-export([analyze_if_clauses/3]). % intended for testing
 -export([map_tail_exprs/2]). % intended for testing
 -export([get_call_arg/2]). % intended for testing
 -export([splice/4]). % intended for testing
@@ -44,6 +46,23 @@
 -type syntax_tree() :: erl_parse:abstract_form() | % for an af_function_decl()
                        erl_syntax:syntaxTree().
 -type pos() :: non_neg_integer().
+
+-type clause_analysis() :: {clause_meaning(), body()}.
+-type body()            :: [syntax_tree()].
+-type clause_meaning()  :: match_undefined |
+                           {match_tagged_variable,
+                            Tag::atom(),
+                            Var::syntax_tree()} |
+                           {match_undefined, FieldName::atom()} |
+                           {match_not_undefined, FieldName::atom()} |
+                           {match_tagged_variable,
+                            FieldName::atom(),
+                            Tag::atom(),
+                            Var::syntax_tree()} |
+                           {match_variable,
+                            FieldName::atom(),
+                            Var::syntax_tree()} |
+                           '_'.
 
 %% @doc Replace unused function params and case clause patterns with
 %% underscore Remove record field match patterns that are unused.
@@ -617,6 +636,164 @@ atom_changer(Old, New) ->
                 _ ->
                     Node
             end
+    end.
+
+%% @doc Analyze case clauses for record field match meanings,
+%% so that they can be reworked for maps.
+-spec analyze_case_clauses(syntax_tree(), atom()) -> [clause_analysis()].
+analyze_case_clauses(CaseExpr, Undef) ->
+    [begin
+         [Pattern] = erl_syntax:clause_patterns(C),
+         analyze_clause(Pattern, C, Undef)
+     end
+     || C <- erl_syntax:case_expr_clauses(CaseExpr)].
+
+%% @doc Analyze if clauses for record field match meanings, so that they
+%% can be reworked for maps. An extra pattern from the function record
+%% parameter must be supplied. (A reason not to rewrite such if clauses to
+%% case clauses is performance; there are differences in the generated beam
+%% assembler that are significant enough to warrant special handling of if
+%% clause analysis.)
+-spec analyze_if_clauses(syntax_tree(), syntax_tree(), atom()) ->
+                                [clause_analysis()].
+analyze_if_clauses(Pattern, IfExpr, Undef) ->
+    [analyze_clause(Pattern, C, Undef)
+     || C <- erl_syntax:if_expr_clauses(IfExpr)].
+
+analyze_clause(Pattern, Clause, Undef) ->
+    Body = erl_syntax:clause_body(Clause),
+    case clause_pattern_contains_record_match(Pattern) of
+        {true, {K,VTree}} ->
+            Guard = erl_syntax:clause_guard(Clause),
+            {analyze_clause_record_match_vtree(K, VTree, Guard, Undef), Body};
+        false ->
+            case erl_syntax:type(Pattern) of
+                underscore ->
+                    {'_', Body};
+                X ->
+                    error({unexpected_case_clause,Clause,X})
+            end
+    end.
+
+clause_pattern_contains_record_match(P) ->
+    erl_syntax_lib:fold(
+      fun(_Node, {true,X}) ->
+              {true,X};
+         (Node, false) ->
+              case erl_syntax:type(Node) of
+                  record_expr ->
+                      case erl_syntax:record_expr_fields(Node) of
+                          [F] ->
+                              Name = erl_syntax:atom_value(
+                                       erl_syntax:record_field_name(F)),
+                              VTree = erl_syntax:record_field_value(F),
+                              {true, {Name, VTree}};
+                          [] ->
+                              false;
+                          Fs ->
+                              error({unexpected_multifield_match,Fs})
+                      end;
+                  _ ->
+                      false
+              end
+      end,
+      false,
+      P).
+
+analyze_clause_record_match_vtree(K, VTree, Guard, Undef) ->
+    case erl_syntax:type(VTree) of
+        atom ->
+            case erl_syntax:atom_value(VTree) of
+                Undef ->
+                    {match_undefined, K};
+                Other ->
+                    error({unexpected_record_field_atom_match,K,Other})
+            end;
+        variable ->
+            Var = erl_syntax:variable_name(VTree),
+            if Guard =:= none ->
+                    {match_variable, K, Var};
+               true ->
+                    case is_guard_cmp_undefined(Var, Guard, Undef) of
+                        {true, eq} -> {match_undefined, K};
+                        {true, ne} -> {match_not_undefined, K};
+                        false ->
+                            case is_guard_true(Guard) of
+                                true ->
+                                    '_'; % a catch-all if-clause, likely
+                                false ->
+                                    error({unexpected_guard,K,Guard,VTree})
+                            end
+                    end
+            end;
+        tuple ->
+            Elems = erl_syntax:tuple_elements(VTree),
+            case lists:zip([erl_syntax:type(Elem) || Elem <- Elems], Elems) of
+                [{atom,E1}, {variable,E2}] ->
+                    Tag = erl_syntax:atom_value(E1),
+                    Var = erl_syntax:variable_name(E2),
+                    {match_tagged_variable, K, Tag, Var};
+                Other ->
+                    error({unexpected_record_field_tuple_match,K,Other})
+            end;
+        Other ->
+            error({unexpected_record_field_match,K,Other,VTree,Guard})
+    end.
+
+is_guard_cmp_undefined(Var, Guard, Undef) ->
+    case erl_syntax:disjunction_body(Guard) of
+        [D] ->
+            case erl_syntax:conjunction_body(D) of
+                [C] -> is_conjunction_cmp_undefined(Var, C, Undef);
+                _   -> false
+            end;
+        _ ->
+            false
+    end.
+
+is_guard_true(Guard) ->
+    case erl_syntax:disjunction_body(Guard) of
+        [D] ->
+            case erl_syntax:conjunction_body(D) of
+                [C] ->
+                    case erl_syntax:type(C) of
+                        atom -> erl_syntax:atom_value(C) == true;
+                        _    -> false
+                    end;
+                _ ->
+                    false
+            end;
+        _ ->
+            false
+    end.
+
+is_conjunction_cmp_undefined(Var, C, U) ->
+    case erl_syntax:type(C) of
+        infix_expr ->
+            L = erl_syntax:infix_expr_left(C),
+            R = erl_syntax:infix_expr_right(C),
+            Op = erl_syntax:operator_name(erl_syntax:infix_expr_operator(C)),
+            case {erl_syntax:type(L), Op, erl_syntax:type(R)} of
+                {variable, '=:=', atom} -> is_cmp_var_undefined(L,Var,R,U, eq);
+                {variable, '=/=', atom} -> is_cmp_var_undefined(L,Var,R,U, ne);
+                {variable, '==', atom}  -> is_cmp_var_undefined(L,Var,R,U, eq);
+                {variable, '/=', atom}  -> is_cmp_var_undefined(L,Var,R,U, ne);
+                {atom, '=:=', variable} -> is_cmp_var_undefined(R,Var,L,U, eq);
+                {atom, '=/=', variable} -> is_cmp_var_undefined(R,Var,L,U, ne);
+                {atom, '==', variable}  -> is_cmp_var_undefined(R,Var,L,U, eq);
+                {atom, '/=', variable}  -> is_cmp_var_undefined(R,Var,L,U, ne);
+                _ -> false
+            end;
+        _ ->
+            false
+    end.
+
+is_cmp_var_undefined(VarTree, Var, ATree, Undef, CmpHow) ->
+    case {erl_syntax:variable_name(VarTree), erl_syntax:atom_value(ATree)} of
+        {Var, Undef} ->
+            {true, CmpHow};
+        _ ->
+            false
     end.
 
 mk_var(Base, Suffix) ->
