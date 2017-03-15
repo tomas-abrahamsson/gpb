@@ -6173,6 +6173,7 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                                 find_last_nonopt_field_index(Fields)
                         end
                 end,
+    MapTypeFieldsRepr = get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
     string:join(
       lists:map(
         fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
@@ -6189,14 +6190,16 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                                  '$no' ->
                                      case {Type, Occur, MapsOrRecords} of
                                          {{map,_,_}, repeated, records} ->
-                                             case proplists:get_value(mapfields_as_maps, Opts, false) of
-                                                 true ->
+                                             case MapTypeFieldsRepr of
+                                                 maps ->
                                                      ?f(" = #{}");
-                                                 false ->
+                                                 '2tuples' ->
                                                      ?f(" = []")
                                              end;
-                                         {_, repeated, records} -> ?f(" = []");
-                                         _        -> ""
+                                         {_, repeated, records} ->
+                                             ?f(" = []");
+                                         _ ->
+                                             ""
                                      end;
                                  Default ->
                                      case MapsOrRecords of
