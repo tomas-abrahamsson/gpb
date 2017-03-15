@@ -6173,9 +6173,10 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                                 find_last_nonopt_field_index(Fields)
                         end
                 end,
+    MapTypeFieldsRepr = get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
     string:join(
       lists:map(
-        fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts,
+        fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
                             occurrence=Occur}=Field}) ->
                 TypeSpecifierSep = calc_field_type_sep(Field, Opts),
                 LineLead = if MappingAndUnset == {maps, omitted},
@@ -6187,9 +6188,18 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                            end,
                 DefaultStr = case proplists:get_value(default, FOpts, '$no') of
                                  '$no' ->
-                                     case {Occur, MapsOrRecords} of
-                                         {repeated, records} -> ?f(" = []");
-                                         _        -> ""
+                                     case {Type, Occur, MapsOrRecords} of
+                                         {{map,_,_}, repeated, records} ->
+                                             case MapTypeFieldsRepr of
+                                                 maps ->
+                                                     ?f(" = #{}");
+                                                 '2tuples' ->
+                                                     ?f(" = []")
+                                             end;
+                                         {_, repeated, records} ->
+                                             ?f(" = []");
+                                         _ ->
+                                             ""
                                      end;
                                  Default ->
                                      case MapsOrRecords of
@@ -8222,7 +8232,7 @@ understands_coding(Opts) ->
 is_target_major_version_at_least(VsnMin, Opts) ->
     case proplists:get_value(target_erlang_version, Opts, current) of
         current ->
-            is_current_major_version_at_least(VsnMin); 
+            is_current_major_version_at_least(VsnMin);
         N when is_integer(N) ->
             N >= VsnMin
     end.
