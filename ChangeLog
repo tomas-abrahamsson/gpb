@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.26.7
+2016-Mar-15
+
+        * Fix default for map type fields (map<_,_>) when the mapfields_as_maps
+        option is set. Thanks to Tristan Sloughter
+
 Version 3.26.6
 2016-Dec-29
 
