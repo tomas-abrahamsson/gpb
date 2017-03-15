@@ -6175,7 +6175,7 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                 end,
     string:join(
       lists:map(
-        fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts,
+        fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
                             occurrence=Occur}=Field}) ->
                 TypeSpecifierSep = calc_field_type_sep(Field, Opts),
                 LineLead = if MappingAndUnset == {maps, omitted},
@@ -6187,8 +6187,15 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                            end,
                 DefaultStr = case proplists:get_value(default, FOpts, '$no') of
                                  '$no' ->
-                                     case {Occur, MapsOrRecords} of
-                                         {repeated, records} -> ?f(" = []");
+                                     case {Type, Occur, MapsOrRecords} of
+                                         {{map,_,_}, repeated, records} ->
+                                             case proplists:get_value(mapfields_as_maps, Opts, false) of
+                                                 true ->
+                                                     ?f(" = #{}");
+                                                 false ->
+                                                     ?f(" = []")
+                                             end;
+                                         {_, repeated, records} -> ?f(" = []");
                                          _        -> ""
                                      end;
                                  Default ->
@@ -8222,7 +8229,7 @@ understands_coding(Opts) ->
 is_target_major_version_at_least(VsnMin, Opts) ->
     case proplists:get_value(target_erlang_version, Opts, current) of
         current ->
-            is_current_major_version_at_least(VsnMin); 
+            is_current_major_version_at_least(VsnMin);
         N when is_integer(N) ->
             N >= VsnMin
     end.
