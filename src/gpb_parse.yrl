@@ -171,8 +171,7 @@ msg_elem -> message_def:                '$1'.
 msg_elem -> enum_def:                   '$1'.
 msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
 msg_elem -> oneof_def:                  '$1'.
-msg_elem -> extend name '{' msg_elems '}':
-                                 {{extend,{eref1,'$2'}},'$4'}.
+msg_elem -> extend_def:                 '$1'.
 msg_elem -> reserved_def:               '$1'.
 
 fidentifier -> identifier:              '$1'.
