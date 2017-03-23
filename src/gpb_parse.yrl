@@ -502,7 +502,8 @@ flatten_qualify_defnames(Defs, Root) ->
                     compute_roots(prepend_path(Root, Name)) ++
                     compute_roots(prepend_path(empty_pkg_root(), Name)),
                 {Fields2, Defs2} = flatten_fields(FieldsOrDefs, Root),
-                [{{extend,{eref2,FullNameCandidates}},Fields2} | Defs2] ++ Acc;
+                [{{extend,{eref2,Root,FullNameCandidates}},Fields2} | Defs2] ++
+                    Acc;
            ({{service, Name}, RPCs}, Acc) ->
                 FullName = prepend_path(Root, Name),
                 [{{service,FullName}, RPCs} | Acc];
@@ -634,11 +635,12 @@ resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
       Reasons,
       Rpcs).
 
-resolve_extend_refs({eref2, ExtendeeCandidates}, Fields, Defs, Root, Acc) ->
+resolve_extend_refs({eref2, Ctxt, ExtendeeCandidates}, Fields, Defs,
+                    Root, Acc) ->
     case resolve_ref_candidates(Defs, ExtendeeCandidates) of
         {found, {msg,NewToBeExtended}} ->
             {NewFields, Acc2} =
-                resolve_field_refs(Fields, Defs, Root, ['.'], Acc),
+                resolve_field_refs(Fields, Defs, Root, Ctxt, Acc),
             {NewToBeExtended, NewFields, Acc2};
         not_found ->
             Reason = {extend_ref_to_undefined_msg, hd(ExtendeeCandidates)},

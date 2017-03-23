@@ -540,6 +540,61 @@ extend_msg_in_other_package_test() ->
       [#?gpb_field{name=g, fnum=1, type=bool, occurrence=required}]}] =
         AllDefs.
 
+extending_and_resolving_ref_to_msg_in_enclosing_package_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"p/p.proto",
+                  ["package p;",
+                   "message err { required uint32 f = 1; };"]},
+                 {"p/x/y.proto",
+                  ["package p.x;",
+                   "import \"p.proto\";",
+                   "message a {",
+                   "  extensions 200 to max;",
+                   "  optional string g = 1;"
+                   "  optional err    h = 2;"
+                   "  extend a {",
+                   "    repeated err errs = 200;",
+                   "  }",
+                   "}"]}],
+                [use_packages]),
+    [{package,p},
+     {package,'p.x'},
+     {{extensions,'p.x.a'},[{200,max}]},
+     {{msg,'p.err'}, [#?gpb_field{name=f}]},
+     {{msg,'p.x.a'},
+      [#?gpb_field{name=g, fnum=1, type=string, occurrence=optional},
+       #?gpb_field{name=h, fnum=2, type={msg,'p.err'}, occurrence=optional},
+       #?gpb_field{name=errs, fnum=200, type={msg,'p.err'},
+                   occurrence=repeated}]}] =
+        AllDefs.
+
+scope_when_resolving_extend_field_refs_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"a.proto",
+                  ["package a;",
+                   "message Foo {",
+                   "  extensions 200 to max;",
+                   "  optional string id = 1;",
+                   "}"]},
+                 {"b.proto",
+                  ["package b;",
+                   "import \"a.proto\";",
+                   "message Bar {",
+                   "  optional string id = 1;",
+                   "}",
+                   "",
+                   "extend a.Foo {",
+                   "  optional Bar b = 200;",
+                   "}"]}],
+                [use_packages]),
+    [{package,a},
+     {package,b},
+     {{extensions,'a.Foo'},[{200,max}]},
+     {{msg,'a.Foo'}, [#?gpb_field{name=id},
+                      #?gpb_field{name=b, type={msg,'b.Bar'}}]},
+     {{msg,'b.Bar'}, [#?gpb_field{name=id}]}] =
+        AllDefs.
+
 parses_service_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
                              "message m2 {required uint32 f2=1;}",
