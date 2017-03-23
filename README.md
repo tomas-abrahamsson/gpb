@@ -510,6 +510,16 @@ Places to update when making a new version:
 * tag it in git
 
 
+Related projects
+----------------
+* [rebar3_plugin_gpb](https://github.com/lrascao/rebar3_gpb_plugin) for
+  using gpb with rebar3
+* [exprotobuf](https://github.com/bitwalker/exprotobuf) for using gpb from
+  [Elixir](http://elixir-lang.org)
+* [enif_protobuf](https://github.com/jg513/enif_protobuf) for a NIF
+  encoder/decoder
+
+
 Contributing
 ------------
 
