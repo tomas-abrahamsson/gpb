@@ -1,7 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.26.8
+2017-Mar-24
+
+        * Fix name resolution bugs when extending messages in enclosing
+        packages and in other packages. Thanks to Michael Ries for reporting.
+
 Version 3.26.7
-2016-Mar-15
+2017-Mar-15
 
         * Fix default for map type fields (map<_,_>) when the mapfields_as_maps
         option is set. Thanks to Tristan Sloughter
