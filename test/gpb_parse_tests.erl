@@ -510,28 +510,24 @@ extend_msg_several_times_test() ->
       ]}] = do_process_sort_defs(Defs, []).
 
 extend_msg_in_other_package_test() ->
-    {ok, FooDefs} = parse_lines([%% foo.proto"
-                                 "package foo;",
-                                 "message fm1 {",
-                                 "    required int32 f = 1;",
-                                 "    extensions 100 to 199;",
-                                 "}",
-                                 "message fm2 {",
-                                 "    required bool g = 1;",
-                                 "}"]),
-    {ok, BarDefs} = parse_lines([%% bar.proto
-                                 "package bar;",
-                                 %% import "foo.proto"; % done implicitly
-                                 "extend foo.fm1 {",
-                                 "    optional string b1 = 100;",
-                                 "    optional foo.fm2 b2 = 101;",
-                                 "}"]),
-    Opts = [use_packages],
-    {ok, FooDefs2} = gpb_parse:post_process_one_file(FooDefs, Opts),
-    {ok, BarDefs2} = gpb_parse:post_process_one_file(BarDefs, Opts),
-    {ok, AllDefs} = gpb_parse:post_process_all_files(FooDefs2 ++ BarDefs2,
-                                                     Opts),
-
+    AllDefs = parse_sort_several_file_lines(
+                [{"foo.proto",
+                  ["package foo;",
+                   "message fm1 {",
+                   "    required int32 f = 1;",
+                   "    extensions 100 to 199;",
+                   "}",
+                   "message fm2 {",
+                   "    required bool g = 1;",
+                   "}"]},
+                 {"bar.proto",
+                  ["package bar;",
+                   "import \"foo.proto\";",
+                   "extend foo.fm1 {",
+                   "    optional string b1 = 100;",
+                   "    optional foo.fm2 b2 = 101;",
+                   "}"]}],
+                [use_packages]),
     [{package,bar},
      {package,foo},
      {{extensions,'foo.fm1'},[{100,199}]},
@@ -542,7 +538,62 @@ extend_msg_in_other_package_test() ->
                    occurrence=optional}]},
      {{msg,'foo.fm2'},
       [#?gpb_field{name=g, fnum=1, type=bool, occurrence=required}]}] =
-        lists:sort(AllDefs).
+        AllDefs.
+
+extending_and_resolving_ref_to_msg_in_enclosing_package_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"p/p.proto",
+                  ["package p;",
+                   "message err { required uint32 f = 1; };"]},
+                 {"p/x/y.proto",
+                  ["package p.x;",
+                   "import \"p.proto\";",
+                   "message a {",
+                   "  extensions 200 to max;",
+                   "  optional string g = 1;"
+                   "  optional err    h = 2;"
+                   "  extend a {",
+                   "    repeated err errs = 200;",
+                   "  }",
+                   "}"]}],
+                [use_packages]),
+    [{package,p},
+     {package,'p.x'},
+     {{extensions,'p.x.a'},[{200,max}]},
+     {{msg,'p.err'}, [#?gpb_field{name=f}]},
+     {{msg,'p.x.a'},
+      [#?gpb_field{name=g, fnum=1, type=string, occurrence=optional},
+       #?gpb_field{name=h, fnum=2, type={msg,'p.err'}, occurrence=optional},
+       #?gpb_field{name=errs, fnum=200, type={msg,'p.err'},
+                   occurrence=repeated}]}] =
+        AllDefs.
+
+scope_when_resolving_extend_field_refs_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"a.proto",
+                  ["package a;",
+                   "message Foo {",
+                   "  extensions 200 to max;",
+                   "  optional string id = 1;",
+                   "}"]},
+                 {"b.proto",
+                  ["package b;",
+                   "import \"a.proto\";",
+                   "message Bar {",
+                   "  optional string id = 1;",
+                   "}",
+                   "",
+                   "extend a.Foo {",
+                   "  optional Bar b = 200;",
+                   "}"]}],
+                [use_packages]),
+    [{package,a},
+     {package,b},
+     {{extensions,'a.Foo'},[{200,max}]},
+     {{msg,'a.Foo'}, [#?gpb_field{name=id},
+                      #?gpb_field{name=b, type={msg,'b.Bar'}}]},
+     {{msg,'b.Bar'}, [#?gpb_field{name=id}]}] =
+        AllDefs.
 
 parses_service_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
@@ -1091,6 +1142,39 @@ verify_strings_present(Str, StringsToTestFor) ->
 is_present(Str, ToTest) -> string:str(Str, ToTest) > 0.
 
 %% test helpers
+parse_sort_several_file_lines(ProtoLines, Opts) ->
+    {AllProtoNames, AllLines} = lists:unzip(ProtoLines),
+    AllProtoBases = lists:map(fun filename:basename/1, AllProtoNames),
+    AllDefs1 = [begin
+                    {ok, Defs1} = parse_lines(filter_away_import_lines(
+                                                Lines, AllProtoBases)),
+                    {ok, Defs2} = gpb_parse:post_process_one_file(Defs1, Opts),
+                    Defs2
+                end
+                || Lines <- AllLines],
+    {ok, AllDefs2} = gpb_parse:post_process_all_files(
+                       lists:append(AllDefs1),
+                       Opts),
+    lists:sort(AllDefs2).
+
+filter_away_import_lines(Lines, AllProtoNames) ->
+    {ImportLines, RestLines} = lists:partition(fun is_import_line/1, Lines),
+    Imports = lists:map(fun protobase_by_importline/1, ImportLines),
+    StrayImports = lists:filter(
+                     fun(I) -> not lists:member(I, AllProtoNames) end,
+                     Imports),
+    if StrayImports == [] -> RestLines;
+       true -> error({bad_test, stray_import_of_missing_proto, Imports, Lines})
+    end.
+
+is_import_line("import \""++_) -> true;
+is_import_line(_) -> false.
+
+protobase_by_importline(Line) ->
+    ["import"++_, ImportTxt | _] = string:tokens(Line, "\""),
+    filename:basename(ImportTxt).
+
+
 parse_lines(Lines) ->
     S = binary_to_list(iolist_to_binary([[L,"\n"] || L <- Lines])),
     case gpb_scan:string(S) of
