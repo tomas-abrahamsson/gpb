@@ -41,8 +41,7 @@ Version 3.26.3
 Version 3.26.2
 2016-Oct-04
 
-	* Integrate with Travis CI. Thanks to Luke Bakken
-	<lbakken@basho.com>
+	* Integrate with Travis CI. Thanks to Luke Bakken.
 
 	* Improve unit tests:
 	- increased timeouts for slow machines
