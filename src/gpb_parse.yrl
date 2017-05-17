@@ -35,6 +35,7 @@ Nonterminals
         reserved_def res_numbers res_number res_names
         oneof_def oneof_elems oneof_elem
         option_def
+        group_def
         service_def rpc_defs rpc_def rpc_arg rpc_ret m_opts
         name
         constant
@@ -56,6 +57,7 @@ Terminals
         option
         extensions extend max to reserved
         oneof
+        group
         service rpc returns stream
         packed deprecated
         syntax
@@ -173,6 +175,7 @@ msg_elem -> extensions_def:             {extensions,lists:sort('$1')}.
 msg_elem -> oneof_def:                  '$1'.
 msg_elem -> extend_def:                 '$1'.
 msg_elem -> reserved_def:               '$1'.
+msg_elem -> group_def:                  '$1'.
 
 fidentifier -> identifier:              '$1'.
 fidentifier -> package:                 kw_to_identifier('$1').
@@ -213,6 +216,7 @@ fidentifier -> deprecated:              kw_to_identifier('$1').
 fidentifier -> syntax:                  kw_to_identifier('$1').
 fidentifier -> map:                     kw_to_identifier('$1').
 fidentifier -> reserved:                kw_to_identifier('$1').
+fidentifier -> group:                   kw_to_identifier('$1').
 
 opt_field_opts -> field_opts:           '$1'.
 opt_field_opts -> '$empty':             [].
@@ -265,6 +269,17 @@ map_key_type -> sfixed64:               sfixed64.
 map_key_type -> bool:                   bool.
 map_key_type -> string:                 string.
 %% missing from type: double | float | bytes | message name | enum name
+
+group_def -> occurrence group fidentifier '=' dec_lit '{' msg_elems '}':
+                 begin
+                     TmpGName = identifier_name('$3'),
+                     {group1,TmpGName,'$7',
+                      #?gpb_field{occurrence='$1',
+                                  type={ref,['...expanded-later']},
+                                  name=identifier_name('$3'),
+                                  fnum=literal_value('$5'),
+                                  opts=[]}}
+                 end.
 
 constant -> identifier:                 identifier_name('$1').
 constant -> integer:                    '$1'.
@@ -361,6 +376,7 @@ Erlang code.
 
 -type defs() :: [def()].
 -type def() :: {{msg, Name::atom()}, [field()]} |
+               {{group, Name::atom()}, [field()]} |
                {{enum, Name::atom()}, [{Sym::atom(), Value::integer()}]} |
                {{service, Name::atom()}, [#?gpb_rpc{}]} |
                {package, Name::atom()} |
@@ -492,6 +508,9 @@ flatten_qualify_defnames(Defs, Root) ->
                 FullName = prepend_path(Root, Name),
                 {Fields2, Defs2} = flatten_fields(FieldsOrDefs, FullName),
                 [{{msg,FullName},Fields2} | Defs2] ++ Acc;
+           ({{group,FullName}, FieldsOrDefs}, Acc) ->
+                {Fields2, Defs2} = flatten_fields(FieldsOrDefs, FullName),
+                [{{group,FullName},Fields2} | Defs2] ++ Acc;
            ({{enum,Name}, ENs}, Acc) ->
                 FullName = prepend_path(Root, Name),
                 [{{enum,FullName}, ENs} | Acc];
@@ -515,25 +534,32 @@ flatten_qualify_defnames(Defs, Root) ->
 
 flatten_fields(FieldsOrDefs, FullName) ->
     {RFields2, Defs2} =
-        lists:foldl(fun(#?gpb_field{}=F, {Fs,Ds}) ->
-                            {[F | Fs], Ds};
-                       (#gpb_oneof{}=O, {Fs,Ds}) ->
-                            {[O | Fs], Ds};
-                       ({{extend, _Ref},_}=Def, {Fs,Ds}) ->
-                            QDefs = flatten_qualify_defnames([Def], FullName),
-                            {Fs, QDefs ++ Ds};
-                       ({reserved_numbers, Ns}, {Fs,Ds}) ->
-                            Def = {{reserved_numbers,FullName}, Ns},
-                            {Fs, [Def | Ds]};
-                       ({reserved_names, Ns}, {Fs,Ds}) ->
-                            Def = {{reserved_names,FullName}, Ns},
-                            {Fs, [Def | Ds]};
-                       (Def, {Fs,Ds}) ->
-                            QDefs = flatten_qualify_defnames([Def], FullName),
-                            {Fs, QDefs++Ds}
-                    end,
-                    {[],[]},
-                    FieldsOrDefs),
+        lists:foldl(
+          fun(#?gpb_field{}=F, {Fs,Ds}) ->
+                  {[F | Fs], Ds};
+             (#gpb_oneof{}=O, {Fs,Ds}) ->
+                  {[O | Fs], Ds};
+             ({group1,TmpGName,GFields,MField}, {Fs,Ds}) ->
+                  FullGroupName = prepend_path(FullName, TmpGName),
+                  Group0 = {{group,FullGroupName}, GFields},
+                  QDefs = flatten_qualify_defnames([Group0], FullGroupName),
+                  MField1 = MField#?gpb_field{type={ref,FullGroupName}},
+                  {[MField1 | Fs], QDefs++Ds};
+             ({{extend, _Ref},_}=Def, {Fs,Ds}) ->
+                  QDefs = flatten_qualify_defnames([Def], FullName),
+                  {Fs, QDefs ++ Ds};
+             ({reserved_numbers, Ns}, {Fs,Ds}) ->
+                  Def = {{reserved_numbers,FullName}, Ns},
+                  {Fs, [Def | Ds]};
+             ({reserved_names, Ns}, {Fs,Ds}) ->
+                  Def = {{reserved_names,FullName}, Ns},
+                  {Fs, [Def | Ds]};
+             (Def, {Fs,Ds}) ->
+                  QDefs = flatten_qualify_defnames([Def], FullName),
+                  {Fs, QDefs++Ds}
+          end,
+          {[],[]},
+          FieldsOrDefs),
     {lists:reverse(RFields2), Defs2}.
 
 %% Resolve any refs
@@ -545,6 +571,10 @@ resolve_refs(Defs) ->
                   {NewFields, Acc2} =
                       resolve_field_refs(Fields, Defs, Root, FullName, Acc),
                   {{{msg,FullName}, NewFields}, Acc2};
+             ({{group,FullName}, Fields}, Acc) ->
+                  {NewFields, Acc2} =
+                      resolve_field_refs(Fields, Defs, Root, FullName, Acc),
+                  {{{group,FullName}, NewFields}, Acc2};
              ({{service,FullName}, Rpcs}, Acc) ->
                   {NewRPCs, Acc2} =
                       resolve_rpc_refs(Rpcs, Defs, Root, FullName, Acc),
@@ -680,6 +710,7 @@ is_absolute_ref(_Other)    -> false.
 
 find_typename(Name, [{{enum,Name}, _Values} | _])  -> {found, {enum,Name}};
 find_typename(Name, [{{msg,Name}, _SubElems} | _]) -> {found, {msg,Name}};
+find_typename(Name, [{{group,Name}, _Elems} | _])  -> {found, {group,Name}};
 find_typename(Name, [_ | Rest])                    -> find_typename(Name, Rest);
 find_typename(_Name,[])                            -> not_found.
 
@@ -714,6 +745,9 @@ convert_default_values(Defs) ->
       fun({{msg,Name},Fields}) ->
               Fields2 = lists:map(fun convert_default_values_field/1, Fields),
               {{msg,Name},Fields2};
+         ({{group,Name},Fields}) ->
+              Fields2 = lists:map(fun convert_default_values_field/1, Fields),
+              {{group,Name},Fields2};
          (Other) ->
               Other
       end,
@@ -831,6 +865,7 @@ is_scalar_numeric(_)        -> false. % not: string | bytes | msg | map
 verify_defs(Defs) ->
     collect_errors(Defs,
                    [{msg,     [fun verify_field_defaults/2]},
+                    {group,   [fun verify_field_defaults/2]},
                     {extend,  [fun verify_extend/2]},
                     {service, [fun verify_service/2]},
                     {'_',     [fun(_Def, _AllDefs) -> ok end]}]).
@@ -881,7 +916,10 @@ verify_field_defaults({{msg,M}, Fields}, AllDefs) ->
                         add_acc(Acc, Res)
                 end,
                 ok,
-                Fields).
+                Fields);
+verify_field_defaults({{group,G}, Fields}, AllDefs) ->
+    verify_field_defaults({{msg,G}, Fields}, AllDefs).
+
 
 verify_scalar_default_if_present(MsgName, FieldName, Type, Default, AllDefs) ->
     case Type of
@@ -988,6 +1026,8 @@ fmt_err({{bad_binary_value, Default}, {Msg, Field}}) ->
 reformat_names(Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
                       {{msg,reformat_name(Name)}, reformat_fields(Fields)};
+                 ({{group,Name}, Fields}) ->
+                      {{group,reformat_name(Name)}, reformat_fields(Fields)};
                  ({{msg_containment, ProtoName}, Msgs}) ->
                       {{msg_containment,ProtoName},
                        [reformat_name(N) || N <- Msgs]};
@@ -1069,6 +1109,8 @@ possibly_extend_msg({{extend,Msg}, MoreFields}=Extending, Defs) ->
 enumerate_msg_fields(Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
                       {{msg, Name}, enumerate_fields(Fields)};
+                 ({{group,Name}, Fields}) ->
+                      {{group, Name}, enumerate_fields(Fields)};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -1090,6 +1132,8 @@ index_seq(Start, L)   -> lists:zip(lists:seq(Start, length(L) + Start - 1), L).
 normalize_msg_field_options(Defs) ->
     lists:map(fun({{msg,Name}, Fields}) ->
                       {{msg, Name}, normalize_field_options(Fields)};
+                 ({{group,Name}, Fields}) ->
+                      {{group, Name}, normalize_field_options(Fields)};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -1170,6 +1214,12 @@ prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs) ->
                                              ToLowerOrSnake, Name)},
                         prefix_suffix_fields(Prefix, Suffix,
                                              ToLowerOrSnake, Fields, Defs)};
+                 ({{group,Name}, Fields}) ->
+                      Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
+                      {{group,prefix_suffix_name(Prefix1, Suffix,
+                                                 ToLowerOrSnake, Name)},
+                        prefix_suffix_fields(Prefix, Suffix,
+                                             ToLowerOrSnake, Fields, Defs)};
                  ({{extensions,Name}, Exts}) ->
                       Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
                       {{extensions,
@@ -1203,6 +1253,11 @@ prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields, Defs) ->
               NewMsgName = prefix_suffix_name(Prefix1, Suffix,
                                               ToLowerOrSnake, MsgName),
               F#?gpb_field{type={msg,NewMsgName}};
+         (#?gpb_field{type={group,MsgName}}=F) ->
+              Prefix1 = maybe_prefix_by_proto(MsgName, Prefix, Defs),
+              NewMsgName = prefix_suffix_name(Prefix1, Suffix,
+                                              ToLowerOrSnake, MsgName),
+              F#?gpb_field{type={group,NewMsgName}};
          (#?gpb_field{type={map,KeyType,{msg,MsgName}}}=F) ->
               Prefix1 = maybe_prefix_by_proto(MsgName, Prefix, Defs),
               NewMsgName = prefix_suffix_name(Prefix1, Suffix,

@@ -595,6 +595,40 @@ scope_when_resolving_extend_field_refs_test() ->
      {{msg,'b.Bar'}, [#?gpb_field{name=id}]}] =
         AllDefs.
 
+group_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required m2 f = 1;",
+                             "  required group g = 2 {",
+                             "    required uint32 gf = 3;",
+                             "  }",
+                             "}",
+                             "message m2 {",
+                             "  required uint32 ff = 11;",
+                             "}"]),
+    [{{group,'m1.g'},[#?gpb_field{name=gf,type=uint32,fnum=3,rnum=2,
+                                  opts=[]}]},
+     {{msg,m1},[#?gpb_field{name=f,type={msg,'m2'}},
+                #?gpb_field{name=g,type={group,'m1.g'}}]},
+     {{msg,m2},[#?gpb_field{name=ff}]}] =
+        do_process_sort_defs(Defs).
+
+message_def_nested_in_group_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required m2 f = 1;",
+                             "  message m2 {",
+                             "    required uint32 ff = 11;",
+                             "  }",
+                             "  required group g = 2 {",
+                             "    required uint32 gf = 3;",
+                             "  }",
+                             "}"]),
+    [{{group,'m1.g'},[#?gpb_field{name=gf,type=uint32,fnum=3,rnum=2,
+                                  opts=[]}]},
+     {{msg,m1},[#?gpb_field{name=f,type={msg,'m1.m2'}},
+                #?gpb_field{name=g,type={group,'m1.g'}}]},
+     {{msg,'m1.m2'},[#?gpb_field{name=ff}]}] =
+        do_process_sort_defs(Defs).
+
 parses_service_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
                              "message m2 {required uint32 f2=1;}",
