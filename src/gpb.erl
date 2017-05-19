@@ -193,8 +193,13 @@ decode_msg(Bin, MsgName, MsgDefs) ->
     MsgDef = keyfetch(MsgKey, MsgDefs),
     decode_field(Bin, MsgDef, MsgDefs, Msg).
 
-new_initial_msg({msg,MsgName}=MsgKey, MsgDefs) ->
-    MsgDef = keyfetch(MsgKey, MsgDefs),
+new_initial_msg({msg,MsgName}=Key, MsgDefs) ->
+    new_init_2(MsgName, Key, MsgDefs);
+new_initial_msg({group,Name}=Key, MsgDefs) ->
+    new_init_2(Name, Key, MsgDefs).
+
+new_init_2(MsgName, Key, MsgDefs) ->
+    MsgDef = keyfetch(Key, MsgDefs),
     IsProto3 = is_msg_proto3(MsgName, MsgDefs),
     lists:foldl(fun(#?gpb_field{rnum=RNum, occurrence=repeated}, Record) ->
                         setelement(RNum, Record, []);
@@ -225,23 +230,28 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
     WireType = Key band 7,
     case find_field(FieldNum, MsgDef) of
         false ->
-            Rest2 = skip_field(Rest, WireType),
+            Rest2 = skip_field(Rest, FieldNum, WireType),
             decode_field(Rest2, MsgDef, MsgDefs, Msg);
         {#?gpb_field{type=FieldType, rnum=RNum}=FieldDef, IsOneof} ->
-            case fielddef_matches_wiretype_get_packed(WireType, FieldDef) of
-                {yes,true} ->
+            case fielddef_matches_wiretype_get_info(WireType, FieldDef) of
+                {yes,packed} ->
                     AccSeq = element(RNum, Msg),
                     {NewSeq, Rest2} = decode_packed(FieldType, Rest, MsgDefs,
                                                    AccSeq),
                     NewMsg = setelement(RNum, Msg, NewSeq),
                     decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
-                {yes,false} ->
+                {yes,normal} ->
                     {NewValue, Rest2} = decode_type(FieldType, Rest, MsgDefs),
                     NewMsg = add_field(NewValue, FieldDef, IsOneof, MsgDefs,
                                        Msg),
                     decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
+                {yes,group} ->
+                    {NewValue, Rest2} = decode_group(FieldDef, Rest, MsgDefs),
+                    NewMsg = add_field(NewValue, FieldDef, IsOneof, MsgDefs,
+                                       Msg),
+                    decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
                 no ->
-                    Rest2 = skip_field(Rest, WireType),
+                    Rest2 = skip_field(Rest, FieldNum, WireType),
                     decode_field(Rest2, MsgDef, MsgDefs, Msg)
             end
     end;
@@ -268,23 +278,31 @@ find_field(N, [#gpb_oneof{fields=Fs} | Rest]) ->
 find_field(_, []) ->
     false.
 
-fielddef_matches_wiretype_get_packed(WireType, #?gpb_field{type=Type}=FieldDef)->
+fielddef_matches_wiretype_get_info(WireType, #?gpb_field{type={group,_}})->
+    if WireType == 3 -> {yes, group};
+       true          -> no
+    end;
+fielddef_matches_wiretype_get_info(WireType, #?gpb_field{type=Type}=FieldDef)->
     IsPacked = is_packed(FieldDef),
-    ExpectedWireType = if IsPacked     -> encode_wiretype(bytes);
-                          not IsPacked -> encode_wiretype(Type)
-                       end,
-    if WireType == ExpectedWireType -> {yes, IsPacked};
+    {ExpectedWireType, Info} =
+        if IsPacked     -> {encode_wiretype(bytes), packed};
+           not IsPacked -> {encode_wiretype(Type), normal}
+        end,
+    if WireType == ExpectedWireType -> {yes, Info};
        WireType /= ExpectedWireType -> no
     end.
 
 -spec decode_wiretype(non_neg_integer()) -> varint | bits32 | bits64 |
+                                            group_start | group_end |
                                             length_delimited.
 decode_wiretype(0) -> varint;
 decode_wiretype(1) -> bits64;
 decode_wiretype(2) -> length_delimited;
+decode_wiretype(3) -> group_start;
+decode_wiretype(4) -> group_end;
 decode_wiretype(5) -> bits32.
 
-skip_field(Bin, WireType) ->
+skip_field(Bin, FieldNum, WireType) ->
     case decode_wiretype(WireType) of
         varint ->
             {_N, Rest} = decode_varint(Bin, 64),
@@ -296,6 +314,9 @@ skip_field(Bin, WireType) ->
             {Len, Rest} = decode_varint(Bin, 64),
             <<_:Len/binary, Rest2/binary>> = Rest,
             Rest2;
+        group_start ->
+            {_, Rest} = read_group(Bin, FieldNum),
+            Rest;
         bits32 ->
             <<_:32, Rest/binary>> = Bin,
             Rest
@@ -400,6 +421,70 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {{Key,Value}, Rest2}
         end.
 
+decode_group(#?gpb_field{type={group,Name}, fnum=FieldNum}, Bin, MsgDefs) ->
+    {GroupBin, Rest} = read_group(Bin, FieldNum),
+    Key    = {group,Name},
+    Msg    = new_initial_msg(Key, MsgDefs),
+    MsgDef = keyfetch(Key, MsgDefs),
+    {decode_field(GroupBin, MsgDef, MsgDefs, Msg), Rest}.
+
+read_group(Bin, FieldNum) ->
+    {NumBytes, EndTagLen} = read_gr_b(Bin, 0, 0, 0, 0, FieldNum),
+    <<GroupBin:NumBytes/binary, _:EndTagLen/binary, Rest/binary>> = Bin,
+    {GroupBin, Rest}.
+
+%% Like skipping over fields, but record the total length,
+%% Each field is <(FieldNum bsl 3) bor FieldType> ++ <FieldValue>
+%% Record the length because varints may be non-optimally encoded.
+%%
+%% Groups can be nested, but assume the same FieldNum cannot be nested
+%% because group field numbers are shared with the rest of the fields numbers.
+%% Thus we can search just for an group-end with the same field number.
+%%
+%% (The only time the same group field number could occur would
+%% be in a nested sub message, but then it would be inside a
+%% length-delimited entry, which we skip-read by length.)
+read_gr_b(<<1:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen, FieldNum)
+  when N < (32-7) ->
+    read_gr_b(Tl, N+7, X bsl N + Acc, NumBytes, TagLen+1, FieldNum);
+read_gr_b(<<0:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen, FieldNum) ->
+    Key = X bsl N + Acc,
+    TagLen1 = TagLen + 1,
+    case {Key bsr 3, decode_wiretype(Key band 7)} of
+        {FieldNum, group_end} ->
+            {NumBytes, TagLen1};
+        {_, varint} ->
+            read_gr_vi(Tl, 0, NumBytes + TagLen1, FieldNum);
+        {_, bits64} ->
+            <<_:64, Tl2/binary>> = Tl,
+            read_gr_b(Tl2, 0, 0, NumBytes + TagLen1 + 8, 0, FieldNum);
+        {_, length_delimited} ->
+            read_gr_ld(Tl, 0, 0, NumBytes + TagLen1, FieldNum);
+        {_, group_start} ->
+            read_gr_b(Tl, 0, 0, NumBytes + TagLen1, 0, FieldNum);
+        {_, group_end} ->
+            read_gr_b(Tl, 0, 0, NumBytes + TagLen1, 0, FieldNum);
+        {_, bits32} ->
+            <<_:32, Tl2/binary>> = Tl,
+            read_gr_b(Tl2, 0, 0, NumBytes + TagLen1 + 4, 0, FieldNum)
+    end.
+
+read_gr_vi(<<1:1, _:7, Tl/binary>>, N, NumBytes, FieldNum)
+  when N < (64-7) ->
+    read_gr_vi(Tl, N+7, NumBytes+1, FieldNum);
+read_gr_vi(<<0:1, _:7, Tl/binary>>, _, NumBytes, FieldNum) ->
+    read_gr_b(Tl, 0, 0, NumBytes+1, 0, FieldNum).
+
+read_gr_ld(<<1:1, X:7, Tl/binary>>, N, Acc, NumBytes, FieldNum)
+  when N < (64-7) ->
+    read_gr_ld(Tl, N+7, X bsl N + Acc, NumBytes+1, FieldNum);
+read_gr_ld(<<0:1, X:7, Tl/binary>>, N, Acc, NumBytes, FieldNum) ->
+    Len = X bsl N + Acc,
+    NumBytes1 = NumBytes + 1,
+    <<_:Len/binary, Tl2/binary>> = Tl,
+    read_gr_b(Tl2, 0, 0, NumBytes1 + Len, 0, FieldNum).
+
+
 add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
     %% the same value appears multiple times, the parser accepts the
@@ -407,10 +492,14 @@ add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
     %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
     %% For now, we assume it works like strings.
     case FieldDef of
-        #?gpb_field{rnum = RNum, occurrence = required, type = {msg,_FMsgName}}->
-            merge_field(RNum, Value, Record, MsgDefs);
-        #?gpb_field{rnum = RNum, occurrence = optional, type = {msg,_FMsgName}}->
-            merge_field(RNum, Value, Record, MsgDefs);
+        #?gpb_field{rnum = RNum, occurrence = required, type = {msg,_Name}}->
+            merge_field_msg(RNum, Value, Record, MsgDefs);
+        #?gpb_field{rnum = RNum, occurrence = optional, type = {msg,_Name}}->
+            merge_field_msg(RNum, Value, Record, MsgDefs);
+        #?gpb_field{rnum = RNum, occurrence = required, type = {group,_Name}}->
+            merge_field_group(RNum, Value, Record, MsgDefs);
+        #?gpb_field{rnum = RNum, occurrence = optional, type = {group,_Name}}->
+            merge_field_group(RNum, Value, Record, MsgDefs);
         #?gpb_field{rnum = RNum, occurrence = required}->
             setelement(RNum, Record, Value);
         #?gpb_field{rnum = RNum, occurrence = optional}->
@@ -435,13 +524,22 @@ add_field(Value, FieldDef, true=_IsOneof, MsgDefs, Record) ->
             setelement(RNum, Record, {Name, Value})
     end.
 
-merge_field(RNum, NewMsg, Record, MsgDefs) ->
+merge_field_msg(RNum, NewMsg, Record, MsgDefs) ->
     case element(RNum, Record) of
         undefined ->
             setelement(RNum, Record, NewMsg);
         PrevMsg ->
             MergedMsg = merge_msgs(PrevMsg, NewMsg, MsgDefs),
             setelement(RNum, Record, MergedMsg)
+    end.
+
+merge_field_group(RNum, NewGroup, Record, MsgDefs) ->
+    case element(RNum, Record) of
+        undefined ->
+            setelement(RNum, Record, NewGroup);
+        PrevMsg ->
+            MergedGroup = merge_groups(PrevMsg, NewGroup, MsgDefs),
+            setelement(RNum, Record, MergedGroup)
     end.
 
 append_to_element(RNum, NewElem, Record) ->
@@ -456,8 +554,16 @@ append_to_map(RNum, {Key, _Value}=NewItem, Record) ->
 -spec merge_msgs(tuple(), tuple(), gpb_parse:defs()) -> tuple().
 merge_msgs(PrevMsg, NewMsg, MsgDefs)
   when element(1,PrevMsg) == element(1,NewMsg) ->
-    MsgName = element(1, NewMsg),
-    MsgDef = keyfetch({msg,MsgName}, MsgDefs),
+    Key = {msg,element(1,PrevMsg)},
+    merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs).
+
+merge_groups(PrevGroup, NewGroup, MsgDefs)
+  when element(1,PrevGroup) == element(1,NewGroup) ->
+    Key = {group,element(1,PrevGroup)},
+    merge_m_g_aux(PrevGroup, NewGroup, Key, MsgDefs).
+
+merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs) ->
+    MsgDef = keyfetch(Key, MsgDefs),
     lists:foldl(
       fun(#?gpb_field{rnum=RNum, occurrence=repeated, type=Type}, AccRecord) ->
               case Type of
@@ -483,6 +589,19 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
                   {PrevSubMsg, NewSubMsg} ->
                       MergedSubMsg = merge_msgs(PrevSubMsg, NewSubMsg, MsgDefs),
                       setelement(RNum, AccRecord, MergedSubMsg)
+              end;
+         (#?gpb_field{rnum=RNum, type={group,_FieldGroupName}}, AccRecord) ->
+              case {element(RNum, AccRecord), element(RNum, NewMsg)} of
+                  {undefined, undefined} ->
+                      AccRecord;
+                  {undefined, NewSubGroup} ->
+                      setelement(RNum, AccRecord, NewSubGroup);
+                  {_PrevSubGroup, undefined} ->
+                      AccRecord;
+                  {PrevSubGroup, NewSubGroup} ->
+                      MergedSubGroup = merge_groups(PrevSubGroup, NewSubGroup,
+                                                    MsgDefs),
+                      setelement(RNum, AccRecord, MergedSubGroup)
               end;
          (#?gpb_field{rnum=RNum}, AccRecord) ->
               case element(RNum, NewMsg) of
@@ -527,6 +646,11 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs)
 encode_msg(Msg, MsgDefs) ->
     MsgName = element(1, Msg),
     MsgDef = keyfetch({msg, MsgName}, MsgDefs),
+    encode_2(MsgDef, Msg, MsgDefs, <<>>).
+
+encode_group(Msg, MsgDefs) ->
+    GroupName = element(1, Msg),
+    MsgDef = keyfetch({group, GroupName}, MsgDefs),
     encode_2(MsgDef, Msg, MsgDefs, <<>>).
 
 encode_2([#?gpb_field{occurrence=Occurrence}=Field | Rest], Msg, MsgDefs, Acc) ->
@@ -598,6 +722,10 @@ encode_repeated([Elem | Rest], FNum, Type, MsgDefs, Acc) ->
 encode_repeated([], _FNum, _Type, _MsgDefs, Acc) ->
     Acc.
 
+encode_field_value(Value, FNum, {group,_}=Type, MsgDefs) ->
+    <<(encode_fnum_type(FNum, group_start))/binary,
+      (encode_value(Value, Type, MsgDefs))/binary,
+      (encode_fnum_type(FNum, group_end))/binary>>;
 encode_field_value(Value, FNum, Type, MsgDefs) ->
     <<(encode_fnum_type(FNum, Type))/binary,
       (encode_value(Value, Type, MsgDefs))/binary>>.
@@ -671,6 +799,8 @@ encode_value(Value, Type, MsgDefs) ->
         {msg,_MsgName} ->
             SubMsg = encode_msg(Value, MsgDefs),
             <<(encode_varint(byte_size(SubMsg)))/binary, SubMsg/binary>>;
+        {group,_MsgName} ->
+            encode_group(Value, MsgDefs);
         fixed32 ->
             <<Value:32/little>>;
         sfixed32 ->
@@ -704,6 +834,8 @@ encode_wiretype(double)            -> 1;
 encode_wiretype(string)            -> 2;
 encode_wiretype(bytes)             -> 2;
 encode_wiretype({msg,_MsgName})    -> 2;
+encode_wiretype(group_start)       -> 3;
+encode_wiretype(group_end)         -> 4;
 encode_wiretype(fixed32)           -> 5;
 encode_wiretype(sfixed32)          -> 5;
 encode_wiretype(float)             -> 5;
@@ -762,6 +894,21 @@ verify_msg2(Msg, MsgName, MsgDefs, Path) when is_tuple(Msg),
     end;
 verify_msg2(V, MsgName, _MsgDefs, Path) ->
     mk_type_error({bad_msg, MsgName}, V, Path).
+
+verify_group(Msg, GName, MsgDefs, Path) when is_tuple(Msg),
+                                             element(1, Msg) == GName ->
+    Key = {group, GName},
+    {value, {Key, Fields}} = lists:keysearch(Key, 1, MsgDefs),
+    if tuple_size(Msg) == length(Fields) + 1 ->
+            Path2 = if Path == [top_level] -> [GName];
+                       true                -> Path
+                    end,
+            verify_fields(Msg, Fields, Path2, MsgDefs);
+       true ->
+            mk_type_error({bad_record,GName}, Msg, Path)
+    end;
+verify_group(V, GroupName, _MsgDefs, Path) ->
+    mk_type_error({bad_group, GroupName}, V, Path).
 
 verify_fields(Msg, Fields, Path, MsgDefs) when tuple_size(Msg)
                                                == length(Fields) + 1 ->
@@ -822,6 +969,7 @@ verify_value_2(V, string, Path, _MsgDefs)   -> verify_string(V, Path);
 verify_value_2(V, bytes, Path, _MsgDefs)    -> verify_bytes(V, Path);
 verify_value_2(V, {enum,E}, Path, MsgDefs)  -> verify_enum(V, E, MsgDefs, Path);
 verify_value_2(V, {msg,M}, Path, MsgDefs)   -> verify_msg2(V, M, MsgDefs, Path);
+verify_value_2(V, {group,G}, Path, MsgDefs) -> verify_group(V, G, MsgDefs,Path);
 verify_value_2(V, {map,_,_}=M, Path, MsgDefs) -> verify_map(V, M, MsgDefs,Path).
 
 verify_int(V, {i,32}, _) when -(1 bsl 31) =< V, V =< (1 bsl 31 - 1) -> ok;
@@ -1142,3 +1290,31 @@ decode_invalid_varint_fails_test() ->
     %% eat memory until the vm dies (denial of service).
     InvalidVarint = iolist_to_binary([lists:duplicate(50, 255), 0]),
     ?assertError(_, decode_varint(InvalidVarint)).
+
+skips_empty_groups_test() ->
+    <<99,88,77>> = test_run_skip_field(<<(mk_group_start(1))/binary,
+                                         (mk_group_end(1))/binary,
+                                         99,88,77>>).
+skips_nested_groups_test() ->
+    Int32F = #?gpb_field{fnum=4, type=int32, rnum=2, occurrence=required},
+    Bytes  = #?gpb_field{fnum=5, type=bytes, rnum=2, occurrence=required},
+    <<99,88,77>> = test_run_skip_field(
+                     <<(mk_group_start(1))/binary,
+                       (mk_group_start(2))/binary,
+                       (encode_field(Int32F, {x,4711}, []))/binary,
+                       (encode_field(Bytes, {x,<<1,2,3>>}, []))/binary,
+                       (mk_group_end(2))/binary,
+                       (mk_group_end(1))/binary,
+                       99,88,77>>).
+
+test_run_skip_field(Bin) ->
+    {Key, Rest} = decode_varint(Bin),
+    WireType = encode_wiretype(group_start),
+    {FieldNum, WireType} = {Key bsr 3, Key band 7},
+    skip_field(Rest, FieldNum, WireType).
+
+mk_group_start(FieldNum) ->
+    encode_varint((FieldNum bsl 3) bor encode_wiretype(group_start)).
+
+mk_group_end(FieldNum) ->
+    encode_varint((FieldNum bsl 3) bor encode_wiretype(group_end)).
