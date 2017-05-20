@@ -2594,8 +2594,12 @@ format_map_encoders(Defs, AnRes, Opts0, IncludeStarter) ->
     format_msg_encoders(Defs, AnRes, Opts1, IncludeStarter).
 
 format_msg_encoders(Defs, AnRes, Opts, IncludeStarter) ->
-    [[format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter)
-      || {{msg, MsgName}, MsgDef} <- Defs],
+    [[format_msg_encoder(MsgName, MsgDef, Defs,
+                         AnRes, Opts,
+                         if Type =:= group -> false;
+                            true -> IncludeStarter
+                         end)
+      || {Type, MsgName, MsgDef} <- msgs_or_groups(Defs)],
      format_special_field_encoders(Defs, AnRes)].
 
 format_msg_encoder(MsgName, [], _Defs, _AnRes, _Opts, _IncludeStarter) ->
@@ -2828,6 +2832,8 @@ mk_field_encode_fn_name(MsgName, #?gpb_field{occurrence=repeated, name=FName})->
     mk_fn(e_field_, MsgName, FName);
 mk_field_encode_fn_name(MsgName, #?gpb_field{type={msg,_Msg}, name=FName}) ->
     mk_fn(e_mfield_, MsgName, FName);
+mk_field_encode_fn_name(MsgName, #?gpb_field{type={group,_Nm}, name=FName}) ->
+    mk_fn(e_mfield_, MsgName, FName);
 mk_field_encode_fn_name(_MsgName, #?gpb_field{type={enum,EnumName}}) ->
     mk_fn(e_enum_, EnumName);
 mk_field_encode_fn_name(_MsgName, #?gpb_field{type=sint32}) ->
@@ -2850,12 +2856,14 @@ mk_field_encode_fn_name(MsgName,  #?gpb_field{type=Type}=F) ->
 
 format_special_field_encoders(Defs, AnRes) ->
     lists:reverse( %% so generated auxiliary functions come in logical order
-      fold_msg_fields(
-        fun(MsgName, #?gpb_field{occurrence=repeated}=FieldDef, Acc) ->
+      fold_msg_or_group_fields(
+        fun(_Type, MsgName, #?gpb_field{occurrence=repeated}=FieldDef, Acc) ->
                 [format_field_encoder(MsgName, FieldDef, AnRes) | Acc];
-           (MsgName, #?gpb_field{type={msg,_}}=FieldDef, Acc)->
+           (_Type, MsgName, #?gpb_field{type={msg,_}}=FieldDef, Acc)->
                 [format_field_encoder(MsgName, FieldDef, AnRes) | Acc];
-           (_MsgName, #?gpb_field{}, Acc) ->
+           (_Type, MsgName, #?gpb_field{type={group,_}}=FieldDef, Acc)->
+                [format_field_encoder(MsgName, FieldDef, AnRes) | Acc];
+           (_Type, _MsgName, #?gpb_field{}, Acc) ->
                 Acc
         end,
         [],
@@ -2913,6 +2921,20 @@ possibly_format_mfield_encoder(MsgName,
     MapAsMsgName = map_type_to_msg_name(KType, VType),
     FieldDef2 = FieldDef#?gpb_field{type = {msg,MapAsMsgName}},
     possibly_format_mfield_encoder(MsgName, FieldDef2, AnRes);
+possibly_format_mfield_encoder(MsgName,
+                               #?gpb_field{type={group,GroupName},
+                                           fnum=FNum}=FieldDef,
+                               _AnRes) ->
+    FnName = mk_field_encode_fn_name(MsgName, FieldDef),
+    EndTagBytes = key_to_binary_fields(FNum, group_end),
+    gpb_codegen:format_fn(
+      FnName,
+      fun(Msg, Bin, TrUserData) ->
+              GroupBin = '<encode-msg>'(Msg, <<>>, TrUserData),
+              <<Bin/binary, GroupBin/binary, 'EndTagBytes'>>
+      end,
+      [replace_term('<encode-msg>', mk_fn(e_msg_, GroupName)),
+       splice_trees('EndTagBytes', EndTagBytes)]);
 possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].
 
@@ -3249,6 +3271,7 @@ maybe_userdata_param(Field, Expr) ->
     end.
 
 is_primitive_type(#?gpb_field{type={msg,_}}) -> false;
+is_primitive_type(#?gpb_field{type={group,_}}) -> false;
 is_primitive_type(#?gpb_field{type={map,_,_}}) -> false;
 is_primitive_type(_) -> true.
 
@@ -8429,6 +8452,8 @@ enum_to_binary_fields(Value) ->
     <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
     varint_to_binary_fields(N).
 
+key_to_binary_fields(FNum, {group,_}) ->
+    key_to_binary_fields(FNum, group_start);
 key_to_binary_fields(FNum, Type) ->
     Key = (FNum bsl 3) bor gpb:encode_wiretype(Type),
     varint_to_binary_fields(Key).
