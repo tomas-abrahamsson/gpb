@@ -40,7 +40,6 @@
         {
           used_types,         % :: sets:set(gpb_field_type()),
           known_msg_size,     % :: dict:dict(), %% MsgName -> Size | undefined
-          msg_occurrences,    % :: dict:dict(), %% MsgName -> [occurrence()]
           fixlen_types,       % :: sets:set(#ft{}),
           num_packed_fields,  % :: integer(),
           num_fields,         % :: dict:dict(), %% MsgName -> integer()
@@ -1669,7 +1668,6 @@ analyze_defs(Defs, Opts) ->
     KnownMsgSize = find_msgsizes_known_at_compile_time(MapsAsMsgs ++ Defs),
     #anres{used_types          = find_used_types(Defs),
            known_msg_size      = KnownMsgSize,
-           msg_occurrences     = find_msg_occurrences(MapsAsMsgs ++ Defs),
            fixlen_types        = find_fixlen_types(MapsAsMsgs ++ Defs),
            num_packed_fields   = find_num_packed_fields(MapsAsMsgs ++ Defs),
            num_fields          = find_num_fields(MapsAsMsgs ++ Defs),
@@ -1713,30 +1711,6 @@ find_used_types(Defs) ->
       end,
       sets:new(),
       Defs).
-
-find_msg_occurrences(Defs) ->
-    %% Don't "count" occurrences inside oneof fields
-    fold_msg_fields_o(
-      fun(_MsgName, #?gpb_field{type=Type, occurrence=Occ}, false, Acc) ->
-              case Type of
-                  {msg,SubMsgName} ->
-                      add_occurrence(SubMsgName, Occ, Acc);
-                  _Other ->
-                      Acc
-              end;
-         (_MsgName, #?gpb_field{}, {true, _CFName}, Acc) ->
-              Acc
-      end,
-      dict:new(),
-      Defs).
-
-add_occurrence(MsgName, Occurrence, D) ->
-    case dict:find(MsgName, D) of
-        {ok, Occurrences0} ->
-            dict:store(MsgName, lists:usort([Occurrence | Occurrences0]), D);
-        error ->
-            dict:store(MsgName, [Occurrence], D)
-    end.
 
 find_fixlen_types(Defs) ->
     fold_msg_fields(
