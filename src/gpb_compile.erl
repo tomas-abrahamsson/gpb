@@ -636,8 +636,7 @@ verify_opts_epb_compat(Defs, Opts) ->
        fun() ->
                case proplists:get_bool(epb_functions, Opts) of
                    true ->
-                       MsgNames = [Nm || {{msg,Nm},_Fields} <- Defs],
-                       case lists:member(msg, MsgNames) of
+                       case lists:member(msg, msg_names(Defs)) of
                            true ->
                                {error, {epb_functions_impossible,
                                         {with_msg_named,msg}}};
@@ -1409,7 +1408,8 @@ parse_file_and_imports(In, AlreadyImported, Opts) ->
                     Imports = gpb_parse:fetch_imports(Defs),
                     Opts2 = ensure_include_path_to_wellknown_types_if_proto3(
                               Defs, Imports, Opts),
-                    MsgContainment = {{msg_containment, ProtoName}, [Name || {{msg, Name}, _} <- Defs]},
+                    MsgContainment = {{msg_containment, ProtoName},
+                                      msg_names(Defs)},
                     read_and_parse_imports(Imports, AlreadyImported2,
                                            [MsgContainment | Defs], Opts2);
                 {error, Reason} ->
@@ -1605,16 +1605,21 @@ sanity_check_installation_wellknown_proto3(WellknownDir) ->
 
 try_topsort_defs(Defs) ->
     G = digraph:new(),
-    [digraph:add_vertex(G, M) || {{msg,M}, _Fields} <- Defs],
-    fold_msg_fields(fun(From, #?gpb_field{type={msg,To}}, _) ->
-                            digraph:add_edge(G, From, To);
-                       (From, #?gpb_field{type={map,_,{msg, To}}}, _) ->
-                            digraph:add_edge(G, From, To);
-                       (_MsgName, _Feild, _Acc) ->
-                            ok
-                    end,
-                    ok,
-                    Defs),
+    %% Build a dependency graph {msg|group, Name} -> {msg|group,Name}
+    [digraph:add_vertex(G, _Key={Type,Name})
+     || {Type,Name,_Fields} <- msgs_or_groups(Defs)],
+    fold_msg_or_group_fields(
+      fun(Type, From, #?gpb_field{type={msg,To}}, _) ->
+              digraph:add_edge(G, {Type,From}, {msg,To});
+         (Type, From, #?gpb_field{type={group,To}}, _) ->
+              digraph:add_edge(G, {Type,From}, {group,To});
+         (Type, From, #?gpb_field{type={map,_,{msg, To}}}, _) ->
+              digraph:add_edge(G, {Type,From}, {msg,To});
+         (_Type, _MsgName, _Feild, _Acc) ->
+              ok
+      end,
+      ok,
+      Defs),
     case digraph_utils:topsort(G) of
         false ->
             digraph:delete(G),
@@ -1622,8 +1627,9 @@ try_topsort_defs(Defs) ->
         Order ->
             digraph:delete(G),
             ROrder = lists:reverse(Order),
-            OrderedMsgDefs = [lists:keyfind({msg,M},1,Defs) || M <- ROrder],
-            {true, OrderedMsgDefs ++ (Defs -- OrderedMsgDefs)}
+            OrderedMsgOrGroupDefs =
+                [lists:keyfind(Key,1,Defs) || Key <- ROrder],
+            {true, OrderedMsgOrGroupDefs ++ (Defs -- OrderedMsgOrGroupDefs)}
     end.
 
 possibly_adjust_typespec_opt(true=_IsAcyclic, Opts) ->
@@ -1680,10 +1686,10 @@ analyze_defs(Defs, Opts) ->
            map_types           = MapTypes}.
 
 find_map_types(Defs) ->
-    fold_msg_fields(
-      fun(_MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
+    fold_msg_or_group_fields(
+      fun(_, _MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
               sets:add_element({KeyType,ValueType}, Acc);
-         (_MsgName, _Field, Acc) ->
+         (_, _MsgName, _Field, Acc) ->
               Acc
       end,
       sets:new(),
@@ -1702,19 +1708,19 @@ map_type_to_msg_name(KeyType, ValueType) ->
     list_to_atom(?ff("map<~s,~s>", [KeyType, ValueType])).
 
 find_used_types(Defs) ->
-    fold_msg_fields(
-      fun(_MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
+    fold_msg_or_group_fields(
+      fun(_Type, _MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
               Acc1 = sets:add_element(KeyType, Acc),
               sets:add_element(ValueType, Acc1);
-         (_MsgName, #?gpb_field{type=Type}, Acc) ->
+         (_Type, _MsgName, #?gpb_field{type=Type}, Acc) ->
               sets:add_element(Type, Acc)
       end,
       sets:new(),
       Defs).
 
 find_fixlen_types(Defs) ->
-    fold_msg_fields(
-      fun(_, #?gpb_field{type=Type, occurrence=Occ}=FieldDef, Acc) ->
+    fold_msg_or_group_fields(
+      fun(_, _, #?gpb_field{type=Type, occurrence=Occ}=FieldDef, Acc) ->
               IsPacked = is_packed(FieldDef),
               FixlenTypeInfo = #ft{type       = Type,
                                    occurrence = Occ,
@@ -1733,20 +1739,27 @@ find_fixlen_types(Defs) ->
       Defs).
 
 find_num_packed_fields(Defs) ->
-    fold_msg_fields(fun(_MsgName, FieldDef, Acc) ->
-                            case is_packed(FieldDef) of
-                                true  -> Acc + 1;
-                                false -> Acc
-                            end
-                    end,
-                    0,
-                    Defs).
+    fold_msg_or_group_fields(
+      fun(_, _MsgName, FieldDef, Acc) ->
+              case is_packed(FieldDef) of
+                  true  -> Acc + 1;
+                  false -> Acc
+              end
+      end,
+      0,
+      Defs).
 
 %% Loop over all message fields, including oneof-fields
 %% Call Fun for all #?gpb_fields{}, skip over non-msg defs
 fold_msg_fields(Fun, InitAcc, Defs) ->
     fold_msg_fields_o(
       fun(MsgName, Field, _IsOneOf, Acc) -> Fun(MsgName, Field, Acc) end,
+      InitAcc,
+      Defs).
+
+fold_msg_or_group_fields(Fun, InitAcc, Defs) ->
+    fold_msg_or_group_fields_o(
+      fun(Type, Name, Field, _IsOneOf, Acc) -> Fun(Type, Name, Field, Acc) end,
       InitAcc,
       Defs).
 
@@ -1769,6 +1782,24 @@ fold_msg_fields_o(Fun, InitAcc, Defs) ->
       end,
       InitAcc,
       Defs).
+
+%% The fun takes 5 args:
+%% Fun(msg | group, Name, #?gpb_field{}, IsOneof, Acc) -> Acc1
+fold_msg_or_group_fields_o(Fun, InitAcc, Defs) ->
+    lists:foldl(
+      fun({{Type, Name}, Fields}, Acc) when Type =:= msg;
+                                            Type =:= group ->
+              FFun = fun(Field, IsOneOf, FAcc) ->
+                             Fun(Type, Name, Field, IsOneOf, FAcc)
+                     end,
+              fold_msgdef_fields_o(FFun, Acc, Fields);
+         (_Def, Acc) ->
+              Acc
+      end,
+      InitAcc,
+      Defs).
+
+
 
 %% The fun takes 3 args: Fun(#?gpb_field{}, IsOneof, Acc) -> Acc1
 fold_msgdef_fields_o(Fun, InitAcc, Fields) ->
@@ -1801,11 +1832,11 @@ map_msgdef_fields_o(Fun, Fields) ->
         Fields)).
 
 find_num_fields(Defs) ->
-    lists:foldl(fun({MsgName, MsgDef}, Acc) ->
+    lists:foldl(fun({_msg_or_group, MsgName, MsgDef}, Acc) ->
                         dict:store(MsgName, length(MsgDef), Acc)
                 end,
                 dict:new(),
-                [{MsgName, MsgDef} || {{msg, MsgName}, MsgDef} <- Defs]).
+                msgs_or_groups(Defs)).
 
 find_msgsizes_known_at_compile_time(Defs) ->
     T = ets:new(gpb_msg_sizes, [set, public]),
@@ -1825,6 +1856,10 @@ find_msgsize(MsgName, Defs, T) ->
             Result
     end.
 
+find_groupsize(GroupName, Defs, T) ->
+    {{group,GroupName}, Fields} = lists:keyfind({group,GroupName}, 1, Defs),
+    find_msgsize_2(Fields, 0, Defs, T).
+
 find_msgsize_2([#gpb_oneof{} | _], _AccSize, _Defs, _T) ->
     undefined;
 find_msgsize_2([#?gpb_field{occurrence=repeated} | _], _AccSize, _Defs, _T) ->
@@ -1832,8 +1867,14 @@ find_msgsize_2([#?gpb_field{occurrence=repeated} | _], _AccSize, _Defs, _T) ->
 find_msgsize_2([#?gpb_field{occurrence=optional} | _], _AccSize, _Defs, _T) ->
     undefined;
 find_msgsize_2([#?gpb_field{type=Type, fnum=FNum} | Rest], AccSize, Defs, T) ->
-    FKey = gpb:encode_varint((FNum bsl 3) bor gpb:encode_wiretype(Type)),
-    FKeySize = byte_size(FKey),
+    FKeySize =
+        case Type of
+            {group, _} ->
+                not_applicable;
+            _ ->
+                FKey = (FNum bsl 3) bor gpb:encode_wiretype(Type),
+                byte_size(gpb:encode_varint(FKey))
+        end,
     case Type of
         sint32   -> undefined;
         sint64   -> undefined;
@@ -1863,6 +1904,18 @@ find_msgsize_2([#?gpb_field{type=Type, fnum=FNum} | Rest], AccSize, Defs, T) ->
                 undefined ->
                     undefined
             end;
+        {group,GroupName} ->
+            case find_groupsize(GroupName, Defs, T) of
+                GroupSize when is_integer(GroupSize) ->
+                    StartTag = (FNum bsl 3) + gpb:encode_wiretype(group_start),
+                    EndTag   = (FNum bsl 3) + gpb:encode_wiretype(group_end),
+                    SizeOfStartTag = byte_size(gpb:encode_varint(StartTag)),
+                    SizeOfEndTag = byte_size(gpb:encode_varint(EndTag)),
+                    GroupFieldSize = SizeOfStartTag + GroupSize + SizeOfEndTag,
+                    find_msgsize_2(Rest, AccSize + GroupFieldSize, Defs, T);
+                undefined ->
+                    undefined
+            end;
         fixed32  -> find_msgsize_2(Rest, AccSize+FKeySize+4, Defs, T);
         sfixed32 -> find_msgsize_2(Rest, AccSize+FKeySize+4, Defs, T);
         float    -> find_msgsize_2(Rest, AccSize+FKeySize+4, Defs, T)
@@ -1884,13 +1937,13 @@ all_enum_values_encode_to_same_size(EnumName, Defs) ->
     end.
 
 compute_decode_field_pass_methods(Defs, Opts) ->
-    lists:foldl(fun({MsgName, MsgDef}, D) ->
-                        PassHow = d_field_pass_method(MsgName, MsgDef, Opts),
-                        dict:store(MsgName, PassHow, D)
+    lists:foldl(fun({_Type, Name, Fields}, D) ->
+                        PassHow = d_field_pass_method(Name, Fields, Opts),
+                        %% FIXME:GROUP: are all group+msg names unique?
+                        dict:store(Name, PassHow, D)
                 end,
                 dict:new(),
-                [{MsgName, MsgDefs} || {{msg, MsgName}, MsgDefs} <- Defs]).
-
+                msgs_or_groups(Defs)).
 
 d_field_pass_method(MsgName, MsgDef, Opts) ->
     %% Allow overriding options, mainly intended for testing
@@ -1929,8 +1982,9 @@ d_field_pass_method(MsgDef) ->
        true ->
             NumSubMsgFields = count_submsg_fields(MsgDef),
             NumMapFields = count_map_fields(MsgDef),
+            NumGroupFields = count_group_fields(MsgDef),
             IsMsgDominatedBySubMsgsOrMaps =
-                (NumSubMsgFields + NumMapFields) / NF > 0.5,
+                (NumSubMsgFields + NumMapFields + NumGroupFields) / NF > 0.5,
             if IsMsgDominatedBySubMsgsOrMaps, NF >= 100 ->
                     pass_as_record;
                true ->
@@ -1947,6 +2001,13 @@ count_submsg_fields(MsgDef) ->
 
 count_map_fields(MsgDef) ->
     fold_msgdef_fields(fun(#?gpb_field{type={map,_,_}}, N) -> N+1;
+                          (#?gpb_field{}, N)               -> N
+                       end,
+                       0,
+                       MsgDef).
+
+count_group_fields(MsgDef) ->
+    fold_msgdef_fields(fun(#?gpb_field{type={group,_}}, N) -> N+1;
                           (#?gpb_field{}, N)               -> N
                        end,
                        0,
@@ -2037,8 +2098,9 @@ compute_any_translations(Defs, Opts) ->
 
 compute_any_translations_2(Defs, AnyTranslations) ->
     P3AnyInfos =
-        fold_msg_fields_o(
-          fun(MsgName, #?gpb_field{name=FName, type={msg,Any}, occurrence=Occ},
+        fold_msg_or_group_fields_o(
+          fun(_Type,
+              MsgName, #?gpb_field{name=FName, type={msg,Any}, occurrence=Occ},
               Oneof,
               Acc) when Any == 'google.protobuf.Any' ->
                   Path = case {Oneof, Occ} of
@@ -2047,13 +2109,14 @@ compute_any_translations_2(Defs, AnyTranslations) ->
                              {{true,CFName}, _} -> [MsgName,CFName,FName]
                          end,
                   [Path | Acc];
-             (_MsgName, #?gpb_field{type={map,KeyType,{msg,Any}=ValueType}},
+             (_Type,
+              _MsgName, #?gpb_field{type={map,KeyType,{msg,Any}=ValueType}},
               _Oneof,
               Acc) when Any == 'google.protobuf.Any' ->
                   MsgAsMapName = map_type_to_msg_name(KeyType, ValueType),
                   Path = [MsgAsMapName,value],
                   [Path | Acc];
-             (_MsgName, _Field, _Oneof, Acc) ->
+             (_Type, _MsgName, _Field, _Oneof, Acc) ->
                   Acc
           end,
           [],
@@ -2173,6 +2236,8 @@ is_known_size_element(float, _) -> true;
 is_known_size_element(double, _) -> true;
 is_known_size_element({msg,MsgName}, KnownMsgSize) ->
     dict:find(MsgName, KnownMsgSize) /= error;
+is_known_size_element({group,Name}, KnownMsgSize) ->
+    dict:find(Name, KnownMsgSize) /= error;
 is_known_size_element({map,KeyType,ValueType}, KnownMsgSize) ->
     MapAsMsgName = map_type_to_msg_name(KeyType, ValueType),
     dict:find(MapAsMsgName, KnownMsgSize) /= error;
@@ -2183,6 +2248,8 @@ fold_fields_and_paths(F, InitAcc, Defs) ->
     lists:foldl(
       fun({{msg, MsgName}, Fields}, Acc) ->
               fold_field_and_path(F, [MsgName], false, Acc, Fields);
+         ({{group, GroupName}, Fields}, Acc) ->
+              fold_field_and_path(F, [GroupName], false, Acc, Fields);
          (_Def, Acc) ->
               Acc
       end,
@@ -8503,6 +8570,19 @@ type_default(Type, Defs, Opts, GetTypeDefault) ->
        Type /= string ->
             GetTypeDefault(Type, Defs)
     end.
+
+msg_names(Defs) ->
+    [Name || {{msg, Name}, _Fields} <- Defs].
+
+%% msg_or_group_names(Defs) ->
+%%     [Name || {_Type, Name, _Fields} <- msgs_or_groups(Defs)].
+%%
+%% msgs(Defs) ->
+%%     [{Name,Fields} || {{msg, Name}, Fields} <- msgs_or_groups(Defs)].
+
+msgs_or_groups(Defs) ->
+    [{Type,Name,Fields} || {{Type,Name},Fields} <- Defs,
+                           Type =:= msg orelse Type =:= group].
 
 flatten_iolist(IoList) ->
     binary_to_list(iolist_to_binary(IoList)).
