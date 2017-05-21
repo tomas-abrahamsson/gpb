@@ -4722,6 +4722,7 @@ format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
 
 any_field_is_sub_msg(Fields) ->
     lists:any(fun(#?gpb_field{type={msg,_}}) -> true;
+                 (#?gpb_field{type={group,_}}) -> true;
                  (#?gpb_field{type={map,_,_}}) -> true;
                  (#gpb_oneof{fields=Fs}) -> any_field_is_sub_msg(Fs);
                  (_) -> false
@@ -4800,7 +4801,7 @@ format_field_merge_expr(#?gpb_field{name=FName, occurrence=Occur}=Field,
                          Transforms ++ [replace_term('PF++NF',Append)])};
         msgmerge ->
             Tr = mk_find_tr_fn_elem_or_default(MsgName, Field, false, AnRes),
-            #?gpb_field{type={msg,SubMsgName}}=Field,
+            #?gpb_field{type={_msg_or_group,SubMsgName}}=Field,
             {merge, {{PF, NF}, Tr, mk_fn(merge_msg_, SubMsgName)}}
     end;
 format_field_merge_expr(#gpb_oneof{name=CFName, fields=OFields},
@@ -5101,7 +5102,7 @@ format_verifiers(Defs, AnRes, Opts) ->
 
 format_msg_verifiers(Defs, AnRes, Opts) ->
     [format_msg_verifier(MsgName, MsgDef, AnRes, Opts)
-     || {{msg,MsgName}, MsgDef} <- Defs].
+     || {_Type, MsgName, MsgDef} <- msgs_or_groups(Defs)].
 
 format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
     FNames = get_field_names(MsgDef),
@@ -5180,6 +5181,7 @@ field_verifier(MsgName,
                FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
     FVerifierFn = case Type of
                       {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
+                      {group,GName}   -> mk_fn(v_msg_, GName);
                       {enum,EnumName} -> mk_fn(v_enum_, EnumName);
                       {map,KT,VT}     -> mk_fn(v_, map_type_to_msg_name(KT,VT));
                       Type            -> mk_fn(v_type_, Type)
@@ -5330,7 +5332,8 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
 
 
 can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
-    sets:is_element({msg,MsgName}, UsedTypes).
+    sets:is_element({msg,MsgName}, UsedTypes)
+        orelse sets:is_element({group,MsgName}, UsedTypes).
 
 format_enum_verifiers(Defs, #anres{used_types=UsedTypes}, Opts) ->
     [format_enum_verifier(EnumName, Def, Opts)
