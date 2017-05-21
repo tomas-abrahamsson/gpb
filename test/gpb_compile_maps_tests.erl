@@ -210,6 +210,61 @@ map_type_with_mapfields_as_maps_option_test() ->
     Msg2 = M2:merge_msgs(Msg2, Msg2, m2),
     unload_code(M2).
 
+required_group_test() ->
+    Mod = compile_iolist(
+            ["message m1 {",
+             "  required group g = 30 { required fixed32 gf = 35; }",
+             "}"],
+            [maps, type_specs]),
+    M = #{g => #{gf => 17}},
+    D = "f3 01 9d 02   11 00 00 00 f4 01",
+    B = hexundump(D),
+    B = Mod:encode_msg(M, m1),
+    M = Mod:decode_msg(B, m1),
+    ok = Mod:verify_msg(#{g => #{gf => 17}}, m1),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g.gf'}]}},
+                 Mod:verify_msg(#{g => #{gf => x}}, m1)),
+    unload_code(Mod).
+
+repeated_and_optional_group_test() ->
+    Mod = compile_iolist(
+            ["message m1 {",
+             "  repeated group g = 31 { required fixed32 gf = 36; };",
+             "  optional group h = 32 { required fixed32 hf = 37; };",
+             "}"],
+            [maps, {maps_unset_optional, omitted}, type_specs]),
+    M1 = #{g => [#{gf => 17},#{gf => 18}]},
+    B1 = hexundump("fb 01 a5 02   11 00 00 00 fc 01"
+                   "fb 01 a5 02   12 00 00 00 fc 01"),
+    B1 = Mod:encode_msg(M1, m1),
+    M1 = Mod:decode_msg(B1, m1),
+    %% Now with merge
+    M2 = #{g => [], h => #{hf => 99}},
+    B21 = hexundump("83 02 ad 02   11 00 00 00 84 02"), % 17 to be over-merged
+    B22 = hexundump("83 02 ad 02   63 00 00 00 84 02"), % 99 to replace
+    B22 = Mod:encode_msg(M2, m1),
+    M2  = Mod:decode_msg(<<B21/binary, B22/binary>>, m1),
+    M2  = Mod:merge_msgs(#{g => []}, M2, m1),
+    ok = Mod:verify_msg(#{g => []}, m1),
+    ok = Mod:verify_msg(#{g => [#{gf => 17},#{gf => 18}]}, m1),
+    ok = Mod:verify_msg(#{g => [], h => #{hf => 4711}}, m1),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g'}]}},
+                 Mod:verify_msg(#{g => #{gf => x}}, m1)),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g.gf'}]}},
+                 Mod:verify_msg(#{g => [#{gf => x}]}, m1)),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.h.hf'}]}},
+                 Mod:verify_msg(#{g => [], h => #{hf => x}}, m1)),
+    unload_code(Mod).
+
+%%hexdump(B) ->
+%%    string:to_lower(lists:concat([integer_to_list(C,16) || <<C:4>> <= B])).
+hexundump(S) ->
+    <<<<(list_to_integer([C],16)):4>> || C <- S, is_hex_digit(C)>>.
+is_hex_digit(D) when $0 =< D, D =< $9 -> true;
+is_hex_digit(D) when $a =< D, D =< $f -> true;
+is_hex_digit(D) when $A =< D, D =< $F -> true;
+is_hex_digit(_) -> false.
+
 fetch_rpc_def_test() ->
     M = compile_iolist(["message m { required uint32 f = 1; };\n",
                         "service s { rpc r(m) returns(m); }\n"],
