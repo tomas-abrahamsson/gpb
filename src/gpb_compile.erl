@@ -8239,8 +8239,8 @@ rpc_record_to_attr_form() ->
     record_to_attr(?gpb_rpc, record_info(fields, ?gpb_rpc)).
 
 msgdefs_to_record_attrs(Defs) ->
-    [record_to_attr(MsgName, lists:map(fun gpb_field_to_record_field/1, Fields))
-     || {{msg, MsgName}, Fields} <- Defs].
+    [record_to_attr(Name, lists:map(fun gpb_field_to_record_field/1, Fields))
+     || {_msg_or_group, Name, Fields} <- msgs_or_groups(Defs)].
 
 record_to_attr(RecordName, Fields) ->
     erl_syntax:revert(
