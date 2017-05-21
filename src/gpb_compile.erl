@@ -48,7 +48,8 @@
           maps_as_msgs,       % :: list() % same format as `Defs'
           translations,       % :: dict:dict(), %% FieldPath -> TranslationOps
           default_transls,    % :: sets:set({FnName::atom(),Arity::integer()})
-          map_types           % :: sets:set({map,_,_})
+          map_types,          % :: sets:set({map,_,_})
+          group_occurrences   % :: dict:dict() %% GroupName -> repeated | ...
         }).
 
 -define(f(Fmt),        io_lib:format(Fmt, [])).
@@ -60,6 +61,10 @@
 %% we expect to see the last varint byte, which must have msb==0.
 %% 64 - 7 = 57.
 -define(NB, 57).
+-define(is_msg_or_group(X),
+        is_tuple(X)
+        andalso tuple_size(X) =:= 2
+        andalso (element(1, X) =:= msg orelse element(1, X) =:= group)).
 
 %% -- Types -----------------------------------------------------
 
@@ -1683,7 +1688,8 @@ analyze_defs(Defs, Opts) ->
            translations        = Translations,
            default_transls     = compute_used_default_translators(
                                    Defs, Translations, KnownMsgSize, Opts),
-           map_types           = MapTypes}.
+           map_types           = MapTypes,
+           group_occurrences   = find_group_occurrences(Defs)}.
 
 find_map_types(Defs) ->
     fold_msg_or_group_fields(
@@ -2273,6 +2279,18 @@ fold_field_and_path(F, Root, IsOneOf, InitAcc, Fields) ->
       end,
       InitAcc,
       Fields).
+
+find_group_occurrences(Defs) ->
+    fold_msg_or_group_fields_o(
+      fun(_msg_or_group, _MsgName,
+          #?gpb_field{type={group,GroupName}, occurrence=Occurrence},
+          _IsOnoeof, D)->
+              dict:store(GroupName, Occurrence, D);
+         (_msg_or_group, _MsgName, _Field, _IsOnoeof, D) ->
+              D
+      end,
+      dict:new(),
+      Defs).
 
 %% -- generating code ----------------------------------------------
 
@@ -3384,8 +3402,8 @@ format_map_decoders(Defs, AnRes, Opts0) ->
     format_msg_decoders(Defs, AnRes, Opts1).
 
 format_msg_decoders(Defs, AnRes, Opts) ->
-    [format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts)
-     || {{msg, MsgName}, MsgDef} <- Defs].
+    [format_msg_decoder(Name, MsgDef, Defs, AnRes, Opts)
+     || {_Type, Name, MsgDef} <- msgs_or_groups(Defs)].
 
 format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     [format_msg_decoder_read_field(MsgName, MsgDef, Defs, AnRes, Opts),
@@ -3837,7 +3855,8 @@ format_non_packed_field_decoder(MsgName, XField, AnRes, Opts) ->
         string   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         bytes    -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
         {msg,_}  -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        {map,_,_}-> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts)
+        {map,_,_}-> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
+        {group,_}-> format_group_field_decoder(MsgName, XField, AnRes, Opts)
     end.
 
 format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
@@ -4128,6 +4147,33 @@ unpack_bytes(ResVar, Value, Rest, Rest2, Opts) ->
                    Transforms)
     end.
 
+format_group_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
+    {#?gpb_field{name=FName, fnum=FNum, type={group,GroupName}}=FieldDef,
+     IsOneof}=XFieldDef,
+    ResVar = ?expr(NewFValue), %% result is to be put in this variable
+    TrUserDataVar = ?expr(TrUserData),
+    Params = decoder_params(MsgName, AnRes),
+    {InParams, PrevValue} = decoder_in_params(Params, MsgName, XFieldDef,
+                                              AnRes, Opts),
+    OutParams = updated_merged_params(MsgName, XFieldDef, AnRes,
+                                      ResVar, PrevValue, Params,
+                                      TrUserDataVar, Opts),
+    Tr = mk_find_tr_fn_elem(MsgName, FieldDef, IsOneof, AnRes),
+    gpb_codegen:format_fn(
+      mk_fn(d_field_, MsgName, FName),
+      fun(Bin, _, _, 'InParams', TrUserData) ->
+              {GroupBin, Rest} = read_group(Bin, 'FieldNum'),
+              'Res' = 'Tr'('d_msg_X'(GroupBin, TrUserData), TrUserData),
+              'call-read-field'(Rest, 0, 0, 'OutParams', TrUserData)
+      end,
+      [splice_trees('InParams', InParams),
+       replace_term('call-read-field', mk_fn(dfp_read_field_def_, MsgName)),
+       replace_term('Tr', Tr(decode)),
+       replace_tree('Res', ResVar),
+       replace_tree('FieldNum', erl_syntax:integer(FNum)),
+       replace_term('d_msg_X', mk_fn(d_msg_, GroupName)),
+       splice_trees('OutParams', OutParams)]).
+
 updated_merged_params(MsgName, XFieldDef, AnRes, NewValue, PrevValue,
                       Params, TrUserDataVar, Opts) ->
     Tr = mk_find_tr_fn_elem_or_default(MsgName, XFieldDef, AnRes),
@@ -4165,7 +4211,10 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue,
                    replace_tree('<Acc>', PrevValue),
                    replace_tree('TrUserData', TrUserDataVar)]);
         msgmerge ->
-            #?gpb_field{type={msg,FMsgName}} = FieldDef,
+            FMsgName = case FieldDef of
+                           #?gpb_field{type={msg,Nm}} -> Nm;
+                           #?gpb_field{type={group,Nm}} -> Nm
+                       end,
             MergeFn = mk_fn(merge_msg_, FMsgName),
             case get_mapping_and_unset_by_opts(Opts) of
                 X when X == records;
@@ -4212,8 +4261,8 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue,
 merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                  MsgName, Tr, TrUserDataVar, AnRes, Opts)->
     #?gpb_field{name=FName, type=Type} = FieldDef,
-    case Type of
-        {msg, FMsgName} ->
+    if ?is_msg_or_group(Type) ->
+            {_, FMsgName} = Type,
             MergeFn = mk_fn(merge_msg_, FMsgName),
             case get_mapping_and_unset_by_opts(Opts) of
                 X when X == records;
@@ -4273,7 +4322,7 @@ merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                                    replace_tree('TrUserData', TrUserDataVar)])
                     end
             end;
-        _ ->
+       true ->
             %% Replace
             ?expr({'fieldname', '<expr>'},
                   [replace_term('fieldname', FName),
@@ -4313,8 +4362,7 @@ decoder_in_params(Params, MsgName, {FieldDef, false}, AnRes, Opts) ->
     end;
 decoder_in_params(Params, MsgName, {FieldDef, {true, CFName}}, AnRes, Opts) ->
     #?gpb_field{type=Type, rnum=RNum} = FieldDef,
-    case Type of
-        {msg, _} ->
+    if ?is_msg_or_group(Type) ->
             %% oneof fields that of message type may need merging
             case get_field_pass(MsgName, AnRes) of
                 pass_as_params ->
@@ -4336,7 +4384,7 @@ decoder_in_params(Params, MsgName, {FieldDef, {true, CFName}}, AnRes, Opts) ->
                             {[MsgVar], MsgVar}
                     end
             end;
-        _ ->
+       true ->
             %% Non-messages, treat as an optional field
             Any = ?expr(_),
             case get_field_pass(MsgName, AnRes) of
@@ -4529,11 +4577,13 @@ format_read_group_fn() ->
 
 classify_field_merge_action(FieldDef) ->
     case FieldDef of
-        #?gpb_field{occurrence=required, type={msg, _}} -> msgmerge;
-        #?gpb_field{occurrence=optional, type={msg, _}} -> msgmerge;
-        #?gpb_field{occurrence=required}                -> overwrite;
-        #?gpb_field{occurrence=optional}                -> overwrite;
-        #?gpb_field{occurrence=repeated}                -> seqadd
+        #?gpb_field{occurrence=required, type={msg, _}}   -> msgmerge;
+        #?gpb_field{occurrence=optional, type={msg, _}}   -> msgmerge;
+        #?gpb_field{occurrence=required, type={group, _}} -> msgmerge;
+        #?gpb_field{occurrence=optional, type={group, _}} -> msgmerge;
+        #?gpb_field{occurrence=required}                  -> overwrite;
+        #?gpb_field{occurrence=optional}                  -> overwrite;
+        #?gpb_field{occurrence=repeated}                  -> seqadd
     end.
 
 format_msg_merge_code(Defs, AnRes, Opts) ->
@@ -4575,8 +4625,24 @@ format_msg_merge_code_no_msgs(Opts) ->
 format_msg_merge_code_msgs(Defs, AnRes, Opts) ->
     MsgNames = [MsgName || {{msg, MsgName}, _MsgDef} <- Defs],
     [format_merge_msgs_top_level(MsgNames, Opts),
-     [format_msg_merger(MsgName, MsgDef, AnRes, Opts)
-      || {{msg, MsgName}, MsgDef} <- Defs]].
+     [case Type of
+          msg ->
+              format_msg_merger(Name, MsgDef, AnRes, Opts);
+          group ->
+              case is_repeated_group(Name, AnRes) of
+                  true ->
+                      %% merged with seq-add, not exported as top-level
+                      %% ==> such groups are never merged recursively,
+                      %%     thus never called
+                      [];
+                  false ->
+                      format_msg_merger(Name, MsgDef, AnRes, Opts)
+              end
+      end
+      || {Type, Name, MsgDef} <- msgs_or_groups(Defs)]].
+
+is_repeated_group(GroupName, #anres{group_occurrences=D}) ->
+    dict:fetch(GroupName, D) == repeated.
 
 format_merge_msgs_top_level(MsgNames, Opts) ->
     case get_records_or_maps_by_opts(Opts) of
