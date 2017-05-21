@@ -6343,13 +6343,14 @@ format_export_types(Defs, Opts) ->
                                 || {{enum, Enum}, _} <- Defs], ", ")]),
                "\n\n",
                "%% message types\n",
-               string:join([format_record_typespec(Msg, Fields, Defs, Opts)
-                            || {{msg, Msg}, Fields} <- Defs],
+               string:join([format_record_typespec(Name, Fields, Defs, Opts)
+                            || {_, Name, Fields} <- msgs_or_groups(Defs)],
                            "\n"),
                "\n",
                ?f("-export_type([~s]).",
-                  [string:join(["'"++atom_to_list(Msg)++"'/0"
-                                || {{msg, Msg}, _} <- Defs], ", ")]),
+                  [string:join(["'"++atom_to_list(Name)++"'/0"
+                                || {_, Name, _} <- msgs_or_groups(Defs)],
+                               ", ")]),
                "\n"])
     end.
 
@@ -6375,7 +6376,7 @@ format_hrl(Mod, Defs, Opts) ->
        ?f("-define(~p, \"~s\").~n", [ModVsn, gpb:version_as_string()]),
        "\n",
        string:join([format_msg_record(Msg, Fields, Opts, Defs)
-                    || {{msg,Msg},Fields} <- Defs],
+                    || {_,Msg,Fields} <- msgs_or_groups(Defs)],
                    "\n"),
        "\n",
        ?f("-endif.~n")],
@@ -6610,6 +6611,7 @@ type_to_typestr_2(string, _Defs, Opts)    ->
 type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
 type_to_typestr_2({enum,E}, Defs, Opts)   -> enum_typestr(E, Defs, Opts);
 type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts);
+type_to_typestr_2({group,G}, _Defs, Opts) -> msg_to_typestr(G, Opts);
 type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
     KTStr = type_to_typestr_2(KT, Defs, Opts),
     VTStr = type_to_typestr_2(VT, Defs, Opts),
