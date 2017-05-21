@@ -3357,7 +3357,8 @@ format_decoders_top_function_msgs(Defs, Opts) ->
       || get_epb_functions_by_opts(Opts)]].
 
 format_aux_decoders(Defs, AnRes, _Opts) ->
-    format_enum_decoders(Defs, AnRes).
+    [format_enum_decoders(Defs, AnRes),
+     [format_read_group_fn() || contains_messages(Defs)]].
 
 format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
@@ -3672,6 +3673,8 @@ decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
         replace_tree('TrUserData', TrUserDataVar)]).
 
 decoder_skip_calls(Bindings, MsgName) ->
+    KeyExpr = fetch_binding('<Key>', Bindings),
+    FieldNumExpr = ?expr('<Key>' bsr 3, [replace_tree('<Key>', KeyExpr)]),
     WiretypeExpr = fetch_binding('<wiretype-expr>', Bindings),
     RestExpr = fetch_binding('<Rest>', Bindings),
     Params = fetch_binding('<Params>', Bindings),
@@ -3680,6 +3683,7 @@ decoder_skip_calls(Bindings, MsgName) ->
               0 -> skip_vi('<Rest>', 0, 0, '<Params>', 'TrUserData');
               1 -> skip_64('<Rest>', 0, 0, '<Params>', 'TrUserData');
               2 -> skip_ld('<Rest>', 0, 0, '<Params>', 'TrUserData');
+              3 -> skip_gr('<Rest>', 'FNum', 0, '<Params>', 'TrUserData');
               5 -> skip_32('<Rest>', 0, 0, '<Params>', 'TrUserData')
           end,
           [replace_tree('<wiretype-expr>', WiretypeExpr),
@@ -3689,14 +3693,21 @@ decoder_skip_calls(Bindings, MsgName) ->
            replace_term(skip_vi, mk_fn(skip_varint_, MsgName)),
            replace_term(skip_64, mk_fn(skip_64_, MsgName)),
            replace_term(skip_ld, mk_fn(skip_length_delimited_, MsgName)),
+           replace_term(skip_gr, mk_fn(skip_group_, MsgName)),
+           replace_tree('FNum', FieldNumExpr),
            replace_term(skip_32, mk_fn(skip_32_, MsgName))]).
 
 decoder_field_selectors(MsgName, MsgDef) ->
     map_msgdef_fields_o(
       fun(#?gpb_field{name=FName, fnum=FNum, type=Type}=FieldDef, _IsOneof) ->
-              Wiretype = case is_packed(FieldDef) of
-                             true  -> gpb:encode_wiretype(bytes);
-                             false -> gpb:encode_wiretype(Type)
+              Wiretype = case Type of
+                             {group, _} ->
+                                 gpb:encode_wiretype(group_start);
+                             _ ->
+                                 case is_packed(FieldDef) of
+                                     true  -> gpb:encode_wiretype(bytes);
+                                     false -> gpb:encode_wiretype(Type)
+                                 end
                          end,
               Selector = (FNum bsl 3) bor Wiretype,
               DecodeFn = mk_fn(d_field_, MsgName, FName),
@@ -4457,6 +4468,65 @@ uint_to_int_to_var(ResVar, ValueExpr, NumBits) ->
         replace_tree('<Res>', ResVar),
         replace_tree('<Value>', ValueExpr)]).
 
+format_read_group_fn() ->
+    ["read_group(Bin, FieldNum) ->\n"
+     "    {NumBytes, EndTagLen} = read_gr_b(Bin, 0, 0, 0, 0, FieldNum),\n"
+     "    <<Group:NumBytes/binary, _:EndTagLen/binary, Rest/binary>> = Bin,\n"
+     "    {Group, Rest}.\n"
+     "\n"
+     "%% Like skipping over fields, but record the total length,\n"
+     "%% Each field is <(FieldNum bsl 3) bor FieldType> ++ <FieldValue>\n"
+     "%% Record the length because varints may be non-optimally encoded.\n"
+     "%%\n"
+     "%% Groups can be nested, but assume the same FieldNum cannot be nested\n"
+     "%% because group field numbers are shared with the rest of the fields\n"
+     "%% numbers. Thus we can search just for an group-end with the same\n"
+     "%% field number.\n"
+     "%%\n"
+     "%% (The only time the same group field number could occur would\n"
+     "%% be in a nested sub message, but then it would be inside a\n"
+     "%% length-delimited entry, which we skip-read by length.)\n"
+     "read_gr_b(<<1:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen, FieldNum)\n"
+     "  when N < (32-7) ->\n"
+     "    read_gr_b(Tl, N+7, X bsl N + Acc, NumBytes, TagLen+1, FieldNum);\n"
+     "read_gr_b(<<0:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen,\n"
+     "          FieldNum) ->\n"
+     "    Key = X bsl N + Acc,\n"
+     "    TagLen1 = TagLen + 1,\n"
+     "    case {Key bsr 3, Key band 7} of\n"
+     "        {FieldNum, 4} -> % 4 = group_end\n"
+     "            {NumBytes, TagLen1};\n"
+     "        {_, 0} -> % 0 = varint\n"
+     "            read_gr_vi(Tl, 0, NumBytes + TagLen1, FieldNum);\n"
+     "        {_, 1} -> % 1 = bits64\n"
+     "            <<_:64, Tl2/binary>> = Tl,\n"
+     "            read_gr_b(Tl2, 0, 0, NumBytes + TagLen1 + 8, 0, FieldNum);\n"
+     "        {_, 2} -> % 2 = length_delimited\n"
+     "            read_gr_ld(Tl, 0, 0, NumBytes + TagLen1, FieldNum);\n"
+     "        {_, 3} -> % 3 = group_start\n"
+     "            read_gr_b(Tl, 0, 0, NumBytes + TagLen1, 0, FieldNum);\n"
+     "        {_, 4} -> % 4 = group_end\n"
+     "            read_gr_b(Tl, 0, 0, NumBytes + TagLen1, 0, FieldNum);\n"
+     "        {_, 5} -> % 5 = bits32\n"
+     "            <<_:32, Tl2/binary>> = Tl,\n"
+     "            read_gr_b(Tl2, 0, 0, NumBytes + TagLen1 + 4, 0, FieldNum)\n"
+     "    end.\n"
+     "\n"
+     "read_gr_vi(<<1:1, _:7, Tl/binary>>, N, NumBytes, FieldNum)\n"
+     "  when N < (64-7) ->\n"
+     "    read_gr_vi(Tl, N+7, NumBytes+1, FieldNum);\n"
+     "read_gr_vi(<<0:1, _:7, Tl/binary>>, _, NumBytes, FieldNum) ->\n"
+     "    read_gr_b(Tl, 0, 0, NumBytes+1, 0, FieldNum).\n"
+     "\n"
+     "read_gr_ld(<<1:1, X:7, Tl/binary>>, N, Acc, NumBytes, FieldNum)\n"
+     "  when N < (64-7) ->\n"
+     "    read_gr_ld(Tl, N+7, X bsl N + Acc, NumBytes+1, FieldNum);\n"
+     "read_gr_ld(<<0:1, X:7, Tl/binary>>, N, Acc, NumBytes, FieldNum) ->\n"
+     "    Len = X bsl N + Acc,\n"
+     "    NumBytes1 = NumBytes + 1,\n"
+     "    <<_:Len/binary, Tl2/binary>> = Tl,\n"
+     "    read_gr_b(Tl2, 0, 0, NumBytes1 + Len, 0, FieldNum).\n"].
+
 classify_field_merge_action(FieldDef) ->
     case FieldDef of
         #?gpb_field{occurrence=required, type={msg, _}} -> msgmerge;
@@ -4823,6 +4893,7 @@ std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar) ->
 format_field_skippers(MsgName, AnRes) ->
     SkipVarintFnName = mk_fn(skip_varint_, MsgName),
     SkipLenDelimFnName = mk_fn(skip_length_delimited_, MsgName),
+    SkipGroupFnName = mk_fn(skip_group_, MsgName),
     ReadFieldFnName = mk_fn(dfp_read_field_def_, MsgName),
     Params = decoder_params(MsgName, AnRes),
     [%% skip_varint_<MsgName>/2,4
@@ -4846,6 +4917,16 @@ format_field_skippers(MsgName, AnRes) ->
                Length = X bsl N + Acc,
                <<_:Length/binary, Rest2/binary>> = Rest,
                '<call-read-field>'(Rest2, 0, 0, '<Params>', TrUserData)
+       end,
+       [replace_term('<call-read-field>', ReadFieldFnName),
+        splice_trees('<Params>', Params)]),
+     "\n",
+     %% skip_group_<MsgName>/4
+     gpb_codegen:format_fn(
+       SkipGroupFnName,
+       fun(Bin, FNum, Z2, '<Params>', TrUserData) ->
+          {_, Rest} = read_group(Bin, FNum),
+          '<call-read-field>'(Rest, 0, Z2, '<Params>', TrUserData)
        end,
        [replace_term('<call-read-field>', ReadFieldFnName),
         splice_trees('<Params>', Params)]),
