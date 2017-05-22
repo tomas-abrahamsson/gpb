@@ -481,6 +481,26 @@ introspection_enums_test() ->
     2  = M:enum_value_by_symbol_e1(n2),
     unload_code(M).
 
+introspection_groups_test() ->
+    M0 = compile_iolist(["enum e1 { n1=1; n2=2; }"]), % no message or groups
+    [] = M0:get_msg_names(),
+    [] = M0:get_group_names(),
+    [] = M0:get_msg_or_group_names(),
+    error = M0:find_msg_def(e1), % e1 for the lack of better...
+    ?assertError(_, M0:fetch_msg_def(e1)),
+    M1 = compile_iolist(["message m1 {",
+                         "  required group g = 1 { required uint32 f = 2; };",
+                         "}"]),
+    [m1] = M1:get_msg_names(),
+    [G] = M1:get_group_names(),
+    [m1, G] = lists:sort(M1:get_msg_or_group_names()),
+    [#?gpb_field{name=g, type={group,G}}] = M1:find_msg_def(m1),
+    [#?gpb_field{name=f, type=uint32}]    = M1:find_msg_def(G),
+    [#?gpb_field{name=g, type={group,G}}] = M1:fetch_msg_def(m1),
+    [#?gpb_field{name=f, type=uint32}]    = M1:fetch_msg_def(G),
+    unload_code(M0),
+    unload_code(M1).
+
 introspection_defs_as_proplists_test() ->
     Proto = ["message msg1 { required uint32 f1=1; }",
              "service s1 {",

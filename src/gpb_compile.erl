@@ -2335,6 +2335,8 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        end,
        ?f("-export([get_msg_defs/0]).~n"),
        ?f("-export([get_msg_names/0]).~n"),
+       ?f("-export([get_group_names/0]).~n"),
+       ?f("-export([get_msg_or_group_names/0]).~n"),
        ?f("-export([get_enum_names/0]).~n"),
        ?f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
        ?f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
@@ -5945,24 +5947,34 @@ inline_attr(FnName,Arity) ->
 format_introspection(Defs, Opts) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
+    GroupDefs = [Item || {{group, _}, _}=Item <- Defs],
     ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
     [gpb_codegen:format_fn(
        get_msg_defs, fun() -> '<Defs>' end,
-       [replace_tree('<Defs>', msg_def_trees(EnumDefs, MsgDefs, Opts))]),
+       [replace_tree('<Defs>', msg_def_trees(EnumDefs, MsgDefs, GroupDefs,
+                                             Opts))]),
      "\n",
      gpb_codegen:format_fn(
        get_msg_names, fun() -> '<Names>' end,
        [replace_term('<Names>', [MsgName || {{msg,MsgName}, _} <- Defs])]),
      "\n",
      gpb_codegen:format_fn(
+       get_group_names, fun() -> '<Names>' end,
+       [replace_term('<Names>', [Name || {{group,Name}, _} <- Defs])]),
+     "\n",
+     gpb_codegen:format_fn(
+       get_msg_or_group_names, fun() -> '<Names>' end,
+       [replace_term('<Names>', msg_or_group_names(Defs))]),
+     "\n",
+     gpb_codegen:format_fn(
        get_enum_names, fun() -> '<Names>' end,
        [replace_term('<Names>', [EnumName || {{enum,EnumName}, _} <- Defs])]),
      "\n",
-     format_fetch_msg_defs(MsgDefs),
+     format_fetch_msg_defs(msgs_or_groups(Defs)),
      ?f("~n"),
      format_fetch_enum_defs(EnumDefs),
      ?f("~n"),
-     format_find_msg_defs(MsgDefs, Opts),
+     format_find_msg_defs(Defs, Opts),
      ?f("~n"),
      format_find_enum_defs(EnumDefs),
      ?f("~n"),
@@ -5985,14 +5997,20 @@ format_introspection(Defs, Opts) ->
      format_descriptor(Defs, Opts)
     ].
 
-msg_def_trees(EnumDefs, MsgDefs, Opts) ->
+msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
     MsgDefTrees = [msg_def_tree(MsgDef, Opts) || MsgDef <- MsgDefs],
-    erl_syntax:list(EnumDefTrees ++ MsgDefTrees).
+    GroupDefTrees = [group_def_tree(GroupDef, Opts) || GroupDef <- GroupDefs],
+    erl_syntax:list(EnumDefTrees ++ MsgDefTrees ++ GroupDefTrees).
 
 msg_def_tree({{msg, MsgName}, Fields}, Opts) ->
     erl_syntax:tuple(
       [erl_syntax:tuple([erl_syntax:atom(msg), erl_syntax:atom(MsgName)]),
+       fields_tree(Fields, Opts)]).
+
+group_def_tree({{group, Name}, Fields}, Opts) ->
+    erl_syntax:tuple(
+      [erl_syntax:tuple([erl_syntax:atom(group), erl_syntax:atom(Name)]),
        fields_tree(Fields, Opts)]).
 
 fields_tree(Fields, Opts) ->
@@ -6065,16 +6083,16 @@ format_fetch_enum_defs(_EnumDefs) ->
               end
       end).
 
-format_find_msg_defs(Msgs, Opts) ->
+format_find_msg_defs(Defs, Opts) ->
     gpb_codegen:format_fn(
       find_msg_def,
-      fun('<MsgName>') -> '<Fields>';
+      fun('<Name>') -> '<Fields>';
          (_) -> error
       end,
-      [repeat_clauses('<MsgName>',
-                      [[replace_term('<MsgName>', MsgName),
+      [repeat_clauses('<Name>',
+                      [[replace_term('<Name>', Name),
                         replace_tree('<Fields>', fields_tree(Fields, Opts))]
-                       || {{msg, MsgName}, Fields} <- Msgs])]).
+                       || {_, Name, Fields} <- msgs_or_groups(Defs)])]).
 
 format_find_enum_defs(Enums) ->
     gpb_codegen:format_fn(
@@ -8751,9 +8769,9 @@ type_default(Type, Defs, Opts, GetTypeDefault) ->
 msg_names(Defs) ->
     [Name || {{msg, Name}, _Fields} <- Defs].
 
-%% msg_or_group_names(Defs) ->
-%%     [Name || {_Type, Name, _Fields} <- msgs_or_groups(Defs)].
-%%
+msg_or_group_names(Defs) ->
+    [Name || {_Type, Name, _Fields} <- msgs_or_groups(Defs)].
+
 %% msgs(Defs) ->
 %%     [{Name,Fields} || {{msg, Name}, Fields} <- msgs_or_groups(Defs)].
 
