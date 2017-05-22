@@ -4979,7 +4979,9 @@ field_verifier(MsgName,
                           ok;
                      true ->
                           mk_type_error(
-                            {invalid_list_of, '<Type>'}, '<F>', Path)
+                            {invalid_list_of, '<Type>'},
+                            '<F>',
+                            ['<FName>' | Path])
                   end,
                   Replacements);
         repeated when IsMapField ->
