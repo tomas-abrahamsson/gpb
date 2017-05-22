@@ -88,7 +88,7 @@ defs_to_msgtype(Defs, MapTypesToPseudoMsgNames, MapPseudoMsgs) ->
         options         = undefined,
         oneof_decl      = oneof_decl(AllOneofs)
        }
-     || {{msg,MsgName}, Fields} <- Defs] ++
+     || {_msg_or_group,MsgName,Fields} <- msgs_or_groups(Defs)] ++
         [#'DescriptorProto'{
             name            = atom_to_ustring(MsgName),
             field           = field_defs_to_mgstype_fields(
@@ -158,12 +158,14 @@ type_to_descr_type(double)           -> 'TYPE_DOUBLE';
 type_to_descr_type(string)           -> 'TYPE_STRING';
 type_to_descr_type(bytes)            -> 'TYPE_BYTES';
 type_to_descr_type({msg,_MsgName})   -> 'TYPE_MESSAGE';
+type_to_descr_type({group,_Name})    -> 'TYPE_GROUP';
 type_to_descr_type(fixed32)          -> 'TYPE_FIXED32';
 type_to_descr_type(sfixed32)         -> 'TYPE_SFIXED32';
 type_to_descr_type(float)            -> 'TYPE_FLOAT';
 type_to_descr_type({map,_,_})        -> 'TYPE_MESSAGE'.
 
 type_to_descr_type_name({msg,MsgName}, _)   -> atom_to_ustring(MsgName);
+type_to_descr_type_name({group,Name}, _)    -> atom_to_ustring(Name);
 type_to_descr_type_name({enum,EnumName}, _) -> atom_to_ustring(EnumName);
 type_to_descr_type_name({map,_,_}=T, M)     -> atom_to_ustring(dict:fetch(T,M));
 type_to_descr_type_name(_, _)               -> undefined.
@@ -227,6 +229,10 @@ defs_to_service(Defs) ->
 
 oneof_decl(AllOneofs) ->
     [#'OneofDescriptorProto'{name=atom_to_ustring(Name)} || Name <- AllOneofs].
+
+msgs_or_groups(Defs) ->
+    [{Type, Name, Fields} || {{Type,Name}, Fields} <- Defs,
+                             Type =:= msg orelse Type =:= group].
 
 compute_map_field_pseudo_msgs(Defs) ->
     AllMapTypes = find_all_map_types(Defs),
