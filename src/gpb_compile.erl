@@ -6896,7 +6896,7 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     Maps = get_records_or_maps_by_opts(Opts) == maps,
     EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
                                || {{enum, _}, EnumDef} <- Defs]),
-    RecordAtoms = [MsgName || {{msg, MsgName}, _Fields} <- Defs],
+    RecordAtoms = [MsgName || {_, MsgName, _Fields} <- msgs_or_groups(Defs)],
     OneofNames = collect_oneof_fields(Defs),
     MiscAtoms0 = case is_any_field_of_type_enum(AnRes) of
                      true  -> [undefined];
@@ -6914,7 +6914,7 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
                          lists:usort(
                            lists:flatten(
                              [[get_field_name(Field) || Field <- Fields]
-                              || {{msg,_MsgName}, Fields} <- Defs]));
+                              || {_, _Name, Fields} <- msgs_or_groups(Defs)]));
                     not Maps ->
                          []
                  end,
@@ -6960,7 +6960,7 @@ collect_oneof_fields(Defs) ->
         [[[FOFName
            || #?gpb_field{name=FOFName} <- OFields]
           || #gpb_oneof{fields=OFields} <- Fields]
-         || {{msg,_}, Fields} <- Defs])).
+         || {_msg_or_group, _, Fields} <- msgs_or_groups(Defs)])).
 
 format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, Opts) ->
     case is_any_field_of_type_string(AnRes) of
@@ -7329,7 +7329,7 @@ format_nif_cc_encoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
 format_nif_cc_packers(_Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
     [format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts)
-     || {{msg, MsgName}, Fields} <- Defs].
+     || {_msg_or_group, MsgName, Fields} <- msgs_or_groups(Defs)].
 
 format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
     Maps = get_records_or_maps_by_opts(Opts) == maps,
@@ -7454,6 +7454,13 @@ format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field, Defs, Opts) ->
     [?f("    if (!enif_is_identical(~s, gpb_x_no_value))\n", [SrcVar]),
      format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, set)].
 
+format_nif_cc_field_packer_single(SrcVar, MsgVar,
+                                  #?gpb_field{type={group,Name}}=Field,
+                                  Defs, Opts, Setter) ->
+    format_nif_cc_field_packer_single(
+      SrcVar, MsgVar,
+      Field#?gpb_field{type={msg,Name}},
+      Defs, Opts, Setter);
 format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
     #?gpb_field{name=FName, type=FType} = Field,
     LCFName = to_lower(FName),
@@ -7795,7 +7802,7 @@ format_nif_cc_decoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
 format_nif_cc_unpackers(_Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
     [format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts)
-     || {{msg, MsgName}, Fields} <- Defs].
+     || {_msg_or_group, MsgName, Fields} <- msgs_or_groups(Defs)].
 
 format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
     Maps = get_records_or_maps_by_opts(Opts) == maps,
@@ -8021,7 +8028,11 @@ format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs) ->
         {msg, Msg2Name} ->
             UnpackFnName = mk_c_fn(u_msg_, Msg2Name),
             [?f("~s = ~s(env, &~s);\n",
-                [DestVar, UnpackFnName, SrcExpr])]
+                [DestVar, UnpackFnName, SrcExpr])];
+        {group, Name} ->
+            FType1 = {msg,Name},
+            format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType1,
+                                                 Defs)
     end.
 
 format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
@@ -8098,6 +8109,8 @@ mk_cctype_name({enum,EnumName}, Defs) ->
 mk_cctype_name({msg,MsgName}, Defs) ->
     CPkg = get_cc_pkg(Defs),
     CPkg ++ "::" ++ dot_replace_s(MsgName, "::");
+mk_cctype_name({group,Name}, Defs) ->
+    mk_cctype_name({msg,Name}, Defs);
 mk_cctype_name({map,KeyType,ValueType}, Defs) ->
     CKeyType = mk_cctype_name(KeyType, Defs),
     CValueType = mk_cctype_name(ValueType, Defs),

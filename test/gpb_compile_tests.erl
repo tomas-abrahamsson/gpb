@@ -1779,6 +1779,7 @@ nif_code_test_() ->
              [{"encode decode", fun nif_encode_decode_proto3/0}])),
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
+         {"Nif with groups", fun nif_with_groups/0},
          {"Nif with strbin", fun nif_with_strbin/0},
          {"Nif with booleans", fun nif_with_booleans/0},
          {"Nif with list indata for bytes",
@@ -2070,6 +2071,41 @@ nif_enum_with_pkgs() ->
                         MMDecoded = M:decode_msg(MEncoded, ntest2),
                         GMDecoded = gpb:decode_msg(MEncoded, ntest2, Defs),
                         MGDecoded = M:decode_msg(GEncoded, ntest2),
+                        ?assertEqual(OrigMsg, MMDecoded),
+                        ?assertEqual(OrigMsg, GMDecoded),
+                        ?assertEqual(OrigMsg, MGDecoded)
+                end)
+      end).
+
+nif_with_groups() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_with_groups,
+              DefsTxt = lf_lines(["message m1 {",
+                                  "    repeated group Rp = 10 {",
+                                  "      required uint32 f = 11;",
+                                  "    }",
+                                  "    required group Rq = 20 {",
+                                  "      required uint32 g = 21;",
+                                  "    }",
+                                  "    optional group O  = 30 {",
+                                  "      required uint32 h = 31;",
+                                  "    }",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {m1,
+                                   [{'m1.Rp',111},{'m1.Rp',112}],
+                                   {'m1.Rq',211},
+                                   {'m1.O',311}},
+                        MEncoded  = M:encode_msg(OrigMsg),
+                        GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                        MMDecoded = M:decode_msg(MEncoded, m1),
+                        GMDecoded = gpb:decode_msg(MEncoded, m1, Defs),
+                        MGDecoded = M:decode_msg(GEncoded, m1),
                         ?assertEqual(OrigMsg, MMDecoded),
                         ?assertEqual(OrigMsg, GMDecoded),
                         ?assertEqual(OrigMsg, MGDecoded)
