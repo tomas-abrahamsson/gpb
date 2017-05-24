@@ -299,19 +299,20 @@ Features of gpb
      - import of well-known types
      - Callback functions can be specified for automatically translating
        google.protobuf.Any messages
+   - groups
 
    gpb reads but ignores or throws away:
    - options other than 'packed' or 'default'
    - custom options
 
    gpb does not support:
-   - groups
    - aggregate custom options introduced in protobuf 2.4.0
    - rpc
    - proto3 JSON mapping
 
 *  Characteristics of gpb:
-   - Skipping over unknown message fields, when decoding, is supported
+   - Skipping over unknown message fields or groups, when decoding,
+     is supported
    - Merging of messages, also recursive merging, is supported
    - Gpb can optionally generate code for verification of values during
      encoding this makes it easy to catch e.g integers out of range,
@@ -462,8 +463,8 @@ speed. The Python implementation cannot optimize for speed.
 
 The benchmarks are all done with the exact same messages files and
 proto files.  The source of the benchmarks was found in the Google
-protobuf's svn repository.  The gpb does not support groups, but the
-benchmarks in the protobuf used groups, so I converted the
+protobuf's svn repository.  The gpb originally did not support groups,
+and the benchmarks in the protobuf used groups, so I converted the
 google_message*.dat to use sub message structures instead.
 For protobuf, that change was only barely noticeable.
 
