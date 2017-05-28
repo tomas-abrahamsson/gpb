@@ -124,6 +124,26 @@ skipping_with_oneof_test() ->
                                                opts=[]}]}]}],
     #m1{a = undefined} = decode_msg(<<32,150,1>>, m1, Defs).
 
+skipping_groups_test() ->
+    DefsO = [{{msg,x1}, [Field1 = #?gpb_field{name=f1, fnum=1, rnum=2,
+                                              type=uint32, occurrence=required,
+                                              opts=[]}]}],
+    %% message with a group in a group
+    DefsN = [{{msg,x1}, [Field1,
+                         #?gpb_field{name=g, fnum=2, rnum=3,
+                                     type={group,'x1.g1'}, occurrence=optional,
+                                     opts=[]}]},
+             {{group,'x1.g1'},[#?gpb_field{
+                                   name=g1f, fnum=3, rnum=2,
+                                   type={group,'x1.g2'}, occurrence=required,
+                                   opts=[]}]},
+             {{group,'x1.g2'},[#?gpb_field{
+                                   name=g2f, fnum=4, rnum=2,
+                                   type=uint32, occurrence=required,
+                                   opts=[]}]}],
+    X1 = encode_msg({x1, 38, {'x1.g1', {'x1.g2', 17}}}, DefsN),
+    {x1, 38} = decode_msg(X1, x1, DefsO).
+
 decode_msg_simple_occurrence_test() ->
     #m1{a = undefined} =
         decode_msg(<<>>,
@@ -780,6 +800,65 @@ proto3_type_default_values_never_serialized_test() ->
     <<>> = encode_msg(Msg, Defs),
     Msg = decode_msg(<<>>, m, Defs).
 
+encode_decode_required_group_test() ->
+    %% message m1 {
+    %%   required group g = 30 {
+    %%     required fixed32 gf = 35;
+    %%   }
+    %% }
+    Defs = [{{msg, m1}, [#?gpb_field{name=g, fnum=30, rnum=2,
+                                     type={group,'m1.g'},
+                                     occurrence=required, opts=[]}]},
+            {{group, 'm1.g'}, [#?gpb_field{name=gf, fnum=35, rnum=2,
+                                           type=fixed32,
+                                           occurrence=required, opts=[]}]}],
+    M = {m1, {'m1.g', 17}},
+    D = "f3 01 9d 02   11 00 00 00 f4 01",
+    %%   ^^^^^ ^^^^^   ^^^^^^^^^^^ ^^^^^
+    %%   GROUP TAG     17          GROUP
+    %%   START FIXED32             END
+    B = hexundump(D),
+    B = encode_msg(M, Defs),
+    M = decode_msg(B, m1, Defs).
+
+encode_decode_repeated_and_optional_group_test() ->
+    Defs = [{{msg, m1}, [#?gpb_field{name=g, fnum=31, rnum=2,
+                                     type={group,'m1.g'},
+                                     occurrence=repeated, opts=[]},
+                         #?gpb_field{name=h, fnum=32, rnum=3,
+                                     type={group,'m1.h'},
+                                     occurrence=optional, opts=[]}]},
+            {{group, 'm1.g'}, [#?gpb_field{name=gf, fnum=36, rnum=2,
+                                           type=fixed32,
+                                           occurrence=required, opts=[]}]},
+            {{group, 'm1.h'}, [#?gpb_field{name=hf, fnum=37, rnum=2,
+                                           type=fixed32,
+                                           occurrence=required, opts=[]}]}],
+    M1 = {m1, [{'m1.g', 17},{'m1.g', 18}], undefined},
+    B1 = hexundump("fb 01 a5 02   11 00 00 00 fc 01"
+                   "fb 01 a5 02   12 00 00 00 fc 01"),
+    %%              ^^^^^ ^^^^^   ^^^^^^^^^^^ ^^^^^
+    %%              GROUP TAG     17,18       GROUP
+    %%              START FIXED32             END
+    B1 = encode_msg(M1, Defs),
+    M1 = decode_msg(B1, m1, Defs),
+    %% Now with merge
+    M2 = {m1, [], {'m1.h', 99}},
+    B21 = hexundump("83 02 ad 02   11 00 00 00 84 02"), % 17 to be over-merged
+    B22 = hexundump("83 02 ad 02   63 00 00 00 84 02"), % 99 to replace
+    B22 = encode_msg(M2, Defs),
+    M2  = decode_msg(<<B21/binary, B22/binary>>, m1, Defs),
+    M2  = merge_msgs({m1, [], undefined}, M2, Defs).
+
+%%hexdump(B) ->
+%%    string:to_lower(lists:concat([integer_to_list(C,16) || <<C:4>> <= B])).
+hexundump(S) ->
+    <<<<(list_to_integer([C],16)):4>> || C <- S, is_hex_digit(C)>>.
+is_hex_digit(D) when $0 =< D, D =< $9 -> true;
+is_hex_digit(D) when $a =< D, D =< $f -> true;
+is_hex_digit(D) when $A =< D, D =< $F -> true;
+is_hex_digit(_) -> false.
+
 %% -------------------------------------------------------------
 
 merging_second_required_integer_overrides_first_test() ->
@@ -1185,6 +1264,45 @@ verify_path_when_failure_test() ->
                  verify_msg(#m1{a = bad_msg}, MsgDefs)),
     ?assertError({gpb_type_error, {_, [_, {path, 'm1.a.b'}]}},
                  verify_msg(#m1{a = #m2{b=x}}, MsgDefs)).
+
+verify_required_group_test() ->
+    %% message m1 {
+    %%   required group g = 30 {
+    %%     required fixed32 gf = 35;
+    %%   }
+    %% }
+    Defs = [{{msg, m1}, [#?gpb_field{name=g, fnum=30, rnum=2,
+                                     type={group,'m1.g'},
+                                     occurrence=required, opts=[]}]},
+            {{group, 'm1.g'}, [#?gpb_field{name=gf, fnum=35, rnum=2,
+                                           type=fixed32,
+                                           occurrence=required, opts=[]}]}],
+    ok = verify_msg({m1, {'m1.g', 17}}, Defs),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g.gf'}]}},
+                 verify_msg({m1, {'m1.g', x}}, Defs)).
+
+verify_repeated_and_optional_group_test() ->
+    Defs = [{{msg, m1}, [#?gpb_field{name=g, fnum=31, rnum=2,
+                                     type={group,'m1.g'},
+                                     occurrence=repeated, opts=[]},
+                         #?gpb_field{name=h, fnum=32, rnum=3,
+                                     type={group,'m1.h'},
+                                     occurrence=optional, opts=[]}]},
+            {{group, 'm1.g'}, [#?gpb_field{name=gf, fnum=36, rnum=2,
+                                           type=fixed32,
+                                           occurrence=required, opts=[]}]},
+            {{group, 'm1.h'}, [#?gpb_field{name=hf, fnum=37, rnum=2,
+                                           type=fixed32,
+                                           occurrence=required, opts=[]}]}],
+    ok = verify_msg({m1, [], undefined}, Defs),
+    ok = verify_msg({m1, [{'m1.g',17},{'m1.g',18}], undefined}, Defs),
+    ok = verify_msg({m1, [], {'m1.h', 4711}}, Defs),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g'}]}},
+                 verify_msg({m1, {'m1.g', x}, undefined}, Defs)),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g.gf'}]}},
+                 verify_msg({m1, [{'m1.g', x}], undefined}, Defs)),
+    ?assertError({gpb_type_error, {_, [_, {path, 'm1.h.hf'}]}},
+                 verify_msg({m1, [], {'m1.h', x}}, Defs)).
 
 version_test() ->
     %% Check that none of version retrieval functions crash.

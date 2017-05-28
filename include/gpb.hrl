@@ -36,6 +36,8 @@
         | {enum,atom()}       % atom()       the enum literal is the atom
         | {msg,atom()}        % record()     the message name is record name
                               % | map()      iff option `maps'
+        | {group,atom()}      % record()     name is <msg name>_<field name>
+                              % | map()      iff option `maps'
         | {map,gpb_map_key(),gpb_map_value()}. % [{K,V}] | map()
 
 %% An intermediary type temporarily used internally within gpb during parsing,
@@ -43,6 +45,7 @@
 -type gpb_internal_intermediary_ref() ::
         {ref, term()} |
         {msg, list()} |
+        {group, list()} |
         {enum, list()}.
 
 -type gpb_internal_intermediary_map_ref() ::

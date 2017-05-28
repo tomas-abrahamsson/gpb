@@ -10,7 +10,7 @@ Deviations from the benchmarks in protobuf's subversion repository:
   fused into msg.proto since gpb doesn't know how to optimize
   neither for speed nor for code size.
 * The "repeated group" construction has been changed into a
-  repeated (sub) message, since groups are not supported by gpb.
+  repeated (sub) message, since groups were not supported by gpb originally.
   The google_message2.dat file has been updated accordingly.
 * Addition of the d.proto and messages in d-msgs/ This contains
   randomly generated messages according to d.proto.

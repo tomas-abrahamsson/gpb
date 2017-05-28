@@ -62,6 +62,7 @@ extend          : {token, {extend,TokenLine}}.
 to              : {token, {to,TokenLine}}.
 max             : {token, {max,TokenLine}}.
 reserved        : {token, {reserved,TokenLine}}.
+group           : {token, {group,TokenLine}}.
 
 service         : {token, {service,TokenLine}}.
 rpc             : {token, {rpc,TokenLine}}.

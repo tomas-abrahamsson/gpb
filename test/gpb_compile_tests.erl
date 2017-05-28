@@ -481,6 +481,26 @@ introspection_enums_test() ->
     2  = M:enum_value_by_symbol_e1(n2),
     unload_code(M).
 
+introspection_groups_test() ->
+    M0 = compile_iolist(["enum e1 { n1=1; n2=2; }"]), % no message or groups
+    [] = M0:get_msg_names(),
+    [] = M0:get_group_names(),
+    [] = M0:get_msg_or_group_names(),
+    error = M0:find_msg_def(e1), % e1 for the lack of better...
+    ?assertError(_, M0:fetch_msg_def(e1)),
+    M1 = compile_iolist(["message m1 {",
+                         "  required group g = 1 { required uint32 f = 2; };",
+                         "}"]),
+    [m1] = M1:get_msg_names(),
+    [G] = M1:get_group_names(),
+    [m1, G] = lists:sort(M1:get_msg_or_group_names()),
+    [#?gpb_field{name=g, type={group,G}}] = M1:find_msg_def(m1),
+    [#?gpb_field{name=f, type=uint32}]    = M1:find_msg_def(G),
+    [#?gpb_field{name=g, type={group,G}}] = M1:fetch_msg_def(m1),
+    [#?gpb_field{name=f, type=uint32}]    = M1:fetch_msg_def(G),
+    unload_code(M0),
+    unload_code(M1).
+
 introspection_defs_as_proplists_test() ->
     Proto = ["message msg1 { required uint32 f1=1; }",
              "service s1 {",
@@ -1759,6 +1779,7 @@ nif_code_test_() ->
              [{"encode decode", fun nif_encode_decode_proto3/0}])),
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
+         {"Nif with groups", fun nif_with_groups/0},
          {"Nif with strbin", fun nif_with_strbin/0},
          {"Nif with booleans", fun nif_with_booleans/0},
          {"Nif with list indata for bytes",
@@ -2050,6 +2071,41 @@ nif_enum_with_pkgs() ->
                         MMDecoded = M:decode_msg(MEncoded, ntest2),
                         GMDecoded = gpb:decode_msg(MEncoded, ntest2, Defs),
                         MGDecoded = M:decode_msg(GEncoded, ntest2),
+                        ?assertEqual(OrigMsg, MMDecoded),
+                        ?assertEqual(OrigMsg, GMDecoded),
+                        ?assertEqual(OrigMsg, MGDecoded)
+                end)
+      end).
+
+nif_with_groups() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_with_groups,
+              DefsTxt = lf_lines(["message m1 {",
+                                  "    repeated group Rp = 10 {",
+                                  "      required uint32 f = 11;",
+                                  "    }",
+                                  "    required group Rq = 20 {",
+                                  "      required uint32 g = 21;",
+                                  "    }",
+                                  "    optional group O  = 30 {",
+                                  "      required uint32 h = 31;",
+                                  "    }",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {m1,
+                                   [{'m1.Rp',111},{'m1.Rp',112}],
+                                   {'m1.Rq',211},
+                                   {'m1.O',311}},
+                        MEncoded  = M:encode_msg(OrigMsg),
+                        GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                        MMDecoded = M:decode_msg(MEncoded, m1),
+                        GMDecoded = gpb:decode_msg(MEncoded, m1, Defs),
+                        MGDecoded = M:decode_msg(GEncoded, m1),
                         ?assertEqual(OrigMsg, MMDecoded),
                         ?assertEqual(OrigMsg, GMDecoded),
                         ?assertEqual(OrigMsg, MGDecoded)
