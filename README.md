@@ -73,7 +73,7 @@ Mapping of protocol buffer datatypes to erlang
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <tr><td>enum</td>
     <td>atom()<br/>
-        unknown enums decode to `integer()`</td></tr>
+        unknown enums decode to integer()</td></tr>
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <tr><td>message</td>
     <td>record (thus tuple())<br/>
@@ -94,7 +94,7 @@ Mapping of protocol buffer datatypes to erlang
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <tr><td>map<_,_></td>
     <td>An unordered list of 2-tuples, <tt>[{Key,Value}]</tt><br/>
-        or  a map, if the maps (-maps) option is specified</td></tr>
+        or  a map(), if the maps (-maps) option is specified</td></tr>
 </tbody></table>
 
 
@@ -288,12 +288,12 @@ Features of gpb
    - importing other proto files
    - nested types
    - message extensions
-   - the 'packed' and 'default' options for fields
-   - the 'allow_alias' enum option (treated as if it is always set true)
+   - the `packed` and `default` options for fields
+   - the `allow_alias` enum option (treated as if it is always set true)
    - generating metadata information
    - package namespacing (optional)
-   - oneof (introduced in protobuf 2.6.0)
-   - map<_,_> (introduced in protobuf 3.0.0)
+   - `oneof` (introduced in protobuf 2.6.0)
+   - `map<_,_>` (introduced in protobuf 3.0.0)
    - proto3 support:
      - syntax and general semantics
      - import of well-known types
@@ -302,7 +302,7 @@ Features of gpb
    - groups
 
    gpb reads but ignores or throws away:
-   - options other than 'packed' or 'default'
+   - options other than `packed` or `default`
    - custom options
 
    gpb does not support:
@@ -317,15 +317,15 @@ Features of gpb
    - Gpb can optionally generate code for verification of values during
      encoding this makes it easy to catch e.g integers out of range,
      or values of the wrong type.
-   - Gpb can optionally or conditionally copying the contents of 'bytes'
+   - Gpb can optionally or conditionally copy the contents of `bytes`
      fields, in order to let the runtime system free the larger message
      binary.
-   - Gpb can optionally make use of the package attribute by prepending
+   - Gpb can optionally make use of the `package` attribute by prepending
      the name of the package to every contained message type (if defined),
      which is useful to avoid name clashes of message types across packages.
    - The generated encode/decoder has no run-time dependency to gpb,
      but there is normally a compile-time dependency for the generated
-     code: to the #field{} record in gpb.hrl the for the get_msg_defs
+     code: to the `#field{}` record in gpb.hrl the for the `get_msg_defs`
      function, but it is possible to avoid this dependency by using
      the also the `defs_as_proplists` or `-pldefs` option.
    - Gpb can generate code both to files and to binaries.
