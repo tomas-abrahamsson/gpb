@@ -38,6 +38,7 @@ Nonterminals
         group_def
         service_def rpc_defs rpc_def rpc_arg rpc_ret m_opts
         name
+        option_name
         constant
         integer
         string_expr
@@ -96,13 +97,17 @@ package_def -> package name ';':        {package, '$2'}.
 name -> '.' identifiers:                ['.' | '$2'].
 name -> identifiers:                    '$1'.
 
+option_name -> name:                       '$1'.
+option_name -> '(' name ')':               '$2'.
+option_name -> option_name '.' name:       '$1' ++ '$3'.
+
 identifiers -> identifier '.' identifiers:      [identifier_name('$1'), '.'
                                                  | '$3'].
 identifiers -> identifier:                      [identifier_name('$1')].
 
 import_def -> import str_lit ';':       {import, literal_value('$2')}.
 
-option_def -> option name '=' constant: {option, '$2', '$4'}.
+option_def -> option option_name '=' constant: {option, '$2', '$4'}.
 
 enum_def -> enum fidentifier '{' enum_fields '}':
                                         {{enum,identifier_name('$2')},'$4'}.
