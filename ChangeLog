@@ -1,5 +1,10 @@
 -*- coding: utf-8 -*-
 
+Version 3.27.1
+2017-Jun-16
+
+        * Add support for custom options. Thanks to Geoff Hayes.
+
 Version 3.27.0
 2017-May-28
 
