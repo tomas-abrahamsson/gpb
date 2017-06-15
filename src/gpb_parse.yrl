@@ -98,7 +98,7 @@ package_def -> package name ';':        {package, '$2'}.
 name -> '.' identifiers:                ['.' | '$2'].
 name -> identifiers:                    '$1'.
 
-option_name_ident -> identifier:        '$1'.
+option_name_ident -> identifier:        [identifier_name('$1')].
 option_name_ident -> '(' name ')':      '$2'.
 
 option_name -> option_name_ident:           '$1'.
