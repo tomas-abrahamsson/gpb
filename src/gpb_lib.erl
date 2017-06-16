@@ -67,6 +67,7 @@
 -export([split_indent_iolist/2]).
 -export([linesplit_iolist/1]).
 -export([iolist_to_utf8_or_escaped_binary/2]).
+-export([nowarn_dialyzer_attr/3]).
 
 -include("../include/gpb.hrl").
 
@@ -403,3 +404,27 @@ esc_non_ascii([])    -> [];
 esc_non_ascii(B) when is_binary(B) -> B;
 esc_non_ascii(C) when is_integer(C), C =< 127 -> C;
 esc_non_ascii(C) when is_integer(C), C > 127  -> ?f("\\x{~.16b}", [C]).
+
+nowarn_dialyzer_attr(FnName,Arity,Opts) ->
+    %% Especially for the verifiers, dialyzer's success typing can
+    %% think that some code paths in the verifiers can't be reached,
+    %% and in a sense, it is right: the verifiers do much the same
+    %% work as dialyzer. But I think their existence is still
+    %% warranted because (a) they work-time rather than compile-time,
+    %% and (b) provide for shorter turn-around times when dialyzer
+    %% can take some time to analyze a non-trivial proto file.
+    %%
+    %% So mute dialyzer for the verifier functions.
+    case can_do_dialyzer_attr(Opts) of
+        true ->
+            ?f("-dialyzer({nowarn_function,~p/~w}).~n", [FnName,Arity]);
+        false ->
+            %% Too old system (Erlang 17 or older), which will see
+            %% the dialyzer attr as just another plain attr,
+            %% which must be located before all functions.
+            %% Just don't silence dialyzer on these systems.
+            ""
+    end.
+
+can_do_dialyzer_attr(Opts) ->
+    is_target_major_version_at_least(18, Opts).
