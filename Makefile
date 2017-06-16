@@ -277,6 +277,7 @@ $(ebin):
 
 # To compile gpb_compile, we first need the parse transform in gpb_codegen
 $(ebin)/gpb_compile.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_nif.beam: $(ebin)/gpb_codegen.beam
 
 # To compile gpb_codegen_tests, we first need the parse transform in gpb_codegen
 $(test)/gpb_codegen_tests.beam: $(ebin)/gpb_codegen.beam
