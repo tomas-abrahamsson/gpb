@@ -39,13 +39,19 @@
 -import(gpb_lib, [mk_fn/2, mk_fn/3]).
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
--import(gpb_lib, [msgs_or_groups/1,
-                  get_field_name/1, get_field_occurrence/1]).
+-import(gpb_lib, [msgs_or_groups/1, msg_names/1,
+                  get_field_name/1, get_field_occurrence/1,
+                  unalias_enum/1]).
+-import(gpb_lib, [mapping_match/3, mapping_create/3, mapping_update/4,
+                  record_match/2, record_create/2,
+                  map_match/1, map_create/1, map_set/2]).
 -import(gpb_lib, [get_2tuples_or_maps_for_maptype_fields_by_opts/1,
                   get_records_or_maps_by_opts/1,
                   get_mapping_and_unset_by_opts/1,
                   get_strings_as_binaries_by_opts/1,
                   get_type_specs_by_opts/1,
+                  get_gen_descriptor_by_opts/1,
+                  get_field_format_by_opts/1,
                   is_target_major_version_at_least/2]).
 -import(gpb_lib, [index_seq/1,
                   iolist_to_utf8_or_escaped_binary/2]).
@@ -2334,7 +2340,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        ?f("-export([get_enum_names/0]).~n"),
        ?f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
        ?f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
-       format_enum_value_symbol_converter_exports(Defs),
+       gpb_gen_introspect:format_enum_value_symbol_converter_exports(Defs),
        ?f("-export([get_service_names/0]).~n"),
        ?f("-export([get_service_def/1]).~n"),
        ?f("-export([get_rpc_names/1]).~n"),
@@ -2423,7 +2429,9 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
                 ?f("~s~n", [format_merge_translators(Defs, AnRes, Opts)])]
        end,
        "\n",
-       format_introspection(Defs, Opts),
+       gpb_gen_introspect:format_introspection(Defs, Opts),
+       "\n",
+       possibly_format_descriptor(Defs, Opts),
        "\n",
        ?f("gpb_version_as_string() ->~n"),
        ?f("    \"~s\".~n", [gpb:version_as_string()]),
@@ -5913,242 +5921,9 @@ compute_needed_default_translations(Translations, Defaults) ->
 inline_attr(FnName,Arity) ->
     ?f("-compile({inline,~p/~w}).~n", [FnName,Arity]).
 
-%% -- message defs -----------------------------------------------------
+%% -- descr -----------------------------------------------------
 
-format_introspection(Defs, Opts) ->
-    MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
-    EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
-    GroupDefs = [Item || {{group, _}, _}=Item <- Defs],
-    ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
-    [gpb_codegen:format_fn(
-       get_msg_defs, fun() -> '<Defs>' end,
-       [replace_tree('<Defs>', msg_def_trees(EnumDefs, MsgDefs, GroupDefs,
-                                             Opts))]),
-     "\n",
-     gpb_codegen:format_fn(
-       get_msg_names, fun() -> '<Names>' end,
-       [replace_term('<Names>', [MsgName || {{msg,MsgName}, _} <- Defs])]),
-     "\n",
-     gpb_codegen:format_fn(
-       get_group_names, fun() -> '<Names>' end,
-       [replace_term('<Names>', [Name || {{group,Name}, _} <- Defs])]),
-     "\n",
-     gpb_codegen:format_fn(
-       get_msg_or_group_names, fun() -> '<Names>' end,
-       [replace_term('<Names>', msg_or_group_names(Defs))]),
-     "\n",
-     gpb_codegen:format_fn(
-       get_enum_names, fun() -> '<Names>' end,
-       [replace_term('<Names>', [EnumName || {{enum,EnumName}, _} <- Defs])]),
-     "\n",
-     format_fetch_msg_defs(msgs_or_groups(Defs)),
-     ?f("~n"),
-     format_fetch_enum_defs(EnumDefs),
-     ?f("~n"),
-     format_find_msg_defs(Defs, Opts),
-     ?f("~n"),
-     format_find_enum_defs(EnumDefs),
-     ?f("~n"),
-     format_enum_value_symbol_converters(EnumDefs),
-     ?f("~n"),
-     format_get_service_names(ServiceDefs),
-     ?f("~n"),
-     format_get_service_defs(ServiceDefs, Opts),
-     ?f("~n"),
-     format_get_rpc_names(ServiceDefs),
-     ?f("~n"),
-     format_find_rpc_defs(ServiceDefs),
-     ?f("~n"),
-     [format_find_service_rpc_defs(ServiceName, Rpcs, Opts) || {{service, ServiceName}, Rpcs} <- ServiceDefs],
-     ?f("~n"),
-     format_fetch_rpc_defs(ServiceDefs, Opts),
-     ?f("~n"),
-     format_get_package_name(Defs),
-     ?f("~n"),
-     format_descriptor(Defs, Opts)
-    ].
-
-msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
-    EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
-    MsgDefTrees = [msg_def_tree(MsgDef, Opts) || MsgDef <- MsgDefs],
-    GroupDefTrees = [group_def_tree(GroupDef, Opts) || GroupDef <- GroupDefs],
-    erl_syntax:list(EnumDefTrees ++ MsgDefTrees ++ GroupDefTrees).
-
-msg_def_tree({{msg, MsgName}, Fields}, Opts) ->
-    erl_syntax:tuple(
-      [erl_syntax:tuple([erl_syntax:atom(msg), erl_syntax:atom(MsgName)]),
-       fields_tree(Fields, Opts)]).
-
-group_def_tree({{group, Name}, Fields}, Opts) ->
-    erl_syntax:tuple(
-      [erl_syntax:tuple([erl_syntax:atom(group), erl_syntax:atom(Name)]),
-       fields_tree(Fields, Opts)]).
-
-fields_tree(Fields, Opts) ->
-    case get_field_format_by_opts(Opts) of
-        fields_as_records ->
-            erl_syntax:list([field_tree(Field, Opts) || Field <- Fields]);
-        fields_as_maps ->
-            erl_syntax:list([field_tree(Field, Opts) || Field <- Fields]);
-        fields_as_proplists ->
-            erl_parse:abstract(gpb:field_records_to_proplists(Fields))
-    end.
-
-get_field_format_by_opts(Opts) ->
-    case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
-        false -> %% default
-            case get_defs_as_maps_or_records(Opts) of
-                records -> fields_as_records;
-                maps    -> fields_as_maps
-            end;
-        true ->
-            fields_as_proplists
-    end.
-
-field_tree(#?gpb_field{}=F, Opts) ->
-    [?gpb_field | FValues] = tuple_to_list(F),
-    FNames = record_info(fields, ?gpb_field),
-    mapping_create(
-      ?gpb_field,
-      lists:zip(FNames,
-                [erl_parse:abstract(FValue) || FValue <- FValues]),
-      mk_get_defs_as_maps_or_records_fn(Opts));
-field_tree(#gpb_oneof{fields=OFields}=F, Opts) ->
-    [gpb_oneof | FValues] = tuple_to_list(F),
-    FNames = record_info(fields, gpb_oneof),
-    mapping_create(
-      gpb_oneof,
-      [if FName == fields -> {FName, fields_tree(OFields, Opts)};
-          FName /= fields -> {FName, erl_parse:abstract(FValue)}
-       end
-       || {FName, FValue} <- lists:zip(FNames, FValues)],
-      mk_get_defs_as_maps_or_records_fn(Opts)).
-
-format_fetch_msg_defs([]) ->
-    ["-spec fetch_msg_def(_) -> no_return().\n",
-     gpb_codegen:format_fn(
-       fetch_msg_def,
-       fun(MsgName) -> erlang:error({no_such_msg, MsgName}) end)];
-format_fetch_msg_defs(_MsgDefs) ->
-    gpb_codegen:format_fn(
-      fetch_msg_def,
-      fun(MsgName) ->
-              case find_msg_def(MsgName) of
-                  Fs when is_list(Fs) -> Fs;
-                  error               -> erlang:error({no_such_msg, MsgName})
-              end
-      end).
-
-format_fetch_enum_defs([]) ->
-    ["-spec fetch_enum_def(_) -> no_return().\n",
-     gpb_codegen:format_fn(
-       fetch_enum_def,
-       fun(EnumName) -> erlang:error({no_such_enum, EnumName}) end)];
-format_fetch_enum_defs(_EnumDefs) ->
-    gpb_codegen:format_fn(
-      fetch_enum_def,
-      fun(EnumName) ->
-              case find_enum_def(EnumName) of
-                  Es when is_list(Es) -> Es;
-                  error               -> erlang:error({no_such_enum, EnumName})
-              end
-      end).
-
-format_find_msg_defs(Defs, Opts) ->
-    gpb_codegen:format_fn(
-      find_msg_def,
-      fun('<Name>') -> '<Fields>';
-         (_) -> error
-      end,
-      [repeat_clauses('<Name>',
-                      [[replace_term('<Name>', Name),
-                        replace_tree('<Fields>', fields_tree(Fields, Opts))]
-                       || {_, Name, Fields} <- msgs_or_groups(Defs)])]).
-
-format_find_enum_defs(Enums) ->
-    gpb_codegen:format_fn(
-      find_enum_def,
-      fun('<EnumName>') -> '<Values>';
-         (_) -> error
-      end,
-      [repeat_clauses('<EnumName>',
-                      [[replace_term('<EnumName>', EnumName),
-                        replace_term('<Values>', Values)]
-                       || {{enum, EnumName}, Values} <- Enums])]).
-
-
-format_enum_value_symbol_converter_exports(Defs) ->
-    [?f("-export([enum_symbol_by_value/2, enum_value_by_symbol/2]).~n"),
-     [begin
-         ToSymFnName = mk_fn(enum_symbol_by_value_, EnumName),
-         ToValFnName = mk_fn(enum_value_by_symbol_, EnumName),
-         ?f("-export([~p/1, ~p/1]).~n", [ToSymFnName, ToValFnName])
-     end
-     || {{enum, EnumName}, _EnumDef} <- Defs]].
-
-format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
-    %% A difference between this function and `d_enum_X' as generated
-    %% by `format_enum_decoders' is that this function generates
-    %% value/symbol converters for all enums, not only for the ones
-    %% that are used in messages.
-    [gpb_codegen:format_fn(
-       enum_symbol_by_value,
-       fun('<EnumName>', Value) -> 'cvt'(Value) end,
-       [repeat_clauses(
-          '<EnumName>',
-          [[replace_term('<EnumName>', EnumName),
-            replace_term('cvt', mk_fn(enum_symbol_by_value_, EnumName))]
-           || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
-     "\n",
-     gpb_codegen:format_fn(
-       enum_value_by_symbol,
-       fun('<EnumName>', Sym) -> 'cvt'(Sym) end,
-       [repeat_clauses(
-          '<EnumName>',
-          [[replace_term('<EnumName>', EnumName),
-            replace_term('cvt', mk_fn(enum_value_by_symbol_, EnumName))]
-           || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
-     "\n",
-     [[gpb_codegen:format_fn(
-         mk_fn(enum_symbol_by_value_, EnumName),
-         fun('<Value>') -> '<Sym>' end,
-         [repeat_clauses('<Value>',
-                         [[replace_term('<Value>', EnumValue),
-                           replace_term('<Sym>', EnumSym)]
-                          || {EnumSym, EnumValue} <- unalias_enum(EnumDef)])]),
-       "\n",
-       gpb_codegen:format_fn(
-         mk_fn(enum_value_by_symbol_, EnumName),
-         fun('<Sym>') -> '<Value>' end,
-         [repeat_clauses('<Sym>',
-                         [[replace_term('<Value>', EnumValue),
-                           replace_term('<Sym>', EnumSym)]
-                          || {EnumSym, EnumValue} <- EnumDef])])]
-      || {{enum, EnumName}, EnumDef} <- EnumDefs]];
-format_enum_value_symbol_converters([]=_EnumDefs) ->
-    ["-spec enum_symbol_by_value(_, _) -> no_return().\n",
-     gpb_codegen:format_fn(
-       enum_symbol_by_value,
-       fun(E, V) -> erlang:error({no_enum_defs, E, V}) end),
-     "\n",
-     "-spec enum_value_by_symbol(_, _) -> no_return().\n",
-     gpb_codegen:format_fn(
-       enum_value_by_symbol,
-       fun(E, V) -> erlang:error({no_enum_defs, E, V}) end),
-     "\n"].
-
-format_get_package_name(Defs) ->
-    case lists:keyfind(package, 1, Defs) of
-        false ->
-            gpb_codegen:format_fn(
-              get_package_name, fun() -> undefined end);
-        {package, Package} ->
-            gpb_codegen:format_fn(
-              get_package_name, fun() -> '<Package>' end,
-              [replace_term('<Package>', Package)])
-    end.
-
-format_descriptor(Defs, Opts) ->
+possibly_format_descriptor(Defs, Opts) ->
     case get_gen_descriptor_by_opts(Opts) of
         true ->
             try gpb_compile_descr:encode_defs_to_descriptor(Defs) of
@@ -6170,132 +5945,6 @@ format_descriptor(Defs, Opts) ->
             end;
         false ->
             ""
-    end.
-
-get_gen_descriptor_by_opts(Opts) ->
-    proplists:get_bool(descriptor, Opts).
-
-% --- service introspection methods
-
-format_get_service_names(ServiceDefs) ->
-    gpb_codegen:format_fn(
-      get_service_names,
-      fun() -> '<ServiceNames>' end,
-      [replace_term(
-         '<ServiceNames>',
-         [ServiceName || {{service, ServiceName}, _Rpcs} <- ServiceDefs])]).
-
-format_get_service_defs(ServiceDefs, Opts) ->
-    gpb_codegen:format_fn(
-      get_service_def,
-      fun('<ServiceName>') -> '<ServiceDef>';
-         (_) -> error
-      end,
-      [repeat_clauses(
-         '<ServiceName>',
-         [[replace_term('<ServiceName>', ServiceName),
-           replace_tree('<ServiceDef>', service_def_tree(ServiceDef, Opts))]
-          || {{service, ServiceName}, _Rpcs} = ServiceDef <- ServiceDefs])]).
-
-format_get_rpc_names(ServiceDefs) ->
-    gpb_codegen:format_fn(
-      get_rpc_names,
-      fun('<ServiceName>') -> '<ServiceRpcNames>';
-         (_) -> error
-      end,
-      [repeat_clauses('<ServiceName>',
-                      [[replace_term('<ServiceName>', ServiceName),
-                        replace_term('<ServiceRpcNames>',
-                                     [RpcName
-                                      || #?gpb_rpc{name=RpcName} <- Rpcs])]
-                       || {{service, ServiceName}, Rpcs} <- ServiceDefs])]).
-
-format_find_rpc_defs(ServiceDefs) ->
-    gpb_codegen:format_fn(
-      find_rpc_def,
-      fun('<ServiceName>', RpcName) -> '<ServiceFindRpcDef>'(RpcName);
-         (_, _) -> error
-      end,
-      [repeat_clauses(
-         '<ServiceName>',
-         [[replace_term('<ServiceName>', ServiceName),
-           replace_term('<ServiceFindRpcDef>',
-                        mk_fn(find_rpc_def_, ServiceName))]
-          || {{service, ServiceName}, _} <- ServiceDefs])]).
-
-format_find_service_rpc_defs(ServiceName, Rpcs, Opts) ->
-    gpb_codegen:format_fn(
-      mk_fn(find_rpc_def_, ServiceName),
-      fun('<RpcName>') -> '<RpcDef>';
-         (_) -> error
-      end,
-      [repeat_clauses('<RpcName>',
-                      [[replace_term('<RpcName>', RpcName),
-                        replace_tree('<RpcDef>', rpc_def_tree(Rpc, Opts))]
-                       || #?gpb_rpc{name=RpcName} = Rpc <- Rpcs])]).
-
-format_fetch_rpc_defs([], _Opts) ->
-    ["-spec fetch_rpc_def(_, _) -> no_return().\n",
-     gpb_codegen:format_fn(
-       fetch_rpc_def,
-       fun(ServiceName, RpcName) ->
-               erlang:error({no_such_rpc, ServiceName, RpcName})
-       end)];
-format_fetch_rpc_defs(_ServiceDefs, Opts) ->
-    gpb_codegen:format_fn(
-      fetch_rpc_def,
-      fun(ServiceName, RpcName) ->
-              case find_rpc_def(ServiceName, RpcName) of
-                  Def when is_X(Def) -> Def;
-                  error -> erlang:error({no_such_rpc, ServiceName, RpcName})
-              end
-      end,
-      [replace_term(is_X,
-                    case get_rpc_format_by_opts(Opts) of
-                        rpcs_as_proplists ->
-                            is_list;
-                        rpcs_as_records ->
-                            case get_records_or_maps_by_opts(Opts) of
-                                maps    -> is_map;
-                                records -> is_tuple
-                            end
-                    end)]).
-
-service_def_tree({{service, ServiceName}, Rpcs}, Opts) ->
-    erl_syntax:tuple(
-      [erl_syntax:tuple([erl_syntax:atom(service),
-                         erl_syntax:atom(ServiceName)]),
-       rpcs_def_tree(Rpcs, Opts)]).
-
-get_rpc_format_by_opts(Opts) ->
-    case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
-        false -> rpcs_as_records; %% default
-        true  -> rpcs_as_proplists
-    end.
-
-rpc_record_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
-    [?gpb_rpc | RValues] = tuple_to_list(Rpc),
-    RNames = record_info(fields, ?gpb_rpc),
-    mapping_create(
-      ?gpb_rpc,
-      lists:zip(RNames,
-                [erl_parse:abstract(RValue) || RValue <- RValues]),
-      mk_get_defs_as_maps_or_records_fn(Opts)).
-
-rpcs_def_tree(Rpcs, Opts) ->
-    case get_rpc_format_by_opts(Opts) of
-        rpcs_as_records   ->
-            erl_syntax:list([rpc_record_def_tree(Rpc, Opts) || Rpc <- Rpcs]);
-        rpcs_as_proplists ->
-            erl_parse:abstract(gpb:rpc_records_to_proplists(Rpcs))
-    end.
-
-rpc_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
-    case get_rpc_format_by_opts(Opts) of
-        rpcs_as_records   ->
-            rpc_record_def_tree(Rpc, Opts);
-        rpcs_as_proplists ->
-            erl_parse:abstract(gpb:rpc_record_to_proplist(Rpc))
     end.
 
 %% -- hrl -----------------------------------------------------
@@ -6463,148 +6112,6 @@ add_binding({Key, Value}, Bindings) ->
 fetch_binding(Key, Bindings) ->
     dict:fetch(Key, Bindings).
 
-%% a mapping is either a record or a map
-%%
-%%
-mapping_match(RName, Fields, Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
-        records -> record_match(RName, Fields);
-        maps    -> map_match(Fields)
-    end.
-
-mapping_create(RName, Fields, Opts) when is_list(Opts) ->
-    Fn = fun() -> get_records_or_maps_by_opts(Opts) end,
-    mapping_create(RName, Fields, Fn);
-mapping_create(RName, Fields, RecordsOrMaps) when is_function(RecordsOrMaps) ->
-    case RecordsOrMaps() of
-        records -> record_create(RName, Fields);
-        maps    -> map_create(Fields)
-    end.
-
-mapping_update(Var, RName, FieldsValues, Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
-        records ->
-            record_update(Var, RName, FieldsValues);
-        maps ->
-            case get_mapping_and_unset_by_opts(Opts) of
-                {maps, present_undefined} -> map_update(Var, FieldsValues);
-                {maps, omitted}           -> map_set(Var, FieldsValues)
-            end
-    end.
-
-mk_get_defs_as_maps_or_records_fn(Opts) ->
-    fun() -> get_defs_as_maps_or_records(Opts) end.
-
-get_defs_as_maps_or_records(Opts) ->
-    Default = false,
-    case proplists:get_value(defs_as_maps, Opts, Default) of
-        false -> records;
-        true  -> maps
-    end.
-
-%% records
-record_match(RName, Fields) -> record_create_or_match(RName, Fields).
-record_create(RName, Fields) -> record_create_or_match(RName, Fields).
-
-record_create_or_match(RecordName, FieldsValueTrees) ->
-    record_update(none, RecordName, FieldsValueTrees).
-
-record_update(Var, _RecordName, []) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-record_update(Var, RecordName, FieldsValueTrees) ->
-    erl_syntax:record_expr(
-      Var,
-      erl_syntax:atom(RecordName),
-      [erl_syntax:record_field(erl_syntax:atom(FName), ValueSyntaxTree)
-       || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
-
-%% maps
--ifndef(NO_HAVE_MAPS).
-map_match(Fields) ->
-    erl_syntax:map_expr(
-      [erl_syntax:map_field_exact(erl_syntax:atom(FName), Expr)
-       || {FName, Expr} <- Fields]).
-
-map_create(Fields) ->
-    map_set(none, Fields).
-
-map_update(Var, []) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-map_update(Var, FieldsValueTrees) ->
-    erl_syntax:map_expr(
-      Var,
-      [erl_syntax:map_field_exact(erl_syntax:atom(FName), Expr)
-       || {FName, Expr} <- FieldsValueTrees]).
-
-map_set(Var, []) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-map_set(Var, FieldsValueTrees) ->
-    erl_syntax:map_expr(
-      Var,
-      [if is_atom(FName) ->
-               erl_syntax:map_field_assoc(erl_syntax:atom(FName), Expr);
-          true -> % Key can be a variable or other type too.
-               erl_syntax:map_field_assoc(FName, Expr)
-       end
-       || {FName, Expr} <- FieldsValueTrees]).
-
--else. %% on a pre Erlang 17 system
-
-map_match(Fields) ->
-    erl_syntax:text(
-      ?ff("#{~s}", [string:join([?ff("~p := ~s", [FName, Var])
-                                 || {FName, Var} <- map_kvars(Fields)],
-                                ", ")])).
-
-map_create(Fields) ->
-    erl_syntax:text(
-      ?ff("#{~s}", [string:join([?ff("~p => ~s", [FName, Val])
-                                 || {FName, Val} <- map_kvalues(Fields)],
-                                ", ")])).
-
-map_update(Var, []) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-map_update(Var, FieldsValueTrees) ->
-    erl_syntax:text(
-      ?ff("~s#{~s}",
-          [var_literal(Var),
-           string:join([?ff("~p := ~s", [FName, Val])
-                        || {FName, Val} <- map_kvalues(FieldsValueTrees)],
-                       ", ")])).
-
-map_set(Var, []) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-map_set(Var, FieldsValueTrees) ->
-    erl_syntax:text(
-      ?ff("~s#{~s}",
-          [var_literal(Var),
-           string:join([?ff("~p => ~s", [FName, Val])
-                        || {FName, Val} <- map_kvalues(FieldsValueTrees)],
-                       ", ")])).
-
-%% -> [{atom(), string()}]
-map_kvars(KVars) ->
-    [{Key, var_literal(Var)} || {Key, Var} <- KVars].
-
-var_literal(Var) ->
-    variable = erl_syntax:type(Var),
-    erl_syntax:variable_literal(Var).
-
-%% -> [{atom(), string()}]
-map_kvalues(KVars) ->
-    [begin
-         ExprAsStr = erl_prettypr:format(Expr),
-         {Key, ExprAsStr}
-     end
-     || {Key, Expr} <- KVars].
-
--endif. %% NO_HAVE_MAPS
-
 mk_find_tr_fn(MsgName, #?gpb_field{name=FName}, AnRes) ->
     ElemPath = [MsgName,FName],
     fun(Op) -> find_translation(ElemPath, Op, AnRes) end;
@@ -6676,16 +6183,6 @@ exists_tr_for_msg(MsgName, Op, #anres{translations=Translations}) ->
               end,
               false,
               Translations).
-
-%% The "option allow_alias = true;" inside an enum X { ... }
-%% says it is ok to have multiple symbols that map to the same numeric value.
-%% Appeared in protobuf 2.5.0.
-unalias_enum([{_Sym,Value}=Enum | Rest]) ->
-    [Enum | unalias_enum([E || {_,V}=E <- Rest, V /= Value])];
-unalias_enum([{option,_Name,_Value} | Rest]) ->
-    unalias_enum(Rest);
-unalias_enum([]) ->
-    [].
 
 var_f_n(N) -> var_n("F", N).
 var_b_n(N) -> var_n("B", N).
@@ -6802,12 +6299,6 @@ type_default(Type, Defs, Opts, GetTypeDefault) ->
        Type /= string ->
             GetTypeDefault(Type, Defs)
     end.
-
-msg_names(Defs) ->
-    [Name || {{msg, Name}, _Fields} <- Defs].
-
-msg_or_group_names(Defs) ->
-    [Name || {_Type, Name, _Fields} <- msgs_or_groups(Defs)].
 
 %% msgs(Defs) ->
 %%     [{Name,Fields} || {{msg, Name}, Fields} <- msgs_or_groups(Defs)].
