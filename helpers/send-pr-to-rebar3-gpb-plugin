@@ -122,21 +122,26 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
     # Grep for rebar / omit README.md because it contains line number references
     # likely to get wrong if we substitute version numbers in that too:
     # https://github.com/tomas-abrahamsson/gpb/blob/3.19.0/src/gpb_compile.erl#L66-L93
-    for f in $(git grep -l -E 'gpb.*[0-9]+\.[0-9]+\.[0-9]+' | grep rebar)
-    do
-	tmpf=$(mktemp "$f.tmp-XXXXXXX")
-	cp "$f" "$tmpf"
-	# the [^_] is there so we do not change lines like
-	#     {rebar3_gpb_plugin, "1.10.0"}
-	# but only lines like these:
-	#     {'gpb', "3.26.4"}
-	#     [{<<"gpb">>,{pkg,<<"gpb">>,<<"3.26.4">>},0}].
-	sed -e 's/^\(.*[^_]gpb.*\)[0-9]\+\.[0-9]\+\.[0-9]\+/\1'"$vsn"'/' \
-	    < "$tmpf" \
-	    > "$f"
-	rm "$tmpf"
-	git add "$f"
-    done
+    if [ -f rebar.config ]; then f=rebar.config
+    elif [ -f rebar.config.script ]; then f=rebar.config.script
+    else echo "Neither rebar.config nor rebar.config.script exists" >&2; exit 1
+    fi
+    tmpf=$(mktemp "$f.tmp-XXXXXXX")
+    cp "$f" "$tmpf"
+    # the [^_] is there so we do not change lines like
+    #     {rebar3_gpb_plugin, "1.10.0"}
+    # but only lines like these:
+    #     {'gpb', "3.26.4"}
+    #     [{<<"gpb">>,{pkg,<<"gpb">>,<<"3.26.4">>},0}].
+    sed -e 's/^\(.*[^_]gpb.*\)[0-9]\+\.[0-9]\+\.[0-9]\+/\1'"$vsn"'/' \
+	< "$tmpf" \
+	> "$f"
+    rm "$tmpf"
+    git add "$f"
+    unset ERL_LIBS
+    rebar3 unlock gpb
+    rebar3 upgrade
+    git add rebar.lock
     git commit -q -m "Bump gpb to $vsn"
     echo "This is the change:-----------------------------------"
     PAGER=cat git log -p -1
