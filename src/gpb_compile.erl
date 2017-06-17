@@ -39,9 +39,13 @@
 -import(gpb_lib, [mk_fn/2, mk_fn/3]).
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
--import(gpb_lib, [msgs_or_groups/1, msg_names/1,
-                  get_field_name/1, get_field_occurrence/1,
-                  unalias_enum/1]).
+-import(gpb_lib, [msgs_or_groups/1, msg_names/1, contains_messages/1,
+                  get_field_name/1, get_field_names/1,
+                  get_field_occurrence/1, map_type_to_msg_name/2,
+                  unalias_enum/1, zip_for_non_opt_fields/2,
+                  any_field_is_sub_msg/1, any_field_is_repeated/1,
+                  any_enum_field_exists/1, any_packed_field_exists/1,
+                  at_least_one_submsg_with_size_not_known_at_compile_time_exists/1]).
 -import(gpb_lib, [mapping_match/3, mapping_create/3, mapping_update/4,
                   record_match/2, record_create/2,
                   map_match/1, map_create/1, map_set/2]).
@@ -52,20 +56,20 @@
                   get_type_specs_by_opts/1,
                   get_gen_descriptor_by_opts/1,
                   get_field_format_by_opts/1]).
--import(gpb_lib, [index_seq/1,
-                  iolist_to_utf8_or_escaped_binary/2,
-                  nowarn_dialyzer_attr/3]).
+-import(gpb_lib, [var_f_n/1, var_b_n/1, var_n/2, var/2, prefix_var/2,
+                  match_bind_var/2]).
+-import(gpb_lib, [index_seq/1, smember/2, smember_any/2,
+                  iolist_to_utf8_or_escaped_binary/2]).
 
 -import(gpb_gen_translators, [mk_find_tr_fn/3, mk_find_tr_fn_elem/4,
                               mk_find_tr_fn_elem_or_default/3,
                               mk_find_tr_fn_elem_or_default/4,
-                              mk_elempath_elem/3,
                               find_translation/3, find_translation/4,
                               default_fn_by_op/2,
                               default_any_merge_translator/0,
                               default_any_verify_translator/0,
                               exists_tr_for_msg/3,
-                              args_by_op2/1]).
+                              args_by_op2/1, maybe_userdata_param/2]).
 
 %% Varints are processed 7 bits at a time.
 %% We can expect that we have processed this number of bits before
@@ -1717,13 +1721,6 @@ map_types_to_msgs(MapTypes) ->
       gpb:map_item_pseudo_fields(KeyType, ValueType)}
      || {KeyType,ValueType} <- MapTypes].
 
-map_type_to_msg_name(KeyType, {msg,MsgName}) ->
-    list_to_atom(?ff("map<~s,~s>", [KeyType, MsgName]));
-map_type_to_msg_name(KeyType, {enum,EnumName}) ->
-    list_to_atom(?ff("map<~s,~s>", [KeyType, EnumName]));
-map_type_to_msg_name(KeyType, ValueType) ->
-    list_to_atom(?ff("map<~s,~s>", [KeyType, ValueType])).
-
 find_used_types(Defs) ->
     fold_msg_or_group_fields(
       fun(_Type, _MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
@@ -2423,9 +2420,9 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        "\n",
        ?f("~s~n", [format_msg_merge_code(Defs, AnRes, Opts)]),
        "\n",
-       format_verifiers_top_function(Defs, Opts),
+       gpb_gen_verifiers:format_verifiers_top_function(Defs, Opts),
        "\n",
-       ?f("~s~n", [format_verifiers(Defs, AnRes, Opts)]),
+       gpb_gen_verifiers:format_verifiers(Defs, AnRes, Opts),
        "\n",
        if not DoNif ->
                [gpb_gen_translators:format_aux_transl_helpers(AnRes),
@@ -2693,25 +2690,6 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
        end,
        [replace_tree('<msg-matching>', FieldMatching),
         splice_trees('<encode-param-exprs>', EncodeExprs)])].
-
-get_field_names(MsgDef) ->
-    [case Field of
-         #?gpb_field{name=FName} -> FName;
-         #gpb_oneof{name=FName}  -> FName
-     end
-     || Field <- MsgDef].
-
-zip_for_non_opt_fields([#?gpb_field{name=FName, occurrence=Occurrence} | FRest],
-                       [Elem | ERest]) ->
-    case Occurrence of
-        optional -> zip_for_non_opt_fields(FRest, ERest);
-        required -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)];
-        repeated -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)]
-    end;
-zip_for_non_opt_fields([#gpb_oneof{} | FRest], [_Elem | ERest]) ->
-    zip_for_non_opt_fields(FRest, ERest);
-zip_for_non_opt_fields([], []) ->
-    [].
 
 field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                   FVar, PrevBVar, TrUserDataVar, Defs, Tr, _AnRes, Opts)->
@@ -3138,26 +3116,6 @@ is_varint_encoder_needed(#anres{used_types=UsedTypes}=AnRes) ->
         any_packed_field_exists(AnRes) orelse
         at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes).
 
-any_enum_field_exists(UsedTypes) ->
-    sets:fold(fun({enum,_}, _Acc) -> true;
-                 (_, Acc)         -> Acc
-              end,
-              false,
-              UsedTypes).
-
-any_packed_field_exists(#anres{num_packed_fields=0}) -> false;
-any_packed_field_exists(#anres{num_packed_fields=_}) -> true.
-
-at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
-    #anres{used_types=UsedTypes,
-           maps_as_msgs=MapsAsMsgs,
-           known_msg_size=KnownSize} = AnRes,
-    SubMsgNames = [MsgName || {msg,MsgName} <- sets:to_list(UsedTypes)],
-    MapMsgNames = [MsgName || {{msg,MsgName},_} <- MapsAsMsgs],
-    IsMsgSizeUnknown = fun(Nm) -> dict:fetch(Nm, KnownSize) == undefined end,
-    lists:any(IsMsgSizeUnknown, SubMsgNames) orelse
-        lists:any(IsMsgSizeUnknown, MapMsgNames).
-
 format_sint_encoder() ->
     gpb_codegen:format_fn(
       e_type_sint,
@@ -3281,17 +3239,6 @@ format_varint_encoder() ->
               Bin2 = <<Bin/binary, (N band 127 bor 128)>>,
               call_self(N bsr 7, Bin2)
       end).
-
-maybe_userdata_param(Field, Expr) ->
-    case is_primitive_type(Field) of
-        true -> [];
-        false -> [Expr]
-    end.
-
-is_primitive_type(#?gpb_field{type={msg,_}}) -> false;
-is_primitive_type(#?gpb_field{type={group,_}}) -> false;
-is_primitive_type(#?gpb_field{type={map,_,_}}) -> false;
-is_primitive_type(_) -> true.
 
 %% -- decoders -----------------------------------------------------
 
@@ -3475,12 +3422,6 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
 decode_finalizer_needs_tr_userdata(MsgName, Fields, AnRes) ->
     any_field_is_repeated(Fields) orelse
         exists_tr_for_msg(MsgName, decode_repeated_finalize, AnRes).
-
-any_field_is_repeated(Fields) ->
-    lists:any(fun(#?gpb_field{occurrence=Occ}) -> Occ == repeated;
-                 (#gpb_oneof{}) -> false
-              end,
-              Fields).
 
 format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The more general field selecting decoder
@@ -4720,15 +4661,6 @@ format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
                         false -> ?expr(_)
                     end)]).
 
-any_field_is_sub_msg(Fields) ->
-    lists:any(fun(#?gpb_field{type={msg,_}}) -> true;
-                 (#?gpb_field{type={group,_}}) -> true;
-                 (#?gpb_field{type={map,_,_}}) -> true;
-                 (#gpb_oneof{fields=Fs}) -> any_field_is_sub_msg(Fs);
-                 (_) -> false
-              end,
-              Fields).
-
 format_msg_merger_fnclause_match(_MsgName, [], _Opts) ->
     {?expr(PF), ?expr(_), no_fields};
 format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
@@ -5011,545 +4943,6 @@ format_field_skippers(MsgName, AnRes) ->
        "\n"]
       || NumBits <- [32, 64]]].
 
-%% -- verifiers -----------------------------------------------------
-
-format_verifiers_top_function(Defs, Opts) ->
-    case {contains_messages(Defs), get_records_or_maps_by_opts(Opts)} of
-        {false, records} -> format_verifiers_top_no_msgs_r();
-        {false, maps}    -> format_verifiers_top_no_msgs_m();
-        {true,  _}       -> format_verifiers_top_with_msgs(Defs, Opts)
-    end.
-
-format_verifiers_top_no_msgs_r() ->
-    [?f("-spec verify_msg(_) -> no_return().~n", []),
-     gpb_codegen:format_fn(
-       verify_msg,
-       fun(Msg) -> call_self(Msg, []) end),
-     ?f("-spec verify_msg(_,_) -> no_return().~n", []),
-     gpb_codegen:format_fn(
-       verify_msg,
-       fun(Msg,_Opts) -> mk_type_error(not_a_known_message, Msg, []) end),
-     "\n"].
-
-format_verifiers_top_no_msgs_m() ->
-    [?f("-spec verify_msg(_,_) -> no_return().~n", []),
-     gpb_codegen:format_fn(
-       verify_msg,
-       fun(Msg, MsgName) -> call_self(Msg, MsgName, []) end),
-     ?f("-spec verify_msg(_,_,_) -> no_return().~n", []),
-     gpb_codegen:format_fn(
-       verify_msg,
-       fun(Msg, _MsgName, _Opts) ->
-               mk_type_error(not_a_known_message, Msg, [])
-       end),
-     "\n"].
-
-format_verifiers_top_with_msgs(Defs, Opts) ->
-    Mapping = get_records_or_maps_by_opts(Opts),
-    MsgNameVars = case Mapping of
-                      records -> [];
-                      maps    -> [?expr(MsgName)]
-                  end,
-    [gpb_codegen:format_fn(
-       verify_msg,
-       fun(Msg, '<MsgName>') -> call_self(Msg, '<MsgName>', []) end,
-       [splice_trees('<MsgName>', MsgNameVars)]),
-     gpb_codegen:format_fn(
-       verify_msg,
-       fun(Msg, '<MsgName>', Opts) ->
-               TrUserData = proplists:get_value(user_data, Opts),
-               case '<MsgOrMsgName>' of
-                   '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>'],
-                                                   TrUserData);
-                   _ -> mk_type_error(not_a_known_message, Msg, [])
-               end
-       end,
-       [repeat_clauses(
-          '<msg-match>',
-          [[replace_tree('<msg-match>',
-                         case Mapping of
-                             records -> record_match(MsgName, []);
-                             maps    -> erl_syntax:atom(MsgName)
-                         end),
-            replace_term('<verify-msg>', mk_fn(v_msg_, MsgName)),
-            replace_term('<MsgName>', MsgName)]
-           || {{msg, MsgName}, _MsgDef} <- Defs]),
-        replace_tree('<MsgOrMsgName>', case Mapping of
-                                           records -> ?expr(Msg);
-                                           maps    -> ?expr(MsgName)
-                                       end),
-        splice_trees('<MsgName>', MsgNameVars)])].
-
-format_verifiers(Defs, AnRes, Opts) ->
-    [format_msg_verifiers(Defs, AnRes, Opts),
-     format_enum_verifiers(Defs, AnRes, Opts),
-     format_type_verifiers(AnRes, Opts),
-     format_map_verifiers(AnRes, Opts),
-     format_verifier_auxiliaries(Defs)
-    ].
-
-format_msg_verifiers(Defs, AnRes, Opts) ->
-    [format_msg_verifier(MsgName, MsgDef, AnRes, Opts)
-     || {_Type, MsgName, MsgDef} <- msgs_or_groups(Defs)].
-
-format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
-    FNames = get_field_names(MsgDef),
-    FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],
-    MsgVar = ?expr(M),
-    {FieldMatching, NonOptKeys} =
-        case get_mapping_and_unset_by_opts(Opts) of
-            X when X == records;
-                   X == {maps, present_undefined} ->
-                {mapping_match(MsgName, lists:zip(FNames, FVars), Opts),
-                 FNames};
-            {maps, omitted} ->
-                FMap = zip_for_non_opt_fields(MsgDef, FVars),
-                if length(FMap) == length(FNames) ->
-                        {map_match(FMap), FNames};
-                   length(FMap) < length(FNames) ->
-                        {?expr('mapmatch' = 'M',
-                               [replace_tree('mapmatch', map_match(FMap)),
-                                replace_tree('M', MsgVar)]),
-                         [K || {K, _} <- FMap]}
-                end
-        end,
-    NeedsMatchOther = case get_records_or_maps_by_opts(Opts) of
-                          records -> can_occur_as_sub_msg(MsgName, AnRes);
-                          maps    -> true
-                      end,
-    FnName = mk_fn(v_msg_, MsgName),
-    TrUserDataVar = ?expr(TrUserData),
-    [nowarn_dialyzer_attr(FnName,3,Opts),
-     gpb_codegen:format_fn(
-       FnName,
-       fun('<msg-match>', '<Path>', 'MaybeTrUserData') ->
-               '<verify-fields>',
-               ok;
-          ('<M>', Path, _TrUserData) when is_map('<M>') ->
-               mk_type_error(
-                 {missing_fields, 'NonOptKeys'--maps:keys('<M>'), '<MsgName>'},
-                 '<M>', Path);
-          ('<X>', Path, _TrUserData) ->
-               mk_type_error({expected_msg,'<MsgName>'}, X, Path)
-       end,
-       [replace_tree('<msg-match>', FieldMatching),
-        replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
-                                  MsgDef /= [] -> ?expr(Path)
-                               end),
-        replace_tree('MaybeTrUserData',
-                     case any_field_is_sub_msg(MsgDef)
-                         orelse exists_tr_for_msg(MsgName, verify, AnRes) of
-                         true  -> TrUserDataVar;
-                         false -> ?expr(_)
-                     end),
-        splice_trees('<verify-fields>',
-                     field_verifiers(MsgName, MsgDef, FVars, MsgVar,
-                                     TrUserDataVar,
-                                     AnRes, Opts)),
-        repeat_clauses('<X>', case NeedsMatchOther of
-                                  true  -> [[replace_tree('<X>', ?expr(X))]];
-                                  false -> [] %% omit the else clause
-                              end),
-        repeat_clauses('<M>',
-                       case get_records_or_maps_by_opts(Opts) of
-                           records ->
-                               []; % omit this clause
-                           maps ->
-                               [[replace_tree('<M>', ?expr(M)),
-                                 replace_term('NonOptKeys', NonOptKeys)]]
-                       end),
-        replace_term('<MsgName>', MsgName)])].
-
-field_verifiers(MsgName, Fields, FVars, MsgVar, TrUserDataVar, AnRes, Opts) ->
-    [field_verifier(MsgName, Field, FVar, MsgVar, TrUserDataVar, AnRes, Opts)
-     || {Field, FVar} <- lists:zip(Fields, FVars)].
-
-field_verifier(MsgName,
-               #?gpb_field{name=FName, type=Type, occurrence=Occurrence}=Field,
-               FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
-    FVerifierFn = case Type of
-                      {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
-                      {group,GName}   -> mk_fn(v_msg_, GName);
-                      {enum,EnumName} -> mk_fn(v_enum_, EnumName);
-                      {map,KT,VT}     -> mk_fn(v_, map_type_to_msg_name(KT,VT));
-                      Type            -> mk_fn(v_type_, Type)
-                  end,
-    ElemPath = mk_elempath_elem(MsgName, Field, false),
-    FVerifierFn2 = find_translation(ElemPath, verify, AnRes, FVerifierFn),
-    Replacements = [replace_term('<verify-fn>', FVerifierFn2),
-                    replace_tree('<F>', FVar),
-                    replace_term('<FName>', FName),
-                    replace_term('<Type>', Type),
-                    replace_tree('TrUserData', TrUserDataVar),
-                    splice_trees('MaybeTrUserData',
-                                 maybe_userdata_param(Field, TrUserDataVar))],
-    IsMapField = case Type of
-                     {map,_,_} -> true;
-                     _ -> false
-                 end,
-    case Occurrence of
-        required ->
-            %% FIXME: check especially for `undefined'
-            %% and if found, error out with required_field_not_set
-            %% specifying expected type
-            ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'MaybeTrUserData'),
-                  Replacements);
-        repeated when not IsMapField ->
-            ?expr(if is_list('<F>') ->
-                          %% _ = [...] to avoid dialyzer error
-                          %% "Expression produces a value of type
-                          %% ['ok'], but this value is unmatched"
-                          %% with the -Wunmatched_returns flag.
-                          _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                             'MaybeTrUserData')
-                               || Elem <- '<F>'],
-                          ok;
-                     true ->
-                          mk_type_error(
-                            {invalid_list_of, '<Type>'},
-                            '<F>',
-                            ['<FName>' | Path])
-                  end,
-                  Replacements);
-        repeated when IsMapField ->
-            ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'TrUserData'),
-                  Replacements);
-        optional ->
-            case get_mapping_and_unset_by_opts(Opts) of
-                X when X == records;
-                       X == {maps, present_undefined} ->
-                    ?expr(if '<F>' == undefined -> ok;
-                             true -> '<verify-fn>'('<F>', ['<FName>' | Path],
-                                                  'MaybeTrUserData')
-                          end,
-                          Replacements);
-                {maps, omitted} ->
-                    ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
-                                                'MaybeTrUserData');
-                              _ ->
-                                  ok
-                          end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        map_match([{FName, FVar}])),
-                           replace_tree('M', MsgVar) | Replacements])
-            end
-    end;
-field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
-               FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
-    IsOneof = {true, FName},
-    case get_mapping_and_unset_by_opts(Opts) of
-        X when X == records;
-               X == {maps, present_undefined} ->
-            ?expr(
-               case '<F>' of
-                   undefined ->
-                       ok;
-                   '<oneof-pattern>' ->
-                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
-                                     'MaybeTrUserData');
-                   _ ->
-                       mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
-               end,
-               [replace_tree('<F>', FVar),
-                replace_term('<FName>', FName),
-                repeat_clauses(
-                  '<oneof-pattern>',
-                  [begin
-                       FVerifierFn =
-                           case Type of
-                               {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
-                               {enum,EnumName} -> mk_fn(v_enum_, EnumName);
-                               Type            -> mk_fn(v_type_, Type)
-                           end,
-                       ElemPath = mk_elempath_elem(MsgName, F, IsOneof),
-                       FVerifierFn2 = find_translation(ElemPath, verify, AnRes,
-                                                       FVerifierFn),
-                       OFVar = prefix_var("O", FVar),
-                       [replace_tree('M', MsgVar),
-                        replace_tree('<oneof-pattern>',
-                                     ?expr({'<OFName>','<OFVar>'})),
-                        replace_term('<verify-fn>', FVerifierFn2),
-                        replace_tree('<OFVar>', OFVar),
-                        replace_term('<OFName>', OFName),
-                        splice_trees('MaybeTrUserData',
-                                     maybe_userdata_param(F, TrUserDataVar))]
-                   end
-                   || #?gpb_field{name=OFName, type=Type}=F <- OFields])]);
-        {maps, omitted} ->
-            ?expr(
-               case 'M' of
-                   '<oneof-pattern>' ->
-                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
-                                     'MaybeTrUserData');
-                   '#{<FName> := <F>}' ->
-                       mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path]);
-                   _ ->
-                       ok
-               end,
-               [replace_tree('<F>', FVar),
-                replace_term('<FName>', FName),
-                replace_tree('M', MsgVar),
-                replace_tree('#{<FName> := <F>}', map_match([{FName, FVar}])),
-                repeat_clauses(
-                  '<oneof-pattern>',
-                  [begin
-                       FVerifierFn =
-                           case Type of
-                               {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
-                               {enum,EnumName} -> mk_fn(v_enum_, EnumName);
-                               Type            -> mk_fn(v_type_, Type)
-                           end,
-                       ElemPath = mk_elempath_elem(MsgName, F, IsOneof),
-                       FVerifierFn2 = find_translation(ElemPath, verify, AnRes,
-                                                       FVerifierFn),
-                       OFVar = prefix_var("O", FVar),
-                       Trs1 = [replace_tree('<OFVar>', OFVar),
-                               replace_term('<OFName>', OFName)],
-                       OFPat = ?expr({'<OFName>','<OFVar>'}, Trs1),
-                       [replace_tree('<oneof-pattern>',
-                                     map_match([{FName, OFPat}])),
-                        replace_term('<verify-fn>', FVerifierFn2),
-                        splice_trees('MaybeTrUserData',
-                                     maybe_userdata_param(F, TrUserDataVar))
-                        | Trs1]
-                   end
-                   || #?gpb_field{name=OFName, type=Type}=F <- OFields])])
-    end.
-
-
-can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
-    sets:is_element({msg,MsgName}, UsedTypes)
-        orelse sets:is_element({group,MsgName}, UsedTypes).
-
-format_enum_verifiers(Defs, #anres{used_types=UsedTypes}, Opts) ->
-    [format_enum_verifier(EnumName, Def, Opts)
-     || {{enum,EnumName}, Def} <- Defs,
-        smember({enum, EnumName}, UsedTypes)].
-
-format_enum_verifier(EnumName, EnumMembers, Opts) ->
-    FnName = mk_fn(v_enum_, EnumName),
-    [nowarn_dialyzer_attr(FnName, 2, Opts),
-     gpb_codegen:format_fn(
-       FnName,
-       fun('<sym>', _Path) -> ok;
-          (V, Path) when is_integer(V) -> v_type_sint32(V, Path);
-          (X, Path) -> mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
-       end,
-       [repeat_clauses('<sym>', [[replace_term('<sym>', EnumSym)]
-                                 || {EnumSym, _Value} <- EnumMembers]),
-        replace_term('<EnumName>', EnumName)])].
-
-format_type_verifiers(#anres{used_types=UsedTypes}, Opts) ->
-    [[format_int_verifier(sint32, signed, 32, Opts)
-      || smember(sint32, UsedTypes) orelse any_enum_field_exists(UsedTypes)],
-     [format_int_verifier(Type, Signedness, Bits, Opts)
-      || {Type, Signedness, Bits} <- [{sint64,   signed,   64},
-                                      {int32,    signed,   32},
-                                      {int64,    signed,   64},
-                                      {uint32,   unsigned, 32},
-                                      {uint64,   unsigned, 64},
-                                      {fixed32,  unsigned, 32},
-                                      {fixed64,  unsigned, 64},
-                                      {sfixed32, signed,   32},
-                                      {sfixed64, signed,   64}],
-         smember(Type, UsedTypes)],
-     [format_bool_verifier(Opts)                || smember(bool, UsedTypes)],
-     [format_float_verifier(float, Opts)        || smember(float, UsedTypes)],
-     [format_float_verifier(double, Opts)       || smember(double, UsedTypes)],
-     [format_string_verifier(Opts)              || smember(string, UsedTypes)],
-     [format_bytes_verifier(Opts)               || smember(bytes, UsedTypes)]].
-
-format_int_verifier(IntType, Signedness, NumBits, Opts) ->
-    Min = case Signedness of
-              unsigned -> 0;
-              signed   -> -(1 bsl (NumBits-1))
-          end,
-    Max = case Signedness of
-              unsigned -> 1 bsl NumBits - 1;
-              signed   -> 1 bsl (NumBits-1) - 1
-          end,
-    FnName = mk_fn(v_type_, IntType),
-    [nowarn_dialyzer_attr(FnName, 2, Opts),
-     gpb_codegen:format_fn(
-       FnName,
-       fun(N, _Path) when '<Min>' =< N, N =< '<Max>' ->
-               ok;
-          (N, Path) when is_integer(N) ->
-               mk_type_error({value_out_of_range, '<details>'}, N, Path);
-          (X, Path) ->
-               mk_type_error({bad_integer, '<details>'}, X, Path)
-       end,
-       [replace_term('<Min>', Min),
-        replace_term('<Max>', Max),
-        splice_trees('<details>', [erl_syntax:atom(IntType),
-                                   erl_syntax:atom(Signedness),
-                                   erl_syntax:integer(NumBits)])])].
-
-format_bool_verifier(Opts) ->
-    FnName = mk_fn(v_type_, bool),
-    [nowarn_dialyzer_attr(FnName, 2, Opts),
-     gpb_codegen:format_fn(
-       FnName,
-       fun(false, _Path) -> ok;
-          (true, _Path)  -> ok;
-          (0, _Path)  -> ok;
-          (1, _Path)  -> ok;
-          (X, Path) -> mk_type_error(bad_boolean_value, X, Path)
-       end)].
-
-format_float_verifier(FlType, Opts) ->
-    BadTypeOfValue = list_to_atom(lists:concat(["bad_", FlType, "_value"])),
-    FnName = mk_fn(v_type_, FlType),
-    [nowarn_dialyzer_attr(FnName, 2, Opts),
-     gpb_codegen:format_fn(
-       FnName,
-       fun(N, _Path) when is_float(N) -> ok;
-          %% It seems a float for the corresponding integer value is
-          %% indeed packed when doing <<Integer:32/little-float>>.
-          %% So let verify accept integers too.
-          %% When such a value is unpacked, we get a float.
-          (N, _Path) when is_integer(N) -> ok;
-          (infinity, _Path)    -> ok;
-          ('-infinity', _Path) -> ok;
-          (nan, _Path)         -> ok;
-          (X, Path)            -> mk_type_error('<bad_x_value>', X, Path)
-       end,
-       [replace_term('<bad_x_value>', BadTypeOfValue)])].
-
-format_string_verifier(Opts) ->
-    FnName = mk_fn(v_type_, string),
-    [nowarn_dialyzer_attr(FnName, 2, Opts),
-     gpb_codegen:format_fn(
-       FnName,
-       fun(S, Path) when is_list(S); is_binary(S) ->
-               try unicode:characters_to_binary(S) of
-                   B when is_binary(B) ->
-                       ok;
-                   {error, _, _} -> %% a non-UTF-8 binary
-                       mk_type_error(bad_unicode_string, S, Path)
-               catch error:badarg ->
-                       mk_type_error(bad_unicode_string, S, Path)
-               end;
-          (X, Path) ->
-               mk_type_error(bad_unicode_string, X, Path)
-       end)].
-
-format_bytes_verifier(Opts) ->
-    FnName = mk_fn(v_type_, bytes),
-    [nowarn_dialyzer_attr(FnName, 2, Opts),
-     gpb_codegen:format_fn(
-       FnName,
-       fun(B, _Path) when is_binary(B) ->
-               ok;
-          (B, _Path) when is_list(B) ->
-               ok;
-          (X, Path) ->
-               mk_type_error(bad_binary_value, X, Path)
-       end)].
-
-format_map_verifiers(#anres{map_types=MapTypes}=AnRes, Opts) ->
-    MapsOrTuples = get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
-    [format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts)
-     || {KeyType,ValueType} <- sets:to_list(MapTypes)].
-
-format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
-    MsgName = map_type_to_msg_name(KeyType, ValueType),
-    FnName = mk_fn(v_, MsgName),
-    KeyVerifierFn = mk_fn(v_type_, KeyType),
-    ValueVerifierFn1 = case ValueType of
-                           {msg,FMsgName}  -> mk_fn(v_msg_, FMsgName);
-                           {enum,EnumName} -> mk_fn(v_enum_, EnumName);
-                           Type            -> mk_fn(v_type_, Type)
-                       end,
-    ElemPath = [MsgName,value],
-    ValueVerifierFn2 = find_translation(ElemPath, verify, AnRes,
-                                        ValueVerifierFn1),
-
-    TrUserDataVar = ?expr(TrUserData),
-    TrUserDataReplacements =
-        case {ValueType,{ValueVerifierFn1, ValueVerifierFn2}} of
-            {{msg,_}, _} ->
-                [replace_tree('MaybeTrUserDataArg', TrUserDataVar),
-                 replace_tree('MaybeTrUserData', TrUserDataVar)];
-            {_, {X,Y}} when X /= Y ->
-                %% Translation exists
-                [replace_tree('MaybeTrUserDataArg', TrUserDataVar),
-                 replace_tree('MaybeTrUserData', TrUserDataVar)];
-            _ ->
-                [replace_tree('MaybeTrUserDataArg', ?expr(_)),
-                 splice_trees('MaybeTrUserData', [])]
-        end,
-    [nowarn_dialyzer_attr(FnName, 3, Opts),
-     case MapsOrTuples of
-         '2tuples' ->
-             gpb_codegen:format_fn(
-               FnName,
-               fun(KVs, Path, 'MaybeTrUserDataArg') when is_list(KVs) ->
-                       [case X of
-                            {Key, Value} ->
-                                'VerifyKey'(Key, ['key' | Path]),
-                                'VerifyValue'(Value, ['value' | Path],
-                                             'MaybeTrUserData');
-                            _ ->
-                                mk_type_error(invalid_key_value_tuple, X, Path)
-                        end
-                        || X <- KVs],
-                       ok;
-                  (X, Path, _TrUserData) ->
-                       mk_type_error(invalid_list_of_key_value_tuples, X, Path)
-               end,
-               [replace_term('VerifyKey', KeyVerifierFn),
-                replace_term('VerifyValue', ValueVerifierFn2)]
-               ++ TrUserDataReplacements);
-         maps ->
-             gpb_codegen:format_fn(
-               FnName,
-               fun(M, Path, 'MaybeTrUserDataArg') when is_map(M) ->
-                       [begin
-                            'VerifyKey'(Key, ['key' | Path]),
-                            'VerifyValue'(Value, ['value' | Path],
-                                         'MaybeTrUserData')
-                        end
-                        || {Key, Value} <- maps:to_list(M)],
-                       ok;
-                  (X, Path, _TrUserData) ->
-                       mk_type_error(invalid_map, X, Path)
-               end,
-               [replace_term('VerifyKey', KeyVerifierFn),
-                replace_term('VerifyValue', ValueVerifierFn2)]
-               ++ TrUserDataReplacements)
-     end].
-
-format_verifier_auxiliaries(Defs) ->
-    ["-spec mk_type_error(_, _, list()) -> no_return().\n",
-     gpb_codegen:format_fn(
-       mk_type_error,
-       fun(Error, ValueSeen, Path) ->
-               Path2 = prettify_path(Path),
-               erlang:error({gpb_type_error,
-                             {Error, [{value, ValueSeen},{path, Path2}]}})
-       end),
-     "\n",
-     case contains_messages(Defs) of
-         false ->
-             gpb_codegen:format_fn(
-               prettify_path,
-               fun([]) -> top_level end);
-         true ->
-             gpb_codegen:format_fn(
-               prettify_path,
-               fun([]) ->
-                       top_level;
-                  (PathR) ->
-                       list_to_atom(
-                         string:join(
-                           lists:map(fun atom_to_list/1, lists:reverse(PathR)),
-                           "."))
-               end)
-     end].
-
 %% -- descr -----------------------------------------------------
 
 possibly_format_descriptor(Defs, Opts) ->
@@ -5741,23 +5134,6 @@ add_binding({Key, Value}, Bindings) ->
 fetch_binding(Key, Bindings) ->
     dict:fetch(Key, Bindings).
 
-var_f_n(N) -> var_n("F", N).
-var_b_n(N) -> var_n("B", N).
-
-var_n(S, N) ->
-    var("~s~w", [S, N]).
-
-var(Fmt, Args) ->
-    erl_syntax:variable(?ff(Fmt, Args)).
-
-prefix_var(Prefix, Var) ->
-    erl_syntax:variable(Prefix ++ erl_syntax:variable_literal(Var)).
-
-match_bind_var(Pattern, Var) ->
-    ?expr('Pattern' = 'Var',
-          [replace_tree('Pattern', Pattern),
-           replace_tree('Var', Var)]).
-
 enum_to_binary_fields(Value) ->
     %% Encode as a 64 bit value, for interop compatibility.
     %% Some implementations don't decode 32 bits properly,
@@ -5811,19 +5187,6 @@ get_field_pass(MsgName, #anres{d_field_pass_method=D}) ->
 
 get_num_fields(MsgName, #anres{num_fields=D}) ->
     dict:fetch(MsgName, D).
-
-smember(Elem, Set) -> %% set-member
-    sets:is_element(Elem, Set).
-
-smember_any(Elems, Set) -> %% is any elem a member in the set
-    lists:any(fun(Elem) -> smember(Elem, Set) end,
-              Elems).
-
-contains_messages(Defs) ->
-    lists:any(fun({{msg, _}, _}) -> true;
-                 (_)             -> false
-              end,
-              Defs).
 
 %% lists_replace(N, List, New) -> NewList
 %% Like erlang:setelement, but for a list:

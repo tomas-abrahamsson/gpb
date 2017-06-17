@@ -41,6 +41,7 @@
 -export([default_any_verify_translator/0]).
 -export([exists_tr_for_msg/3]).
 -export([args_by_op2/1]).
+-export([maybe_userdata_param/2]).
 
 -include("../include/gpb.hrl").
 -include("gpb_codegen.hrl").
@@ -482,4 +483,15 @@ exists_tr_for_msg(MsgName, Op, #anres{translations=Translations}) ->
               end,
               false,
               Translations).
+
+maybe_userdata_param(Field, Expr) ->
+    case is_primitive_type(Field) of
+        true -> [];
+        false -> [Expr]
+    end.
+
+is_primitive_type(#?gpb_field{type={msg,_}}) -> false;
+is_primitive_type(#?gpb_field{type={group,_}}) -> false;
+is_primitive_type(#?gpb_field{type={map,_,_}}) -> false;
+is_primitive_type(_) -> true.
 

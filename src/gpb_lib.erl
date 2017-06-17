@@ -22,6 +22,7 @@
 
 -module(gpb_lib).
 
+-include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
 -export([mk_fn/2, mk_fn/3]).
@@ -33,10 +34,18 @@
 -export([msgs_or_groups/1]).
 -export([msg_or_group_names/1]).
 -export([msg_names/1]).
--export([get_field_name/1]).
+-export([contains_messages/1]).
+-export([get_field_name/1, get_field_names/1]).
 -export([get_field_rnum/1]).
 -export([get_field_occurrence/1]).
+-export([map_type_to_msg_name/2]).
 -export([unalias_enum/1]).
+-export([zip_for_non_opt_fields/2]).
+-export([any_field_is_sub_msg/1]).
+-export([any_field_is_repeated/1]).
+-export([any_enum_field_exists/1]).
+-export([any_packed_field_exists/1]).
+-export([at_least_one_submsg_with_size_not_known_at_compile_time_exists/1]).
 
 -export([mapping_match/3]).
 -export([mapping_create/3]).
@@ -61,7 +70,15 @@
 -export([get_defs_as_maps_or_records/1]).
 -export([is_target_major_version_at_least/2]).
 
+-export([var_f_n/1]).
+-export([var_b_n/1]).
+-export([var_n/2]).
+-export([var/2]).
+-export([prefix_var/2]).
+-export([match_bind_var/2]).
+
 -export([index_seq/1]).
+-export([smember/2, smember_any/2]).
 -export([indent/2, indent_lines/2]).
 -export([outdent_first/1]).
 -export([split_indent_iolist/2]).
@@ -105,6 +122,15 @@ msg_or_group_names(Defs) ->
 msg_names(Defs) ->
     [Name || {{msg, Name}, _Fields} <- Defs].
 
+contains_messages(Defs) ->
+    lists:any(fun({{msg, _}, _}) -> true;
+                 (_)             -> false
+              end,
+              Defs).
+
+get_field_names(MsgDef) ->
+    [get_field_name(Field) || Field <- MsgDef].
+
 get_field_name(#?gpb_field{name=FName}) -> FName;
 get_field_name(#gpb_oneof{name=FName})  -> FName.
 
@@ -113,6 +139,13 @@ get_field_rnum(#gpb_oneof{rnum=RNum})  -> RNum.
 
 get_field_occurrence(#?gpb_field{occurrence=Occurrence}) -> Occurrence;
 get_field_occurrence(#gpb_oneof{})                       -> optional.
+
+map_type_to_msg_name(KeyType, {msg,MsgName}) ->
+    list_to_atom(?ff("map<~s,~s>", [KeyType, MsgName]));
+map_type_to_msg_name(KeyType, {enum,EnumName}) ->
+    list_to_atom(?ff("map<~s,~s>", [KeyType, EnumName]));
+map_type_to_msg_name(KeyType, ValueType) ->
+    list_to_atom(?ff("map<~s,~s>", [KeyType, ValueType])).
 
 %% The "option allow_alias = true;" inside an enum X { ... }
 %% says it is ok to have multiple symbols that map to the same numeric value.
@@ -123,6 +156,54 @@ unalias_enum([{option,_Name,_Value} | Rest]) ->
     unalias_enum(Rest);
 unalias_enum([]) ->
     [].
+
+zip_for_non_opt_fields([#?gpb_field{name=FName,
+                                    occurrence=Occurrence} | FRest],
+                       [Elem | ERest]) ->
+    case Occurrence of
+        optional -> zip_for_non_opt_fields(FRest, ERest);
+        required -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)];
+        repeated -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)]
+    end;
+zip_for_non_opt_fields([#gpb_oneof{} | FRest], [_Elem | ERest]) ->
+    zip_for_non_opt_fields(FRest, ERest);
+zip_for_non_opt_fields([], []) ->
+    [].
+
+any_field_is_sub_msg(Fields) ->
+    lists:any(fun(#?gpb_field{type={msg,_}}) -> true;
+                 (#?gpb_field{type={group,_}}) -> true;
+                 (#?gpb_field{type={map,_,_}}) -> true;
+                 (#gpb_oneof{fields=Fs}) -> any_field_is_sub_msg(Fs);
+                 (_) -> false
+              end,
+              Fields).
+
+any_field_is_repeated(Fields) ->
+    lists:any(fun(#?gpb_field{occurrence=Occ}) -> Occ == repeated;
+                 (#gpb_oneof{}) -> false
+              end,
+              Fields).
+
+any_enum_field_exists(UsedTypes) ->
+    sets:fold(fun({enum,_}, _Acc) -> true;
+                 (_, Acc)         -> Acc
+              end,
+              false,
+              UsedTypes).
+
+any_packed_field_exists(#anres{num_packed_fields=0}) -> false;
+any_packed_field_exists(#anres{num_packed_fields=_}) -> true.
+
+at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
+    #anres{used_types=UsedTypes,
+           maps_as_msgs=MapsAsMsgs,
+           known_msg_size=KnownSize} = AnRes,
+    SubMsgNames = [MsgName || {msg,MsgName} <- sets:to_list(UsedTypes)],
+    MapMsgNames = [MsgName || {{msg,MsgName},_} <- MapsAsMsgs],
+    IsMsgSizeUnknown = fun(Nm) -> dict:fetch(Nm, KnownSize) == undefined end,
+    lists:any(IsMsgSizeUnknown, SubMsgNames) orelse
+        lists:any(IsMsgSizeUnknown, MapMsgNames).
 
 %% Record or map expr helpers --------
 
@@ -348,10 +429,36 @@ is_current_major_version_at_least(VsnMin) ->
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
 
+%% Syntax tree stuff ----
+
+var_f_n(N) -> var_n("F", N).
+var_b_n(N) -> var_n("B", N).
+
+var_n(S, N) ->
+    var("~s~w", [S, N]).
+
+var(Fmt, Args) ->
+    erl_syntax:variable(?ff(Fmt, Args)).
+
+prefix_var(Prefix, Var) ->
+    erl_syntax:variable(Prefix ++ erl_syntax:variable_literal(Var)).
+
+match_bind_var(Pattern, Var) ->
+    ?expr('Pattern' = 'Var',
+          [replace_tree('Pattern', Pattern),
+           replace_tree('Var', Var)]).
+
 %% Misc ---
 
 index_seq([]) -> [];
 index_seq(L)  -> lists:zip(lists:seq(1,length(L)), L).
+
+smember(Elem, Set) -> %% set-member
+    sets:is_element(Elem, Set).
+
+smember_any(Elems, Set) -> %% is any elem a member in the set
+    lists:any(fun(Elem) -> smember(Elem, Set) end,
+              Elems).
 
 indent(Indent, Str) ->
     lists:duplicate(Indent, $\s) ++ Str.
