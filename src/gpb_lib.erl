@@ -52,6 +52,13 @@
 -export([key_partition_on_optionality/2]).
 -export([classify_field_merge_action/1]).
 
+-export([fold_msg_fields/3]).
+-export([fold_msg_or_group_fields/3]).
+-export([fold_msgdef_fields/3]).
+-export([fold_msg_fields_o/3]).
+-export([fold_msg_or_group_fields_o/3]).
+-export([fold_msgdef_fields_o/3]).
+
 -export([mapping_match/3]).
 -export([mapping_create/3]).
 -export([mapping_update/4]).
@@ -243,6 +250,74 @@ classify_field_merge_action(FieldDef) ->
         #?gpb_field{occurrence=optional}                  -> overwrite;
         #?gpb_field{occurrence=repeated}                  -> seqadd
     end.
+
+%% Msg iteration --------
+
+%% Loop over all message fields, including oneof-fields
+%% Call Fun for all #?gpb_fields{}, skip over non-msg defs
+fold_msg_fields(Fun, InitAcc, Defs) ->
+    fold_msg_fields_o(
+      fun(MsgName, Field, _IsOneOf, Acc) -> Fun(MsgName, Field, Acc) end,
+      InitAcc,
+      Defs).
+
+fold_msg_or_group_fields(Fun, InitAcc, Defs) ->
+    fold_msg_or_group_fields_o(
+      fun(Type, Name, Field, _IsOneOf, Acc) -> Fun(Type, Name, Field, Acc) end,
+      InitAcc,
+      Defs).
+
+fold_msgdef_fields(Fun, InitAcc, Fields) ->
+    fold_msgdef_fields_o(
+      fun(Field, _IsOneOf, Acc) -> Fun(Field, Acc) end,
+      InitAcc,
+      Fields).
+
+%% The fun takes 4 args: Fun(Msgname, #?gpb_field{}, IsOneof, Acc) -> Acc1
+fold_msg_fields_o(Fun, InitAcc, Defs) ->
+    lists:foldl(
+      fun({{msg, MsgName}, Fields}, Acc) ->
+              FFun = fun(Field, IsOneOf, FAcc) ->
+                             Fun(MsgName, Field, IsOneOf, FAcc)
+                     end,
+              fold_msgdef_fields_o(FFun, Acc, Fields);
+         (_Def, Acc) ->
+              Acc
+      end,
+      InitAcc,
+      Defs).
+
+%% The fun takes 5 args:
+%% Fun(msg | group, Name, #?gpb_field{}, IsOneof, Acc) -> Acc1
+fold_msg_or_group_fields_o(Fun, InitAcc, Defs) ->
+    lists:foldl(
+      fun({{Type, Name}, Fields}, Acc) when Type =:= msg;
+                                            Type =:= group ->
+              FFun = fun(Field, IsOneOf, FAcc) ->
+                             Fun(Type, Name, Field, IsOneOf, FAcc)
+                     end,
+              fold_msgdef_fields_o(FFun, Acc, Fields);
+         (_Def, Acc) ->
+              Acc
+      end,
+      InitAcc,
+      Defs).
+
+
+
+%% The fun takes 3 args: Fun(#?gpb_field{}, IsOneof, Acc) -> Acc1
+fold_msgdef_fields_o(Fun, InitAcc, Fields) ->
+    lists:foldl(
+      fun(#?gpb_field{}=Field, Acc) ->
+              Fun(Field, false, Acc);
+         (#gpb_oneof{name=CFName, fields=OFields}, Acc) ->
+              IsOneOf = {true, CFName},
+              lists:foldl(fun(OField, OAcc) -> Fun(OField, IsOneOf, OAcc) end,
+                          Acc,
+                          OFields)
+      end,
+      InitAcc,
+      Fields).
 
 %% Record or map expr helpers --------
 
