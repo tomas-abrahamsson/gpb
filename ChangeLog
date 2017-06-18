@@ -1,5 +1,10 @@
 -*- coding: utf-8 -*-
 
+Version 3.27.2
+2017-Jun-18
+
+        * Bugfix code generation for empty groups.
+
 Version 3.27.1
 2017-Jun-16
 
