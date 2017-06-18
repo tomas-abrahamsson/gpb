@@ -2622,12 +2622,21 @@ format_msg_encoders(Defs, AnRes, Opts, IncludeStarter) ->
       || {Type, MsgName, MsgDef} <- msgs_or_groups(Defs)],
      format_special_field_encoders(Defs, AnRes)].
 
-format_msg_encoder(MsgName, [], _Defs, _AnRes, _Opts, _IncludeStarter) ->
-    gpb_codegen:format_fn(
-      mk_fn(e_msg_, MsgName),
-      fun(_Msg, _TrUserData) ->
-              <<>>
-      end);
+format_msg_encoder(MsgName, [], _Defs, _AnRes, _Opts, IncludeStarter) ->
+    case IncludeStarter of
+        true ->
+            gpb_codegen:format_fn(
+              mk_fn(e_msg_, MsgName),
+              fun(_Msg, _TrUserData) ->
+                      <<>>
+              end);
+        false ->
+            gpb_codegen:format_fn(
+              mk_fn(e_msg_, MsgName),
+              fun(_Msg, Bin, _TrUserData) ->
+                      Bin
+              end)
+    end;
 format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
     FNames = get_field_names(MsgDef),
     FVars = [var_f_n(I) || I <- lists:seq(1, length(FNames))],

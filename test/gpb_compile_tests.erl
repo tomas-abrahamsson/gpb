@@ -412,6 +412,17 @@ no_dialyzer_attributes_for_erlang_version_pre_18_test() ->
     S2 = compile_to_string(Proto, [{target_erlang_version,18}]),
     true = is_substr("-dialyzer(", S2).
 
+empty_group_test() ->
+    M = compile_iolist("syntax = \"proto2\";
+                        message Quz {optional group E = 11 {}}",
+                       [{verify,always},
+                        to_proto_defs]),
+    EStart = <<91>>, % (11 bsl 3) bor 3
+    EEnd = <<92>>,   % (11 bsl 3) bor 4
+    EGroup = <<EStart/binary, EEnd/binary>>,
+    EGroup = M:encode_msg({'Quz',{'Quz.E'}}),
+    unload_code(M).
+
 %% --- default values --------------
 
 default_value_handling_test() ->
