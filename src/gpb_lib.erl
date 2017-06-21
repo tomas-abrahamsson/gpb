@@ -55,20 +55,15 @@
 -export([fold_msg_fields/3]).
 -export([fold_msg_or_group_fields/3]).
 -export([fold_msgdef_fields/3]).
--export([fold_msg_fields_o/3]).
 -export([fold_msg_or_group_fields_o/3]).
--export([fold_msgdef_fields_o/3]).
 
 -export([mapping_match/3]).
 -export([mapping_create/3]).
 -export([mapping_update/4]).
 -export([record_match/2]).
 -export([record_create/2]).
--export([record_create_or_match/2]).
--export([record_update/3]).
 -export([map_match/1]).
 -export([map_create/1]).
--export([map_update/2]).
 -export([map_set/2]).
 
 -export([get_2tuples_or_maps_for_maptype_fields_by_opts/1]).
@@ -100,7 +95,6 @@
 -export([indent/2, indent_lines/2]).
 -export([outdent_first/1]).
 -export([split_indent_iolist/2]).
--export([linesplit_iolist/1]).
 -export([iolist_to_utf8_or_escaped_binary/2]).
 -export([nowarn_dialyzer_attr/3]).
 
