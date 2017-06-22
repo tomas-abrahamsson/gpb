@@ -374,6 +374,12 @@ m_opts -> '$empty':                     [].
 
 
 
+Header
+"%%% @doc The yecc grammar for the protobuf language,"
+"%%% both for syntax = proto2 and for proto3."
+"%%% @private"
+"".
+
 Erlang code.
 
 -include("../include/gpb.hrl").
