@@ -2354,9 +2354,12 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
          "\n"]
         || DoNif],
        case get_records_or_maps_by_opts(Opts) of
+           records -> ?f("-include(\"~s.hrl\").~n", [Mod]);
+           maps    -> ""
+       end,
+       case get_defs_as_maps_or_records(Opts) of
            records ->
-               [?f("-include(\"~s.hrl\").~n", [Mod]),
-                case get_field_format_by_opts(Opts) of
+               [case get_field_format_by_opts(Opts) of
                     fields_as_records ->
                         if AsLib ->
                                 ?f("-include_lib(\"gpb/include/gpb.hrl\").~n");
