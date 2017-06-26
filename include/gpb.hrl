@@ -77,31 +77,41 @@
 -endif.
 
 -record(?gpb_field, % NB: record name is (currently) `field' (not `gpb_field')!
-        {name               :: atom(),
-         fnum               :: integer(),
+        {name               :: atom()
+                             | undefined, % temporarily in some phases
+         fnum               :: integer()
+                             | undefined, % temporarily in some phases
          rnum               :: pos_integer() % field number in the record
                                | undefined,  % temporarily, during parsing
          type               :: gpb_field_type() |
                                gpb_internal_intermediary_ref() |
-                               gpb_internal_intermediary_map_ref(),
-         occurrence         :: 'required' | 'optional' | 'repeated',
+                               gpb_internal_intermediary_map_ref()
+                             | undefined, % temporarily in some phases
+         occurrence         :: 'required' | 'optional' | 'repeated'
+                             | undefined, % temporarily in some phases
          opts      = []     :: [term()]
         }).
 
 -record(gpb_oneof,
-        {name   :: atom(),
+        {name   :: atom()
+                 | undefined,      % temporarily in some phases
          rnum   :: pos_integer()   % field number in the record
                  | undefined,      % temporarily, during parsing
          fields :: [#?gpb_field{}] % all fields have the same rnum
+                 | undefined       % temporarily in some phases
         }).
 
 -record(?gpb_rpc, % NB: record name is (currently) `rpc' (not `gpb_rpc')!
-        {name               :: atom(),
+        {name               :: atom()
+                             | undefined, % temporarily in some phases
          input,
          output,
-         input_stream       :: boolean(),
-         output_stream      :: boolean(),
+         input_stream       :: boolean()
+                             | undefined, % temporarily in some phases
+         output_stream      :: boolean()
+                             | undefined, % temporarily in some phases
          opts               :: [term()]
+                             | undefined  % temporarily in some phases
         }).
 
 -endif.

@@ -672,8 +672,9 @@ do_proto_defs_aux2(Defs, Mod, AnRes, Opts) ->
             {ok, Defs};
         binary ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
+            HrlTxt = possibly_format_hrl(Mod, Defs, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
-            compile_to_binary(Mod, Defs, ErlTxt, NifTxt, Opts);
+            compile_to_binary(Mod, HrlTxt, ErlTxt, NifTxt, Opts);
         file ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
             HrlTxt = possibly_format_hrl(Mod, Defs, Opts),
@@ -8210,50 +8211,147 @@ capitalize_letter(C) ->
 
 %% -- compile to memory -----------------------------------------------------
 
-compile_to_binary(Mod, MsgDefs, ErlCode, PossibleNifCode, Opts) ->
+compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
     ModAsStr = flatten_iolist(?f("~p", [Mod])),
-    ErlCode2 = replace_module_macro(ErlCode, ModAsStr),
+    ErlCode2 = nano_epp(ErlCode, ModAsStr, HrlText),
     {ok, Toks, _EndLine} = erl_scan:string(ErlCode2),
     FormToks = split_toks_at_dot(Toks),
     Forms = [case erl_parse:parse_form(Ts) of
                  {ok, Form} ->
                      Form;
                  {error, Reason} ->
+                     io:format(user, "Ts=~p~n", [Ts]),
                      erlang:error(
-                       {internal_error,?MODULE,Mod,ErlCode2,MsgDefs,
-                        PossibleNifCode,Opts,Reason})
+                       {internal_error,?MODULE,Mod,Ts,Reason,
+                        {more_info,[{full_erl,ErlCode2},{hrl,HrlText},
+                                    {nif,PossibleNifCode},{opts,Opts}]}})
              end
              || Ts <- FormToks],
-    {AttrForms0, CodeForms} = split_forms_at_first_code(Forms),
-    % extract export_type and type forms from attribute forms
-    AttrForms = lists:filter(fun(A) ->
-                                     case erl_syntax_lib:analyze_attribute(A) of
-                                         {export_type, _} -> false;
-                                         {type, _}        -> false;
-                                         _                -> true
-                                     end
-                             end,
-                             AttrForms0),
-    TypeForms = AttrForms -- AttrForms0,
-    FieldDef = field_record_to_attr_form(),
-    OneofDef = oneof_record_to_attr_form(),
-    RpcDef   = rpc_record_to_attr_form(),
-    RecordBaseDefs = [FieldDef, OneofDef, RpcDef],
-    MsgRecordForms = msgdefs_to_record_attrs(MsgDefs),
-    AllForms = AttrForms ++ RecordBaseDefs ++ MsgRecordForms ++ TypeForms ++
-        CodeForms,
-    combine_erl_and_possible_nif(compile:noenv_forms(AllForms, Opts),
+    combine_erl_and_possible_nif(compile:noenv_forms(Forms, Opts),
                                  PossibleNifCode).
 
-replace_module_macro(Code, ModAsStr) ->
-    rmm_aux(Code, ModAsStr, []).
+nano_epp(Code, ModAsStr, HrlText) ->
+    %% nepp = nano-erlang-preprocessor. Couldn't find a way to run
+    %% the epp from a string, and don't want or need to use the file
+    %% system when everything is already in memory.
+    D0 = dict:new(),
+    {Txt, _EndLine, _Defs} = nepp1(Code, ModAsStr, HrlText, 1, D0, []),
+    Txt.
 
-rmm_aux(<<"?MODULE", Rest/binary>>, ModAsStr, Acc) ->
-    rmm_aux(Rest, ModAsStr, lists:reverse(ModAsStr, Acc));
-rmm_aux(<<C, Rest/binary>>, ModAsStr, Acc) ->
-    rmm_aux(Rest, ModAsStr, [C | Acc]);
-rmm_aux(<<>>, _ModAsStr, Acc) ->
-    lists:reverse(Acc).
+nepp1(<<"%% -*- coding:",_/binary>>=B, ModAsStr, HrlText, N, Ds, Acc) ->
+    %% First (non-coding) line must be a -file(...) directive,
+    %% or else unused record definitions in included files will
+    %% produce warnings: eg: {27,erl_lint,{unused_record,gpb_oneof}}.
+    {CodingLine,Rest} = read_until(B, "\n", ""),
+    Erl = (ModAsStr -- "''") ++ ".erl",
+    CodingAndFileDirective = CodingLine ++ "\n" ++ file_directive(Erl, 1),
+    Acc2 = lists:reverse(CodingAndFileDirective, Acc),
+    nepp2_nl(Rest, ModAsStr, HrlText, N, Ds, Acc2);
+nepp1(Rest, ModAsStr, HrlText, N, Ds, Acc) ->
+    Erl = (ModAsStr -- "''") ++ ".erl",
+    FileDirective = file_directive(Erl, 1),
+    Acc2 = lists:reverse(FileDirective, Acc),
+    nepp2_nl(Rest, ModAsStr, HrlText, N, Ds, Acc2).
+
+
+nepp2(<<"?MODULE", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2(Rest, ModAsStr, Hrl, N, Ds, lists:reverse(ModAsStr, Acc));
+nepp2(<<$\n, Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, [$\n | Acc]);
+nepp2(<<C, Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2(Rest, ModAsStr, Hrl, N, Ds, [C | Acc]);
+nepp2(<<>>, _ModAsStr, _Hrl, N, Ds, Acc) ->
+    {lists:reverse(Acc), N, Ds}.
+
+nepp2_nl(<<"-include", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_inc(Rest, ModAsStr, Hrl, N, Ds, Acc);
+nepp2_nl(<<"-include_lib", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_inc(Rest, ModAsStr, Hrl, N, Ds, Acc);
+nepp2_nl(<<"-define", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_def(Rest, ModAsStr, Hrl, N, Ds, Acc);
+nepp2_nl(<<"-ifdef", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_ifdef(Rest, ifdef, ModAsStr, Hrl, N, Ds, Acc);
+nepp2_nl(<<"-ifndef", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_ifdef(Rest, ifndef, ModAsStr, Hrl, N, Ds, Acc);
+nepp2_nl(<<"-endif.\n", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, Acc);
+nepp2_nl(X, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2(X, ModAsStr, Hrl, N, Ds, Acc).
+
+nepp2_inc(Rest, ModAsStr, Hrl, N, Ds, Acc) ->
+    {_,    Rest1} = read_until(Rest,  "(", ""),
+    {Inc1, Rest2} = read_until(Rest1, ")", ""),
+    {_,    Rest3} = read_until(Rest2, "\n", ""),
+    Inc = parse_term(Inc1),
+    Erl = (ModAsStr -- "''") ++ ".erl",
+    case classify_inc(Inc) of
+        gpb_hrl ->
+            FieldDef = field_record_to_text(),
+            OneofDef = oneof_record_to_text(),
+            RpcDef   = rpc_record_to_text(),
+            Txt = lists:flatten([file_directive(Inc, 1),
+                                 FieldDef, OneofDef, RpcDef]),
+            Acc2 = lists:reverse(Txt ++ file_directive(Erl, N+1), Acc),
+            nepp2_nl(Rest3, ModAsStr, Hrl, N+1, Ds, Acc2);
+        mod_hrl when Hrl /= '$not_generated' ->
+            {Txt1, _End, Ds2} = nepp2_nl(Hrl, ModAsStr, Hrl, 1, Ds, []),
+            Txt2 = lists:flatten([file_directive(Inc, 1), Txt1]),
+            Acc2 = lists:reverse(Txt2 ++ file_directive(Erl, N+1), Acc),
+            nepp2_nl(Rest3, ModAsStr, Hrl, N+1, Ds2, Acc2)
+    end.
+
+nepp2_def(Rest, ModAsStr, Hrl, N, Ds, Acc) ->
+    {_,   Rest1} = read_until(Rest,  "(", ""),
+    {Sym, Rest2} = read_until(Rest1, ",", ""),
+    {Val, Rest3} = read_until(Rest2, ")", ""),
+    {_,   Rest4} = read_until(Rest3, "\n", ""),
+    Ds1 = dict:store(parse_term(Sym), parse_term(Val), Ds),
+    nepp2_nl(Rest4, ModAsStr, Hrl, N+1, Ds1, Acc).
+
+nepp2_ifdef(Rest, SkipCond, ModAsStr, Hrl, N, Ds, Acc) ->
+    {_,   Rest1} = read_until(Rest,  "(", ""),
+    {Sym, Rest2} = read_until(Rest1, ")", ""),
+    {_,   Rest3} = read_until(Rest2, "\n", ""),
+    case {dict:is_key(parse_term(Sym), Ds), SkipCond} of
+        {true,  ifdef}  -> nepp2_nl(Rest3, ModAsStr, Hrl, N+1, Ds, Acc);
+        {false, ifndef} -> nepp2_nl(Rest3, ModAsStr, Hrl, N+1, Ds, Acc);
+        _ -> nepp2_skip(Rest3, 1, ModAsStr, Hrl, N+1, Ds, Acc)
+    end.
+
+nepp2_skip(<<"-endif.\n", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
+    if Depth == 1 -> nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, Acc);
+       Depth >  1 -> nepp2_skip(Rest, Depth-1, ModAsStr, Hrl, N+1, Ds, Acc)
+    end;
+nepp2_skip(<<"-ifdef", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
+    {_, Rest2} = read_until(Rest, "\n", ""),
+    nepp2_skip(Rest2, Depth+1, ModAsStr, Hrl, N+1, Ds, Acc);
+nepp2_skip(<<"-ifndef", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
+    {_, Rest2} = read_until(Rest, "\n", ""),
+    nepp2_skip(Rest2, Depth+1, ModAsStr, Hrl, N+1, Ds, Acc);
+nepp2_skip(<<$\n, Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_skip(Rest, Depth, ModAsStr, Hrl, N+1, Ds, Acc);
+nepp2_skip(<<_, Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_skip(Rest, Depth, ModAsStr, Hrl, N, Ds, Acc).
+
+read_until(<<C, Rest/binary>>, Delims, Acc) ->
+    case lists:member(C, Delims) of
+        true  -> {lists:reverse(Acc), Rest};
+        false -> read_until(Rest, Delims, [C | Acc])
+    end.
+
+parse_term(S) ->
+    {ok, Tokens, _End} = erl_scan:string(S),
+    {ok, Term} = erl_parse:parse_term(Tokens++[{dot,1}]),
+    Term.
+
+classify_inc(F) ->
+    case lists:last(filename:split(F)) of
+        "gpb.hrl" -> gpb_hrl;
+        _         -> mod_hrl
+    end.
+
+file_directive(File, N) ->
+    ?ff("-file(\"~s\", ~p).\n", [File, N]).
 
 split_toks_at_dot(AllToks) ->
     case lists:splitwith(fun is_no_dot/1, AllToks) of
@@ -8264,51 +8362,23 @@ split_toks_at_dot(AllToks) ->
 is_no_dot({dot,_}) -> false;
 is_no_dot(_)       -> true.
 
-split_forms_at_first_code(Forms) -> split_forms_at_first_code_2(Forms, []).
+field_record_to_text() ->
+    record_to_text(?gpb_field, record_info(fields, ?gpb_field), #?gpb_field{}).
 
-split_forms_at_first_code_2([Form | Rest], Acc) ->
-    case erl_syntax_lib:analyze_form(Form) of
-        {attribute, _Info} -> split_forms_at_first_code_2(Rest, [Form | Acc]);
-        {function, _Info}  -> {lists:reverse(Acc), [Form | Rest]}
-    end.
+oneof_record_to_text() ->
+    record_to_text(gpb_oneof, record_info(fields, gpb_oneof), #gpb_oneof{}).
 
-field_record_to_attr_form() ->
-    record_to_attr(?gpb_field, record_info(fields, ?gpb_field)).
+rpc_record_to_text() ->
+    record_to_text(?gpb_rpc, record_info(fields, ?gpb_rpc), #?gpb_rpc{}).
 
-oneof_record_to_attr_form() ->
-    record_to_attr(gpb_oneof, record_info(fields, gpb_oneof)).
-
-rpc_record_to_attr_form() ->
-    record_to_attr(?gpb_rpc, record_info(fields, ?gpb_rpc)).
-
-msgdefs_to_record_attrs(Defs) ->
-    [record_to_attr(Name, lists:map(fun gpb_field_to_record_field/1, Fields))
-     || {_msg_or_group, Name, Fields} <- msgs_or_groups(Defs)].
-
-record_to_attr(RecordName, Fields) ->
-    erl_syntax:revert(
-      erl_syntax:attribute(
-        erl_syntax:atom(record),
-        [erl_syntax:atom(RecordName),
-         erl_syntax:tuple(
-           [case F of
-                {FName, Default} ->
-                    erl_syntax:record_field(erl_syntax:atom(FName),
-                                            erl_parse:abstract(Default));
-                {FName} ->
-                    erl_syntax:record_field(erl_syntax:atom(FName), none);
-                FName when is_atom(FName) ->
-                    erl_syntax:record_field(erl_syntax:atom(FName), none)
-            end
-            || F <- Fields])])).
-
-gpb_field_to_record_field(#?gpb_field{name=FName, opts=Opts}) ->
-    case proplists:get_value(default, Opts) of
-        undefined -> {FName};
-        Default   -> {FName, Default}
-    end;
-gpb_field_to_record_field(#gpb_oneof{name=FName}) ->
-    {FName}.
+record_to_text(RecordName, Fields, DefaultR) ->
+    FieldTexts =
+        [if Default == undefined -> ?ff("~p", [FName]);
+            Default /= undefined -> ?ff("~p = ~p", [FName, Default])
+         end
+         || {FName,Default} <- lists:zip(Fields, tl(tuple_to_list(DefaultR)))],
+    ?f("-record(~p, {~s}).~n",
+       [RecordName, string:join(FieldTexts, ", ")]).
 
 combine_erl_and_possible_nif(ErlCompilationResult, '$not_generated'=_Nif) ->
     ErlCompilationResult;
