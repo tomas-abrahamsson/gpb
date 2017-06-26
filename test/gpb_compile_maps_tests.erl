@@ -198,6 +198,8 @@ map_type_with_mapfields_as_maps_option_test() ->
     B1 = M1:encode_msg(Msg1),
     Msg1 = M1:decode_msg(B1, m1),
     Msg1 = M1:merge_msgs(Msg1, Msg1),
+    #m1{a=EmptyMap} = M1:decode_msg(<<>>, m1),
+    0 = maps:size(EmptyMap),
     unload_code(M1),
 
     %% messages are maps, but map<_,_> are 2-tuples
