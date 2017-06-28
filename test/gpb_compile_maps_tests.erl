@@ -103,6 +103,43 @@ encode_decode_maps_with_opts_omitted_test() ->
     [{f1,"x"}] = lists:sort(maps:to_list(M:decode_msg(Data2, m1))),
     unload_code(M).
 
+repeated_fields_can_be_omitted_on_input_with_opts_omitted_test() ->
+    M = compile_iolist(
+          ["message m1 {"
+           "  repeated string    f1 = 1;",
+           "  map<string,uint32> f2 = 2;", % a map<_,_> is a repeated field
+           "}"],
+          [maps, {maps_unset_optional, omitted}, type_specs]),
+    Data1 = M:encode_msg(#{f1 => ["one", "two", "three"],
+                           f2 => #{"a" => 1, "b" => 2}}, m1),
+    [{f1,["one", "two", "three"]}, {f2, #{"a" := 1, "b" := 2}}] =
+        map_to_sorted_list(M:decode_msg(Data1, m1)),
+    %% repeated fields can be omitted on encoding
+    Data2 = M:encode_msg(#{}, m1),
+    [{f1,[]}, {f2, #{}}] = map_to_sorted_list(M:decode_msg(Data2, m1)),
+    %% repeated fields always present on decoding (even if not preset in data)
+    [{f1,[]}, {f2, #{}}] = map_to_sorted_list(M:decode_msg(<<>>, m1)),
+    %% repeated fields can be omitted in calls to merge
+    [] = map_to_sorted_list(M:merge_msgs(#{}, #{}, m1)),
+    [{f1,["a"]}] = map_to_sorted_list(M:merge_msgs(#{f1 => ["a"]}, #{}, m1)),
+    [{f1,["b"]}] = map_to_sorted_list(M:merge_msgs(#{}, #{f1 => ["b"]}, m1)),
+    [{f1,["a","b"]}] = map_to_sorted_list(M:merge_msgs(#{f1 => ["a"]},
+                                                       #{f1 => ["b"]}, m1)),
+    [{f2,[{"a",1}]}] = map_to_sorted_list_r(
+                         M:merge_msgs(#{f2 => #{"a" => 1}}, #{}, m1)),
+    [{f2,[{"b",2}]}] = map_to_sorted_list_r(
+                         M:merge_msgs(#{}, #{f2 => #{"b" => 2}}, m1)),
+    [{f2,[{"a",1},{"b",2}]}] = map_to_sorted_list_r(
+                                 M:merge_msgs(#{f2 => #{"a" => 1}},
+                                              #{f2 => #{"b" => 2}},
+                                              m1)),
+    %% repeated fields can be omitted in calls to verify
+    ok = M:verify_msg(#{}, m1),
+    ok = M:verify_msg(#{f1 => []}, m1),
+    ok = M:verify_msg(#{f2 => #{}}, m1),
+
+    unload_code(M).
+
 encode_decode_submsg_with_omitted_test() ->
     M = compile_iolist(["message t1 {",
                         "  optional m2 f2 = 3;",
@@ -187,6 +224,23 @@ map_type_test() ->
     ?verify_gpb_err(M:verify_msg(#{a => #{16 => "x"}}, m1)), %% wrong key type
     ?verify_gpb_err(M:verify_msg(#{a => #{"x" => "wrong value type"}}, m1)),
 
+    unload_code(M).
+
+map_type_with_unset_omitted_test() ->
+    M = compile_iolist(["message m1 { map<string,fixed32> a = 1; };"],
+                       [maps, type_specs, {maps_unset_optional,omitted}]),
+    <<10,8,10,1,"x", 21,17:32/little>> = M:encode_msg(#{a => #{"x" => 17}},
+                                                      m1),
+    #{a := #{"x" := 17}} = M:decode_msg(<<10,8,10,1,"x", 21,17:32/little>>,
+                                        m1),
+    #{a := #{"x" := 17, "y" := 18, "z" := 19}} =
+        M:merge_msgs(#{a => #{"x" => 16, "y" => 18}},
+                     #{a => #{"x" => 17, "z" => 19}},
+                     m1),
+    ok = M:verify_msg(#{a => #{"x" => 17}}, m1),
+    ?verify_gpb_err(M:verify_msg(#{a => not_a_map}, m1)),
+    ?verify_gpb_err(M:verify_msg(#{a => #{16 => "x"}}, m1)), %% wrong key type
+    ?verify_gpb_err(M:verify_msg(#{a => #{"x" => "wrong value type"}}, m1)),
     unload_code(M).
 
 map_type_with_mapfields_as_maps_option_test() ->
@@ -301,6 +355,15 @@ lines_matching(Text, Lines) ->
     [Line || Line <- Lines, is_substr(Text, Line)].
 
 is_substr(Needle, Haystack) ->  string:str(Haystack, Needle) > 0.
+
+map_to_sorted_list(M) ->
+    lists:sort(maps:to_list(M)).
+
+map_to_sorted_list_r(M) ->
+    [{K,if is_map(V) -> map_to_sorted_list_r(V);
+           true      -> V
+        end}
+     || {K, V} <- lists:sort(maps:to_list(M))].
 
 %% --- default values --------------
 

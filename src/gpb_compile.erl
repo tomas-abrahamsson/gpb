@@ -2705,7 +2705,7 @@ zip_for_non_opt_fields([#?gpb_field{name=FName, occurrence=Occurrence} | FRest],
     case Occurrence of
         optional -> zip_for_non_opt_fields(FRest, ERest);
         required -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)];
-        repeated -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)]
+        repeated -> zip_for_non_opt_fields(FRest, ERest)
     end;
 zip_for_non_opt_fields([#gpb_oneof{} | FRest], [_Elem | ERest]) ->
     zip_for_non_opt_fields(FRest, ERest);
@@ -2792,14 +2792,33 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                         | Transforms])
             end;
         repeated ->
-            ?expr(
-               begin
-                   'TrF' = 'Tr'('<F>', 'TrUserData'),
-                   if 'TrF' == [] -> '<Bin>';
-                      true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
-                   end
-               end,
-               Transforms);
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    ?expr(
+                       begin
+                           'TrF' = 'Tr'('<F>', 'TrUserData'),
+                           if 'TrF' == [] -> '<Bin>';
+                              true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
+                           end
+                       end,
+                   Transforms);
+                {maps, omitted} ->
+                    ?expr(
+                       case 'M' of
+                           '#{fieldname := <F>}' ->
+                               'TrF' = 'Tr'('<F>', 'TrUserData'),
+                               if 'TrF' == [] -> '<Bin>';
+                                  true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
+                               end;
+                           _ ->
+                               '<Bin>'
+                       end,
+                       [replace_tree('M', MsgVar),
+                        replace_tree('#{fieldname := <F>}',
+                                     map_match([{FName,FVar}]))
+                        | Transforms])
+            end;
         required ->
             ?expr(
                begin
@@ -4798,8 +4817,6 @@ compute_msg_field_mergers({om, {MandXInfo, OptXInfo, PMsg, NMsg}},
 
 format_field_merge_expr(#?gpb_field{name=FName, occurrence=Occur}=Field,
                         PF, NF, MsgName, AnRes)->
-    Transforms = [replace_tree('PF', PF),
-                  replace_tree('NF', NF)],
     case classify_field_merge_action(Field) of
         overwrite when Occur == required ->
             {required, {PF, NF}};
@@ -4808,8 +4825,8 @@ format_field_merge_expr(#?gpb_field{name=FName, occurrence=Occur}=Field,
         seqadd ->
             ElemPath = [MsgName, FName],
             Append = find_translation(ElemPath, merge, AnRes, 'erlang_++'),
-            {expr, ?expr('PF++NF'('PF', 'NF', 'TrUserData'),
-                         Transforms ++ [replace_term('PF++NF',Append)])};
+            Tr = fun (_,_) -> Append end,
+            {merge, {{PF, NF}, Tr, 'erlang_++'}};
         msgmerge ->
             Tr = mk_find_tr_fn_elem_or_default(MsgName, Field, false, AnRes),
             #?gpb_field{type={_msg_or_group,SubMsgName}}=Field,
@@ -4838,7 +4855,9 @@ reshape_cases_for_maps_find(Merges, PMsg, NMsg) ->
                  {merge, {{_, _}, Tr, MergeFn}} ->
                      {merge, {{PMsg, NMsg}, Tr, MergeFn}};
                  {oneof, {{_, _}, OFMerges}} ->
-                     {oneof, {{PMsg, NMsg}, OFMerges}}
+                     {oneof, {{PMsg, NMsg}, OFMerges}};
+                 {expr, Expr} ->
+                     {expr, Expr}
              end}
      || {FName, Merge} <- Merges].
 
@@ -5218,25 +5237,68 @@ field_verifier(MsgName,
             ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'MaybeTrUserData'),
                   Replacements);
         repeated when not IsMapField ->
-            ?expr(if is_list('<F>') ->
-                          %% _ = [...] to avoid dialyzer error
-                          %% "Expression produces a value of type
-                          %% ['ok'], but this value is unmatched"
-                          %% with the -Wunmatched_returns flag.
-                          _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                             'MaybeTrUserData')
-                               || Elem <- '<F>'],
-                          ok;
-                     true ->
-                          mk_type_error(
-                            {invalid_list_of, '<Type>'},
-                            '<F>',
-                            ['<FName>' | Path])
-                  end,
-                  Replacements);
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    ?expr(if is_list('<F>') ->
+                                 %% _ = [...] to avoid dialyzer error
+                                 %% "Expression produces a value of type
+                                 %% ['ok'], but this value is unmatched"
+                                 %% with the -Wunmatched_returns flag.
+                                 _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
+                                                    'MaybeTrUserData')
+                                      || Elem <- '<F>'],
+                                 ok;
+                             true ->
+                                 mk_type_error(
+                                   {invalid_list_of, '<Type>'},
+                                   '<F>',
+                                   ['<FName>' | Path])
+                          end,
+                          Replacements);
+                {maps, omitted} ->
+                    ?expr(case 'M' of
+                              '#{<FName> := <F>}' ->
+                                  if is_list('<F>') ->
+                                         %% _ = [...] to avoid dialyzer error
+                                         %% "Expression produces a value of type
+                                         %% ['ok'], but this value is unmatched"
+                                         %% with the -Wunmatched_returns flag.
+                                         _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
+                                                            'MaybeTrUserData')
+                                              || Elem <- '<F>'],
+                                         ok;
+                                     true ->
+                                         mk_type_error(
+                                           {invalid_list_of, '<Type>'},
+                                           '<F>',
+                                           ['<FName>' | Path])
+                                  end;
+                              _ -> ok
+                          end,
+                          [replace_tree('#{<FName> := <F>}',
+                                        map_match([{FName, FVar}])),
+                           replace_tree('M', MsgVar) | Replacements])
+            end;
         repeated when IsMapField ->
-            ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'TrUserData'),
-                  Replacements);
+            case get_mapping_and_unset_by_opts(Opts) of
+                X when X == records;
+                       X == {maps, present_undefined} ->
+                    ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
+                                        'TrUserData'),
+                          Replacements);
+                {maps, omitted} ->
+                    ?expr(case 'M' of
+                              '#{<FName> := <F>}' ->
+                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                'TrUserData');
+                              _ ->
+                                  ok
+                          end,
+                          [replace_tree('#{<FName> := <F>}',
+                                        map_match([{FName, FVar}])),
+                           replace_tree('M', MsgVar) | Replacements])
+            end;
         optional ->
             case get_mapping_and_unset_by_opts(Opts) of
                 X when X == records;
@@ -8667,7 +8729,14 @@ get_field_rnum(#gpb_oneof{rnum=RNum})  -> RNum.
 key_partition_on_optionality(Key, Items) ->
     lists:partition(fun(Item) ->
                             Field = element(Key, Item),
-                            get_field_occurrence(Field) == optional
+                            case get_field_occurrence(Field) of
+                                optional ->
+                                    true;
+                                repeated ->
+                                    true;
+                                _ ->
+                                    false
+                            end
                     end,
                     Items).
 
