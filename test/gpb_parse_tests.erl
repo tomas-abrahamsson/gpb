@@ -208,6 +208,31 @@ parses_enum_option_test() ->
     [{{enum,e1}, [{option, allow_alias, true}, {ee1,1},{ee2,1}]}] =
         do_process_sort_defs(Elems).
 
+parses_custom_option_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"descriptor.proto",
+                  ["package google.protobuf;"
+                   "message MessageOptions {", % dummy for this test inly
+                   "}"]},
+                 {"x.proto",
+                  ["package x;",
+                   "import \"descriptor.proto\";",
+                   "extend google.protobuf.MessageOptions {",
+                   "  optional string my_option = 51234;",
+                   "}",
+                   "",
+                   "message msg {",
+                   "  option (my_option) = \"Hello world!\";",
+                   "  required uint32 f1 = 22;",
+                   "}"]}],
+                [use_packages]),
+    [{package,'google.protobuf'},
+     {package,x},
+     {{msg,'google.protobuf.MessageOptions'}, [#?gpb_field{name=my_option}]},
+     {{msg,'x.msg'},[#?gpb_field{}]},
+     {option,[my_option],"Hello world!"}] =
+        AllDefs.
+
 generates_correct_absolute_names_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
                                "  message m2 { required uint32 x = 1; }",

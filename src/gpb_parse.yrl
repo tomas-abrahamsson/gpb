@@ -184,6 +184,7 @@ msg_elem -> oneof_def:                  '$1'.
 msg_elem -> extend_def:                 '$1'.
 msg_elem -> reserved_def:               '$1'.
 msg_elem -> group_def:                  '$1'.
+msg_elem -> option_def:                 '$1'.
 
 fidentifier -> identifier:              '$1'.
 fidentifier -> package:                 kw_to_identifier('$1').
