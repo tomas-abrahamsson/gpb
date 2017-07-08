@@ -234,13 +234,14 @@ opt_field_opts -> '$empty':             [].
 field_opts -> field_opt ',' field_opts: ['$1' | '$3'].
 field_opts -> field_opt:                ['$1'].
 
+
 field_opt -> default '=' constant:      {default, '$3'}.
 field_opt -> packed:                    {packed, true}.
 field_opt -> packed '=' bool_lit:       {packed, literal_value('$3')}.
 field_opt -> deprecated:                {deprecated, true}.
 field_opt -> deprecated '=' bool_lit:   {deprecated, literal_value('$3')}.
-field_opt -> name:                      {identifier_name('$1'), true}.
-field_opt -> name '=' constant:         {identifier_name('$1'), '$3'}.
+field_opt -> option_name:               {'$1', true}.
+field_opt -> option_name '=' constant:  {'$1', '$3'}.
 
 occurrence -> required:                 required.
 occurrence -> optional:                 optional.

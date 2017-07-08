@@ -213,24 +213,32 @@ parses_custom_option_test() ->
                 [{"descriptor.proto",
                   ["package google.protobuf;"
                    "message MessageOptions {", % dummy for this test inly
+                   "}",
+                   "message FieldOptions {", % dummy for this test inly
                    "}"]},
                  {"x.proto",
                   ["package x;",
                    "import \"descriptor.proto\";",
                    "extend google.protobuf.MessageOptions {",
-                   "  optional string my_option = 51234;",
+                   "  optional string my_m_option = 51234;",
+                   "}",
+                   "extend google.protobuf.FieldOptions {",
+                   "  optional string my_f_option = 51235;",
                    "}",
                    "",
                    "message msg {",
-                   "  option (my_option) = \"Hello world!\";",
-                   "  required uint32 f1 = 22;",
+                   "  option (my_m_option) = \"Hello world!\";",
+                   "  required uint32 f1 = 22 [(my_f_option)];",
+                   "  required uint32 f2 = 23 [(my_f_option).x = false];",
                    "}"]}],
                 [use_packages]),
     [{package,'google.protobuf'},
      {package,x},
-     {{msg,'google.protobuf.MessageOptions'}, [#?gpb_field{name=my_option}]},
-     {{msg,'x.msg'},[#?gpb_field{}]},
-     {option,[my_option],"Hello world!"}] =
+     {{msg,'google.protobuf.FieldOptions'}, [#?gpb_field{name=my_f_option}]},
+     {{msg,'google.protobuf.MessageOptions'}, [#?gpb_field{name=my_m_option}]},
+     {{msg,'x.msg'},[#?gpb_field{name=f1,opts=[{[my_f_option],true}]},
+                     #?gpb_field{name=f2,opts=[{[my_f_option,x],false}]}]},
+     {option,[my_m_option],"Hello world!"}] =
         AllDefs.
 
 generates_correct_absolute_names_test() ->
