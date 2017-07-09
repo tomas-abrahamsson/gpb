@@ -184,6 +184,7 @@ msg_elem -> oneof_def:                  '$1'.
 msg_elem -> extend_def:                 '$1'.
 msg_elem -> reserved_def:               '$1'.
 msg_elem -> group_def:                  '$1'.
+msg_elem -> option_def:                 '$1'.
 
 fidentifier -> identifier:              '$1'.
 fidentifier -> package:                 kw_to_identifier('$1').
@@ -233,13 +234,14 @@ opt_field_opts -> '$empty':             [].
 field_opts -> field_opt ',' field_opts: ['$1' | '$3'].
 field_opts -> field_opt:                ['$1'].
 
+
 field_opt -> default '=' constant:      {default, '$3'}.
 field_opt -> packed:                    {packed, true}.
 field_opt -> packed '=' bool_lit:       {packed, literal_value('$3')}.
 field_opt -> deprecated:                {deprecated, true}.
 field_opt -> deprecated '=' bool_lit:   {deprecated, literal_value('$3')}.
-field_opt -> name:                      {identifier_name('$1'), true}.
-field_opt -> name '=' constant:         {identifier_name('$1'), '$3'}.
+field_opt -> option_name:               {'$1', true}.
+field_opt -> option_name '=' constant:  {'$1', '$3'}.
 
 occurrence -> required:                 required.
 occurrence -> optional:                 optional.
@@ -395,9 +397,11 @@ Erlang code.
                {{msg_containment, ProtoName::string()},[MsgName::atom()]} |
                {{reserved_numbers, MsgName::atom()}, [integer()]} |
                {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
-               {import, ProtoFile::string()}.
+               {import, ProtoFile::string()} |
+               {{msg_options, MsgName::atom()}, [msg_option()]}.
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
+-type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
 
 -export_type([defs/0, def/0]).
 -export_type([field/0]).
@@ -423,8 +427,9 @@ post_process_one_file(Defs, Opts) ->
     case find_package_def(Defs, Opts) of
         {ok, Package} ->
             {ok, handle_proto_syntax_version_one_file(
-                   convert_default_values(
-                     flatten_qualify_defnames(Defs, Package)))};
+                   join_any_msg_options(
+                     convert_default_values(
+                       flatten_qualify_defnames(Defs, Package))))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -562,6 +567,8 @@ flatten_fields(FieldsOrDefs, FullName) ->
              ({reserved_names, Ns}, {Fs,Ds}) ->
                   Def = {{reserved_names,FullName}, Ns},
                   {Fs, [Def | Ds]};
+             ({option,OptName,OptValue}, {Fs,Ds}) ->
+                  {Fs, [{{msg_option,FullName},{OptName,OptValue}} | Ds]};
              (Def, {Fs,Ds}) ->
                   QDefs = flatten_qualify_defnames([Def], FullName),
                   {Fs, QDefs++Ds}
@@ -774,6 +781,20 @@ convert_default_values_field(#?gpb_field{type=Type, opts=Opts}=Field) ->
 convert_default_values_field(#gpb_oneof{fields=OFs}=Field) ->
     OFs2 = lists:map(fun convert_default_values_field/1, OFs),
     Field#gpb_oneof{fields=OFs2}.
+
+join_any_msg_options(Defs) ->
+    {NonMsgOptDefs, MsgOptsDict} =
+        lists:foldl(
+          fun({{msg_option,MsgName},Opt}, {Ds,MsgOptsDict}) ->
+                  {Ds, dict:append(MsgName, Opt, MsgOptsDict)};
+             (OtherDef, {Ds, MsgOptsDict}) ->
+                  {[OtherDef | Ds], MsgOptsDict}
+          end,
+          {[], dict:new()},
+          Defs),
+    MsgOpts = [{{msg_options, MsgName}, MsgOpts}
+               || {MsgName, MsgOpts} <- dict:to_list(MsgOptsDict)],
+    lists:reverse(NonMsgOptDefs, MsgOpts).
 
 handle_proto_syntax_version_one_file(Defs) ->
     case proplists:get_value(syntax, Defs) of
@@ -1056,6 +1077,8 @@ reformat_names(Defs) ->
                       {{reserved_numbers,reformat_name(Name)}, Ns};
                  ({{reserved_names,Name}, FieldNames}) ->
                       {{reserved_names,reformat_name(Name)}, FieldNames};
+                 ({{msg_options,MsgName}, Opt}) ->
+                      {{msg_options,reformat_name(MsgName)}, Opt};
                  (OtherElem) ->
                       OtherElem
               end,

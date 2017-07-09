@@ -208,6 +208,46 @@ parses_enum_option_test() ->
     [{{enum,e1}, [{option, allow_alias, true}, {ee1,1},{ee2,1}]}] =
         do_process_sort_defs(Elems).
 
+parses_custom_option_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"descriptor.proto",
+                  ["package google.protobuf;"
+                   "message MessageOptions {", % dummy for this test inly
+                   "}",
+                   "message FieldOptions {", % dummy for this test inly
+                   "}"]},
+                 {"x.proto",
+                  ["package x;",
+                   "import \"descriptor.proto\";",
+                   "extend google.protobuf.MessageOptions {",
+                   "  optional string my_m_option = 51234;",
+                   "}",
+                   "extend google.protobuf.FieldOptions {",
+                   "  optional string my_f_option = 51235;",
+                   "}",
+                   "",
+                   "message t {",
+                   "  option (my_m_option) = \"t1\";",
+                   "  option (my_m_option) = \"t2\";",
+                   "  message s {",
+                   "    option (my_m_option) = \"s\";",
+                   "  }",
+                   "  required uint32 f1 = 22 [(my_f_option)];",
+                   "  required uint32 f2 = 23 [(my_f_option).x = false];",
+                   "}"]}],
+                [use_packages]),
+    [{package,'google.protobuf'},
+     {package,x},
+     {{msg,'google.protobuf.FieldOptions'}, [#?gpb_field{name=my_f_option}]},
+     {{msg,'google.protobuf.MessageOptions'}, [#?gpb_field{name=my_m_option}]},
+     {{msg,'x.t'},[#?gpb_field{name=f1,opts=[{[my_f_option],true}]},
+                   #?gpb_field{name=f2,opts=[{[my_f_option,x],false}]}]},
+     {{msg,'x.t.s'},[]},
+     {{msg_options,'x.t'},[{[my_m_option],"t1"},
+                           {[my_m_option],"t2"}]},
+     {{msg_options,'x.t.s'},[{[my_m_option],"s"}]}] =
+        AllDefs.
+
 generates_correct_absolute_names_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
                                "  message m2 { required uint32 x = 1; }",
