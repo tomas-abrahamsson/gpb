@@ -226,8 +226,12 @@ parses_custom_option_test() ->
                    "  optional string my_f_option = 51235;",
                    "}",
                    "",
-                   "message msg {",
-                   "  option (my_m_option) = \"Hello world!\";",
+                   "message t {",
+                   "  option (my_m_option) = \"t1\";",
+                   "  option (my_m_option) = \"t2\";",
+                   "  message s {",
+                   "    option (my_m_option) = \"s\";",
+                   "  }",
                    "  required uint32 f1 = 22 [(my_f_option)];",
                    "  required uint32 f2 = 23 [(my_f_option).x = false];",
                    "}"]}],
@@ -236,9 +240,12 @@ parses_custom_option_test() ->
      {package,x},
      {{msg,'google.protobuf.FieldOptions'}, [#?gpb_field{name=my_f_option}]},
      {{msg,'google.protobuf.MessageOptions'}, [#?gpb_field{name=my_m_option}]},
-     {{msg,'x.msg'},[#?gpb_field{name=f1,opts=[{[my_f_option],true}]},
-                     #?gpb_field{name=f2,opts=[{[my_f_option,x],false}]}]},
-     {option,[my_m_option],"Hello world!"}] =
+     {{msg,'x.t'},[#?gpb_field{name=f1,opts=[{[my_f_option],true}]},
+                   #?gpb_field{name=f2,opts=[{[my_f_option,x],false}]}]},
+     {{msg,'x.t.s'},[]},
+     {{msg_options,'x.t'},[{[my_m_option],"t1"},
+                           {[my_m_option],"t2"}]},
+     {{msg_options,'x.t.s'},[{[my_m_option],"s"}]}] =
         AllDefs.
 
 generates_correct_absolute_names_test() ->
