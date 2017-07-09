@@ -40,7 +40,7 @@ no_maps_tests__test() ->
 -import(gpb_compile_tests, [increase_timeouts/1]).
 -import(gpb_compile_tests, [with_tmpdir/1]).
 -import(gpb_compile_tests, [in_separate_vm/4]).
--import(gpb_compile_tests, [compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
+-import(gpb_compile_tests, [compile_nif_msg_defs/4]).
 -import(gpb_compile_tests, [check_protoc_can_do_oneof/0]).
 
 -define(verify_gpb_err(Expr), ?assertError({gpb_type_error, _}, Expr)).
