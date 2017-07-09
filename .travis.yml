@@ -5,6 +5,7 @@ addons:
       - libprotobuf-dev
       - protobuf-compiler
 otp_release:
+  - 20.0
   - 19.3
   - 18.3
   - 17.5
