@@ -103,7 +103,9 @@ Repeated fields are represented as lists.
 Optional fields are represented as either the value or `undefined` if
 not set. However, for maps, if the option `maps_unset_optional` is set
 to `omitted`, then unset optional values are omitted from the map,
-instead of being set to `undefined`.
+instead of being set to `undefined` when encoding messages. When
+decoding messages, even with `maps_unset_optional` set to `omitted,
+the default value will be set in the decoded map.
 
 Examples of Erlang format for protocol buffer messages
 ------------------------------------------------------
