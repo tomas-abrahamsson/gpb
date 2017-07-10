@@ -1,5 +1,21 @@
 -*- coding: utf-8 -*-
 
+Version 3.27.3
+2017-Jul-10
+
+        * Repeated fields can now be omitted with maps if option
+        maps_unset_optional = omitted. This makes sense especially
+        for proto3. Thanks to Adam Cook.
+
+        * Parse custom message and field options. Custom message
+        options land in {{msg_options,MsgName},[{Name,Value}] items
+        in the output when compiling with to_proto_defs. Thanks
+        to Tristan Sloughter for reporting.
+
+        * Improve unit tests to also cover generated hrl files
+        One issue fixed: when only mapfields_as_maps (-mapfields_as_maps)
+        but not the maps (-maps) option was set.
+
 Version 3.27.2
 2017-Jun-18
 
@@ -25,8 +41,8 @@ Version 3.26.8
 Version 3.26.7
 2017-Mar-15
 
-        * Fix default for map type fields (map<_,_>) when the mapfields_as_maps
-        option is set. Thanks to Tristan Sloughter
+        * Fix default for map type fields (map<_,_>) when the
+        mapfields_as_maps option is set. Thanks to Tristan Sloughter
 
 Version 3.26.6
 2016-Dec-29
