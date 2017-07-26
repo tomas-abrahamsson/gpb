@@ -49,7 +49,8 @@
           translations,       % :: dict:dict(), %% FieldPath -> TranslationOps
           default_transls,    % :: sets:set({FnName::atom(),Arity::integer()})
           map_types,          % :: sets:set({map,_,_})
-          group_occurrences   % :: dict:dict() %% GroupName -> repeated | ...
+          group_occurrences,  % :: dict:dict() %% GroupName -> repeated | ...
+          has_p3_opt_strings  % :: boolean()
         }).
 
 -define(f(Fmt),        io_lib:format(Fmt, [])).
@@ -1690,7 +1691,8 @@ analyze_defs(Defs, Opts) ->
            default_transls     = compute_used_default_translators(
                                    Defs, Translations, KnownMsgSize, Opts),
            map_types           = MapTypes,
-           group_occurrences   = find_group_occurrences(Defs)}.
+           group_occurrences   = find_group_occurrences(Defs),
+           has_p3_opt_strings  = has_p3_opt_strings(Defs)}.
 
 find_map_types(Defs) ->
     fold_msg_or_group_fields(
@@ -2293,6 +2295,29 @@ find_group_occurrences(Defs) ->
       dict:new(),
       Defs).
 
+has_p3_opt_strings(Defs) ->
+    P3Msgs = case lists:keyfind(proto3_msgs, 1, Defs) of
+                 {proto3_msgs, Names} -> Names;
+                 false                -> []
+             end,
+    try fold_msg_or_group_fields_o(
+          fun(_msg_or_group, MsgName, #?gpb_field{type=Type,occurrence=Occ},
+              _IsOneOf, Acc) ->
+                  if Type == string, Occ == optional ->
+                          case lists:member(MsgName, P3Msgs) of
+                              true -> throw(true);
+                              false -> Acc
+                          end;
+                     true ->
+                          Acc
+                  end
+          end,
+          false,
+          Defs)
+    catch throw:true ->
+            true
+    end.
+
 %% -- generating code ----------------------------------------------
 
 format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
@@ -2590,7 +2615,8 @@ format_encoders_top_function_msgs(Defs, Opts) ->
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
-     format_type_encoders(AnRes)
+     format_type_encoders(AnRes),
+     format_is_empty_string(AnRes)
     ].
 
 format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
@@ -2745,10 +2771,10 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                     true when Type == string ->
                         ?expr(begin
                                   'TrF' = 'Tr'('<F>', 'TrUserData'),
-                                  case iolist_size('TrF') of
-                                      0 ->
+                                  case is_empty_string('TrF') of
+                                      true ->
                                           '<Bin>';
-                                      _ ->
+                                      false ->
                                           '<enc>'('TrF',
                                                   <<'<Bin>'/binary, '<Key>'>>,
                                                   'MaybeTrUserData')
@@ -3303,6 +3329,30 @@ format_varint_encoder() ->
               Bin2 = <<Bin/binary, (N band 127 bor 128)>>,
               call_self(N bsr 7, Bin2)
       end).
+
+format_is_empty_string(#anres{has_p3_opt_strings=false}) ->
+    "";
+format_is_empty_string(#anres{has_p3_opt_strings=true}) ->
+    [gpb_codegen:format_fn(
+       is_empty_string,
+       fun("") -> true;
+          (<<>>) -> true;
+          (L) when is_list(L) -> not string_has_chars(L);
+          (B) when is_binary(B) -> false
+       end),
+     gpb_codegen:format_fn(
+       string_has_chars,
+       fun([C | _]) when is_integer(C) -> true; % common case
+          ([H | T]) ->
+               case string_has_chars(H) of
+                   true  -> true;
+                   false -> call_self(T)
+               end;
+          (B) when is_binary(B), byte_size(B) =/= 0 -> true;
+          (C) when is_integer(C) -> true;
+          (<<>>) -> false;
+          ([]) -> false
+       end)].
 
 format_nif_encoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_encode_error_wrapper(MsgName)

@@ -760,6 +760,26 @@ encode_map_test() ->
       21, 18:32/little  %% value
     >> = encode_msg(#m1{a = [{"x",17},{"y",18}]}, Defs).
 
+encode_proto3_unicode_strings_test() ->
+    P3Defs = [{syntax,"proto3"},
+              {proto3_msgs, [m1,m2]},
+              {{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                      type={map,string,string},
+                                      occurrence=repeated, opts=[]}]},
+              {{msg,m2}, [#?gpb_field{name=a, fnum=1, rnum=#m2.b,
+                                      type=string,
+                                      occurrence=optional, opts=[]}]}],
+    Smiley1  = [16#1f631],
+    Smiley1B = <<240,159,152,177>> = unicode:characters_to_binary(Smiley1),
+    Smiley2  = [16#1f628],
+    Smiley2B = <<240,159,152,168>> = unicode:characters_to_binary(Smiley2),
+    <<10,12,
+      10,4,Smiley1B:4/binary,
+      18,4,Smiley2B:4/binary>> =
+        encode_msg(#m1{a = [{Smiley1, Smiley2}]}, P3Defs),
+
+    <<10,4,Smiley1B:4/binary>> = encode_msg(#m2{b = [Smiley1]}, P3Defs).
+
 proto3_type_default_values_never_serialized_test() ->
     %% "... if a scalar message field is set to its default, the value
     %% will not be serialized on the wire."
