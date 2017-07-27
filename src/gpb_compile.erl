@@ -6772,9 +6772,10 @@ type_to_typestr_2({group,G}, _Defs, Opts) -> msg_to_typestr(G, Opts);
 type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
     KTStr = type_to_typestr_2(KT, Defs, Opts),
     VTStr = type_to_typestr_2(VT, Defs, Opts),
+    MapSep = mandatory_map_item_type_sep(Opts),
     case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
         '2tuples' -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
-        maps      -> ?f("#{~s => ~s}", [KTStr, VTStr])
+        maps      -> ?f("#{~s ~s ~s}", [KTStr, MapSep, VTStr])
     end.
 
 float_spec() ->
