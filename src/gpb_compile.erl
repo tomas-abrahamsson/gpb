@@ -2781,7 +2781,20 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                   end
                               end,
                               Transforms);
-                    true when Type /= string ->
+                    true when Type == bytes ->
+                        ?expr(begin
+                                  'TrF' = 'Tr'('<F>', 'TrUserData'),
+                                  case iolist_size('TrF') of
+                                      0 ->
+                                          '<Bin>';
+                                      _ ->
+                                          '<enc>'('TrF',
+                                                  <<'<Bin>'/binary, '<Key>'>>,
+                                                  'MaybeTrUserData')
+                                  end
+                              end,
+                              Transforms);
+                    true ->
                         TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
                            begin

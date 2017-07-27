@@ -780,6 +780,54 @@ encode_proto3_unicode_strings_test() ->
 
     <<10,4,Smiley1B:4/binary>> = encode_msg(#m2{b = [Smiley1]}, P3Defs).
 
+encode_proto3_various_empty_string_test() ->
+    %% With iolists for encoding, there are many ways to specify an empty
+    %% string.  In proto3, they should encode to nothing.
+    P3Defs = [{syntax,"proto3"},
+              {proto3_msgs, [m1,m2]},
+              {{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                      type={map,uint32,string},
+                                      occurrence=repeated, opts=[]}]},
+              {{msg,m2}, [#?gpb_field{name=a, fnum=1, rnum=#m2.b,
+                                      type=string,
+                                      occurrence=optional, opts=[]}]}],
+    SuperEmpty = [<<>>,[[[<<>>,<<>>]]]],
+    <<10,4,8,1,18,0,
+      10,4,8,2,18,0,
+      10,6,8,3,18,2,97,98,
+      10,5,8,4,18,1,65>> = encode_msg(#m1{a = [{1,<<>>},{2,SuperEmpty},
+                                               {3,[97,[<<98>>]]},{4,<<65>>}]},
+                                      P3Defs),
+    <<>> = encode_msg(#m2{b = ""}, P3Defs),
+    <<>> = encode_msg(#m2{b = <<>>}, P3Defs),
+    <<>> = encode_msg(#m2{b = SuperEmpty}, P3Defs),
+    <<10,2,97,98>> = encode_msg(#m2{b = [97,[<<98>>]]}, P3Defs),
+    <<10,1,65>> = encode_msg(#m2{b = <<65>>}, P3Defs).
+
+encode_proto3_various_enpty_sequence_of_bytes_test() ->
+    %% With iolists for encoding, there are many ways to specify an empty
+    %% binary.  In proto3, they should encode to nothing.
+    P3Defs = [{syntax,"proto3"},
+              {proto3_msgs, [m1,m2]},
+              {{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                      type={map,uint32,bytes},
+                                      occurrence=repeated, opts=[]}]},
+              {{msg,m2}, [#?gpb_field{name=a, fnum=1, rnum=#m2.b,
+                                      type=bytes,
+                                      occurrence=optional, opts=[]}]}],
+    SuperEmpty = [<<>>,[[[<<>>,<<>>]]]],
+    <<10,4,8,1,18,0,
+      10,4,8,2,18,0,
+      10,6,8,3,18,2,97,98,
+      10,5,8,4,18,1,65>> = encode_msg(#m1{a = [{1,<<>>},{2,SuperEmpty},
+                                               {3,[97,[<<98>>]]},{4,<<65>>}]},
+                                      P3Defs),
+    <<>> = encode_msg(#m2{b = <<>>}, P3Defs),
+    <<>> = encode_msg(#m2{b = ""}, P3Defs),
+    <<>> = encode_msg(#m2{b = SuperEmpty}, P3Defs),
+    <<10,2,97,98>> = encode_msg(#m2{b = [97,[<<98>>]]}, P3Defs),
+    <<10,1,65>> = encode_msg(#m2{b = <<65>>}, P3Defs).
+
 proto3_type_default_values_never_serialized_test() ->
     %% "... if a scalar message field is set to its default, the value
     %% will not be serialized on the wire."

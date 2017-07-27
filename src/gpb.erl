@@ -704,7 +704,7 @@ encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=optional},
             <<>>;
         Value ->
             case is_msg_proto3(element(1, Msg), MsgDefs)
-                andalso proto3_type_default(Type, MsgDefs) =:= Value of
+                andalso is_proto3_type_default(Type, MsgDefs, Value) of
                 true ->
                     <<>>;
                 false ->
@@ -1184,6 +1184,13 @@ is_msg_proto3(Name, MsgDefs) ->
         false ->
             false
     end.
+
+is_proto3_type_default(string, _MsgDefs, Value) ->
+    unicode:characters_to_binary(Value) =:= <<>>;
+is_proto3_type_default(bytes, _MsgDefs, Value) ->
+    iolist_size(Value) == 0;
+is_proto3_type_default(Type, MsgDefs, Value) ->
+    proto3_type_default(Type, MsgDefs) =:= Value.
 
 -spec proto2_type_default(gpb_field_type(), gpb_parse:defs()) -> term().
 proto2_type_default(Type, MsgDefs) ->
