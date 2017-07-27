@@ -6680,7 +6680,7 @@ calc_field_type_sep(#?gpb_field{occurrence=Occurrence}, Opts) ->
         {maps, omitted} ->
             case Occurrence of
                 required -> mandatory_map_item_type_sep(Opts);
-                repeated -> mandatory_map_item_type_sep(Opts);
+                repeated -> "=>";
                 optional -> "=>"
             end
     end;
@@ -6733,7 +6733,8 @@ type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs, Opts) ->
             case Type of
                 {map,_,_} -> type_to_typestr_2(Type, Defs, Opts);
                 _         -> "[" ++ type_to_typestr_2(Type, Defs, Opts) ++ "]"
-            end;
+            end
+                ++ OrUndefined;
         optional ->
             type_to_typestr_2(Type, Defs, Opts) ++ OrUndefined
     end;
