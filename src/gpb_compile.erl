@@ -3878,7 +3878,8 @@ decoder_finalize_params_all_present(Params, MsgName, MsgDef, TrUserDataVar,
 decoder_finalize_params_opt_omitted(Params, MsgName, MsgDef, TrUserDataVar,
                                     AnRes, _Opts) ->
     {Optionals, NonOptionals} = key_partition_on_optionality(
-                                  1, lists:zip(MsgDef, Params)),
+                                  1, lists:zip(MsgDef, Params),
+                                  [mapfields_are_required]),
     NonOptionalsMap = map_create(
                         [decoder_finalize_param_for_mapping(
                            Field, Param, MsgName, TrUserDataVar, AnRes)
@@ -8865,18 +8866,25 @@ get_field_rnum(#gpb_oneof{rnum=RNum})  -> RNum.
 
 %% -> {Optionals, NonOptionals}
 key_partition_on_optionality(Key, Items) ->
-    lists:partition(fun(Item) ->
-                            Field = element(Key, Item),
-                            case get_field_occurrence(Field) of
-                                optional ->
-                                    true;
-                                repeated ->
-                                    true;
-                                _ ->
-                                    false
-                            end
-                    end,
-                    Items).
+    key_partition_on_optionality(Key, Items, []).
+key_partition_on_optionality(Key, Items, Opts) ->
+    lists:partition(
+      fun(Item) ->
+              Field = element(Key, Item),
+              case get_field_occurrence(Field) of
+                  optional -> true;
+                  required -> false;
+                  repeated -> case mapfields_considered_required(Opts) of
+                                  false -> true;
+                                  true  -> not is_maptype_field(Field)
+                              end
+              end
+      end,
+      Items).
+
+mapfields_considered_required(Opts) ->
+    proplists:get_bool(mapfields_are_required, Opts).
+
 
 is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
