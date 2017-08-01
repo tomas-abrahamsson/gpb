@@ -49,6 +49,7 @@
           translations,       % :: dict:dict(), %% FieldPath -> TranslationOps
           default_transls,    % :: sets:set({FnName::atom(),Arity::integer()})
           map_types,          % :: sets:set({map,_,_})
+          map_value_types,    % :: {boolean(), boolean()} % submsgs?/nonsubmsgs?
           group_occurrences,  % :: dict:dict() %% GroupName -> repeated | ...
           has_p3_opt_strings  % :: boolean()
         }).
@@ -1676,7 +1677,8 @@ utf8_decode(B) ->
 
 analyze_defs(Defs, Opts) ->
     MapTypes = find_map_types(Defs),
-    MapsAsMsgs = map_types_to_msgs(sets:to_list(MapTypes)),
+    MapsAsMsgs = map_types_to_msgs(MapTypes),
+    MapMsgEnums = enums_for_maps_as_msgs(MapTypes, Defs),
     Translations = compute_translations(Defs, Opts),
     KnownMsgSize = find_msgsizes_known_at_compile_time(MapsAsMsgs ++ Defs),
     #anres{used_types          = find_used_types(Defs),
@@ -1686,11 +1688,12 @@ analyze_defs(Defs, Opts) ->
            num_fields          = find_num_fields(MapsAsMsgs ++ Defs),
            d_field_pass_method = compute_decode_field_pass_methods(
                                    MapsAsMsgs ++ Defs, Opts),
-           maps_as_msgs        = MapsAsMsgs,
+           maps_as_msgs        = MapsAsMsgs ++ MapMsgEnums,
            translations        = Translations,
            default_transls     = compute_used_default_translators(
                                    Defs, Translations, KnownMsgSize, Opts),
            map_types           = MapTypes,
+           map_value_types     = compute_map_value_types(MapTypes),
            group_occurrences   = find_group_occurrences(Defs),
            has_p3_opt_strings  = has_p3_opt_strings(Defs)}.
 
@@ -1705,9 +1708,12 @@ find_map_types(Defs) ->
       Defs).
 
 map_types_to_msgs(MapTypes) ->
-    [{{msg, map_type_to_msg_name(KeyType,ValueType)},
-      gpb:map_item_pseudo_fields(KeyType, ValueType)}
-     || {KeyType,ValueType} <- MapTypes].
+    sets:fold(fun({KeyType, ValueType}, Acc) ->
+                      [{{msg, map_type_to_msg_name(KeyType,ValueType)},
+                        gpb:map_item_pseudo_fields(KeyType, ValueType)} | Acc]
+              end,
+              [],
+              MapTypes).
 
 map_type_to_msg_name(KeyType, {msg,MsgName}) ->
     list_to_atom(?ff("map<~s,~s>", [KeyType, MsgName]));
@@ -1715,6 +1721,23 @@ map_type_to_msg_name(KeyType, {enum,EnumName}) ->
     list_to_atom(?ff("map<~s,~s>", [KeyType, EnumName]));
 map_type_to_msg_name(KeyType, ValueType) ->
     list_to_atom(?ff("map<~s,~s>", [KeyType, ValueType])).
+
+enums_for_maps_as_msgs(MapTypes, Defs) ->
+    MapEnumNames = sets:fold(fun({_Key, {enum, EName}}, Acc) -> [EName | Acc];
+                                ({_KeyType, _ValueType}, Acc) -> Acc
+                             end,
+                             [],
+                             MapTypes),
+    [Enum || {{enum, EnumName}, _}=Enum <- Defs,
+             lists:member(EnumName, MapEnumNames)].
+
+compute_map_value_types(MapTypes) ->
+    sets:fold(
+      fun({_KT, {msg,_}}, {_SubMsgs, NonSubMsgs})  -> {true, NonSubMsgs};
+         ({_KT, _VT},     {SubMsgs,  _NonSubMsgs}) -> {SubMsgs, true}
+      end,
+      {false, false},
+      MapTypes).
 
 find_used_types(Defs) ->
     fold_msg_or_group_fields(
@@ -2069,33 +2092,38 @@ compute_map_translations(Defs, Opts) ->
           end,
           [],
           Defs),
-    MapsOrTuples = get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
+    MapFieldFormat = get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
     dict:from_list(
       lists:append(
-        [begin
-             MapAsMsgName = map_type_to_msg_name(KeyType, ValueType),
-             case MapsOrTuples of
-                 '2tuples' ->
-                     [{[MsgName,FName,[]],
-                       [{encode, {mt_maptuple_to_pseudomsg_r,
-                                  ['$1',MapAsMsgName]}}]},
-                      {[MsgName,FName],
-                       [{decode_init_default, {mt_empty_map_r,[]}},
-                        {decode_repeated_add_elem,{mt_add_item_r,['$1','$2']}},
-                        {decode_repeated_finalize,{mt_finalize_items_r,['$1']}},
-                        {merge, {mt_merge_maptuples_r,['$1','$2']}}]}];
-                 maps ->
-                     [{[MsgName,FName,[]],
-                       [{encode, {mt_maptuple_to_pseudomsg_m, ['$1']}}]},
-                      {[MsgName,FName],
-                       [{encode, {mt_map_to_list_m,['$1']}},
-                        {decode_init_default, {mt_empty_map_m,[]}},
-                        {decode_repeated_add_elem,{mt_add_item_m,['$1','$2']}},
-                        {decode_repeated_finalize,{id,['$1','$user_data']}},
-                        {merge, {mt_merge_maps_m,['$1','$2']}}]}]
-             end
-         end
+        [mk_map_transls(MsgName, FName, KeyType, ValueType, MapFieldFormat)
          || {{MsgName, FName}, {KeyType, ValueType}} <- MapInfos])).
+
+mk_map_transls(MsgName, FName, KeyType, ValueType, '2tuples')->
+    MapAsMsgName = map_type_to_msg_name(KeyType, ValueType),
+    AddItemTrFn = case ValueType of
+                    {msg,_} -> mt_add_item_r_verify_value;
+                    _       -> mt_add_item_r
+                  end,
+    [{[MsgName,FName,[]],
+      [{encode, {mt_maptuple_to_pseudomsg_r, ['$1', MapAsMsgName]}}]},
+     {[MsgName,FName],
+      [{decode_init_default,      {mt_empty_map_r,       []}},
+       {decode_repeated_add_elem, {AddItemTrFn,          ['$1', '$2']}},
+       {decode_repeated_finalize, {mt_finalize_items_r,  ['$1']}},
+       {merge,                    {mt_merge_maptuples_r, ['$1', '$2']}}]}];
+mk_map_transls(MsgName, FName, _KeyType, ValueType, maps)->
+    AddItemTrFn = case ValueType of
+                    {msg,_} -> mt_add_item_m_verify_value;
+                    _       -> mt_add_item_m
+                  end,
+    [{[MsgName,FName,[]],
+      [{encode,                   {mt_maptuple_to_pseudomsg_m, ['$1']}}]},
+     {[MsgName,FName],
+      [{encode,                   {mt_map_to_list_m, ['$1']}},
+       {decode_init_default,      {mt_empty_map_m,   []}},
+       {decode_repeated_add_elem, {AddItemTrFn,      ['$1', '$2']}},
+       {decode_repeated_finalize, {id,               ['$1', '$user_data']}},
+       {merge,                    {mt_merge_maps_m,  ['$1', '$2']}}]}].
 
 compute_any_translations(Defs, Opts) ->
     case proplists:get_value(any_translate,Opts) of
@@ -3615,21 +3643,30 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
                        false -> ?expr(_)
                    end)]).
 
-msg_decoder_initial_params(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts) ->
+msg_decoder_initial_params(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
     IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
+    IsMapMsg = is_map_msg(MsgName, AnRes),
     UseDefaults = proplists:get_bool(defaults_for_omitted_optionals, Opts),
     UseTypeDefaults = proplists:get_bool(type_defaults_for_omitted_optionals,
                                          Opts),
     ExprInfos1 =
         [case Field of
-             #?gpb_field{name=FName, occurrence=Occurrence, type=Type,
+             #?gpb_field{name=FName, occurrence=Occurrence0, type=Type,
                          opts=FOpts} ->
                  HasDefault = lists:keymember(default, 1, FOpts),
+                 SubMsgType = is_msg_type(Type),
+                 Occurrence = if IsMapMsg, not SubMsgType -> optional;
+                                 true -> Occurrence0
+                              end,
                  {Undefined, Undef, P} =
                      if IsProto3 ->
                              TD = proto3_type_default(Type, Defs, Opts),
                              ATD = erl_syntax:abstract(TD),
                              {ATD, ATD, m};
+                        IsMapMsg, not SubMsgType ->
+                             TD = proto3_type_default(Type, Defs, Opts),
+                             ATD = erl_syntax:abstract(TD),
+                             {ATD, ATD, o};
                         UseDefaults, HasDefault ->
                              {default,D} = lists:keyfind(default, 1, FOpts),
                              AD = erl_syntax:abstract(D),
@@ -3693,6 +3730,12 @@ msg_decoder_initial_params(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts) ->
                        [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos2])]
             end
     end.
+
+is_map_msg(MsgName, #anres{maps_as_msgs=MapsAsMsgs}) ->
+    lists:keymember({msg,MsgName}, 1, MapsAsMsgs).
+
+is_msg_type({msg,_}) -> true;
+is_msg_type(_)       -> false.
 
 decoder_read_field_params(MsgName, MsgDef, AnRes, Opts) ->
     case get_field_pass(MsgName, AnRes) of
@@ -5954,8 +5997,10 @@ format_default_translators(AnRes, Opts) ->
     [format_default_map_translators(AnRes, Opts),
      format_default_any_translators(AnRes, Opts)].
 
-format_default_map_translators(#anres{map_types=MapTypes}=AnRes, Opts) ->
+format_default_map_translators(#anres{map_types=MapTypes,
+                                      map_value_types=MVT}=AnRes, Opts) ->
     HaveMaps = sets:size(MapTypes) > 0,
+    {HaveMapSubmsgs, HaveMapNonSubmsgs} = MVT,
     [%% Auxiliary helpers in case of fields of type map<_,_>
      [case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
           '2tuples' ->
@@ -5968,11 +6013,20 @@ format_default_map_translators(#anres{map_types=MapTypes}=AnRes, Opts) ->
                gpb_codegen:format_fn(
                  mt_empty_map_r,
                  fun() -> dict:new() end),
-               inline_attr(mt_add_item_r,2),
-               gpb_codegen:format_fn(
-                 mt_add_item_r,
-                 fun({_RName,K,V}, D) -> dict:store(K,V,D) end),
-               "\n",
+               [[inline_attr(mt_add_item_r,2),
+                 gpb_codegen:format_fn(
+                   mt_add_item_r,
+                   fun({_RName,K,V}, D) -> dict:store(K,V,D) end),
+                 "\n"]
+                || HaveMapNonSubmsgs],
+               [[inline_attr(mt_add_item_r_verify_value,2),
+                 gpb_codegen:format_fn(
+                   mt_add_item_r_verify_value,
+                   fun({_,_,undefined}, _) -> error({gpb_error, missing_value});
+                      ({_RName,K,V}, D) -> dict:store(K,V,D)
+                   end),
+                 "\n"]
+                || HaveMapSubmsgs],
                inline_attr(mt_finalize_items_r,1),
                gpb_codegen:format_fn(
                  mt_finalize_items_r,
@@ -5998,28 +6052,62 @@ format_default_map_translators(#anres{map_types=MapTypes}=AnRes, Opts) ->
                  fun() -> '#{}' end,
                  [replace_tree('#{}', map_create([]))]),
                "\n",
-               inline_attr(mt_add_item_m,2),
-               case is_target_major_version_at_least(18, Opts) of
-                   true ->
-                       gpb_codegen:format_fn(
-                         mt_add_item_m,
-                         fun('#{key := K,value := V}', M) -> 'M#{K => V}' end,
-                         [replace_tree('#{key := K,value := V}',
-                                       map_match([{key,K}, {value,V}])),
-                          replace_tree('M#{K => V}',
-                                       map_set(M, [{K,V}]))]);
-                   false ->
-                       gpb_codegen:format_fn(
-                         mt_add_item_m,
-                         fun('#{key := K,value := V}', M) ->
-                                 maps:put('K', 'V', 'M')
-                         end,
-                         [replace_tree('#{key := K,value := V}',
-                                       map_match([{key,K}, {value,V}])),
-                          replace_tree('K', K),
-                          replace_tree('V', V),
-                          replace_tree('M', M)])
-               end,
+               [[inline_attr(mt_add_item_m,2),
+                 case is_target_major_version_at_least(18, Opts) of
+                     true ->
+                         gpb_codegen:format_fn(
+                           mt_add_item_m,
+                           fun('#{key := K,value := V}', M) -> 'M#{K => V}' end,
+                           [replace_tree('#{key := K,value := V}',
+                                         map_match([{key,K}, {value,V}])),
+                            replace_tree('M#{K => V}',
+                                         map_set(M, [{K,V}]))]);
+                     false ->
+                         gpb_codegen:format_fn(
+                           mt_add_item_m,
+                           fun('#{key := K,value := V}', M) ->
+                                   maps:put('K', 'V', 'M')
+                           end,
+                           [replace_tree('#{key := K,value := V}',
+                                         map_match([{key,K}, {value,V}])),
+                            replace_tree('K', K),
+                            replace_tree('V', V),
+                            replace_tree('M', M)])
+                 end]
+                || HaveMapNonSubmsgs],
+               [[inline_attr(mt_add_item_m_verify_value,2),
+                 case is_target_major_version_at_least(18, Opts) of
+                     true ->
+                         gpb_codegen:format_fn(
+                           mt_add_item_m_verify_value,
+                           fun('#{key := K,value := V}', M) ->
+                                   if V =:= '$undef' ->
+                                           error({gpb_error, missing_value});
+                                      true ->
+                                           'M#{K => V}'
+                                   end
+                           end,
+                           [replace_tree('#{key := K,value := V}',
+                                         map_match([{key,K}, {value,V}])),
+                            replace_tree('M#{K => V}',
+                                         map_set(M, [{K,V}]))]);
+                     false ->
+                         gpb_codegen:format_fn(
+                           mt_add_item_m_verify_value,
+                           fun('#{key := K,value := V}', M) ->
+                                   if V =:= '$undef' ->
+                                           error({gpb_error, missing_value});
+                                      true ->
+                                           maps:put('K', 'V', 'M')
+                                   end
+                           end,
+                           [replace_tree('#{key := K,value := V}',
+                                         map_match([{key,K}, {value,V}])),
+                            replace_tree('K', K),
+                            replace_tree('V', V),
+                            replace_tree('M', M)])
+                 end]
+                || HaveMapSubmsgs],
                "\n"]
       end,
       format_default_merge_translators(AnRes, Opts)]

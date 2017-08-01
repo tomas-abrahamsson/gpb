@@ -527,6 +527,25 @@ merge_maps_with_opts_omitted_test() ->
                      m0),
     unload_code(M).
 
+merge_x_test() ->
+    M = compile_iolist(["message m2 {",
+                        "  map<bool,m1>  b = 2;",
+                        "}",
+                        "message m1 {",
+                        "  required bool a = 1;"
+                        "}"],
+                       [maps, {maps_unset_optional, omitted}]),
+    M2a = #{b => #{}},
+    M2b = #{b => #{false => #{a=> false}}},
+    %% verify round-triping first
+    M2a = M:decode_msg(M:encode_msg(M2a, m2), m2),
+    M2b = M:decode_msg(M:encode_msg(M2b, m2), m2),
+    %% verify merging
+    MM = M:merge_msgs(M2a, M2b, m2),
+    MM = M:decode_msg(<<(M:encode_msg(M2a, m2))/binary,
+                        (M:encode_msg(M2b, m2))/binary>>,
+                      m2),
+    unload_code(M).
 
 %% verify ------------------------------------------------
 verify_maps_with_opts_present_undefined_test() ->

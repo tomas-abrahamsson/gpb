@@ -477,6 +477,56 @@ decoding_map_with_duplicate_keys_test() ->
                      Defs),
     [{"x",17},{"y",18}] = lists:sort(Map).
 
+decoding_map_with_keys_values_missing_should_get_type_defaults_test() ->
+    %% map keys and values are optional, and when decoded, should
+    %% get type-default values if missing.
+    %% This is the case also with syntax="proto2".
+    %% (a map with all values omitted could perhaps be regarded as a set,
+    %% but we can't express that right now)
+    Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=3, rnum=#m1.a,
+                                    type={map,string,uint32},
+                                    occurrence=repeated, opts=[]}]},
+            {{msg,m1m}, % map<string,uint32> equivalent using bwd-compat msgs
+             [#?gpb_field{name=a, fnum=3, rnum=#m1.a,
+                          type={msg,map_equiv},
+                          occurrence=repeated, opts=[]}]},
+            {{msg,map_equiv},
+             [#?gpb_field{name=k,
+                          fnum=1, rnum=2,
+                          type=string, occurrence=optional, opts=[]},
+              #?gpb_field{name=v,
+                          fnum=2, rnum=3,
+                          type=uint32, occurrence=optional, opts=[]}]}],
+    B1m = encode_msg({m1m, [{map_equiv, "abc", 17},
+                            {map_equiv, undefined, 18},
+                            {map_equiv, "def", undefined},
+                            {map_equiv, undefined, undefined}]}, Defs),
+    {m1, Map} = decode_msg(B1m, m1, Defs),
+    [{"", _}, {"abc", 17}, {"def", 0}] = lists:sort(Map).
+
+error_for_mapfield_with_missing_msgvalue_test() ->
+    %% It is an error if a value is missing for a map<_,_> type field,
+    %% and the type of the value is a message.
+    Defs = [{{msg,m1}, [#?gpb_field{name=a, fnum=3, rnum=#m1.a,
+                                    type={map,string,{msg,m2}},
+                                    occurrence=repeated, opts=[]}]},
+            {{msg,m2}, [#?gpb_field{name=b, fnum=4, rnum=#m2.b, type=uint32,
+                                    occurrence=required, opts=[]}]},
+            {{msg,m1m}, % map<string,uint32> equivalent using bwd-compat msgs
+             [#?gpb_field{name=a, fnum=3, rnum=#m1.a,
+                          type={msg,map_equiv},
+                          occurrence=repeated, opts=[]}]},
+            {{msg,map_equiv},
+             [#?gpb_field{name=k,
+                          fnum=1, rnum=2,
+                          type=string, occurrence=optional, opts=[]},
+              #?gpb_field{name=v,
+                          fnum=2, rnum=3,
+                          type={msg,m2}, occurrence=optional, opts=[]}]}],
+    B1m = encode_msg({m1m, [{map_equiv, "abc", {m2,17}},
+                            {map_equiv, "def", undefined}]}, Defs),
+    ?assertError({gpb_error,_}, decode_msg(B1m, m1, Defs)).
+
 %% -------------------------------------------------------------
 
 encode_required_varint_field_test() ->
@@ -758,7 +808,26 @@ encode_map_test() ->
       10, 8,
       10, 1, "y",       %% key
       21, 18:32/little  %% value
-    >> = encode_msg(#m1{a = [{"x",17},{"y",18}]}, Defs).
+    >> = encode_msg(#m1{a = [{"x",17},{"y",18}]}, Defs),
+
+    %% Map items are present even if they have type-defaults
+    %% even if syntax="proto3"
+    P3Defs = [{syntax,"proto3"},
+              {proto3_msgs, [m1]},
+              {{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                                      type={map,string,uint32},
+                                      occurrence=repeated, opts=[]}]}],
+    <<10,4, 10,0, 16,0>> = encode_msg(#m1{a = [{"",0}]}, P3Defs),
+    %%      ^^^^  ^^^^
+    %%      Key   Value
+
+    %% Map fields are not packed, even if proto3
+    %% (the spec says it is equivalent to repeated MapFieldItem x = 17;
+    %% and in proto3, repeated primitive fields are packed by default.
+    %% Now this isn't a packed primitive field, but check just in case.
+    <<10,5,10,1,97,16,1,    % "a" => 1
+      10,5,10,1,98,16,2>> = % "b" => 2
+        encode_msg(#m1{a = [{"a",1},{"b",2}]}, P3Defs).
 
 encode_proto3_unicode_strings_test() ->
     P3Defs = [{syntax,"proto3"},

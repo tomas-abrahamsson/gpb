@@ -414,10 +414,16 @@ decode_type(FieldType, Bin, MsgDefs) ->
                     {N, Rest}
             end;
         {map,KeyType,ValueType} ->
-            MsgDefs1 = [map_item_tmp_def(KeyType, ValueType) | MsgDefs],
             MsgName = map_item_tmp_name(),
+            MsgDefs2 = map_msg_defs_for_decoding(KeyType, ValueType, MsgDefs),
             {{MsgName,Key,Value}, Rest2} =
-                decode_type({msg, MsgName}, Bin, MsgDefs1),
+                decode_type({msg, MsgName}, Bin, MsgDefs2),
+            case {ValueType, Value} of
+                {{msg,_},undefined} ->
+                    error({gpb_error, {missing_value_for_mapfield,FieldType}});
+                _ ->
+                    ok
+            end,
             {{Key,Value}, Rest2}
         end.
 
@@ -1191,6 +1197,17 @@ is_proto3_type_default(bytes, _MsgDefs, Value) ->
     iolist_size(Value) == 0;
 is_proto3_type_default(Type, MsgDefs, Value) ->
     proto3_type_default(Type, MsgDefs) =:= Value.
+
+map_msg_defs_for_decoding(KeyType, ValueType, MsgDefs) ->
+    {{msg,TmpName},Fs} = map_item_tmp_def(KeyType, ValueType),
+    TmpMsg = {{msg,TmpName}, [F#?gpb_field{occurrence=optional} || F <- Fs]},
+    %% Redefine message to be a proto3 message to get type-defaults
+    case lists:keyfind(proto3_msgs, 1, MsgDefs) of
+        {proto3_msgs, Names} ->
+            [{proto3_msgs, [TmpName | Names]}, TmpMsg | MsgDefs];
+        false ->
+            [{proto3_msgs, [TmpName]}, TmpMsg | MsgDefs]
+    end.
 
 -spec proto2_type_default(gpb_field_type(), gpb_parse:defs()) -> term().
 proto2_type_default(Type, MsgDefs) ->
