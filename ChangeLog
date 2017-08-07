@@ -1,5 +1,24 @@
 -*- coding: utf-8 -*-
 
+Version 3.27.4
+2017-Aug-07
+
+        Minor small issues
+
+        * Fix crash in encoding of string fields in proto3 messages,
+        when the string contained code-points >= 256.
+
+        * Fix wrong type-default in encoding for bytes fields in proto3
+        messages, when the bytes was specified as an iolist.
+
+        * Improve typespec for map<_,_> type fields to use := in Erlang 19+
+
+        * Fix dialyzer issues in the generated code
+
+        * Fix decoding of map<_,_> type field items with missing keys
+        or values so they decode to type-defaults. Thanks to Tiago
+        Guedes for reporting.
+
 Version 3.27.3
 2017-Jul-10
 
