@@ -1332,7 +1332,7 @@ prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
                                                   ToLowerOrSnake, Arg),
                       NewReturn = prefix_suffix_name(PrefixReturn, Suffix,
                                                      ToLowerOrSnake, Return),
-                      R#?gpb_rpc{name=RpcName,
+                      R#?gpb_rpc{name=maybe_tolower_or_snake_name(RpcName, ToLowerOrSnake),
                                  input=NewArg,
                                  output=NewReturn}
               end,
