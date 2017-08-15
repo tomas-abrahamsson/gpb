@@ -376,7 +376,6 @@ m_opts -> '$empty':                     [].
 
 Erlang code.
 
--include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
 -export([post_process_one_file/2]).
@@ -1339,8 +1338,7 @@ prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
               end,
               RPCs).
 
-%% @doc Fetch the `import'ed files.
-%% @end
+%% Fetch the `import'ed files.
 %% `Defs' is expected to be parsed, but not necessarily post_processed.
 -spec fetch_imports(defs()) -> [ProtoFile::string()].
 fetch_imports(Defs) ->

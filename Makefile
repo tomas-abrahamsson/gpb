@@ -67,6 +67,10 @@ ifndef EDOC_DEST_DIR
 EDOC_DEST_DIR=.
 endif
 
+ifndef EDOC_OPTS
+EDOC_OPTS={preprocess,true}
+endif
+
 ## Check verbosity
 ifdef VERBOSE
 verbose_opt := verbose
