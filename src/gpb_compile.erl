@@ -6569,7 +6569,8 @@ format_record_typespec(Msg, Fields, Defs, Opts) ->
             ?f("-type ~p() ::~n"
                "      #{~s~n"
                "       }.",
-               [Msg, outdent_first(format_hfields(7 + 1, Fields, Opts, Defs))])
+               [Msg, outdent_first(format_hfields(Msg, 7 + 1,
+                                                  Fields, Opts, Defs))])
     end.
 
 format_export_types(Defs, Opts) ->
@@ -6633,12 +6634,13 @@ format_msg_record(Msg, Fields, Opts, Defs) ->
      ?f("-define(~p, true).~n", [Def]),
      ?f("-record(~p,~n", [Msg]),
      ?f("        {"),
-     outdent_first(format_hfields(8+1, Fields, Opts, Defs)),
+     outdent_first(format_hfields(Msg, 8+1, Fields, Opts, Defs)),
      "\n",
      ?f("        }).~n"),
      ?f("-endif.~n")].
 
-format_hfields(Indent, Fields, Opts, Defs) ->
+format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
+    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
     TypeSpecs = get_type_specs_by_opts(Opts),
     MapsOrRecords = get_records_or_maps_by_opts(Opts),
     MappingAndUnset = get_mapping_and_unset_by_opts(Opts),
@@ -6667,30 +6669,41 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                               true ->
                                    ""
                            end,
-                DefaultStr = case proplists:get_value(default, FOpts, '$no') of
-                                 '$no' ->
-                                     case {Type, Occur, MapsOrRecords} of
-                                         {{map,_,_}, repeated, records} ->
-                                             case MapTypeFieldsRepr of
-                                                 maps ->
-                                                     ?f(" = #{}");
-                                                 '2tuples' ->
-                                                     ?f(" = []")
-                                             end;
-                                         {_, repeated, records} ->
-                                             ?f(" = []");
-                                         _ ->
-                                             ""
-                                     end;
-                                 Default ->
-                                     case MapsOrRecords of
-                                         records ->
-                                             ?f(" = ~p", [Default]);
-                                         maps ->
-                                             ""
-                                     end
-                             end,
-                TypeStr = ?f("~s", [type_to_typestr(Field, Defs, Opts)]),
+                DefaultStr =
+                    case proplists:get_value(default, FOpts, '$no') of
+                        '$no' ->
+                            case {Type, Occur, MapsOrRecords} of
+                                {{map,_,_}, repeated, records} ->
+                                    case MapTypeFieldsRepr of
+                                        maps ->
+                                            ?f(" = #{}");
+                                        '2tuples' ->
+                                            ?f(" = []")
+                                    end;
+                                {_, repeated, records} ->
+                                    ?f(" = []");
+                                {_, _, records} ->
+                                    case IsProto3 of
+                                        true ->
+                                            Default =
+                                                proto3_type_default(Type,
+                                                                    Defs,
+                                                                    Opts),
+                                            ?f(" = ~p", [Default]);
+                                        false -> ""
+                                    end;
+                                _ ->
+                                    ""
+                            end;
+                        Default ->
+                            case MapsOrRecords of
+                                records ->
+                                    ?f(" = ~p", [Default]);
+                                maps ->
+                                    ""
+                            end
+                    end,
+                TypeStr = ?f("~s", [type_to_typestr(MsgName, Field, Defs, Opts)]),
                 CommaSep = if I < LastIndex -> ",";
                               true          -> "" %% last entry
                            end,
@@ -6720,7 +6733,7 @@ format_hfields(Indent, Fields, Opts, Defs) ->
                               true ->
                                    ""
                            end,
-                TypeStr = ?f("~s", [type_to_typestr(Field, Defs, Opts)]),
+                TypeStr = ?f("~s", [type_to_typestr(MsgName, Field, Defs, Opts)]),
                 CommaSep = if I < LastIndex -> ",";
                               true          -> "" %% last entry
                            end,
@@ -6809,7 +6822,8 @@ mandatory_map_item_type_sep(Opts) ->
 can_specify_map_item_presence_in_typespecs(Opts) ->
     is_target_major_version_at_least(19, Opts).
 
-type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs, Opts) ->
+type_to_typestr(_MsgName, #?gpb_field{type=Type, occurrence=Occurrence},
+                Defs, Opts) ->
     OrUndefined = case get_mapping_and_unset_by_opts(Opts) of
                       records                   -> " | undefined";
                       {maps, present_undefined} -> " | undefined";
@@ -6827,7 +6841,7 @@ type_to_typestr(#?gpb_field{type=Type, occurrence=Occurrence}, Defs, Opts) ->
         optional ->
             type_to_typestr_2(Type, Defs, Opts) ++ OrUndefined
     end;
-type_to_typestr(#gpb_oneof{fields=OFields}, Defs, Opts) ->
+type_to_typestr(_, #gpb_oneof{fields=OFields}, Defs, Opts) ->
     OrUndefined = case get_mapping_and_unset_by_opts(Opts) of
                       records                   -> ["undefined"];
                       {maps, present_undefined} -> ["undefined"];
@@ -6879,7 +6893,7 @@ msg_to_typestr(M, Opts) ->
 %% when the strings_as_binaries option is requested the corresponding
 %% typespec should be spec'ed
 string_to_typestr(true) ->
-  "binary() | iolist()";
+  "iodata()";
 string_to_typestr(false) ->
   "iolist()".
 
