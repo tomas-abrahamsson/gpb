@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 3.27.6
+2017-Aug-19
+
+        * Add type-defaults to proto3 message records. Thanks to Evan
+        Vigil-McClanahan and Tristan Sloughter.
+
 Version 3.27.5
 2017-Aug-16
 
