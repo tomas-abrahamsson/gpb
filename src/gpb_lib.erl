@@ -492,7 +492,7 @@ get_strings_as_binaries_by_opts(Opts) ->
     proplists:get_bool(strings_as_binaries, Opts).
 
 get_type_specs_by_opts(Opts) ->
-    Default = false,
+    Default = preferably,
     proplists:get_value(type_specs, Opts, Default).
 
 get_gen_descriptor_by_opts(Opts) ->

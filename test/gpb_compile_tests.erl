@@ -3136,6 +3136,10 @@ any_translation_options_test() ->
           ["-any_translate", "e=me:fe,d=md:fd,v=mv:fv",
            "x.proto"]).
 
+no_type_specs_test() ->
+    {ok, {[{type_specs, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-no_type", "x.proto"]).
+
 %% --- auxiliaries -----------------
 
 %% vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
