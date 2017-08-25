@@ -1382,14 +1382,11 @@ parse_file_and_imports(In, AlreadyImported, Opts) ->
             AlreadyImported2 = [FName | AlreadyImported],
             case scan_and_parse_string(Contents, FName, Opts) of
                 {ok, Defs} ->
-                    ProtoName = filename:basename(FName, ".proto"),
                     Imports = gpb_parse:fetch_imports(Defs),
                     Opts2 = ensure_include_path_to_wellknown_types_if_proto3(
                               Defs, Imports, Opts),
-                    MsgContainment = {{msg_containment, ProtoName},
-                                      msg_names(Defs)},
                     read_and_parse_imports(Imports, AlreadyImported2,
-                                           [MsgContainment | Defs], Opts2);
+                                           Defs, Opts2);
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -1401,8 +1398,8 @@ scan_and_parse_string(S, FName, Opts) ->
     case gpb_scan:string(S) of
         {ok, Tokens, _} ->
             case gpb_parse:parse(Tokens++[{'$end', 999}]) of
-                {ok, ParseTree} ->
-                    case gpb_parse:post_process_one_file(ParseTree, Opts) of
+                {ok, PTree} ->
+                    case gpb_parse:post_process_one_file(FName, PTree, Opts) of
                         {ok, Result} ->
                             {ok, Result};
                         {error, Reason} ->
