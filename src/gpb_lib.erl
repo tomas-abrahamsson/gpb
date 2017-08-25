@@ -484,7 +484,7 @@ get_mapping_and_unset_by_opts(Opts) ->
         records ->
             records;
         maps ->
-            Default = present_undefined,
+            Default = omitted,
             {maps, proplists:get_value(maps_unset_optional, Opts, Default)}
     end.
 

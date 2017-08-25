@@ -9,6 +9,17 @@ Build Status
 
 [![Build Status](https://travis-ci.org/tomas-abrahamsson/gpb.svg?branch=master)](https://travis-ci.org/tomas-abrahamsson/gpb)
 
+New in version 4.0.0
+--------------------
+
+The default value for the `maps_unset_optional` option has changed
+to `omitted`, from `present_undefined` This concerns only code generated
+with the maps (-maps) options. Projects that already set this option
+explicitly are not impacted. Projects that relied on the default to be
+`present_undefined` will need to set the option explicitly in order to
+upgrade to 4.0.0.
+
+
 Basic example of using gpb
 --------------------------
 
@@ -183,8 +194,8 @@ A oneof field is automatically always optional.
    %% With the maps option
    #{u => {a, 17}}
    #{u => {b, "hello"}}
-   #{u => undefined}     % If maps_unset_optional = present_undefined (default)
-   #{}                   % With the maps_unset_optional set to omitted
+   #{}                   % If maps_unset_optional = omitted (default)
+   #{u => undefined}     % With maps_unset_optional set to present_undefined
 ```
 
 #### Map fields

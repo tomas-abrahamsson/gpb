@@ -237,15 +237,12 @@ file(File) ->
 %% and how decoding will return it:
 %% <dl>
 %%   <dt>`omitted'</dt>
-%%   <dd>This means it is not included in the map</dd>
+%%   <dd>This means it is not included in the map.
+%%       This is the default. (since gpb version 4.0.0)
+%%   </dd>
 %%   <dt>`present_undefined'</dt>
 %%   <dd>This means it is present and has the value `undefined'.
-%%       This is the default, for historical reasons mostly, due to
-%%       the way records works, but there are some caveats, although
-%%       apparently rare, but still.  imagine an enum with a symbol
-%%       `undefined', and an optional field of that enum type. It will
-%%       not be possible to tell the difference between it being unset
-%%       and being present and set.  Encoding will assume it is unset.
+%%       This <em>was</em> the default before gpb version 4.0.0.
 %%   </dd>
 %% </dl>
 %%
