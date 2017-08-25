@@ -19,6 +19,10 @@ explicitly are not impacted. Projects that relied on the default to be
 `present_undefined` will need to set the option explicitly in order to
 upgrade to 4.0.0.
 
+For type specs, the default has changed to generate them when possible. The
+option `{type_specs,false}` (-no_type) can be used to avoid generating type
+specs.
+
 
 Basic example of using gpb
 --------------------------

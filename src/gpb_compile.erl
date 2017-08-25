@@ -45,7 +45,7 @@
 -type directory() :: string().
 
 -type opts() :: [opt()].
--type opt() :: boolean_opt(type_specs) |
+-type opt() :: type_specs | {type_specs, boolean() | preferably} |
                {verify, optionally | always | never} |
                {copy_bytes, true | false | auto | integer() | float()} |
                {strings_as_binaries, boolean()} | strings_as_binaries |
@@ -133,10 +133,11 @@ file(File) ->
 %% several times, they will be searched in the order specified.
 %%
 %% The `type_specs' option enables or disables `::Type()' annotations
-%% in the generated .hrl file. Default is currently `false'. If you
-%% set it to `true', you may get into troubles for messages
-%% referencing other messages cyclically, when compiling the generated
-%% files.
+%% in the generated .hrl file. Default is `true' if there are no
+%% cyclic message dependencies. The default changed in gpb version 4.0.0.
+%% Previously, the default was `false'.
+%% If you have messages referencing other messages cyclically, and get into
+%% troubles when compiling the generated files, set this to `false'.
 %%
 %% The `verify' option specifies whether or not to generate code
 %% that verifies, during encoding, that values are of correct type and
@@ -501,11 +502,6 @@ expand_opt(OptionToTestFor, OptionsToExpandTo, Opts) ->
                    (Opt) -> [Opt]
                 end,
                 Opts)).
-
-delete_bool_opt(OptToDelete, Opts) ->
-    %% Boolean opts can be defined both as [opt] and as [{opt, true|false}],
-    %% delete both type of occurrences.
-    lists:keydelete(OptToDelete, 1, Opts -- [OptToDelete]).
 
 unless_defined_set(OptionToTestFor, Default, Opts) ->
     case is_option_defined(OptionToTestFor, Opts) of
@@ -933,8 +929,9 @@ c() ->
 %%   <dt>`-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instead of `-include', which is the default.</dd>
-%%   <dt>`-type'</dt>
-%%   <dd>Enables `::Type()' annotations in the generated .hrl file.</dd>
+%%   <dt>`-type'<br/>`-no_type'</dt>
+%%   <dd>Enables or disables `::Type()' annotations in the generated code.
+%%       Default is to enable if there are no cyclic dependencies.</dd>
 %%   <dt>`-descr'</dt>
 %%   <dd>Generate self-description information.</dd>
 %%   <dt>`-maps'</dt>
@@ -1192,7 +1189,9 @@ opt_specs() ->
       "       Generate code that includes gpb.hrl using -include_lib\n"
       "       instead of -include, which is the default.\n"},
      {"type", undefined, type_specs, "\n"
-      "       Enables `::Type()' annotations in the generated .hrl file.\n"},
+      "       Enables `::Type()' annotations in the generated code.\n"},
+     {"no_type", fun opt_no_type_specs/2, type_specs, "\n"
+      "       Disbles `::Type()' annotations in the generated code.\n"},
      {"descr", undefined, descriptor, "\n"
       "       Generate self-description information.\n"},
      {"maps", undefined, maps, "\n"
@@ -1275,7 +1274,9 @@ opt_specs() ->
 
 
 
-
+opt_no_type_specs(OptTag, Rest) ->
+    Opt = {OptTag, false},
+    {ok, {Opt, Rest}}.
 
 opt_any_translate(OptTag, [S | Rest]) ->
     try
@@ -1612,16 +1613,21 @@ try_topsort_defs(Defs) ->
             {true, OrderedMsgOrGroupDefs ++ (Defs -- OrderedMsgOrGroupDefs)}
     end.
 
-possibly_adjust_typespec_opt(true=_IsAcyclic, Opts) ->
-    {[], Opts};
-possibly_adjust_typespec_opt(false=_IsAcyclic, Opts) ->
-    case gpb_lib:get_type_specs_by_opts(Opts) of
-        true  ->
-            %% disable `type_specs' option
-            Opts1 = delete_bool_opt(type_specs, Opts),
-            {[cyclic_message_dependencies], Opts1};
-        false ->
-            {[], Opts}
+possibly_adjust_typespec_opt(IsAcyclic, Opts0) ->
+    CyclicDeps = not IsAcyclic,
+    TypeSpecs = gpb_lib:get_type_specs_by_opts(Opts0),
+    Opts1 = lists:keydelete(type_specs, 1, Opts0 -- [type_specs]),
+    if not CyclicDeps, TypeSpecs == preferably ->
+            {[], [{type_specs, true} | Opts1]};
+       CyclicDeps, TypeSpecs == preferably ->
+            Opts2 = [{type_specs, false} | Opts1],
+            {[], Opts2};
+       not CyclicDeps ->
+            {[], Opts0};
+       CyclicDeps, TypeSpecs ->
+            {[cyclic_message_dependencies], [{type_specs, false} | Opts1]};
+       CyclicDeps, not TypeSpecs ->
+            {[], Opts0}
     end.
 
 %% Input .proto file appears to be expected to be UTF-8 by Google's protobuf.
