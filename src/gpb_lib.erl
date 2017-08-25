@@ -46,6 +46,11 @@
 -export([any_enum_field_exists/1]).
 -export([any_packed_field_exists/1]).
 -export([at_least_one_submsg_with_size_not_known_at_compile_time_exists/1]).
+-export([get_field_pass/2]).
+-export([get_num_fields/2]).
+-export([is_packed/1]).
+-export([key_partition_on_optionality/2]).
+-export([classify_field_merge_action/1]).
 
 -export([mapping_match/3]).
 -export([mapping_create/3]).
@@ -68,14 +73,20 @@
 -export([get_field_format_by_opts/1]).
 -export([mk_get_defs_as_maps_or_records_fn/1]).
 -export([get_defs_as_maps_or_records/1]).
+-export([get_epb_functions_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
+-export([proto2_type_default/3]).
+-export([proto3_type_default/3]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
 -export([var_n/2]).
 -export([var/2]).
 -export([prefix_var/2]).
+-export([assign_to_var/2]).
 -export([match_bind_var/2]).
+-export([varint_to_binary_fields/1]).
+-export([do_exprs/3]).
 
 -export([index_seq/1]).
 -export([smember/2, smember_any/2]).
@@ -204,6 +215,34 @@ at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
     IsMsgSizeUnknown = fun(Nm) -> dict:fetch(Nm, KnownSize) == undefined end,
     lists:any(IsMsgSizeUnknown, SubMsgNames) orelse
         lists:any(IsMsgSizeUnknown, MapMsgNames).
+
+get_field_pass(MsgName, #anres{d_field_pass_method=D}) ->
+    dict:fetch(MsgName, D).
+
+get_num_fields(MsgName, #anres{num_fields=D}) ->
+    dict:fetch(MsgName, D).
+
+is_packed(#?gpb_field{opts=Opts}) ->
+    lists:member(packed, Opts).
+
+%% -> {Optionals, NonOptionals}
+key_partition_on_optionality(Key, Items) ->
+    lists:partition(fun(Item) ->
+                            Field = element(Key, Item),
+                            get_field_occurrence(Field) == optional
+                    end,
+                    Items).
+
+classify_field_merge_action(FieldDef) ->
+    case FieldDef of
+        #?gpb_field{occurrence=required, type={msg, _}}   -> msgmerge;
+        #?gpb_field{occurrence=optional, type={msg, _}}   -> msgmerge;
+        #?gpb_field{occurrence=required, type={group, _}} -> msgmerge;
+        #?gpb_field{occurrence=optional, type={group, _}} -> msgmerge;
+        #?gpb_field{occurrence=required}                  -> overwrite;
+        #?gpb_field{occurrence=optional}                  -> overwrite;
+        #?gpb_field{occurrence=repeated}                  -> seqadd
+    end.
 
 %% Record or map expr helpers --------
 
@@ -339,8 +378,6 @@ map_kvalues(KVars) ->
 
 -endif. %% NO_HAVE_MAPS
 
-
-
 %% Option helpers ---------------
 
 get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) ->
@@ -397,6 +434,9 @@ get_defs_as_maps_or_records(Opts) ->
         true  -> maps
     end.
 
+get_epb_functions_by_opts(Opts) ->
+    proplists:get_bool(epb_functions, Opts).
+
 is_target_major_version_at_least(VsnMin, Opts) ->
     case proplists:get_value(target_erlang_version, Opts, current) of
         current ->
@@ -429,6 +469,24 @@ is_current_major_version_at_least(VsnMin) ->
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
 
+proto2_type_default(Type, Defs, Opts) ->
+    type_default(Type, Defs, Opts, fun gpb:proto2_type_default/2).
+
+proto3_type_default(Type, Defs, Opts) ->
+    type_default(Type, Defs, Opts, fun gpb:proto3_type_default/2).
+
+type_default(Type, Defs, Opts, GetTypeDefault) ->
+    if Type == string ->
+            case get_strings_as_binaries_by_opts(Opts) of
+                true ->
+                    list_to_binary(GetTypeDefault(Type, Defs));
+                false ->
+                    GetTypeDefault(Type, Defs)
+            end;
+       Type /= string ->
+            GetTypeDefault(Type, Defs)
+    end.
+
 %% Syntax tree stuff ----
 
 var_f_n(N) -> var_n("F", N).
@@ -447,6 +505,35 @@ match_bind_var(Pattern, Var) ->
     ?expr('Pattern' = 'Var',
           [replace_tree('Pattern', Pattern),
            replace_tree('Var', Var)]).
+
+assign_to_var(Var, Expr) ->
+    ?expr('<Var>' = '<Expr>',
+          [replace_tree('<Var>', Var),
+           replace_tree('<Expr>', Expr)]).
+
+varint_to_binary_fields(IntValue) ->
+    [erl_syntax:binary_field(?expr('<n>', [replace_term('<n>', N)]), [])
+     || N <- binary_to_list(gpb:encode_varint(IntValue))].
+
+%% Given a sequence, `Seq', of expressions, and an initial expression,
+%% Construct:
+%%     TmpVar1 = InitialExpr,
+%%     TmpVar2 = <1st expression in sequence, possibly involving TmpVar1>
+%%     TmpVar3 = <2st expression in sequence, possibly involving TmpVar2>
+%%     ...
+%%     <final expression in sequence, possibly involving TmpVarN-1>
+do_exprs(F, InitExpr, Seq) ->
+    {LastExpr, ExprsReversed, _N} =
+        lists:foldl(
+          fun(Elem, {PrevE,Es,N}) ->
+                  Var = var_n("S", N),
+                  BoundPrevE = assign_to_var(Var, PrevE),
+                  E = F(Elem, Var),
+                  {E, [BoundPrevE | Es], N+1}
+          end,
+          {InitExpr, [], 1},
+          Seq),
+    lists:reverse([LastExpr | ExprsReversed]).
 
 %% Misc ---
 
