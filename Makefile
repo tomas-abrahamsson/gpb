@@ -281,6 +281,14 @@ $(ebin):
 
 # To compile gpb_compile, we first need the parse transform in gpb_codegen
 $(ebin)/gpb_compile.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_encoders.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_decoders.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_mergers.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_verifiers.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_introspect.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_translators.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_nif.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_lib.beam: $(ebin)/gpb_codegen.beam
 
 # To compile gpb_codegen_tests, we first need the parse transform in gpb_codegen
 $(test)/gpb_codegen_tests.beam: $(ebin)/gpb_codegen.beam
