@@ -1350,9 +1350,10 @@ string_to_number(S) ->
     end.
 
 parse_file_or_string(In, Opts) ->
-    case parse_file_and_imports(In, Opts) of
+    Opts1 = add_curr_dir_as_include_if_needed(Opts),
+    case parse_file_and_imports(In, Opts1) of
         {ok, {Defs1, _AllImported}} ->
-            case gpb_parse:post_process_all_files(Defs1, Opts) of
+            case gpb_parse:post_process_all_files(Defs1, Opts1) of
                 {ok, Defs2} ->
                     {ok, Defs2};
                 {error, Reasons} ->
@@ -1360,6 +1361,13 @@ parse_file_or_string(In, Opts) ->
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+add_curr_dir_as_include_if_needed(Opts) ->
+    ImportDirs = [Dir || {i,Dir} <- Opts],
+    case lists:member(".", ImportDirs) of
+        true  -> Opts;
+        false -> Opts ++ [{i,"."}]
     end.
 
 parse_file_and_imports(In, Opts) ->
