@@ -36,18 +36,7 @@
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [mk_fn/2]).
 -import(gpb_lib, [replace_term/2]).
--import(gpb_lib, [msgs_or_groups/1,
-                  get_field_name/1, get_field_occurrence/1,
-                  get_field_rnum/1]).
--import(gpb_lib, [get_2tuples_or_maps_for_maptype_fields_by_opts/1,
-                  get_records_or_maps_by_opts/1,
-                  get_mapping_and_unset_by_opts/1,
-                  get_strings_as_binaries_by_opts/1]).
--import(gpb_lib, [index_seq/1,
-                  indent/2, indent_lines/2,
-                  split_indent_iolist/2]).
 
 format_load_nif(Mod, Opts) ->
     VsnAsList = gpb:version_as_list(),
@@ -89,7 +78,7 @@ format_nif_encoder_error_wrappers(Defs, _AnRes, _Opts) ->
 
 format_msg_nif_encode_error_wrapper(MsgName) ->
     gpb_codegen:format_fn(
-      mk_fn(e_msg_, MsgName),
+      gpb_lib:mk_fn(e_msg_, MsgName),
       fun(Msg) ->
               erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Msg])
       end,
@@ -101,7 +90,7 @@ format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
 
 format_msg_nif_decode_error_wrapper(MsgName) ->
     gpb_codegen:format_fn(
-      mk_fn(d_msg_, MsgName),
+      gpb_lib:mk_fn(d_msg_, MsgName),
       fun(Bin) ->
               erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Bin])
       end,
@@ -213,7 +202,7 @@ format_nif_cc_proto3_version_check_if_present(Defs) ->
     end.
 
 format_nif_cc_map_api_check_if_needed(Opts) ->
-    case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
+    case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
         '2tuples' ->
             "";
         maps ->
@@ -246,10 +235,11 @@ format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
      "\n"].
 
 format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
-    Maps = get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
     EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
                                || {{enum, _}, EnumDef} <- Defs]),
-    RecordAtoms = [MsgName || {_, MsgName, _Fields} <- msgs_or_groups(Defs)],
+    RecordAtoms = [MsgName
+                   || {_, MsgName, _Fields} <- gpb_lib:msgs_or_groups(Defs)],
     OneofNames = collect_oneof_fields(Defs),
     MiscAtoms0 = case is_any_field_of_type_enum(AnRes) of
                      true  -> [undefined];
@@ -266,15 +256,16 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     FieldAtoms = if Maps ->
                          lists:usort(
                            lists:flatten(
-                             [[get_field_name(Field) || Field <- Fields]
-                              || {_, _Name, Fields} <- msgs_or_groups(Defs)]));
+                             [[gpb_lib:get_field_name(Field) || Field <- Fields]
+                              || {_, _Name, Fields} <- gpb_lib:msgs_or_groups(
+                                                         Defs)]));
                     not Maps ->
                          []
                  end,
     MiscAtoms3 = MiscAtoms2 ++ FieldAtoms,
     Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms3),
     AtomVars0 = [{mk_c_var(gpb_aa_, minus_to_m(A)), A} || A <- Atoms],
-    NoValue = case get_mapping_and_unset_by_opts(Opts) of
+    NoValue = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                   records -> undefined;
                   {maps, present_undefined} -> undefined;
                   {maps, omitted} -> '$undef'
@@ -313,7 +304,7 @@ collect_oneof_fields(Defs) ->
         [[[FOFName
            || #?gpb_field{name=FOFName} <- OFields]
           || #gpb_oneof{fields=OFields} <- Fields]
-         || {_msg_or_group, _, Fields} <- msgs_or_groups(Defs)])).
+         || {_msg_or_group, _, Fields} <- gpb_lib:msgs_or_groups(Defs)])).
 
 format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, Opts) ->
     case is_any_field_of_type_string(AnRes) of
@@ -339,7 +330,7 @@ is_any_field_of_type_float_or_double(#anres{used_types=UsedTypes}) ->
         sets:is_element(double, UsedTypes).
 
 format_nif_cc_utf8_conversion_code(Opts) ->
-    [case get_strings_as_binaries_by_opts(Opts) of
+    [case gpb_lib:get_strings_as_binaries_by_opts(Opts) of
          true ->
              ["static ERL_NIF_TERM\n",
               "utf8_to_erl_string(ErlNifEnv *env,\n",
@@ -463,7 +454,7 @@ format_nif_cc_utf8_conversion_code(Opts) ->
               "}\n"]
      end,
      "\n",
-     case get_strings_as_binaries_by_opts(Opts) of
+     case gpb_lib:get_strings_as_binaries_by_opts(Opts) of
          true ->
              "";
          false ->
@@ -614,9 +605,9 @@ format_nif_cc_nif_funcs_list(Defs, Flags) ->
                  true -> ", " ++ Flags
               end,
     [begin
-         EncodeFnName = mk_fn(e_msg_, MsgName),
+         EncodeFnName = gpb_lib:mk_fn(e_msg_, MsgName),
          EncodeCFnName = mk_c_fn(e_msg_, MsgName),
-         DecodeFnName = mk_fn(d_msg_, MsgName),
+         DecodeFnName = gpb_lib:mk_fn(d_msg_, MsgName),
          DecodeCFnName = mk_c_fn(d_msg_, MsgName),
          IsLast = I == length(MsgNames),
          Comma = ["," || not IsLast],
@@ -625,7 +616,7 @@ format_nif_cc_nif_funcs_list(Defs, Flags) ->
           ?f("    {\"~s\", 1, ~s~s}~s\n",
              [DecodeFnName, DecodeCFnName, FlagStr, Comma])]
      end
-     || {I, MsgName} <- index_seq(MsgNames)].
+     || {I, MsgName} <- gpb_lib:index_seq(MsgNames)].
 
 format_nif_cc_encoders(Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
@@ -682,10 +673,10 @@ format_nif_cc_encoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
 format_nif_cc_packers(_Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
     [format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts)
-     || {_msg_or_group, MsgName, Fields} <- msgs_or_groups(Defs)].
+     || {_msg_or_group, MsgName, Fields} <- gpb_lib:msgs_or_groups(Defs)].
 
 format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
-    Maps = get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
     PackFnName = mk_c_fn(p_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     ["static int\n",
@@ -719,9 +710,9 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
                   [if I == 1 -> "";
                       I >  1 -> "else "
                    end,
-                   mk_c_var(gpb_aa_, get_field_name(Field)),
-                   get_field_rnum(Field)-1])
-               || {I, Field} <- index_seq(Fields)],
+                   mk_c_var(gpb_aa_, gpb_lib:get_field_name(Field)),
+                   gpb_lib:get_field_rnum(Field)-1])
+               || {I, Field} <- gpb_lib:index_seq(Fields)],
               "        enif_map_iterator_next(env, &iter);\n",
               "    }\n",
               "    enif_map_iterator_destroy(env, &iter);\n",
@@ -742,7 +733,7 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
           SrcVar = ?f("elem[~w]",[I]),
           format_nif_cc_field_packer(SrcVar, "m", Field, Defs, Opts)
       end
-      || {I, Field} <- index_seq(Fields)],
+      || {I, Field} <- gpb_lib:index_seq(Fields)],
      "\n"
      "    return 1;\n"
      "}\n",
@@ -769,7 +760,7 @@ format_nif_cc_field_packer(SrcVar, MsgVar, #?gpb_field{}=Field, Defs, Opts) ->
     end;
 format_nif_cc_field_packer(SrcVar, MsgVar, #gpb_oneof{}=Field, Defs, Opts) ->
     #gpb_oneof{fields=OFields} = Field,
-    [split_indent_iolist(
+    [gpb_lib:split_indent_iolist(
        4,
        ?f("if (!enif_is_identical(~s, gpb_x_no_value))~n"
           "{~n"
@@ -786,7 +777,7 @@ format_nif_cc_field_packer(SrcVar, MsgVar, #gpb_oneof{}=Field, Defs, Opts) ->
      "\n"].
 
 format_nif_cc_oneof_packer(NameVar, SrcVar, MsgVar, OFields, Defs, Opts) ->
-    split_indent_iolist(
+    gpb_lib:split_indent_iolist(
       4,
       [[begin
             Else = if I == 1 -> "";
@@ -794,12 +785,12 @@ format_nif_cc_oneof_packer(NameVar, SrcVar, MsgVar, OFields, Defs, Opts) ->
                    end,
             AtomVar = mk_c_var(gpb_aa_, Name),
             [?f("~sif (enif_is_identical(~s, ~s))~n", [Else, NameVar, AtomVar]),
-             split_indent_iolist(
+             gpb_lib:split_indent_iolist(
                4,
                format_nif_cc_field_packer_single(SrcVar, MsgVar, OField,
                                                  Defs, Opts, set))]
         end
-        || {I, #?gpb_field{name=Name}=OField} <- index_seq(OFields)],
+        || {I, #?gpb_field{name=Name}=OField} <- gpb_lib:index_seq(OFields)],
        "else\n"
        "    return 0;\n"]).
 
@@ -832,7 +823,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                             end
                     end
             end,
-    [split_indent_iolist(
+    [gpb_lib:split_indent_iolist(
        4,
        case FType of
            float ->
@@ -927,12 +918,12 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                      end,
                      SrcVar, mk_c_var(gpb_aa_, Sym),
                      SetFn([?f("~s::~s~s", [CPkg, EPrefix, Sym])])])
-                 || {I, {Sym, _Val}} <- index_seq(Enumerations)],
+                 || {I, {Sym, _Val}} <- gpb_lib:index_seq(Enumerations)],
                 "    else\n"
                 "        return 0;\n"
                 "}\n"];
            string ->
-               case get_strings_as_binaries_by_opts(Opts) of
+               case gpb_lib:get_strings_as_binaries_by_opts(Opts) of
                    true ->
                        ?f("{\n"
                           "    ErlNifBinary b;\n"
@@ -1024,7 +1015,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
      "\n"].
 
 format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs, Opts) ->
-    split_indent_iolist(
+    gpb_lib:split_indent_iolist(
       4, [?f("{\n"
              "    ERL_NIF_TERM l = ~s;\n"
              "\n"
@@ -1036,15 +1027,16 @@ format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field, Defs, Opts) ->
              "            return 0;\n",
              [SrcVar]),
           "\n",
-          split_indent_iolist(4, format_nif_cc_field_packer_single(
-                                   "head", MsgVar, Field, Defs, Opts, add)),
+          gpb_lib:split_indent_iolist(
+            4, format_nif_cc_field_packer_single(
+                 "head", MsgVar, Field, Defs, Opts, add)),
           ?f("        l = tail;\n"
              "    }\n"
              "}\n",
              [])]).
 
 format_nif_cc_field_packer_maptype(SrcVar, MsgVar, Field, Defs, Opts) ->
-    case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
+    case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
         '2tuples' ->
             format_nif_cc_field_packer_maptype_r(SrcVar, MsgVar, Field, Defs,
                                                  Opts);
@@ -1054,7 +1046,7 @@ format_nif_cc_field_packer_maptype(SrcVar, MsgVar, Field, Defs, Opts) ->
     end.
 
 format_nif_cc_field_packer_maptype_r(SrcVar, MsgVar, Field, Defs, Opts) ->
-    split_indent_iolist(
+    gpb_lib:split_indent_iolist(
       4, [?f("{\n"
              "    ERL_NIF_TERM l = ~s;\n"
              "\n"
@@ -1072,7 +1064,7 @@ format_nif_cc_field_packer_maptype_r(SrcVar, MsgVar, Field, Defs, Opts) ->
              "        if (arity != 2)\n"
              "            return 0;\n",
              []),
-          split_indent_iolist(
+          gpb_lib:split_indent_iolist(
             4, format_nif_cc_field_packer_single(
                  {"tuple[0]", "tuple[1]"}, MsgVar, Field, Defs, Opts, add)),
           ?f("        l = tail;\n"
@@ -1081,7 +1073,7 @@ format_nif_cc_field_packer_maptype_r(SrcVar, MsgVar, Field, Defs, Opts) ->
              [])]).
 
 format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field, Defs, Opts) ->
-    split_indent_iolist(
+    gpb_lib:split_indent_iolist(
       4, ["{\n"
           "    ERL_NIF_TERM ik, iv;\n",
           "    ErlNifMapIterator iter;\n",
@@ -1098,7 +1090,7 @@ format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field, Defs, Opts) ->
              [SrcVar]),
           "    while (enif_map_iterator_get_pair(env, &iter, &ik, &iv))\n",
           "    {\n",
-          split_indent_iolist(
+          gpb_lib:split_indent_iolist(
             4, format_nif_cc_field_packer_single(
                  {"ik", "iv"}, MsgVar, Field, Defs, Opts, add)),
           "        enif_map_iterator_next(env, &iter);\n",
@@ -1155,13 +1147,13 @@ format_nif_cc_decoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
 format_nif_cc_unpackers(_Mod, Defs, Opts) ->
     CPkg = get_cc_pkg(Defs),
     [format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts)
-     || {_msg_or_group, MsgName, Fields} <- msgs_or_groups(Defs)].
+     || {_msg_or_group, MsgName, Fields} <- gpb_lib:msgs_or_groups(Defs)].
 
 format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
-    Maps = get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
-    Is = [I || {I,_} <- index_seq(Fields)],
+    Is = [I || {I,_} <- gpb_lib:index_seq(Fields)],
     IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
     ["static ERL_NIF_TERM\n",
      UnpackFnName,"(ErlNifEnv *env, const ",CMsgType," *m)\n",
@@ -1176,35 +1168,36 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
           format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field,
                                        Defs, Opts, IsProto3)
       end
-      || {I, Field} <- index_seq(Fields)],
+      || {I, Field} <- gpb_lib:index_seq(Fields)],
      "\n",
-     case get_mapping_and_unset_by_opts(Opts) of
+     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
          records ->
              ?f("    res = enif_make_tuple(env, ~w, rname~s);\n",
                 [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]]);
          {maps, present_undefined} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [?f("    enif_make_map_put(env, res, gpb_aa_~s, elem~w, &res);\n",
-                  [get_field_name(Field), I])
-               || {I, Field} <- index_seq(Fields)]];
+                  [gpb_lib:get_field_name(Field), I])
+               || {I, Field} <- gpb_lib:index_seq(Fields)]];
          {maps, omitted} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [begin
                    Put = ?f("enif_make_map_put("++
                                 "env, res, gpb_aa_~s, elem~w, &res);",
-                            [get_field_name(Field), I]),
+                            [gpb_lib:get_field_name(Field), I]),
                    Test = ?f("if (!enif_is_identical(elem~w, gpb_x_no_value))",
                              [I]),
                    PutLine = Put ++ "\n",
                    TestLine = Test ++ "\n",
-                   case get_field_occurrence(Field) of
+                   case gpb_lib:get_field_occurrence(Field) of
                        optional ->
-                           indent_lines(4, [TestLine, indent(4, PutLine)]);
+                           gpb_lib:indent_lines(
+                             4, [TestLine, gpb_lib:indent(4, PutLine)]);
                        _ ->
-                           indent(4, PutLine)
+                           gpb_lib:indent(4, PutLine)
                    end
                end
-               || {I, Field} <- index_seq(Fields)]]
+               || {I, Field} <- gpb_lib:index_seq(Fields)]]
      end,
      "    return res;\n"
      "}\n",
@@ -1237,19 +1230,19 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     LCOFName = to_lower(OFName),
     UCOFName = to_upper(OFName),
-    [split_indent_iolist(
+    [gpb_lib:split_indent_iolist(
        4,
        [?f("switch (~s->~s_case())\n", [MsgVar, LCOFName]),
         ?f("{\n"),
         [begin
              CamelCaseFOFName = camel_case(FOFName),
              AtomVar = mk_c_var(gpb_aa_, FOFName),
-             split_indent_iolist(
+             gpb_lib:split_indent_iolist(
                4,
                [?f("case ~s::k~s:\n", [CMsgType, CamelCaseFOFName]),
                 ?f("    {\n"),
                 ?f("        ERL_NIF_TERM ores;\n"),
-                split_indent_iolist(
+                gpb_lib:split_indent_iolist(
                   8,
                   format_nif_cc_field_unpacker_by_field("ores", MsgVar,
                                                         OField, Defs)),
@@ -1259,7 +1252,7 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
                 ?f("    break;\n\n")])
          end
          || #?gpb_field{name=FOFName}=OField <- OFields],
-        split_indent_iolist(
+        gpb_lib:split_indent_iolist(
           4,
           [?f("case ~s::~s_NOT_SET: /* FALL THROUGH */~n", [CMsgType, UCOFName]),
            ?f("default:~n"),
@@ -1277,7 +1270,7 @@ format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field, Defs, IsProto3) ->
     end.
 
 format_nif_cc_field_unpacker_single_p3(DestVar, MsgVar, Field, Defs) ->
-    [indent_lines(
+    [gpb_lib:indent_lines(
        4, format_nif_cc_field_unpacker_by_field(DestVar, MsgVar, Field, Defs)),
      "\n"].
 
@@ -1287,7 +1280,7 @@ format_nif_cc_field_unpacker_single_p2(DestVar, MsgVar, Field, Defs) ->
     [?f("    if (!~s->has_~s())\n", [MsgVar, LCFName]),
      ?f("        ~s = gpb_x_no_value;\n", [DestVar]),
      ?f("    else\n"),
-     indent_lines(
+     gpb_lib:indent_lines(
        8, format_nif_cc_field_unpacker_by_field(DestVar, MsgVar, Field, Defs)),
      "\n"].
 
@@ -1397,7 +1390,7 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
      ?f("        unsigned int i;\n"),
      "\n",
      ?f("        for (i = 0; i < numElems; i++)\n"),
-     indent_lines(
+     gpb_lib:indent_lines(
        12,
        format_nif_cc_field_unpacker_by_type(
          "relem[i]", ?f("~s->~s(i)", [MsgVar, LCFName]),
@@ -1411,11 +1404,11 @@ format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field, Defs, Opts) ->
     #?gpb_field{name=FName, type={map, KeyType, ValueType}=Type} = Field,
     LCFName = to_lower(FName),
     ItType = mk_cctype_name(Type, Defs) ++ "::const_iterator",
-    MapsOrTuples = get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
-    split_indent_iolist(
+    MapsOrTuples = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
+    gpb_lib:split_indent_iolist(
       4,
       ["{\n",
-       split_indent_iolist(
+       gpb_lib:split_indent_iolist(
          4,
          case MapsOrTuples of
              '2tuples' ->
@@ -1432,7 +1425,7 @@ format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field, Defs, Opts) ->
        "    {\n",
        "        ERL_NIF_TERM ek, ev;\n",
        %% FIXME
-       split_indent_iolist(
+       gpb_lib:split_indent_iolist(
          8,
          [format_nif_cc_field_unpacker_by_type("ek", "it->first", KeyType,
                                                Defs),

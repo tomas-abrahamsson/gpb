@@ -28,19 +28,6 @@
 -include("../include/gpb.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [msgs_or_groups/1,
-                  map_type_to_msg_name/2,
-                  is_packed/1]).
--import(gpb_lib, [fold_msg_fields/3, fold_msg_or_group_fields/3,
-                  fold_msgdef_fields/3,
-                  fold_msg_or_group_fields_o/3]).
--import(gpb_lib, [get_2tuples_or_maps_for_maptype_fields_by_opts/1]).
-
--import(gpb_gen_translators, [default_fn_by_op/2,
-                              default_any_merge_translator/0,
-                              default_any_verify_translator/0,
-                              args_by_op2/1]).
-
 %% -- analysis -----------------------------------------------------
 
 analyze_defs(Defs, Opts) ->
@@ -66,7 +53,7 @@ analyze_defs(Defs, Opts) ->
            has_p3_opt_strings  = has_p3_opt_strings(Defs)}.
 
 find_map_types(Defs) ->
-    fold_msg_or_group_fields(
+    gpb_lib:fold_msg_or_group_fields(
       fun(_, _MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
               sets:add_element({KeyType,ValueType}, Acc);
          (_, _MsgName, _Field, Acc) ->
@@ -77,7 +64,7 @@ find_map_types(Defs) ->
 
 map_types_to_msgs(MapTypes) ->
     sets:fold(fun({KeyType, ValueType}, Acc) ->
-                      [{{msg, map_type_to_msg_name(KeyType,ValueType)},
+                      [{{msg, gpb_lib:map_type_to_msg_name(KeyType,ValueType)},
                         gpb:map_item_pseudo_fields(KeyType, ValueType)} | Acc]
               end,
               [],
@@ -101,7 +88,7 @@ compute_map_value_types(MapTypes) ->
       MapTypes).
 
 find_used_types(Defs) ->
-    fold_msg_or_group_fields(
+    gpb_lib:fold_msg_or_group_fields(
       fun(_Type, _MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
               Acc1 = sets:add_element(KeyType, Acc),
               sets:add_element(ValueType, Acc1);
@@ -112,9 +99,9 @@ find_used_types(Defs) ->
       Defs).
 
 find_fixlen_types(Defs) ->
-    fold_msg_or_group_fields(
+    gpb_lib:fold_msg_or_group_fields(
       fun(_, _, #?gpb_field{type=Type, occurrence=Occ}=FieldDef, Acc) ->
-              IsPacked = is_packed(FieldDef),
+              IsPacked = gpb_lib:is_packed(FieldDef),
               FixlenTypeInfo = #ft{type       = Type,
                                    occurrence = Occ,
                                    is_packed  = IsPacked},
@@ -132,9 +119,9 @@ find_fixlen_types(Defs) ->
       Defs).
 
 find_num_packed_fields(Defs) ->
-    fold_msg_or_group_fields(
+    gpb_lib:fold_msg_or_group_fields(
       fun(_, _MsgName, FieldDef, Acc) ->
-              case is_packed(FieldDef) of
+              case gpb_lib:is_packed(FieldDef) of
                   true  -> Acc + 1;
                   false -> Acc
               end
@@ -147,7 +134,7 @@ find_num_fields(Defs) ->
                         dict:store(MsgName, length(MsgDef), Acc)
                 end,
                 dict:new(),
-                msgs_or_groups(Defs)).
+                gpb_lib:msgs_or_groups(Defs)).
 
 find_msgsizes_known_at_compile_time(Defs) ->
     T = ets:new(gpb_msg_sizes, [set, public]),
@@ -254,7 +241,7 @@ compute_decode_field_pass_methods(Defs, Opts) ->
                         dict:store(Name, PassHow, D)
                 end,
                 dict:new(),
-                msgs_or_groups(Defs)).
+                gpb_lib:msgs_or_groups(Defs)).
 
 d_field_pass_method(MsgName, MsgDef, Opts) ->
     %% Allow overriding options, mainly intended for testing
@@ -304,25 +291,28 @@ d_field_pass_method(MsgDef) ->
     end.
 
 count_submsg_fields(MsgDef) ->
-    fold_msgdef_fields(fun(#?gpb_field{type={msg,_}}, N) -> N+1;
-                          (#?gpb_field{}, N)             -> N
-                       end,
-                       0,
-                       MsgDef).
+    gpb_lib:fold_msgdef_fields(
+      fun(#?gpb_field{type={msg,_}}, N) -> N+1;
+         (#?gpb_field{}, N)             -> N
+      end,
+      0,
+      MsgDef).
 
 count_map_fields(MsgDef) ->
-    fold_msgdef_fields(fun(#?gpb_field{type={map,_,_}}, N) -> N+1;
-                          (#?gpb_field{}, N)               -> N
-                       end,
-                       0,
-                       MsgDef).
+    gpb_lib:fold_msgdef_fields(
+      fun(#?gpb_field{type={map,_,_}}, N) -> N+1;
+         (#?gpb_field{}, N)               -> N
+      end,
+      0,
+      MsgDef).
 
 count_group_fields(MsgDef) ->
-    fold_msgdef_fields(fun(#?gpb_field{type={group,_}}, N) -> N+1;
-                          (#?gpb_field{}, N)               -> N
-                       end,
-                       0,
-                       MsgDef).
+    gpb_lib:fold_msgdef_fields(
+      fun(#?gpb_field{type={group,_}}, N) -> N+1;
+         (#?gpb_field{}, N)               -> N
+      end,
+      0,
+      MsgDef).
 
 compute_translations(Defs, Opts) ->
     remove_empty_translations(
@@ -363,7 +353,7 @@ remove_empty_translations(D) ->
 
 compute_map_translations(Defs, Opts) ->
     MapInfos =
-        fold_msg_fields(
+        gpb_lib:fold_msg_fields(
           fun(MsgName, #?gpb_field{name=FName, type={map,KType,VType}}, Acc) ->
                   [{{MsgName, FName}, {KType, VType}} | Acc];
              (_MsgName, _Field, Acc) ->
@@ -371,14 +361,14 @@ compute_map_translations(Defs, Opts) ->
           end,
           [],
           Defs),
-    MapFieldFormat = get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
+    MapFieldFmt = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
     dict:from_list(
       lists:append(
-        [mk_map_transls(MsgName, FName, KeyType, ValueType, MapFieldFormat)
+        [mk_map_transls(MsgName, FName, KeyType, ValueType, MapFieldFmt)
          || {{MsgName, FName}, {KeyType, ValueType}} <- MapInfos])).
 
 mk_map_transls(MsgName, FName, KeyType, ValueType, '2tuples')->
-    MapAsMsgName = map_type_to_msg_name(KeyType, ValueType),
+    MapAsMsgName = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
     AddItemTrFn = case ValueType of
                     {msg,_} -> mt_add_item_r_verify_value;
                     _       -> mt_add_item_r
@@ -414,7 +404,7 @@ compute_any_translations(Defs, Opts) ->
 
 compute_any_translations_2(Defs, AnyTranslations) ->
     P3AnyInfos =
-        fold_msg_or_group_fields_o(
+        gpb_lib:fold_msg_or_group_fields_o(
           fun(_Type,
               MsgName, #?gpb_field{name=FName, type={msg,Any}, occurrence=Occ},
               Oneof,
@@ -429,7 +419,8 @@ compute_any_translations_2(Defs, AnyTranslations) ->
               _MsgName, #?gpb_field{type={map,KeyType,{msg,Any}=ValueType}},
               _Oneof,
               Acc) when Any == 'google.protobuf.Any' ->
-                  MsgAsMapName = map_type_to_msg_name(KeyType, ValueType),
+                  MsgAsMapName = gpb_lib:map_type_to_msg_name(
+                                   KeyType, ValueType),
                   Path = [MsgAsMapName,value],
                   [Path | Acc];
              (_Type, _MsgName, _Field, _Oneof, Acc) ->
@@ -439,10 +430,12 @@ compute_any_translations_2(Defs, AnyTranslations) ->
           Defs),
     Encode = {encode, fetch_any_translation(encode, AnyTranslations)},
     Decode = {decode, fetch_any_translation(decode, AnyTranslations)},
-    Merge  = {merge,  fetch_any_translation(merge,  AnyTranslations,
-                                            default_any_merge_translator())},
-    Verify = {verify, fetch_any_translation(verify, AnyTranslations,
-                                            default_any_verify_translator())},
+    Merge  = {merge,  fetch_any_translation(
+                        merge,  AnyTranslations,
+                        gpb_gen_translators:default_any_merge_translator())},
+    Verify = {verify, fetch_any_translation(
+                        verify, AnyTranslations,
+                        gpb_gen_translators:default_any_verify_translator())},
     dict:from_list(
       [{Path, ([Encode,Decode,Verify]
                ++ [Merge || not is_repeated_elem_path(Path)])}
@@ -533,8 +526,9 @@ get_translations(#?gpb_field{type=Type, occurrence=Occ, opts=FOpts},
              if Op == merge, IsRepeated, not IsElem ->
                      {'erlang_++',3};
                 true ->
-                     FnName = default_fn_by_op(Op, undefined),
-                     Arity = length(args_by_op2(Op)) + 1,
+                     FnName = gpb_gen_translators:default_fn_by_op(
+                                Op, undefined),
+                     Arity = length(gpb_gen_translators:args_by_op2(Op)) + 1,
                      {FnName, Arity}
              end
      end
@@ -551,7 +545,7 @@ is_known_size_element({msg,MsgName}, KnownMsgSize) ->
 is_known_size_element({group,Name}, KnownMsgSize) ->
     dict:find(Name, KnownMsgSize) /= error;
 is_known_size_element({map,KeyType,ValueType}, KnownMsgSize) ->
-    MapAsMsgName = map_type_to_msg_name(KeyType, ValueType),
+    MapAsMsgName = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
     dict:find(MapAsMsgName, KnownMsgSize) /= error;
 is_known_size_element(_Type, _) ->
     false.
@@ -587,7 +581,7 @@ fold_field_and_path(F, Root, IsOneOf, InitAcc, Fields) ->
       Fields).
 
 find_group_occurrences(Defs) ->
-    fold_msg_or_group_fields_o(
+    gpb_lib:fold_msg_or_group_fields_o(
       fun(_msg_or_group, _MsgName,
           #?gpb_field{type={group,GroupName}, occurrence=Occurrence},
           _IsOnoeof, D)->
@@ -603,7 +597,7 @@ has_p3_opt_strings(Defs) ->
                  {proto3_msgs, Names} -> Names;
                  false                -> []
              end,
-    try fold_msg_or_group_fields_o(
+    try gpb_lib:fold_msg_or_group_fields_o(
           fun(_msg_or_group, MsgName, #?gpb_field{type=Type,occurrence=Occ},
               _IsOneOf, Acc) ->
                   if Type == string, Occ == optional ->

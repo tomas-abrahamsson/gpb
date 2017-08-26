@@ -48,11 +48,6 @@
 -include("gpb_compile.hrl").
 
 -import(gpb_lib, [replace_term/2, replace_tree/2, splice_trees/2]).
--import(gpb_lib, [map_match/1, map_create/1, map_set/2]).
--import(gpb_lib, [get_2tuples_or_maps_for_maptype_fields_by_opts/1,
-                  is_target_major_version_at_least/2]).
--import(gpb_lib, [index_seq/1,
-                  nowarn_dialyzer_attr/3]).
 
 format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
     [[[format_field_op_translator(ElemPath, Op, CallTemplate, Opts)
@@ -122,7 +117,7 @@ format_field_op_translator(ElemPath, Op, CallTemplate, Opts) ->
              %% Dialyzer might complain that "The created fun has no
              %% local return", for a $errorf, which is true, but also
              %% not surprising, so shut this warning down.
-             nowarn_dialyzer_attr(FnName,length(InArgs),Opts);
+             gpb_lib:nowarn_dialyzer_attr(FnName,length(InArgs),Opts);
         true ->
              ""
      end,
@@ -249,7 +244,7 @@ dollar_i(Name) ->
     list_to_atom(?ff("$~w", [Name])).
 
 tr_in_args_by_op(Op) ->
-    [{dollar_i(I), A} || {I,A} <- index_seq(args_by_op2(Op))]
+    [{dollar_i(I), A} || {I,A} <- gpb_lib:index_seq(args_by_op2(Op))]
         ++ [{'$user_data', ?expr(TrUserData)}].
 
 args_by_op2(encode)                   -> [?expr(X)];
@@ -284,7 +279,7 @@ format_default_map_translators(#anres{map_types=MapTypes,
     HaveMaps = sets:size(MapTypes) > 0,
     {HaveMapSubmsgs, HaveMapNonSubmsgs} = MVT,
     [%% Auxiliary helpers in case of fields of type map<_,_>
-     [case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
+     [case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
           '2tuples' ->
               [inline_attr(mt_maptuple_to_pseudomsg_r,2),
                gpb_codegen:format_fn(
@@ -321,7 +316,7 @@ format_default_map_translators(#anres{map_types=MapTypes,
                  mt_maptuple_to_pseudomsg_m,
                  fun({K,V}) -> '#{key => K, value => V}' end,
                  [replace_tree('#{key => K, value => V}',
-                               map_create([{key,K}, {value,V}]))]),
+                               gpb_lib:map_create([{key,K}, {value,V}]))]),
                "\n",
                inline_attr(mt_map_to_list_m,1),
                gpb_codegen:format_fn(
@@ -332,33 +327,36 @@ format_default_map_translators(#anres{map_types=MapTypes,
                gpb_codegen:format_fn(
                  mt_empty_map_m,
                  fun() -> '#{}' end,
-                 [replace_tree('#{}', map_create([]))]),
+                 [replace_tree('#{}', gpb_lib:map_create([]))]),
                "\n",
                [[inline_attr(mt_add_item_m,2),
-                 case is_target_major_version_at_least(18, Opts) of
+                 case gpb_lib:is_target_major_version_at_least(18, Opts) of
                      true ->
                          gpb_codegen:format_fn(
                            mt_add_item_m,
                            fun('#{key := K,value := V}', M) -> 'M#{K => V}' end,
-                           [replace_tree('#{key := K,value := V}',
-                                         map_match([{key,K}, {value,V}])),
-                            replace_tree('M#{K => V}',
-                                         map_set(M, [{K,V}]))]);
+                           [replace_tree(
+                              '#{key := K,value := V}',
+                              gpb_lib:map_match([{key,K}, {value,V}])),
+                            replace_tree(
+                              'M#{K => V}',
+                              gpb_lib:map_set(M, [{K,V}]))]);
                      false ->
                          gpb_codegen:format_fn(
                            mt_add_item_m,
                            fun('#{key := K,value := V}', M) ->
                                    maps:put('K', 'V', 'M')
                            end,
-                           [replace_tree('#{key := K,value := V}',
-                                         map_match([{key,K}, {value,V}])),
+                           [replace_tree(
+                              '#{key := K,value := V}',
+                              gpb_lib:map_match([{key,K}, {value,V}])),
                             replace_tree('K', K),
                             replace_tree('V', V),
                             replace_tree('M', M)])
                  end]
                 || HaveMapNonSubmsgs],
                [[inline_attr(mt_add_item_m_verify_value,2),
-                 case is_target_major_version_at_least(18, Opts) of
+                 case gpb_lib:is_target_major_version_at_least(18, Opts) of
                      true ->
                          gpb_codegen:format_fn(
                            mt_add_item_m_verify_value,
@@ -369,10 +367,12 @@ format_default_map_translators(#anres{map_types=MapTypes,
                                            'M#{K => V}'
                                    end
                            end,
-                           [replace_tree('#{key := K,value := V}',
-                                         map_match([{key,K}, {value,V}])),
-                            replace_tree('M#{K => V}',
-                                         map_set(M, [{K,V}]))]);
+                           [replace_tree(
+                              '#{key := K,value := V}',
+                              gpb_lib:map_match([{key,K}, {value,V}])),
+                            replace_tree(
+                              'M#{K => V}',
+                              gpb_lib:map_set(M, [{K,V}]))]);
                      false ->
                          gpb_codegen:format_fn(
                            mt_add_item_m_verify_value,
@@ -383,8 +383,9 @@ format_default_map_translators(#anres{map_types=MapTypes,
                                            maps:put('K', 'V', 'M')
                                    end
                            end,
-                           [replace_tree('#{key := K,value := V}',
-                                         map_match([{key,K}, {value,V}])),
+                           [replace_tree(
+                              '#{key := K,value := V}',
+                              gpb_lib:map_match([{key,K}, {value,V}])),
                             replace_tree('K', K),
                             replace_tree('V', V),
                             replace_tree('M', M)])
@@ -398,7 +399,7 @@ format_default_map_translators(#anres{map_types=MapTypes,
 format_default_merge_translators(#anres{map_types=MapTypes}, Opts) ->
     HaveMaps = sets:size(MapTypes) > 0,
     [%% Auxiliary helpers in case of fields of type map<_,_>
-     case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
+     case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
          '2tuples' ->
              [inline_attr(mt_merge_maptuples_r,2),
               gpb_codegen:format_fn(

@@ -30,26 +30,13 @@
 -include("../include/gpb.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [msgs_or_groups/1,
-                  get_field_occurrence/1]).
--import(gpb_lib, [get_2tuples_or_maps_for_maptype_fields_by_opts/1,
-                  get_records_or_maps_by_opts/1,
-                  get_mapping_and_unset_by_opts/1,
-                  get_strings_as_binaries_by_opts/1,
-                  get_type_specs_by_opts/1,
-                  is_target_major_version_at_least/2,
-                  proto3_type_default/3]).
--import(gpb_lib, [index_seq/1,
-                  indent/2,
-                  outdent_first/1]).
-
 format_msg_record(Msg, Fields, Opts, Defs) ->
     Def = list_to_atom(string:to_upper(lists:concat([Msg, "_PB_H"]))),
     [?f("-ifndef(~p).~n", [Def]),
      ?f("-define(~p, true).~n", [Def]),
      ?f("-record(~p,~n", [Msg]),
      ?f("        {"),
-     outdent_first(format_hfields(Msg, 8+1, Fields, Opts, Defs)),
+     gpb_lib:outdent_first(format_hfields(Msg, 8+1, Fields, Opts, Defs)),
      "\n",
      ?f("        }).~n"),
      ?f("-endif.~n")].
@@ -62,7 +49,7 @@ format_maps_as_msgs_record_defs(MapsAsMsgs) ->
      || {{msg,MsgName},Fields} <- MapsAsMsgs].
 
 format_export_types(Defs, Opts) ->
-    case get_type_specs_by_opts(Opts) of
+    case gpb_lib:get_type_specs_by_opts(Opts) of
         false ->
             "";
         true ->
@@ -77,14 +64,16 @@ format_export_types(Defs, Opts) ->
                                 || {{enum, Enum}, _} <- Defs], ", ")]),
                "\n\n",
                "%% message types\n",
-               string:join([format_record_typespec(Name, Fields, Defs, Opts)
-                            || {_, Name, Fields} <- msgs_or_groups(Defs)],
-                           "\n"),
+               string:join(
+                 [format_record_typespec(Name, Fields, Defs, Opts)
+                  || {_, Name, Fields} <- gpb_lib:msgs_or_groups(Defs)],
+                 "\n"),
                "\n",
                ?f("-export_type([~s]).",
-                  [string:join(["'"++atom_to_list(Name)++"'/0"
-                                || {_, Name, _} <- msgs_or_groups(Defs)],
-                               ", ")]),
+                  [string:join(
+                     ["'"++atom_to_list(Name)++"'/0"
+                      || {_, Name, _} <- gpb_lib:msgs_or_groups(Defs)],
+                     ", ")]),
                "\n"])
     end.
 
@@ -95,22 +84,22 @@ format_enum_typespec(Enum, Enumeration) ->
 
 
 format_record_typespec(Msg, Fields, Defs, Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
+    case gpb_lib:get_records_or_maps_by_opts(Opts) of
         records ->
             ?f("-type ~p() :: #~p{}.", [Msg, Msg]);
         maps ->
             ?f("-type ~p() ::~n"
                "      #{~s~n"
                "       }.",
-               [Msg, outdent_first(format_hfields(Msg, 7 + 1,
-                                                  Fields, Opts, Defs))])
+               [Msg, gpb_lib:outdent_first(format_hfields(Msg, 7 + 1,
+                                                          Fields, Opts, Defs))])
     end.
 
 format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
     IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
-    TypeSpecs = get_type_specs_by_opts(Opts),
-    MapsOrRecords = get_records_or_maps_by_opts(Opts),
-    MappingAndUnset = get_mapping_and_unset_by_opts(Opts),
+    TypeSpecs = gpb_lib:get_type_specs_by_opts(Opts),
+    MapsOrRecords = gpb_lib:get_records_or_maps_by_opts(Opts),
+    MappingAndUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     TypespecsCanIndicateMapItemPresence =
         can_specify_map_item_presence_in_typespecs(Opts),
     LastIndex = case MappingAndUnset of
@@ -123,7 +112,8 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                                 find_last_nonopt_field_index(Fields)
                         end
                 end,
-    MapTypeFieldsRepr = get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
+    MapTypeFieldsRepr = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(
+                          Opts),
     string:join(
       lists:map(
         fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
@@ -153,9 +143,10 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                                     case IsProto3 of
                                         true ->
                                             Default =
-                                                proto3_type_default(Type,
-                                                                    Defs,
-                                                                    Opts),
+                                                gpb_lib:proto3_type_default(
+                                                  Type,
+                                                  Defs,
+                                                  Opts),
                                             ?f(" = ~p", [Default]);
                                         false -> ""
                                     end;
@@ -175,7 +166,7 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                               true          -> "" %% last entry
                            end,
                 FieldTxt0 = ?f("~s~w~s", [LineLead, Name, DefaultStr]),
-                FieldTxt1 = indent(Indent, FieldTxt0),
+                FieldTxt1 = gpb_lib:indent(Indent, FieldTxt0),
                 FieldTxt2 = if TypeSpecs ->
                                     LineUp = lineup(iolist_size(FieldTxt1), 32),
                                     ?f("~s~s~s ~s~s", [FieldTxt1, LineUp,
@@ -205,7 +196,7 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                               true          -> "" %% last entry
                            end,
                 FieldTxt0 = ?f("~s~w", [LineLead, Name]),
-                FieldTxt1 = indent(Indent, FieldTxt0),
+                FieldTxt1 = gpb_lib:indent(Indent, FieldTxt0),
                 FieldTxt2 = if TypeSpecs ->
                                     LineUp = lineup(iolist_size(FieldTxt1), 32),
                                     ?f("~s~s~s ~s~s", [FieldTxt1, LineUp,
@@ -222,22 +213,22 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                 ?f("~s~s% ~s",
                    [FieldTxt2, LineUpStr2, TypeComment])
         end,
-        index_seq(Fields)),
+        gpb_lib:index_seq(Fields)),
       "\n").
 
 find_last_nonopt_field_index(Fields) ->
     lists:foldl(fun({I, F}, Acc) ->
-                        case get_field_occurrence(F) of
+                        case gpb_lib:get_field_occurrence(F) of
                             required -> I;
                             repeated -> I;
                             optional -> Acc
                         end
                 end,
                 0,
-                index_seq(Fields)).
+                gpb_lib:index_seq(Fields)).
 
 calc_field_type_sep(#?gpb_field{occurrence=Occurrence}, Opts) ->
-    case get_mapping_and_unset_by_opts(Opts) of
+    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         records ->
             "::";
         {maps, present_undefined} ->
@@ -250,7 +241,7 @@ calc_field_type_sep(#?gpb_field{occurrence=Occurrence}, Opts) ->
             end
     end;
 calc_field_type_sep(#gpb_oneof{}, Opts) ->
-    case get_mapping_and_unset_by_opts(Opts) of
+    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         records   -> "::";
         {maps, _} -> "=>"
     end.
@@ -283,11 +274,11 @@ mandatory_map_item_type_sep(Opts) ->
     end.
 
 can_specify_map_item_presence_in_typespecs(Opts) ->
-    is_target_major_version_at_least(19, Opts).
+    gpb_lib:is_target_major_version_at_least(19, Opts).
 
 type_to_typestr(_MsgName, #?gpb_field{type=Type, occurrence=Occurrence},
                 Defs, Opts) ->
-    OrUndefined = case get_mapping_and_unset_by_opts(Opts) of
+    OrUndefined = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                       records                   -> " | undefined";
                       {maps, present_undefined} -> " | undefined";
                       {maps, omitted}           -> ""
@@ -305,7 +296,7 @@ type_to_typestr(_MsgName, #?gpb_field{type=Type, occurrence=Occurrence},
             type_to_typestr_2(Type, Defs, Opts) ++ OrUndefined
     end;
 type_to_typestr(_, #gpb_oneof{fields=OFields}, Defs, Opts) ->
-    OrUndefined = case get_mapping_and_unset_by_opts(Opts) of
+    OrUndefined = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                       records                   -> ["undefined"];
                       {maps, present_undefined} -> ["undefined"];
                       {maps, omitted}           -> []
@@ -330,7 +321,7 @@ type_to_typestr_2(sfixed64, _Defs, _Opts) -> "integer()";
 type_to_typestr_2(float, _Defs, _Opts)    -> float_spec();
 type_to_typestr_2(double, _Defs, _Opts)   -> float_spec();
 type_to_typestr_2(string, _Defs, Opts)    ->
-  string_to_typestr(get_strings_as_binaries_by_opts(Opts));
+  string_to_typestr(gpb_lib:get_strings_as_binaries_by_opts(Opts));
 type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
 type_to_typestr_2({enum,E}, Defs, Opts)   -> enum_typestr(E, Defs, Opts);
 type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts);
@@ -339,7 +330,7 @@ type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
     KTStr = type_to_typestr_2(KT, Defs, Opts),
     VTStr = type_to_typestr_2(VT, Defs, Opts),
     MapSep = mandatory_map_item_type_sep(Opts),
-    case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
+    case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
         '2tuples' -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
         maps      -> ?f("#{~s ~s ~s}", [KTStr, MapSep, VTStr])
     end.
@@ -348,7 +339,7 @@ float_spec() ->
     "float() | integer() | infinity | '-infinity' | nan".
 
 msg_to_typestr(M, Opts) ->
-  case get_records_or_maps_by_opts(Opts) of
+  case gpb_lib:get_records_or_maps_by_opts(Opts) of
     records -> ?f("#~p{}", [M]);
     maps -> ?f("~p()", [M])
   end.
