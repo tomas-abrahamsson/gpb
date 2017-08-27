@@ -157,6 +157,7 @@
 %% run-time for the code-generating code) to this module.
 %% The generated code has no dependency to this module, though.
 %% @end
+%% @private
 
 -module(gpb_codegen).
 -export([parse_transform/2]).
