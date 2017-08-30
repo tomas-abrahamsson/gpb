@@ -837,7 +837,8 @@ c() ->
 %% '''
 %% The `<erlargs>' can be `-noshell -noinput +B -boot start_clean -pa SomeDir'
 %%
-%% The following options are supported:
+%% The options below are supported. Dashes and underscores inside option names
+%% are equivalent, ie `-o-erl' and `-o_erl' are the same option.
 %% <dl>
 %%   <dt>`-IDir' `-I Dir'</dt>
 %%   <dd>Specify include directory.
@@ -1073,9 +1074,13 @@ find_opt_spec(OptName) ->
     end.
 
 opt_matches(Opt, {OptName, 'string_maybe_appended()', _OptTag, _Descr}) ->
-    lists:prefix(OptName, Opt);
+    lists:prefix(norm_uscore_dash(OptName), norm_uscore_dash(Opt));
 opt_matches(Opt, {OptName, _Type, _OptTag, _Descr}) ->
-    Opt == OptName.
+    norm_uscore_dash(Opt) == norm_uscore_dash(OptName).
+
+norm_uscore_dash("_"++Tl)  -> "-" ++ norm_uscore_dash(Tl);
+norm_uscore_dash([C | Tl]) -> [C | norm_uscore_dash(Tl)];
+norm_uscore_dash("")       -> "".
 
 parse_opt(Opt, {OptName, 'string_maybe_appended()', OptTag, _Descr}, Rest) ->
     case {Opt, Rest} of
@@ -1088,20 +1093,20 @@ parse_opt(Opt, {OptName, 'string_maybe_appended()', OptTag, _Descr}, Rest) ->
             OptArg = string:substr(Opt, length(OptName)+1),
             {ok, {{OptTag, OptArg}, Rest}}
     end;
-parse_opt(OptName, {OptName, undefined, OptTag, _Descr}, Rest) ->
+parse_opt(_, {_OptName, undefined, OptTag, _Descr}, Rest) ->
     {ok, {OptTag, Rest}};
-parse_opt(OptName, {OptName, 'string()', OptTag, _Descr}, [OptArg | Rest]) ->
+parse_opt(_, {_OptName, 'string()', OptTag, _Descr}, [OptArg | Rest]) ->
     {ok, {{OptTag, OptArg}, Rest}};
-parse_opt(OptName, {OptName, 'integer()', OptTag, _Descr}, [OptArg | Rest]) ->
+parse_opt(_, {OptName, 'integer()', OptTag, _Descr}, [OptArg | Rest]) ->
     try list_to_integer(OptArg) of
         N -> {ok, {{OptTag, N}, Rest}}
     catch error:badarg ->
             {error, ?ff("Invalid version number (integer) for ~s: ~p",
                         [OptName, OptArg])}
     end;
-parse_opt(OptName, {OptName, F, OptTag, _Descr}, Rest) when is_function(F) ->
+parse_opt(_, {_OptName, F, OptTag, _Descr}, Rest) when is_function(F) ->
     F(OptTag, Rest);
-parse_opt(OptName, {OptName, Alternatives, OptTag, _Descr}, [OptArg | Rest]) ->
+parse_opt(_, {OptName, Alternatives, OptTag, _Descr}, [OptArg | Rest]) ->
     case parse_opt_alts(tuple_to_list(Alternatives), OptArg, OptTag) of
         {ok, Opt} -> {ok, {Opt, Rest}};
         error     -> {error, "Invalid argument for -" ++ OptName}
