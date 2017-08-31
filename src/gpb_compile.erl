@@ -1583,10 +1583,14 @@ sanity_check_installation_wellknown_proto3(WellknownDir) ->
         true ->
             ok;
         false ->
-            error({your_installation_is_missing_the, WellknownDir, directory,
-                   which_is_expected_to_house_proto3_well_known_types,
-                   such_as, ["google/protobuf/timestamp.proto",
-                             "google/protobuf/duration.proto", and_more]})
+            error({well_known_proto3_missing,
+                   "Your installation is missing the priv/proto3 "
+                   "directory, which is expected to house the "
+                   "'proto3 well known types' such as "
+                   "google/protobuf/timestamp.proto and "
+                   "google/protobuf/duration.proto. "
+                   "They were expected (calculated) to be found in "
+                    ++ WellknownDir})
     end.
 
 try_topsort_defs(Defs) ->
