@@ -94,6 +94,30 @@ finds_record_param_test() ->
                                "f(_, #r{}) -> nok."]))),
     ok.
 
+map_tail_expr_test() ->
+    %% Turn any expression <E> into {x,<E>}
+    TailExprF = fun(X) -> erl_syntax:tuple([erl_syntax:atom(x), X]) end,
+    FnClausePatternF = fun(Params) -> {Params, TailExprF} end,
+    F = fun(FnSTree) ->
+                gpb_codemorpher:map_tail_exprs(
+                  FnClausePatternF,
+                  FnSTree)
+        end,
+    {module,M} = ls(?dummy_mod, [{F, ["x(A) -> A."]},
+                                 {F, ["y(B) -> case B of\n
+                                                   1 -> -17;
+                                                   _ -> B+1
+                                               end."]},
+                                 {F, ["z(C) -> if C == 1 -> -17;
+                                                  true   -> {C+2}
+                                               end.\n"]}]),
+    {x,33} = M:x(33),
+    {x,-17} = M:y(1),
+    {x,3}   = M:y(2),
+    {x,-17} = M:z(1),
+    {x,{4}} = M:z(2),
+    ok.
+
 ls(Mod, FormStrs) ->
     Forms = parse_transform_form_strs(FormStrs),
     l(Mod, Forms).

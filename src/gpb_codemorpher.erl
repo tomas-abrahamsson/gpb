@@ -26,6 +26,8 @@
 -export([underscore_unused_vars/1]).
 -export([locate_record_param/1]).
 
+-export([map_tail_exprs/2]). % intended for testing
+
 -type syntax_tree() :: erl_parse:abstract_form() | % for an af_function_decl()
                        erl_syntax:syntaxTree().
 -type pos() :: non_neg_integer().
@@ -173,6 +175,78 @@ is_r_param(Pattern) ->
       fun(Node, B) -> B orelse erl_syntax:type(Node) == record_expr end,
       false,
       Pattern).
+
+%% @doc Transform tail expressions, possibly based on params.
+%% Takes a map-function and a syntax tree for a function-to-transform.  For
+%% each function clause in the function-to-transform, the map-function is
+%% called with the list of parameters. It must return both a (possibly
+%% changed) list of parameters, and a new map-function that is called for
+%% each tail expressions of the function clause.
+%%
+%% Example:
+%% ```
+%%   F1 = fun(Params) when is_list(Params) ->
+%%              F2 = fun(TailExpressions) ->
+%%                        ...transform tail expression depending on Params...
+%%                   end,
+%%              {Params, F2}
+%%        end
+%%   map_tail_exprs(F1, SyntaxTreeForFunctionToTransform) -> NewFunction.
+%% '''
+-spec map_tail_exprs(F1, Funcion::syntax_tree()) -> syntax_tree() when
+      F1 :: fun((Params::[syntax_tree()]) -> {Params1::[syntax_tree()], F2}),
+      F2 :: fun((TailExpr::syntax_tree()) -> TailExpr1),
+      TailExpr1 ::syntax_tree() | [syntax_tree()].
+map_tail_exprs(F1, FnSTree) ->
+    function = erl_syntax:type(FnSTree), % assert
+    FnName = erl_syntax:function_name(FnSTree),
+    Clauses = erl_syntax:function_clauses(FnSTree),
+    Clauses1 = [map_fn_clause_tails(F1, C) || C <- Clauses],
+    erl_syntax:copy_pos(
+      FnSTree,
+      erl_syntax:function(FnName, Clauses1)).
+
+map_fn_clause_tails(F1, Clause) ->
+    Patterns = erl_syntax:clause_patterns(Clause),
+    Body = erl_syntax:clause_body(Clause),
+    Guard = erl_syntax:clause_guard(Clause),
+    {Patterns1, F2} = F1(Patterns),
+    Clause1 = erl_syntax:copy_pos(
+                Clause,
+                erl_syntax:clause(Patterns1, Guard, Body)),
+    map_tails(F2, Clause1).
+
+map_tails(F, Clause) ->
+    Patterns = erl_syntax:clause_patterns(Clause),
+    Body = erl_syntax:clause_body(Clause),
+    Guard = erl_syntax:clause_guard(Clause),
+    Body1 = map_tails2(F, Body),
+    erl_syntax:copy_pos(
+      Clause,
+      erl_syntax:clause(Patterns, Guard, Body1)).
+
+map_tails2(F, Exprs) ->
+    [E | Preceding] = lists:reverse(Exprs),
+    case erl_syntax:type(E) of
+        if_expr ->
+            Cs = erl_syntax:if_expr_clauses(E),
+            Cs1 = [map_tails(F, C) || C <- Cs],
+            E1 = erl_syntax:copy_pos(E, erl_syntax:if_expr(Cs1)),
+            lists:reverse([E1 | Preceding]);
+        case_expr ->
+            A = erl_syntax:case_expr_argument(E),
+            Cs = erl_syntax:case_expr_clauses(E),
+            Cs1 = [map_tails(F, C) || C <- Cs],
+            E1 = erl_syntax:copy_pos(E, erl_syntax:case_expr(A, Cs1)),
+            lists:reverse([E1 | Preceding]);
+        _ ->
+            case F(E) of
+                E1 when not is_list(E1) ->
+                    lists:reverse([E1 | Preceding]);
+                E1s when is_list(E1s) ->
+                    lists:reverse(lists:reverse(E1s, Preceding))
+            end
+    end.
 
 index_seq(L) ->
     lists:zip(lists:seq(1,length(L)), L).
