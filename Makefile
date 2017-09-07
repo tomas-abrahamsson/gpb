@@ -249,7 +249,8 @@ clean_plt:
 	$(RM) -f $(plt)
 
 $(plt):
-	dialyzer -q --build_plt --output_plt $@ --apps erts kernel stdlib
+	dialyzer -q --build_plt --output_plt $@ \
+		--apps erts kernel stdlib syntax_tools
 
 
 FORCE:
