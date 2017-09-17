@@ -62,6 +62,7 @@
 -export([mapping_update/4]).
 -export([record_match/2]).
 -export([record_create/2]).
+-export([record_update/3]).
 -export([map_match/1]).
 -export([map_create/1]).
 -export([map_set/2]).
