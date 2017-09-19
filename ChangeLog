@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 3.27.7
+2017-Sep-19
+
+        * When verifying maps with maps_unset_optional = omitted,
+        signal an error if extraneous fields are present, since they
+        might be misspellings of optional fields. Thanks to Guilherme Andrade
+        for the suggestion to do this.
+
 Version 3.27.6
 2017-Aug-19
 
