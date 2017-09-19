@@ -623,6 +623,22 @@ verify_maps_with_opts_omitted_test() ->
                                  m1)),
     unload_code(M).
 
+extraneous_keys_with_opts_omitted_test() ->
+    M = compile_iolist(["message m1 {",
+                        "  optional uint32 bar_value = 3;",
+                        "  oneof o1 {",
+                        "    uint32 a = 11;",
+                        "  };",
+                        "}"],
+                       [maps, {maps_unset_optional, omitted},
+                        type_specs]),
+    ok = M:verify_msg(#{}, m1),
+    ok = M:verify_msg(#{bar_value => 33}, m1),
+    ok = M:verify_msg(#{o1 => {a,111}}, m1),
+    ?assertError(_, M:verify_msg(#{bar => 33}, m1)), % misspelling of bar_value
+    ?assertError(_, M:verify_msg(#{o2  => {a,11}}, m1)), % misspelling of o1
+    unload_code(M).
+
 %% verify ------------------------------------------------
 
 nif_test_() ->

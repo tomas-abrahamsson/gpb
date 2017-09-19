@@ -5257,15 +5257,31 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                  FNames};
             {maps, omitted} ->
                 FMap = zip_for_non_opt_fields(MsgDef, FVars),
-                if length(FMap) == length(FNames) ->
-                        {map_match(FMap), FNames};
-                   length(FMap) < length(FNames) ->
-                        {?expr('mapmatch' = 'M',
-                               [replace_tree('mapmatch', map_match(FMap)),
-                                replace_tree('M', MsgVar)]),
-                         [K || {K, _} <- FMap]}
-                end
+                {?expr('mapmatch' = 'M',
+                       [replace_tree('mapmatch', map_match(FMap)),
+                        replace_tree('M', MsgVar)]),
+                 [K || {K, _} <- FMap]}
         end,
+    ExtraneousFieldsChecks =
+        case get_mapping_and_unset_by_opts(Opts) of
+            X2 when X2 == records;
+                    X2 == {maps, present_undefined} ->
+                [];
+            {maps, omitted} ->
+                [?expr(lists:foreach(
+                         fun('<Key>') ->
+                                 ok;
+                            (OtherKey) ->
+                                 mk_type_error({extraneous_key, OtherKey},
+                                               'M', Path)
+                         end,
+                         maps:keys('M')),
+                       [repeat_clauses('<Key>',
+                                       [[replace_term('<Key>', Key)]
+                                         || Key <- FNames]),
+                        replace_tree('M', MsgVar)])]
+        end,
+
     NeedsMatchOther = case get_records_or_maps_by_opts(Opts) of
                           records -> can_occur_as_sub_msg(MsgName, AnRes);
                           maps    -> true
@@ -5277,6 +5293,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
        FnName,
        fun('<msg-match>', '<Path>', 'MaybeTrUserData') ->
                '<verify-fields>',
+               '<maybe-verify-no-extraneous-fields>',
                ok;
           ('<M>', Path, _TrUserData) when is_map('<M>') ->
                mk_type_error(
@@ -5286,8 +5303,10 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                mk_type_error({expected_msg,'<MsgName>'}, X, Path)
        end,
        [replace_tree('<msg-match>', FieldMatching),
-        replace_tree('<Path>', if MsgDef == [] -> ?expr(_Path);
-                                  MsgDef /= [] -> ?expr(Path)
+        replace_tree('<Path>', if MsgDef == [], ExtraneousFieldsChecks == [] ->
+                                       ?expr(_Path);
+                                  true ->
+                                       ?expr(Path)
                                end),
         replace_tree('MaybeTrUserData',
                      case any_field_is_sub_msg(MsgDef)
@@ -5299,6 +5318,8 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                      field_verifiers(MsgName, MsgDef, FVars, MsgVar,
                                      TrUserDataVar,
                                      AnRes, Opts)),
+        splice_trees('<maybe-verify-no-extraneous-fields>',
+                     ExtraneousFieldsChecks),
         repeat_clauses('<X>', case NeedsMatchOther of
                                   true  -> [[replace_tree('<X>', ?expr(X))]];
                                   false -> [] %% omit the else clause
