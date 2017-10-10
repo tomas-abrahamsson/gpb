@@ -527,6 +527,33 @@ error_for_mapfield_with_missing_msgvalue_test() ->
                             {map_equiv, "def", undefined}]}, Defs),
     ?assertError({gpb_error,_}, decode_msg(B1m, m1, Defs)).
 
+decode_packed_repeated_with_without_packed_test() ->
+    %% "Protocol buffer parsers must be able to parse repeated fields
+    %% that were compiled as packed as if they were not packed, and vice
+    %% versa. [...]"
+    %% -- https://developers.google.com/protocol-buffers/docs/encoding#packed
+    %%
+    %% Also: "Only repeated fields of primitive numeric types (types
+    %% which use the varint, 32-bit, or 64-bit wire types) can be
+    %% declared 'packed'."
+    TypesWithValues = [{uint32, [3, 270, 86942]},
+                       {fixed32, [3, 270, 86942]},
+                       {float, [32.0, 0.0, 1.125]},
+                       {fixed64, [3, 270, 86942]}],
+    [begin
+         UF = #?gpb_field{name=a, fnum=1, rnum=#m1.a, type=Type,
+                          occurrence=repeated, opts=[]},
+         PF = UF#?gpb_field{opts=[packed]},
+         UDefs = [{{msg,m1}, [UF]}],
+         PDefs = [{{msg,m1}, [PF]}],
+         BU = encode_msg({m1,Values}, UDefs),
+         BP = encode_msg({m1,Values}, PDefs),
+         {m1,Values} = decode_msg(BU, m1, PDefs), % dec unpacked with packed
+         {m1,Values} = decode_msg(BP, m1, UDefs)  % ... and vice versa
+     end
+     || {Type,Values} <- TypesWithValues],
+    ok.
+
 %% -------------------------------------------------------------
 
 encode_required_varint_field_test() ->
