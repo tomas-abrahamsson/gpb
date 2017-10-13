@@ -2568,10 +2568,8 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                       maps    -> [?expr(MsgName)]
                   end,
     DoNif = proplists:get_bool(nif, Opts),
-    EncodeSpecArgs = lists:join(" | ", [
-      ?f("#'~s'{}", [MsgName])
-      || {{msg,MsgName}, _Fields} <- Defs
-    ]),
+    SpecArgs = [?f("#'~s'{}", [MsgName]) || {{msg,MsgName}, _Fields} <- Defs],
+    EncodeSpecArgs = lists:join(" | ", SpecArgs),
     SpecExtraArgs = case Mapping of
                         records -> "";
                         maps    -> ",atom()"
