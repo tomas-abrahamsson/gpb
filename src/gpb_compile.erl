@@ -2568,17 +2568,19 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                       maps    -> [?expr(MsgName)]
                   end,
     DoNif = proplists:get_bool(nif, Opts),
+    SpecArgs = [?f("#'~s'{}", [MsgName]) || {{msg,MsgName}, _Fields} <- Defs],
+    EncodeSpecArgs = lists:join(" | ", SpecArgs),
     SpecExtraArgs = case Mapping of
                         records -> "";
                         maps    -> ",atom()"
                     end,
-    [?f("-spec encode_msg(_~s) -> binary().~n", [SpecExtraArgs]),
+    [?f("-spec encode_msg(~s~s) -> binary().~n", [EncodeSpecArgs, SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
-     ?f("-spec encode_msg(_~s, list()) -> binary().~n", [SpecExtraArgs]),
+     ?f("-spec encode_msg(~s~s, list()) -> binary().~n", [EncodeSpecArgs, SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>', '<Opts>') ->
