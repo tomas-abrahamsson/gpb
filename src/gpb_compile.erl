@@ -2561,24 +2561,40 @@ format_encoders_top_function_no_msgs(Opts) ->
       || get_epb_functions_by_opts(Opts)]].
 
 format_encoders_top_function_msgs(Defs, Opts) ->
-    Verify = proplists:get_value(verify, Opts, optionally),
+    Verify  = proplists:get_value(verify, Opts, optionally),
     Mapping = get_records_or_maps_by_opts(Opts),
-    MsgNameVars = case Mapping of
-                      records -> [];
-                      maps    -> [?expr(MsgName)]
-                  end,
-    DoNif = proplists:get_bool(nif, Opts),
-    SpecExtraArgs = case Mapping of
-                        records -> "";
-                        maps    -> ",atom()"
+    MsgNames = msg_names(Defs),
+    {MsgNameVars, MsgType, SpecExtraArgs} =
+        case Mapping of
+            records ->
+                {[],
+                 string:join([?f("#~p{}", [M]) || M <- MsgNames],
+                             " | "),
+                 ""};
+            maps ->
+                MsgNameType = string:join([?f("~p", [M]) || M <- MsgNames],
+                                          " | "),
+                MsgMapType =
+                    case get_type_specs_by_opts(Opts) of
+                        false ->
+                            "map()";
+                        true ->
+                            string:join([?f("~p()", [M]) || M <- MsgNames],
+                                        " | ")
                     end,
-    [?f("-spec encode_msg(_~s) -> binary().~n", [SpecExtraArgs]),
+                {[?expr(MsgName)],
+                 MsgMapType,
+                 "," ++ MsgNameType}
+    end,
+    DoNif    = proplists:get_bool(nif, Opts),
+    [?f("-spec encode_msg(~s~s) -> binary().~n", [MsgType, SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
-     ?f("-spec encode_msg(_~s, list()) -> binary().~n", [SpecExtraArgs]),
+     ?f("-spec encode_msg(~s~s, list()) -> binary().~n",
+        [MsgType, SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>', '<Opts>') ->
