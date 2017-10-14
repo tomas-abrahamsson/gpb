@@ -1,5 +1,26 @@
 -*- coding: utf-8 -*-
 
+Version 3.28.0
+2017-Oct-14
+
+        * Fix decoding of packed/non-packed repeated. If a repeated
+        fields was declared as packed, but an encoder encoded it as
+        non-packed (or vice versa), then gpb previously failed to decode
+        it.
+
+        This introduces a POTENTIAL INCOMPATIBILITY: For repeated packed
+        fields of type string, bytes and sub messages: such fields were
+        actually non-packable but gpb accidentally accepted them.
+        Messages with such fields were packed invalidly, and gpb of this
+        version will not be able to unpack/decode such stored messages.
+
+        Thanks to Moxley Stratton for reporting.
+
+        * Make the -spec for encode_msg more narrow to avoid some
+        dialzer underspec warnings.  Note that all underspecs warnings
+        can not in general be avoided.  Thanks to Moxley Stratton and
+        Kevin C. Baird for fixing and to Heinz N. Gies for reporting.
+
 Version 3.27.7
 2017-Sep-19
 
