@@ -2210,15 +2210,13 @@ compute_used_default_translators(Defs, Translations, KnownMsgSize, Opts) ->
 
 get_translations(#gpb_oneof{}, _Path, _Translations, _KnownMsgSize, _Opts) ->
     [];
-get_translations(#?gpb_field{type=Type, occurrence=Occ, opts=FOpts},
+get_translations(#?gpb_field{type=Type, occurrence=Occ},
                  Path, Translations, KnownMsgSize, Opts) ->
-    {IsRepeated,IsPacked,IsKnownSizeElem} =
+    {IsRepeated, IsKnownSizeElem} =
         if Occ == repeated ->
-                {true,
-                 lists:member(packed,FOpts),
-                 is_known_size_element(Type, KnownMsgSize)};
+                {true, is_known_size_element(Type, KnownMsgSize)};
            true ->
-                {false, false, false}
+                {false, false}
         end,
     IsElem = IsRepeated andalso lists:last(Path) == [],
     DoNif = proplists:get_bool(nif, Opts),
@@ -2226,18 +2224,13 @@ get_translations(#?gpb_field{type=Type, occurrence=Occ, opts=FOpts},
                   [merge, verify];
              IsElem ->
                   [encode,decode,merge,verify];
-             IsRepeated, IsPacked, IsKnownSizeElem ->
+             IsRepeated, IsKnownSizeElem ->
                   [encode,
+                   decode_repeated_add_elem,
                    decode_repeated_finalize,
                    merge,
                    verify];
-             IsRepeated, IsPacked, not IsKnownSizeElem ->
-                  [encode,
-                   decode_init_default,
-                   decode_repeated_finalize,
-                   merge,
-                   verify];
-             IsRepeated, not IsPacked ->
+             IsRepeated, not IsKnownSizeElem ->
                   [encode,
                    decode_init_default,
                    decode_repeated_add_elem,
@@ -2561,24 +2554,40 @@ format_encoders_top_function_no_msgs(Opts) ->
       || get_epb_functions_by_opts(Opts)]].
 
 format_encoders_top_function_msgs(Defs, Opts) ->
-    Verify = proplists:get_value(verify, Opts, optionally),
+    Verify  = proplists:get_value(verify, Opts, optionally),
     Mapping = get_records_or_maps_by_opts(Opts),
-    MsgNameVars = case Mapping of
-                      records -> [];
-                      maps    -> [?expr(MsgName)]
-                  end,
-    DoNif = proplists:get_bool(nif, Opts),
-    SpecExtraArgs = case Mapping of
-                        records -> "";
-                        maps    -> ",atom()"
+    MsgNames = msg_names(Defs),
+    {MsgNameVars, MsgType, SpecExtraArgs} =
+        case Mapping of
+            records ->
+                {[],
+                 string:join([?f("#~p{}", [M]) || M <- MsgNames],
+                             " | "),
+                 ""};
+            maps ->
+                MsgNameType = string:join([?f("~p", [M]) || M <- MsgNames],
+                                          " | "),
+                MsgMapType =
+                    case get_type_specs_by_opts(Opts) of
+                        false ->
+                            "map()";
+                        true ->
+                            string:join([?f("~p()", [M]) || M <- MsgNames],
+                                        " | ")
                     end,
-    [?f("-spec encode_msg(_~s) -> binary().~n", [SpecExtraArgs]),
+                {[?expr(MsgName)],
+                 MsgMapType,
+                 "," ++ MsgNameType}
+    end,
+    DoNif    = proplists:get_bool(nif, Opts),
+    [?f("-spec encode_msg(~s~s) -> binary().~n", [MsgType, SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
        [splice_trees('<MsgName>', MsgNameVars)]),
      "\n",
-     ?f("-spec encode_msg(_~s, list()) -> binary().~n", [SpecExtraArgs]),
+     ?f("-spec encode_msg(~s~s, list()) -> binary().~n",
+        [MsgType, SpecExtraArgs]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, '<MsgName>', '<Opts>') ->
@@ -3856,22 +3865,40 @@ decoder_skip_calls(Bindings, MsgName) ->
            replace_term(skip_32, mk_fn(skip_32_, MsgName))]).
 
 decoder_field_selectors(MsgName, MsgDef) ->
-    map_msgdef_fields_o(
-      fun(#?gpb_field{name=FName, fnum=FNum, type=Type}=FieldDef, _IsOneof) ->
-              Wiretype = case Type of
-                             {group, _} ->
-                                 gpb:encode_wiretype(group_start);
-                             _ ->
-                                 case is_packed(FieldDef) of
-                                     true  -> gpb:encode_wiretype(bytes);
-                                     false -> gpb:encode_wiretype(Type)
-                                 end
-                         end,
-              Selector = (FNum bsl 3) bor Wiretype,
-              DecodeFn = mk_fn(d_field_, MsgName, FName),
-              {Selector, DecodeFn}
-      end,
-      MsgDef).
+    lists:append(
+      map_msgdef_fields_o(
+        fun(#?gpb_field{name=FName, fnum=FNum, type=Type, occurrence=Occ},
+            _IsOneof) ->
+                case Occ == repeated andalso gpb:is_type_packable(Type) of
+                    true ->
+                        %% "Protocol buffer parsers must be able to parse
+                        %% repeated fields that were compiled as packed
+                        %% as if they were not packed, and vice versa."
+                        %%
+                        %% So generate selectors for recognizing both
+                        %% the packed and unpacked case.
+                        PWiretype = gpb:encode_wiretype(bytes),
+                        UWiretype = gpb:encode_wiretype(Type),
+                        [begin
+                             Selector = (FNum bsl 3) bor Wiretype,
+                             DecodeFn = mk_fn(Prefix, MsgName, FName),
+                             {Selector, DecodeFn}
+                         end
+                         || {Wiretype, Prefix} <- [{PWiretype, d_pfield_},
+                                                   {UWiretype, d_field_}]];
+                    false ->
+                        Wiretype = case Type of
+                                       {group, _} ->
+                                           gpb:encode_wiretype(group_start);
+                                       _ ->
+                                           gpb:encode_wiretype(Type)
+                                   end,
+                        Selector = (FNum bsl 3) bor Wiretype,
+                        DecodeFn = mk_fn(d_field_, MsgName, FName),
+                        [{Selector, DecodeFn}]
+                end
+        end,
+        MsgDef)).
 
 decoder_finalize_result(Params, FFields, MsgName, MsgDef,
                         TrUserDataVar, AnRes, Opts) ->
@@ -3965,13 +3992,24 @@ format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
       MsgDef).
 
 format_field_decoder(MsgName, Field, IsOneof, AnRes, Opts) ->
-    case is_packed(Field) of
-        false ->
-            XField = {Field, IsOneof},
-            format_non_packed_field_decoder(MsgName, XField, AnRes, Opts);
-        true ->
-            %% a packed field can never be one of a `oneof' fields
-            format_packed_field_decoder(MsgName, Field, AnRes, Opts)
+    XField = {Field, IsOneof},
+    case Field of
+        #?gpb_field{occurrence=repeated, type=Type} ->
+            case gpb:is_type_packable(Type) of
+                true ->
+                    %% Generate decoder functions for both the packed
+                    %% and unpacked case
+                    [format_non_packed_field_decoder(MsgName, XField, AnRes,
+                                                     Opts),
+                     %% A packed field can never be one of a `oneof' fields
+                     %% So pass Field and not XField
+                     format_packed_field_decoder(MsgName, Field, AnRes, Opts)];
+                false ->
+                    format_non_packed_field_decoder(MsgName, XField, AnRes,
+                                                    Opts)
+            end;
+        _ ->
+            format_non_packed_field_decoder(MsgName, XField, AnRes, Opts)
     end.
 
 format_non_packed_field_decoder(MsgName, XField, AnRes, Opts) ->
@@ -4028,7 +4066,7 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
                                            Opts)]
                 end,
     [gpb_codegen:format_fn(
-       mk_fn(d_field_, MsgName, FName),
+       mk_fn(d_pfield_, MsgName, FName),
        fun(<<1:1, X:7, Rest/binary>>, N, Acc, '<Params>', TrUserData)
              when N < ?NB ->
                call_self(Rest, N + 7, X bsl N + Acc, '<Params>', TrUserData);

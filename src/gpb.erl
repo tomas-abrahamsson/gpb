@@ -25,6 +25,7 @@
 -export([verify_msg/2, check_scalar/2]).
 -export([map_item_pseudo_fields/2]).
 -export([is_allowed_as_key_type/1]).
+-export([is_type_packable/1]).
 -export([is_msg_proto3/2, proto3_type_default/2]).
 -export([proto2_type_default/2]).
 -export([encode_varint/1, decode_varint/1, decode_varint/2]).
@@ -278,18 +279,28 @@ find_field(N, [#gpb_oneof{fields=Fs} | Rest]) ->
 find_field(_, []) ->
     false.
 
-fielddef_matches_wiretype_get_info(WireType, #?gpb_field{type={group,_}})->
+fielddef_matches_wiretype_get_info(WireType, #?gpb_field{type={group,_}}) ->
     if WireType == 3 -> {yes, group};
        true          -> no
     end;
-fielddef_matches_wiretype_get_info(WireType, #?gpb_field{type=Type}=FieldDef)->
-    IsPacked = is_packed(FieldDef),
-    {ExpectedWireType, Info} =
-        if IsPacked     -> {encode_wiretype(bytes), packed};
-           not IsPacked -> {encode_wiretype(Type), normal}
-        end,
-    if WireType == ExpectedWireType -> {yes, Info};
-       WireType /= ExpectedWireType -> no
+fielddef_matches_wiretype_get_info(WireType, #?gpb_field{occurrence=repeated,
+                                                         type=Type}) ->
+    WireTypeForPacked = encode_wiretype(bytes),
+    case is_type_packable(Type) of
+        true when WireType == WireTypeForPacked ->
+            {yes, packed};
+        true ->
+            wiretype_matches_normal_type(WireType, Type);
+        false ->
+            wiretype_matches_normal_type(WireType, Type)
+    end;
+fielddef_matches_wiretype_get_info(WireType, #?gpb_field{type=Type}) ->
+    wiretype_matches_normal_type(WireType, Type).
+
+wiretype_matches_normal_type(WireType, Type) ->
+    case encode_wiretype(Type) of
+        WireType -> {yes, normal};
+        _        -> no
     end.
 
 -spec decode_wiretype(non_neg_integer()) -> varint | bits32 | bits64 |
@@ -1176,6 +1187,27 @@ is_allowed_as_key_type(double) -> false;
 is_allowed_as_key_type(float) -> false;
 is_allowed_as_key_type(bytes) -> false;
 is_allowed_as_key_type(_) -> true.
+
+-spec is_type_packable(gpb_field_type()) -> boolean().
+is_type_packable(int32)     -> true;
+is_type_packable(int64)     -> true;
+is_type_packable(uint32)    -> true;
+is_type_packable(uint64)    -> true;
+is_type_packable(sint32)    -> true;
+is_type_packable(sint64)    -> true;
+is_type_packable(fixed32)   -> true;
+is_type_packable(fixed64)   -> true;
+is_type_packable(sfixed32)  -> true;
+is_type_packable(sfixed64)  -> true;
+is_type_packable(bool)      -> true;
+is_type_packable(float)     -> true;
+is_type_packable(double)    -> true;
+is_type_packable(string)    -> false;
+is_type_packable(bytes)     -> false;
+is_type_packable({enum,_})  -> true;
+is_type_packable({msg,_})   -> false;
+is_type_packable({group,_}) -> false;
+is_type_packable({map,_,_}) -> false.
 
 %% --
 
