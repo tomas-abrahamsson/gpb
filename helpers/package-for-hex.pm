@@ -84,9 +84,9 @@ defmodule Gpb.Mixfile do
   def project do
     [app: :gpb,
      version: "$vsn",
-     description: description,
-     package: package,
-     deps: deps]
+     description: description(),
+     package: package(),
+     deps: deps()]
   end
 
   defp deps do
