@@ -712,6 +712,87 @@ module_msg_name_prefix_test() ->
     end,
     ok.
 
+module_name_test() ->
+    Proto = <<"message msg1 { required uint32 f1=1; }\n">>,
+    Master = self(),
+    ReadInput = fun(FName) -> Master ! {read, FName}, {ok, Proto} end,
+    ReportOutput = fun(FName, Contents) ->
+                           Ext = list_to_atom(tl(filename:extension(FName))),
+                           Master ! {write, {Ext, FName, Contents}},
+                           ok
+                   end,
+    FileOpOpt = mk_fileop_opt([{read_file, ReadInput},
+                               {write_file, ReportOutput}]),
+    ok = gpb_compile:file("m.proto",
+                          [FileOpOpt, {i,"."},
+                           {module_name, "new"}]),
+    receive
+        {read, "m.proto"} -> ok;
+        {read, X} -> erlang:error({"reading from odd file", X})
+    end,
+    receive
+        {write, {hrl, "new.hrl", _Hrl}} ->
+            ok;
+        {write, {hrl, "m.hrl", _}} ->
+            erlang:error("expected new.hrl, not m.hrl!");
+        {write, {hrl, X2, C2}} ->
+            erlang:error({"writing odd hrl file!", X2, C2})
+    end,
+    receive
+        {write, {erl, "new.erl", Erl}} ->
+            assert_contains_regexp(Erl, "-include.*\"new.hrl\""),
+            assert_contains_regexp(Erl, "-module.*new"),
+            ok;
+        {write, {erl, "m.erl", _}} ->
+            erlang:error("expected new.erl, not m.erl!");
+        {write, {erl, X3, C3}} ->
+            erlang:error({"writing odd erl file!", X3, C3})
+    end,
+    ok.
+
+module_name_with_suffix_prefix_test() ->
+    %% interaction between options module_name and module_name_prefix/suffix
+    Proto = <<"message msg1 { required uint32 f1=1; }\n">>,
+    Master = self(),
+    ReadInput = fun(FName) -> Master ! {read, FName}, {ok, Proto} end,
+    ReportOutput = fun(FName, Contents) ->
+                           Ext = list_to_atom(tl(filename:extension(FName))),
+                           Master ! {write, {Ext, FName, Contents}},
+                           ok
+                   end,
+    FileOpOpt = mk_fileop_opt([{read_file, ReadInput},
+                               {write_file, ReportOutput}]),
+    ModPrefix = "mp_",
+    ModSuffix = "_xp",
+    ok = gpb_compile:file("m.proto",
+                          [FileOpOpt, {i,"."},
+                           {module_name, "new"},
+                           {module_name_prefix, ModPrefix},
+                           {module_name_suffix, ModSuffix}]),
+    receive
+        {read, "m.proto"} -> ok;
+        {read, X} -> erlang:error({"reading from odd file", X})
+    end,
+    receive
+        {write, {hrl, "mp_new_xp.hrl", _Hrl}} ->
+            ok;
+        {write, {hrl, "m.hrl", _}} ->
+            erlang:error("hrl file not changed + prefixed or suffixed!");
+        {write, {hrl, X2, C2}} ->
+            erlang:error({"writing odd hrl file!", X2, C2})
+    end,
+    receive
+        {write, {erl, "mp_new_xp.erl", Erl}} ->
+            assert_contains_regexp(Erl, "-include.*\"mp_new_xp.hrl\""),
+            assert_contains_regexp(Erl, "-module.*mp_new_xp"),
+            ok;
+        {write, {erl, "m.erl", _}} ->
+            erlang:error("erl file not changed + prefixed or suffixed!");
+        {write, {erl, X3, C3}} ->
+            erlang:error({"writing odd erl file!", X3, C3})
+    end,
+    ok.
+
 assert_contains_regexp(IoData, Re) ->
     case re:run(IoData, Re) of
         {match, _} -> ok;
@@ -3058,7 +3139,8 @@ opt_test() ->
            {module_name_prefix, "mod_prefix_"},
            {msg_name_suffix,    "_msg_suffix"},
            {module_name_suffix, "_mod_suffix"},
-           msg_name_to_lower],
+           msg_name_to_lower,
+           {module_name, "abc"}],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-msgprefix", "msg_prefix_",
@@ -3066,6 +3148,7 @@ opt_test() ->
            "-msgsuffix", "_msg_suffix",
            "-modsuffix", "_mod_suffix",
            "-msgtolower",
+           "-modname", "abc",
            "x.proto"]),
     {ok, {[defs_as_proplists,
            maps, msgs_as_maps, mapfields_as_maps, defs_as_maps],

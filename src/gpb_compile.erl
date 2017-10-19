@@ -109,6 +109,7 @@
                boolean_opt(msg_name_to_lower) |
                {module_name_prefix, string() | atom()} |
                {module_name_suffix, string() | atom()} |
+               {module_name, string() | atom()} |
                {any_translate, [translation()]} |
                boolean_opt(epb_compatibility) |
                boolean_opt(epb_functions) |
@@ -351,6 +352,11 @@ file(File) ->
 %% works correspondingly. For the case of compatibility with Erlang Protobuffs,
 %% the `epb_compatibility' option implies `{module_name_suffix,"_pb"}'
 %%
+%% The `{module_name,Name}' can be used to specify the module name of the
+%% generated code freely, instead of basing it on the proto file name.
+%% The name specified with `module_name' can be prefixed and suffixed with
+%% the `module_name_prefix' and `module_name_suffix' options.
+
 %% The `any_translate' option can be used to provide packer and
 %% unpacker functions for `google.protobuf.Any' messages.  The merge
 %% translator is optional, and is called either via the `merge_msgs'
@@ -558,9 +564,14 @@ find_out_mod(File, Opts) ->
     Ext = filename:extension(File),
     list_to_atom(possibly_suffix_mod(
                    possibly_prefix_mod(
-                     filename:basename(File, Ext),
+                     mod_name_from_opts_or_else_filename(
+                       filename:basename(File, Ext),
+                       Opts),
                      Opts),
                    Opts)).
+
+mod_name_from_opts_or_else_filename(FileBaseName, Opts) ->
+    proplists:get_value(module_name, Opts, FileBaseName).
 
 possibly_prefix_mod(BaseNameNoExt, Opts) ->
     case proplists:get_value(module_name_prefix, Opts) of
@@ -960,6 +971,8 @@ c() ->
 %%   <dd>Suffix each message name with `Suffix'.</dd>
 %%   <dt>`-modsuffix Suffix'</dt>
 %%   <dd>Suffix each module name with `Suffix'.</dd>
+%%   <dt>`-modname Name'</dt>
+%%   <dd>Specify the name of the generated module.</dd>
 %%   <dt>`-msgtolower'</dt>
 %%   <dd>ToLower each message. Any prefixes/suffixes are added
 %%       after case modification.</dd>
@@ -1221,6 +1234,8 @@ opt_specs() ->
       "       after case modification.\n"},
      {"modsuffix", 'string()', module_name_suffix, "Suffix\n"
       "       Suffix the module name with Suffix.\n"},
+     {"modname", 'string()', module_name, "Name\n"
+      "       Specify the name of the generated module.\n"},
      {"il", undefined, include_as_lib, "\n"
       "       Generate code that includes gpb.hrl using -include_lib\n"
       "       instead of -include, which is the default.\n"},
