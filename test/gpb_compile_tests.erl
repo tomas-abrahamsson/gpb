@@ -643,6 +643,18 @@ decodes_overly_long_varints_test() ->
     #m1{a=54} = M:decode_msg(<<8, (128+54), 128, 128, 0>>, m1),
     unload_code(M).
 
+decode_failure_error_for_invalid_binary_test() ->
+    M = compile_defs([{{msg,m1}, [#?gpb_field{name=a, type=int32,
+                                              fnum=1, rnum=#m1.a,
+                                              occurrence=required,
+                                              opts=[]}]}]),
+    Bad1 = <<8>>,
+    ?assertError({gpb_error,
+                  {decoding_failure,
+                   {Bad1, m1, {_Class,_Reason,_Stack}}}},
+                 M:decode_msg(Bad1, m1)),
+    unload_code(M).
+
 %% --- scoped messages ---------------
 
 dotted_names_gives_no_compilation_error_test() ->
