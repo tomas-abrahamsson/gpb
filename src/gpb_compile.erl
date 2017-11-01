@@ -3474,7 +3474,15 @@ format_decoders_top_function_msgs(Defs, Opts) ->
        fun(Bin, MsgName, 'Opts') when is_binary(Bin) ->
                'TrUserData = proplists:get_value(user_data, Opts)',
                case MsgName of
-                   '<MsgName>' -> '<decode-call>'(Bin, 'TrUserData')
+                   '<MsgName>' ->
+                       try '<decode-call>'(Bin, 'TrUserData')
+                       catch Class:Reason ->
+                               StackTrace = erlang:get_stacktrace(),
+                               error({gpb_error,
+                                      {decoding_failure,
+                                       {Bin, '<MsgName>',
+                                        {Class, Reason, StackTrace}}}})
+                       end
                end
        end,
        [splice_trees('Opts', if DoNif -> [];
