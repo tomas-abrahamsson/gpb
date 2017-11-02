@@ -1237,12 +1237,16 @@ never_generates_unused_translator_functions_aux() ->
      end
      || Type <- Types,
         OInfo <- case Type of
-                     {map,_,_} -> [{repeated,[]}];
-                     _         -> [{repeated,[]},
-                                   {repeated,[packed]},
-                                   {required,[]},
-                                   {optional,[]},
-                                   oneof]
+                     {map,_,_} ->
+                         [{repeated,[]}];
+                     _ ->
+                         lists:flatten(
+                           [{repeated,[]},
+                            [{repeated,[packed]}
+                             || gpb:is_type_packable(Type)],
+                            {required,[]},
+                            {optional,[]},
+                            oneof])
                  end].
 
 needs_enum({enum,ee}) -> true;
