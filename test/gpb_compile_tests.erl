@@ -1330,12 +1330,16 @@ never_generates_unused_translator_functions_aux() ->
      end
      || Type <- Types,
         OInfo <- case Type of
-                     {map,_,_} -> [{repeated,[]}];
-                     _         -> [{repeated,[]},
-                                   {repeated,[packed]},
-                                   {required,[]},
-                                   {optional,[]},
-                                   oneof]
+                     {map,_,_} ->
+                         [{repeated,[]}];
+                     _ ->
+                         lists:flatten(
+                           [{repeated,[]},
+                            [{repeated,[packed]}
+                             || gpb:is_type_packable(Type)],
+                            {required,[]},
+                            {optional,[]},
+                            oneof])
                  end].
 
 needs_enum({enum,ee}) -> true;
@@ -1360,6 +1364,14 @@ only_enums_no_msgs_test() ->
     [] = M:get_msg_names(),
     [e] = M:get_enum_names(),
     unload_code(M).
+
+ignores_packed_for_nonpackable_repeated_on_encoding_test() ->
+    {ok, M, [_WarningAboutIgnoredPackedOption]} =
+        compile_iolist_get_errors_or_warnings(
+          ["message m1 { repeated string s1 = 1 [packed]; }"]),
+    %% expect no length-delimited wrapping around the field
+    %% just the elements one after the other.
+    <<10,3,"abc",10,3,"def">> = M:encode_msg({m1, ["abc", "def"]}).
 
 %% --- Returning/reporting warnings/errors (and warnings_as_errors) tests -----
 %% ... when compiling to file/binary/defs
@@ -1762,7 +1774,7 @@ failure_to_write_output_files_not_ignored_test() ->
     gpb_compile:format_error(Err1),
     gpb_compile:format_error(Err2).
 
-%% --- format_error tests ----------
+%% --- format_error and format_warning tests ----------
 
 format_error_works_for_scan_errors_test() ->
     compile_and_assert_that_format_error_produces_iolist(
@@ -1793,24 +1805,45 @@ format_error_works_for_verification_errors_test() ->
       ["message Msg1 { required Msg2 field1 = 2;}\n"],
       ["Msg2", "Msg1", "field1"]).
 
+format_warning_works_with_packed_for_unpackable_test() ->
+    compile_and_assert_that_format_warning_produces_iolist(
+      ["message Msg1 { repeated string field1 = 2 [packed]; }\n"],
+      ["Msg1", "field1", "ignor", "packed"]).
+
 compile_and_assert_that_format_error_produces_iolist(Contents, ExpectedWords) ->
     compile_and_assert_that_format_error_produces_iolist(
       Contents, [], ExpectedWords).
 
 compile_and_assert_that_format_error_produces_iolist(Contents,
                                                      ExtraFileOpReturnValues,
-                                                     ExpectedPhrases) ->
+                                                     ExpectedWords) ->
+    compile_and_assert_that_format_x_produces_iolist(
+      Contents, ExtraFileOpReturnValues, ExpectedWords, format_error).
+
+compile_and_assert_that_format_warning_produces_iolist(Contents,
+                                                       ExpectedWords) ->
+    compile_and_assert_that_format_x_produces_iolist(
+      Contents, [], ExpectedWords, format_warning).
+
+
+compile_and_assert_that_format_x_produces_iolist(Contents,
+                                                 ExtraFileOpReturnValues,
+                                                 ExpectedPhrases,
+                                                 FormatWhat) ->
     FileContents = iolist_to_binary(Contents),
     FileRetriever = mk_file_retriever(FileContents, ExtraFileOpReturnValues),
     FileInfoReader = mk_read_file_info("X.proto", ExtraFileOpReturnValues),
-    Res = gpb_compile:file(
-            "X.proto",
-            [mk_fileop_opt([{read_file, FileRetriever},
-                            {read_file_info, FileInfoReader}]),
-             mk_defs_probe_sender_opt(self()),
-             {i,"."}]),
-    ?assertMatch({error,_}, Res),
-    Txt = gpb_compile:format_error(Res),
+    Opts = [mk_fileop_opt([{read_file, FileRetriever},
+                           {read_file_info, FileInfoReader}]),
+            mk_defs_probe_sender_opt(self()),
+            {i,"."},
+            return_errors, return_warnings],
+    Txt = case gpb_compile:file("X.proto", Opts) of
+              {error, _Reason, _Warns}=Res when FormatWhat == format_error ->
+                  gpb_compile:format_error(Res);
+              {ok, Warns} when FormatWhat == format_warning ->
+                  [gpb_compile:format_warning(Warn) || Warn <- Warns]
+          end,
     IsIoList = io_lib:deep_char_list(Txt),
     ?assertMatch({true, _}, {IsIoList, Txt}),
     FlatTxt = lists:flatten(Txt),
