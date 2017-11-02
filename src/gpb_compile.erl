@@ -596,7 +596,9 @@ proto_defs(Mod, Defs, Opts) ->
 do_proto_defs_aux1(Mod, Defs0, Opts0) ->
     {IsAcyclic, Defs} = try_topsort_defs(Defs0),
     possibly_probe_defs(Defs, Opts0),
-    {Warns, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
+    Warns0 = check_unpackables_marked_as_packed(Defs),
+    {Warns1, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
+    Warns = Warns0 ++ Warns1,
     AnRes = analyze_defs(Defs, Opts1),
     case verify_opts(Defs, Opts1) of
         ok ->
@@ -852,6 +854,10 @@ fmt_err(X) ->
 -spec format_warning(warning()) -> iolist().
 format_warning(cyclic_message_dependencies) ->
     ?f("Warning: omitting type specs due to cyclic message references.");
+format_warning({ignored_field_opt_packed_for_unpackable_type,
+                MsgName, FName, Type, _Opts}) ->
+    ?f("Warning: ignoring option packed for non-packable field ~s.~s "
+       "of type ~p", [MsgName, FName, Type]);
 format_warning(X) ->
     case io_lib:deep_char_list(X) of
         true  -> X;
@@ -1672,6 +1678,21 @@ utf8_decode(B) ->
        true ->
             {error, {invalid_proto_byte_order_mark, Enc}}
     end.
+
+check_unpackables_marked_as_packed(Defs) ->
+    fold_msg_or_group_fields(
+      fun(_, MsgName, #?gpb_field{name=FName, type=Type, opts=Opts}, Acc) ->
+              case {lists:member(packed, Opts), gpb:is_type_packable(Type)} of
+                  {true, false} ->
+                      Warn = {ignored_field_opt_packed_for_unpackable_type,
+                              MsgName, FName, Type, Opts},
+                      [Warn | Acc];
+                  _ ->
+                      Acc
+              end
+      end,
+      [],
+      Defs).
 
 %% -- analysis -----------------------------------------------------
 
@@ -9047,8 +9068,8 @@ mapfields_considered_required(Opts) ->
     proplists:get_bool(mapfields_are_required, Opts).
 
 
-is_packed(#?gpb_field{opts=Opts}) ->
-    lists:member(packed, Opts).
+is_packed(#?gpb_field{type=Type, opts=Opts}) ->
+    gpb:is_type_packable(Type) andalso lists:member(packed, Opts).
 
 %% Given a sequence, `Seq', of expressions, and an initial expression,
 %% Construct:
