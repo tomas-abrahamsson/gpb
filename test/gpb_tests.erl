@@ -900,7 +900,7 @@ encode_proto3_various_empty_string_test() ->
     <<10,2,97,98>> = encode_msg(#m2{b = [97,[<<98>>]]}, P3Defs),
     <<10,1,65>> = encode_msg(#m2{b = <<65>>}, P3Defs).
 
-encode_proto3_various_enpty_sequence_of_bytes_test() ->
+encode_proto3_various_empty_sequence_of_bytes_test() ->
     %% With iolists for encoding, there are many ways to specify an empty
     %% binary.  In proto3, they should encode to nothing.
     P3Defs = [{syntax,"proto3"},
