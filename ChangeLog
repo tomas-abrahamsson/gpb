@@ -1,5 +1,27 @@
 -*- coding: utf-8 -*-
 
+Version 3.28.1
+2017-Nov-02
+
+        * Similar to the fix in 3.28.0, but for encoding: Warn and
+        ignore the option packed for repeated fields that are not
+        allowed to be packed, such as string, bytes and sub
+        messages. Such fields were not allowed to be be packed i the
+        first place, but gpb never said anything so this could go
+        unnoticed. And gpb packed them in an invalid fasion, that was
+        probably incompaitble with other protobuf parsers/encoders.
+
+        For such fields, this introduces a POTENTIAL INCOMPATIBILITY,
+        in that the invalid option is now ignored and warned about.
+
+        * Add an option {module_name, Name} (-modname Name) for
+        entirely controlling the resulting module name, instead of
+        only being able to prefix or suffix it. Thanks to
+        Tomas Johansson for the suggestion.
+
+        * Wrap decoding in a {gpb_error, {decoding_failure, ...}}
+        if it fails. Thanks to Tristan Sloughter for the suggestion.
+
 Version 3.28.0
 2017-Oct-14
 
