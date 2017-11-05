@@ -374,11 +374,17 @@ m_opts -> '$empty':                     [].
 
 
 
+Header
+"%%% @doc The yecc grammar for the protobuf language,"
+"%%% both for syntax = proto2 and for proto3."
+"%%% @private"
+"".
+
 Erlang code.
 
 -include("../include/gpb.hrl").
 
--export([post_process_one_file/2]).
+-export([post_process_one_file/3]).
 -export([post_process_all_files/2]).
 -export([format_post_process_error/1]).
 -export([fetch_imports/1]).
@@ -397,7 +403,8 @@ Erlang code.
                {{reserved_numbers, MsgName::atom()}, [integer()]} |
                {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
                {import, ProtoFile::string()} |
-               {{msg_options, MsgName::atom()}, [msg_option()]}.
+               {{msg_options, MsgName::atom()}, [msg_option()]} |
+               {{msg_containment, ProtoName::string()}, MsgNames::[atom()]}.
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
@@ -422,13 +429,18 @@ kw_to_identifier({Kw, Line}) ->
 
 literal_value({_TokenType, _Line, Value}) -> Value.
 
-post_process_one_file(Defs, Opts) ->
+post_process_one_file(FileName, Defs, Opts) ->
     case find_package_def(Defs, Opts) of
         {ok, Package} ->
-            {ok, handle_proto_syntax_version_one_file(
-                   join_any_msg_options(
-                     convert_default_values(
-                       flatten_qualify_defnames(Defs, Package))))};
+            Defs1 = handle_proto_syntax_version_one_file(
+                      join_any_msg_options(
+                        convert_default_values(
+                          flatten_qualify_defnames(Defs, Package)))),
+            FileExt = filename:extension(FileName),
+            ProtoName = filename:basename(FileName, FileExt),
+            MsgContainment = {{msg_containment, ProtoName},
+                              lists:sort(gpb_lib:msg_names(Defs1))},
+            {ok, [MsgContainment | Defs1]};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -1212,7 +1224,8 @@ possibly_prefix_suffix_msgs(Defs, Opts) ->
     if Prefix == "", Suffix == "", ToLowerOrSnake == false ->
             Defs;
        true ->
-            prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs)
+            Defs1 = prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs),
+            prefix_suffix_msg_containment(Prefix, Suffix, ToLowerOrSnake, Defs1)
     end.
 
 find_proto(_, []) ->
@@ -1301,6 +1314,19 @@ prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields, Defs) ->
               F
       end,
       Fields).
+
+prefix_suffix_msg_containment(Prefix, Suffix, ToLowerOrSnake, Defs) ->
+    lists:map(
+      fun({{msg_containment, Proto}, MsgNames}=Elem) ->
+              MsgNames1 = [prefix_suffix_name(
+                             maybe_prefix_by_proto(Name, Prefix, [Elem]),
+                             Suffix, ToLowerOrSnake, Name)
+                           || Name <- MsgNames],
+              {{msg_containment, Proto}, MsgNames1};
+         (OtherElem) ->
+              OtherElem
+      end,
+      Defs).
 
 prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name) ->
     Name1 = maybe_tolower_or_snake_name(Name, ToLowerOrSnake),

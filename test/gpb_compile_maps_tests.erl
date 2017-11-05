@@ -371,7 +371,10 @@ map_to_sorted_list_r(M) ->
 
 %% --- default values --------------
 
-default_value_handling_test() ->
+default_value_handling_test_() ->
+    {timeout,15,fun 'default_value_handling_test_aux'/0}.
+
+default_value_handling_test_aux() ->
     Proto = ["message m {",
              "  optional uint32 f1 = 1;",
              "  optional uint32 f2 = 2 [default=2];",

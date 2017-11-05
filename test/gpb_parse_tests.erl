@@ -56,7 +56,8 @@ parses_simple_oneof_test() ->
                        name=x,
                        rnum=2,
                        fields=[#field{name=a1, rnum=2},
-                               #field{name=a2, rnum=2}]}]}] =
+                               #field{name=a2, rnum=2}]}]},
+     {{msg_containment, _}, _}] =
         do_process_sort_defs(Defs).
 
 parses_default_value_test() ->
@@ -68,7 +69,7 @@ parses_default_value_test() ->
            "  optional uint32 x = 1 [default = 12];",
            "}"]).
 
-parses_default_value_for_byyes_test() ->
+parses_default_value_for_bytes_test() ->
     {ok, Defs} = parse_lines(
                    ["message m {",
                     "  optional bytes  b = 1 [default = '\001\002\003'];",
@@ -77,7 +78,8 @@ parses_default_value_for_byyes_test() ->
     [{{msg,m}, [#?gpb_field{name=b, type=bytes,
                             opts=[{default,<<1,2,3>>}]},
                 #?gpb_field{name=s, type=string,
-                            opts=[{default,"abc"}]}]}] =
+                            opts=[{default,"abc"}]}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
 parses_string_concatenation_test() ->
@@ -126,7 +128,8 @@ parses_relative_nested_messages_test() ->
      {{msg,'m1.m2.m3'}, [#?gpb_field{name=f5, type={msg,'m1.m2.m5'}},
                          #?gpb_field{name=f6, type={msg,'m1.m2.m5'}}]},
      {{msg,'m1.m2.m5'}, [#?gpb_field{name=fy}]},
-     {{msg,'m1.m5'},    [#?gpb_field{name=fx}]}] =
+     {{msg,'m1.m5'},    [#?gpb_field{name=fx}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Elems).
 
 parses_relative_nested_messages_with_oneof_test() ->
@@ -150,14 +153,16 @@ parses_relative_nested_messages_with_oneof_test() ->
                                  #?gpb_field{name=xa2, type={msg,'m1.m2'}}]}]},
      {{msg,'m1.m2'}, [#?gpb_field{}]},
      {{msg,'t1'},    []},
-     {{msg,'t1.t2'}, [#?gpb_field{}]}] =
+     {{msg,'t1.t2'}, [#?gpb_field{}]},
+     {{msg_containment,_}, [m1, 'm1.m2', t1, 't1.t2']}] =
         do_process_sort_defs(Elems).
 
 parses_circular_messages_test() ->
     {ok, Elems} = parse_lines(["message m1 {",
                                "  optional m1 f = 1;",
                                "}"]),
-    [{{msg,m1}, [#?gpb_field{name=f, type={msg,m1}}]}] =
+    [{{msg,m1}, [#?gpb_field{name=f, type={msg,m1}}]},
+     {{msg_containment,_}, [m1]}] =
         do_process_sort_defs(Elems).
 
 parses_enum_def_test() ->
@@ -205,7 +210,8 @@ parses_enum_option_test() ->
                                "  ee1 = 1;",
                                "  ee2 = 1;",
                                "}"]),
-    [{{enum,e1}, [{option, allow_alias, true}, {ee1,1},{ee2,1}]}] =
+    [{{enum,e1}, [{option, allow_alias, true}, {ee1,1},{ee2,1}]},
+     {{msg_containment,_}, []}] =
         do_process_sort_defs(Elems).
 
 parses_custom_option_test() ->
@@ -243,6 +249,9 @@ parses_custom_option_test() ->
      {{msg,'x.t'},[#?gpb_field{name=f1,opts=[{[my_f_option],true}]},
                    #?gpb_field{name=f2,opts=[{[my_f_option,x],false}]}]},
      {{msg,'x.t.s'},[]},
+     {{msg_containment,_}, ['google.protobuf.FieldOptions',
+                            'google.protobuf.MessageOptions']},
+     {{msg_containment,_}, ['x.t', 'x.t.s']},
      {{msg_options,'x.t'},[{[my_m_option],"t1"},
                            {[my_m_option],"t2"}]},
      {{msg_options,'x.t.s'},[{[my_m_option],"s"}]}] =
@@ -264,7 +273,8 @@ generates_correct_absolute_names_test() ->
                        #?gpb_field{name=z, type={msg,'m1.m2'}},
                        #?gpb_field{name=w, type={enum,'m1.e1'}}]},
      {{msg,'m1.m2'},  [#?gpb_field{name=x}]},
-     {{msg,m3},       [#?gpb_field{name=b, type={msg,'m1.m2'}}]}] =
+     {{msg,m3},       [#?gpb_field{name=b, type={msg,'m1.m2'}}]},
+     {{msg_containment,_}, [m1, 'm1.m2', m3]}] =
         do_process_sort_defs(Elems).
 
 generates_correct_absolute_names_2_test() ->
@@ -285,7 +295,8 @@ generates_correct_absolute_names_2_test() ->
      {{msg,'m1.m2'},    []},
      {{msg,'m1.m2.m3'}, [#?gpb_field{name=y}]},
      {{msg,m2},         []},
-     {{msg,'m2.m4'},    [#?gpb_field{name=x}]}] =
+     {{msg,'m2.m4'},    [#?gpb_field{name=x}]},
+     {{msg_containment,_}, [m1, 'm1.m2', 'm1.m2.m3', m2, 'm2.m4']}] =
         do_process_sort_defs(Elems).
 
 resolve_refs_test() ->
@@ -308,7 +319,8 @@ resolve_refs_test() ->
                        #?gpb_field{name=z, type={enum,'m1.e1'}},
                        #?gpb_field{name=w}]},
      {{msg,'m1.m2'},  [#?gpb_field{name=x}]},
-     {{msg,m3},       [#?gpb_field{name=b, type={msg,'m1.m2'}}]}] =
+     {{msg,m3},       [#?gpb_field{name=b, type={msg,'m1.m2'}}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Elems).
 
 resolve_map_valuetype_refs_test() ->
@@ -317,7 +329,8 @@ resolve_map_valuetype_refs_test() ->
                                "  map<string, m2> b = 1;",
                                "}"]),
     [{{msg,m1},       [#?gpb_field{name=b, type={map,string,{msg,'m1.m2'}}}]},
-     {{msg,'m1.m2'},  [#?gpb_field{name=x}]}] =
+     {{msg,'m1.m2'},  [#?gpb_field{name=x}]},
+     {{msg_containment,_}, [m1, 'm1.m2']}] =
         do_process_sort_defs(Elems).
 
 error_for_map_in_oneof_test() ->
@@ -351,7 +364,8 @@ resolve_refs_with_packages_test() ->
                          #?gpb_field{name=z, type={enum,'p1.m1.e1'}},
                          #?gpb_field{name=w}]},
      {{msg,'p1.m1.m2'}, [#?gpb_field{name=x}]},
-     {{msg,'p1.m3'},    [#?gpb_field{name=b, type={msg,'p1.m1.m2'}}]}] =
+     {{msg,'p1.m3'},    [#?gpb_field{name=b, type={msg,'p1.m1.m2'}}]},
+     {{msg_containment,_}, ['p1.m1', 'p1.m1.m2', 'p1.m3']}] =
         do_process_sort_defs(Elems, [use_packages]).
 
 package_can_appear_anywhere_toplevelwise_test() ->
@@ -369,7 +383,8 @@ package_can_appear_anywhere_toplevelwise_test() ->
                                 "package p1;"]),
     [{package, p1},
      {{msg,'p1.m1'}, [#?gpb_field{}]},
-     {{msg,'p1.m2'}, [#?gpb_field{}]}] = Defs =
+     {{msg,'p1.m2'}, [#?gpb_field{}]},
+     {{msg_containment,_}, _}] = Defs =
         do_process_sort_defs(Elems1, [use_packages]),
     ?assertEqual(Defs, do_process_sort_defs(Elems2, [use_packages])),
     ?assertEqual(Defs, do_process_sort_defs(Elems3, [use_packages])).
@@ -385,7 +400,8 @@ enumerates_msg_fields_test() ->
     [{{enum,'m1.e1'}, _},
      {{msg,m1},       [#?gpb_field{name=y, fnum=11, rnum=2},
                        #?gpb_field{name=z, fnum=12, rnum=3}]},
-     {{msg,'m1.m2'},  [#?gpb_field{name=x, fnum=1,  rnum=2}]}] =
+     {{msg,'m1.m2'},  [#?gpb_field{name=x, fnum=1,  rnum=2}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Elems).
 
 field_opt_normalization_test() ->
@@ -404,12 +420,14 @@ field_opt_normalization_test() ->
                  #?gpb_field{name=f4, opts=[deprecated]},
                  #?gpb_field{name=f5, opts=[]},
                  #?gpb_field{name=f6, opts=[deprecated]},
-                 #?gpb_field{name=f7, opts=[packed, {default,true}]}]}] =
+                 #?gpb_field{name=f7, opts=[packed, {default,true}]}]},
+     {{msg_containment,_}, [m1]}] =
         do_process_sort_several_defs([Defs]).
 
 parses_empty_msg_field_options_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1 []; }"]),
-    [{{msg,m1}, [#?gpb_field{name=f1, opts=[]}]}] = do_process_sort_defs(Defs).
+    [{{msg,m1}, [#?gpb_field{name=f1, opts=[]}]},
+     {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
 
 parses_and_ignores_enum_field_options_test() ->
     {ok,_Defs} = parse_lines(["enum e1 { a=1 [x=y]; }"]).
@@ -431,7 +449,8 @@ parses_msg_extensions_test() ->
      {{extensions,m1},[{251,251},{252,252}]},
      {{extensions,'m1.m2'},[{233,233}]},
      {{msg,m1},      [#?gpb_field{name=f1}]},
-     {{msg,'m1.m2'}, [#?gpb_field{name=f2}]}] =
+     {{msg,'m1.m2'}, [#?gpb_field{name=f2}]},
+     {{msg_containment,_}, [m1, 'm1.m2']}] =
         do_process_sort_defs(Defs).
 
 parses_extending_msgs_test() ->
@@ -446,7 +465,8 @@ parses_extending_msgs_test() ->
      {{msg,m1},       [#?gpb_field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
                                    occurrence=required},
                        #?gpb_field{name=f2, fnum=2, rnum=3, opts=[],
-                                   occurrence=optional}]}] =
+                                   occurrence=optional}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
 parses_extend_scope_rules_test() ->
@@ -489,7 +509,8 @@ parses_extend_scope_rules_test() ->
        #?gpb_field{name=e22, fnum=202, occurrence=optional}]},
      {{msg,'m1.m1.m1'},
       [#?gpb_field{name=f3,  fnum=3,   occurrence=required},
-       #?gpb_field{name=e31, fnum=301, occurrence=optional}]}] =
+       #?gpb_field{name=e31, fnum=301, occurrence=optional}]},
+     {{msg_containment,_}, [m1, 'm1.m1', 'm1.m1.m1']}] =
         do_process_sort_defs(Defs).
 
 parses_extending_msgs_with_nested_msg_test() ->
@@ -509,7 +530,8 @@ parses_extending_msgs_with_nested_msg_test() ->
                        #?gpb_field{name=ext_m2, fnum=200, rnum=3, opts=[],
                                    occurrence=optional, type={msg, m2}}]},
      {{msg,m2},       [#?gpb_field{name=num, fnum=1, rnum=2, opts=[],
-                                   occurrence=optional}]}] =
+                                   occurrence=optional}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
 parses_nested_extending_msgs_in_package_test() ->
@@ -527,7 +549,8 @@ parses_nested_extending_msgs_in_package_test() ->
       [#?gpb_field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
                    occurrence=required},
        #?gpb_field{name=f2, fnum=2, rnum=3, opts=[],
-                   occurrence=optional}]}] =
+                   occurrence=optional}]},
+     {{msg_containment,_}, ['p1.p2.m1']}] =
         do_process_sort_defs(Defs, [use_packages]).
 
 extend_msg_several_times_test() ->
@@ -547,7 +570,9 @@ extend_msg_several_times_test() ->
       [#?gpb_field{name=f1, fnum=1, rnum=2, type=uint32, occurrence=required},
        #?gpb_field{name=f2, fnum=202, rnum=3, type=bool, occurrence=optional},
        #?gpb_field{name=f3, fnum=203, rnum=4, type=string, occurrence=optional}
-      ]}] = do_process_sort_defs(Defs, []).
+      ]},
+     {{msg_containment,_}, _}] =
+        do_process_sort_defs(Defs, []).
 
 extend_msg_in_other_package_test() ->
     AllDefs = parse_sort_several_file_lines(
@@ -577,7 +602,10 @@ extend_msg_in_other_package_test() ->
        #?gpb_field{name=b2, fnum=101, type={msg,'foo.fm2'},
                    occurrence=optional}]},
      {{msg,'foo.fm2'},
-      [#?gpb_field{name=g, fnum=1, type=bool, occurrence=required}]}] =
+      [#?gpb_field{name=g, fnum=1, type=bool, occurrence=required}]},
+     {{msg_containment,"bar"}, _}, % for bar.proto
+     {{msg_containment,"foo"}, _}  % for foo.proto
+    ] =
         AllDefs.
 
 extending_and_resolving_ref_to_msg_in_enclosing_package_test() ->
@@ -605,7 +633,9 @@ extending_and_resolving_ref_to_msg_in_enclosing_package_test() ->
       [#?gpb_field{name=g, fnum=1, type=string, occurrence=optional},
        #?gpb_field{name=h, fnum=2, type={msg,'p.err'}, occurrence=optional},
        #?gpb_field{name=errs, fnum=200, type={msg,'p.err'},
-                   occurrence=repeated}]}] =
+                   occurrence=repeated}]},
+     {{msg_containment,"p"}, _},
+     {{msg_containment,"y"}, _}] =
         AllDefs.
 
 scope_when_resolving_extend_field_refs_test() ->
@@ -632,7 +662,9 @@ scope_when_resolving_extend_field_refs_test() ->
      {{extensions,'a.Foo'},[{200,max}]},
      {{msg,'a.Foo'}, [#?gpb_field{name=id},
                       #?gpb_field{name=b, type={msg,'b.Bar'}}]},
-     {{msg,'b.Bar'}, [#?gpb_field{name=id}]}] =
+     {{msg,'b.Bar'}, [#?gpb_field{name=id}]},
+     {{msg_containment,"a"}, _},
+     {{msg_containment,"b"}, _}] =
         AllDefs.
 
 group_test() ->
@@ -649,7 +681,9 @@ group_test() ->
                                   opts=[]}]},
      {{msg,m1},[#?gpb_field{name=f,type={msg,'m2'}},
                 #?gpb_field{name=g,type={group,'m1.g'}}]},
-     {{msg,m2},[#?gpb_field{name=ff}]}] =
+     {{msg,m2},[#?gpb_field{name=ff}]},
+     {{msg_containment,_}, [m1,m2]} % groups not included
+    ] =
         do_process_sort_defs(Defs).
 
 message_def_nested_in_group_test() ->
@@ -666,7 +700,8 @@ message_def_nested_in_group_test() ->
                                   opts=[]}]},
      {{msg,m1},[#?gpb_field{name=f,type={msg,'m1.m2'}},
                 #?gpb_field{name=g,type={group,'m1.g'}}]},
-     {{msg,'m1.m2'},[#?gpb_field{name=ff}]}] =
+     {{msg,'m1.m2'},[#?gpb_field{name=ff}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
 parses_service_test() ->
@@ -677,6 +712,7 @@ parses_service_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
+     {{msg_containment,_}, _},
      {{service,s1},[#?gpb_rpc{name=req, input=m1, output=m2}]}] =
         do_process_sort_defs(Defs).
 
@@ -691,6 +727,7 @@ parses_multiple_services_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
+     {{msg_containment,_}, _},
      {{service,s1},[#?gpb_rpc{name=req,  input=m1, output=m2}]},
      {{service,s2},[#?gpb_rpc{name=req2, input=m2, output=m1}]}] =
         do_process_sort_defs(Defs).
@@ -709,6 +746,7 @@ parses_rpc_streams_and_options_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
+     {{msg_containment,_}, _},
      {{service,s1},
       [#?gpb_rpc{name=r1, input_stream=false, output_stream=false},
        #?gpb_rpc{name=r2, input_stream=true, output_stream=false},
@@ -729,26 +767,31 @@ parses_service_ignores_empty_method_option_braces_test() ->
                              "}"]),
     [{{msg,m1}, _},
      {{msg,m2}, _},
+     {{msg_containment,_}, _},
      {{service,s1},[#?gpb_rpc{name=req, input=m1, output=m2}]}] =
         do_process_sort_defs(Defs).
 
 
 parses_empty_toplevel_statement_test() ->
     {ok,Defs} = parse_lines(["; message m1 { required uint32 f1=1; }; ; "]),
-    [{{msg,m1}, _}] = do_process_sort_defs(Defs).
+    [{{msg,m1}, _},
+     {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
 
 parses_empty_message_statement_test() ->
     {ok,Defs} = parse_lines(["message m1 { ; ; required uint32 f1=1;;; }"]),
-    [{{msg,m1}, [#?gpb_field{name=f1}]}] = do_process_sort_defs(Defs).
+    [{{msg,m1}, [#?gpb_field{name=f1}]},
+     {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
 
 parses_empty_enum_statement_test() ->
     {ok,Defs} = parse_lines(["enum e1 { ; ; ee1=1;;; }"]),
-    [{{enum,e1}, [{ee1,1}]}] = do_process_sort_defs(Defs).
+    [{{enum,e1}, [{ee1,1}]},
+     {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
 
 parses_empty_service_statement_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
                              "service s1 { ; ; rpc r1(m1) returns (m1);;; }"]),
     [{{msg,m1}, _},
+     {{msg_containment,_}, _},
      {{service,s1},[#?gpb_rpc{name=r1, input=m1, output=m1}]}] =
         do_process_sort_defs(Defs).
 
@@ -759,6 +802,7 @@ parses_empty_service_statement_method_options_test() ->
                              "service s2 { rpc r5(m1) returns (m1){}",
                              "             rpc r6(m1) returns (m1){} }"]),
     [{{msg,m1}, _},
+     {{msg_containment,_}, _},
      {{service,s1},[#?gpb_rpc{name=r1, input=m1, output=m1},
                     #?gpb_rpc{name=r2, input=m1, output=m1}]},
      {{service,s2},[#?gpb_rpc{name=r5, input=m1, output=m1},
@@ -775,7 +819,8 @@ proto3_no_occurrence_test() ->
      {syntax,"proto3"},
      {{msg,m1},
       [#?gpb_field{name=f1,fnum=1,occurrence=optional},
-       #?gpb_field{name=f2,fnum=2,occurrence=repeated}]}] =
+       #?gpb_field{name=f2,fnum=2,occurrence=repeated}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
 proto3_sub_msgs_gets_occurrence_optional_test() ->
@@ -791,7 +836,8 @@ proto3_sub_msgs_gets_occurrence_optional_test() ->
       [#?gpb_field{name=f1,fnum=1,type={msg,s1},occurrence=optional},
        #?gpb_field{name=f2,fnum=2,type={msg,s1},occurrence=repeated}]},
      {{msg,s1},
-      [#?gpb_field{name=f1,fnum=1,type=uint32,occurrence=optional}]}] =
+      [#?gpb_field{name=f1,fnum=1,type=uint32,occurrence=optional}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
 proto3_no_repeated_are_packed_by_default_test() ->
@@ -808,8 +854,8 @@ proto3_no_repeated_are_packed_by_default_test() ->
       [#?gpb_field{name=f2,fnum=2,occurrence=repeated,opts=[packed]},
        #?gpb_field{name=f3,fnum=3,occurrence=repeated,opts=[]},
        #?gpb_field{name=f4,fnum=4,occurrence=repeated,opts=[packed]},
-       #?gpb_field{name=f5,fnum=5,occurrence=repeated,opts=[packed]}
-      ]}] =
+       #?gpb_field{name=f5,fnum=5,occurrence=repeated,opts=[packed]}]},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
 proto3_only_numeric_scalars_are_packed_test() ->
@@ -860,7 +906,8 @@ proto3_only_numeric_scalars_are_packed_test() ->
        #?gpb_field{name=subf, occurrence=repeated, opts=[]},
        #?gpb_field{name=mapf,                      opts=[]}
       ]},
-     {{msg,subm},_}] =
+     {{msg,subm},_},
+     {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
 mixing_proto2_and_proto3_test() ->
@@ -881,7 +928,9 @@ mixing_proto2_and_proto3_test() ->
       [#?gpb_field{name=f1,type={msg,m2}},
        #?gpb_field{name=f2,occurrence=repeated,opts=[packed]}]},
      {{msg,m2},
-      [#?gpb_field{name=f3,occurrence=repeated,opts=[]}]}] =
+      [#?gpb_field{name=f3,occurrence=repeated,opts=[]}]},
+     {{msg_containment,_}, _},
+     {{msg_containment,_}, _}] =
         do_process_sort_several_defs([Defs1, Defs2]).
 
 proto3_reserved_numbers_and_names_test() ->
@@ -899,6 +948,7 @@ proto3_reserved_numbers_and_names_test() ->
      {syntax,"proto3"},
      {{msg,m1},      [#?gpb_field{name=f1}]},
      {{msg,'m1.m2'}, [#?gpb_field{name=f2}]},
+     {{msg_containment,_}, _},
      {{reserved_names,m1},       ["foo","bar"]},
      {{reserved_numbers,m1},     [2,15,{9,11}]},
      {{reserved_numbers,'m1.m2'},[17]}] =
@@ -921,8 +971,11 @@ can_prefix_record_names_test() ->
                               "}",
                               "extend m1 { optional uint32 fm2=2; }"]),
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
-     {{msg,p_m1}, [#?gpb_field{name=f1, type={enum,e1}}, #?gpb_field{name=fm2}]},
-     {{msg,p_m2}, [#?gpb_field{type={msg,p_m1}}]}, %% type is a msg: to be prefixed
+     {{msg,p_m1}, [#?gpb_field{name=f1, type={enum,e1}},
+                   #?gpb_field{name=fm2}]},
+     %% type is a msg: to be prefixed
+     {{msg,p_m2}, [#?gpb_field{type={msg,p_m1}}]},
+     {{msg_containment,_}, _},
      {{service,s1}, %% not prefixed
       [#?gpb_rpc{name=req,
                  input=p_m1,  %% both argument ...
@@ -930,30 +983,32 @@ can_prefix_record_names_test() ->
       ]}] = do_process_sort_defs(Defs, [{msg_name_prefix, "p_"}]).
 
 can_prefix_record_names_by_proto_test() ->
-    {ok, Defs} = parse_lines(["enum    e1 {a=1; b=2;}",
-                              "message m1 {required e1 f1=1;}",
-                              "message m2 {required m1 f2=1;}",
-                              "message m3 {map<string, m1> m=1;}",
-                              "service s1 {",
-                              "  rpc req(m1) returns (m2) {};",
-                              "}",
-                              "extend m1 { optional uint32 fm2=2; }"]),
-    Defs1 = [{{msg_containment, "proto1"}, [['.',m1]]},
-             {{msg_containment, "proto2"}, [['.',m2]]} | Defs],
+    Defs = parse_sort_several_file_lines(
+             [{"proto1.proto", ["enum    e1 {a=1; b=2;}",
+                                "message m1 {required e1 f1=1;}"]},
+              {"proto2.proto", ["message m2 {required m1 f2=1;}",
+                                "service s1 {",
+                                "  rpc req(m1) returns (m2) {};",
+                                "}",
+                                "extend m1 { optional uint32 fm2=2; }"]},
+              {"proto3.proto", ["message m3 {map<string, m1> m=1;}"]}],
+             [{msg_name_prefix,
+               {by_proto, [{proto1, "p1_"},
+                           {proto2, "p2_"}]}}]),
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
-     {{msg,m3},
-      [#?gpb_field{name=m, type={map,string,{msg,p1_m1}}}]},
-     {{msg,p1_m1}, [#?gpb_field{name=f1, type={enum,e1}}, #?gpb_field{name=fm2}]},
-     {{msg,p2_m2}, [#?gpb_field{type={msg,p1_m1}}]}, %% type is a msg: to be prefixed
-     {{msg_containment,"proto1"},[m1]},
-     {{msg_containment,"proto2"},[m2]},
+     {{msg,m3},   [#?gpb_field{name=m, type={map,string,{msg,p1_m1}}}]},
+     {{msg,p1_m1}, [#?gpb_field{name=f1, type={enum,e1}},
+                    #?gpb_field{name=fm2}]},
+     %% type is a msg: to be prefixed
+     {{msg,p2_m2}, [#?gpb_field{type={msg,p1_m1}}]},
+     {{msg_containment,"proto1"}, [p1_m1]},
+     {{msg_containment,"proto2"}, [p2_m2]},
+     {{msg_containment,"proto3"}, [m3]},
      {{service,s1}, %% not prefixed
       [#?gpb_rpc{name=req,
                  input=p1_m1,  %% both argument ...
                  output=p2_m2} %% ... and result msgs to be prefixed
-      ]}] = do_process_sort_defs(Defs1, [{msg_name_prefix, {by_proto,
-                                                            [{proto1, "p1_"},
-                                                             {proto2, "p2_"}]}}]).
+      ]}] = Defs.
 
 can_suffix_record_names_test() ->
     {ok, Defs} = parse_lines(["enum    e1 {a=1; b=2;}",
@@ -964,8 +1019,11 @@ can_suffix_record_names_test() ->
                               "}",
                               "extend m1 { optional uint32 fm2=2; }"]),
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
-     {{msg,m1_s}, [#?gpb_field{name=f1, type={enum,e1}}, #?gpb_field{name=fm2}]},
-     {{msg,m2_s}, [#?gpb_field{type={msg,m1_s}}]}, %% type is a msg: to be prefixed
+     {{msg,m1_s}, [#?gpb_field{name=f1, type={enum,e1}},
+                   #?gpb_field{name=fm2}]},
+     %% type is a msg: to be suffixed
+     {{msg,m2_s}, [#?gpb_field{type={msg,m1_s}}]},
+     {{msg_containment,_}, [m1_s, m2_s]},
      {{service,s1}, %% not prefixed
       [#?gpb_rpc{name=req,
                  input=m1_s,  %% both argument ...
@@ -982,6 +1040,7 @@ can_tolower_record_names_test() ->
     [{{msg,msg1}, [#?gpb_field{name=f1, type={msg,msg2}},
                    #?gpb_field{name=fm2}]},
      {{msg,msg2}, [#?gpb_field{name=g1}]},
+     {{msg_containment,_}, [msg1, msg2]},
      {{service,svc1},
       [#?gpb_rpc{name=req,
                  input=msg1,  %% both argument ...
@@ -996,7 +1055,8 @@ can_tolower_record_names_with_oneof_test() ->
                               "  }",
                               "}"]),
     [{{msg,msg1}, [#gpb_oneof{fields=[#?gpb_field{name=a,type={msg,msg1}},
-                                      #?gpb_field{name=b}]}]}] =
+                                      #?gpb_field{name=b}]}]},
+     {{msg_containment,_}, [msg1]}] =
         do_process_sort_defs(Defs, [msg_name_to_lower]).
 
 can_tolower_record_names_with_map_test() ->
@@ -1007,7 +1067,8 @@ can_tolower_record_names_with_map_test() ->
                               "  map<string,Msg1> m = 1;",
                               "}"]),
     [{{msg,msg1}, [#?gpb_field{}]},
-     {{msg,msg2}, [#?gpb_field{type={map,string,{msg,msg1}}}]}] =
+     {{msg,msg2}, [#?gpb_field{type={map,string,{msg,msg1}}}]},
+     {{msg_containment,_}, [msg1, msg2]}] =
         do_process_sort_defs(Defs, [msg_name_to_lower]).
 
 can_to_snake_record_names_test() ->
@@ -1020,6 +1081,7 @@ can_to_snake_record_names_test() ->
     [{{msg,msg_name_1}, [#?gpb_field{name=f1, type={msg,msg_name_2}},
                    #?gpb_field{name=fm2}]},
      {{msg,msg_name_2}, [#?gpb_field{name=g1}]},
+     {{msg_containment,_}, [msg_name_1, msg_name_2]},
      {{service,svc_name_1},
       [#?gpb_rpc{name=req,
                  input=msg_name_1,  %% both argument ...
@@ -1038,6 +1100,7 @@ can_tolower_record_names_with_packages_test() ->
      {{msg,'pkg1.msg1'}, [#?gpb_field{name=f1, type={msg,'pkg1.msg2'}},
                           #?gpb_field{name=fm2}]},
      {{msg,'pkg1.msg2'}, [#?gpb_field{name=g1}]},
+     {{msg_containment,_}, ['pkg1.msg1','pkg1.msg2']},
      {{service,'pkg1.svc1'},
       [#?gpb_rpc{name=req,
                  input='pkg1.msg1',  %% both argument ...
@@ -1221,15 +1284,17 @@ is_present(Str, ToTest) -> string:str(Str, ToTest) > 0.
 
 %% test helpers
 parse_sort_several_file_lines(ProtoLines, Opts) ->
-    {AllProtoNames, AllLines} = lists:unzip(ProtoLines),
+    {AllProtoNames, _AllLines} = lists:unzip(ProtoLines),
     AllProtoBases = lists:map(fun filename:basename/1, AllProtoNames),
     AllDefs1 = [begin
-                    {ok, Defs1} = parse_lines(filter_away_import_lines(
-                                                Lines, AllProtoBases)),
-                    {ok, Defs2} = gpb_parse:post_process_one_file(Defs1, Opts),
+                    {ok, Defs1} = parse_lines(
+                                    filter_away_import_lines(
+                                      Lines, AllProtoBases)),
+                    {ok, Defs2} = gpb_parse:post_process_one_file(
+                                    FName, Defs1, Opts),
                     Defs2
                 end
-                || Lines <- AllLines],
+                || {FName, Lines} <- ProtoLines],
     {ok, AllDefs2} = gpb_parse:post_process_all_files(
                        lists:append(AllDefs1),
                        Opts),
@@ -1278,7 +1343,7 @@ do_process_sort_defs(Defs, Opts) ->
     lists:sort(Defs2).
 
 post_process(Elems, Opts) ->
-    {ok, Elems2} = gpb_parse:post_process_one_file(Elems, Opts),
+    {ok, Elems2} = gpb_parse:post_process_one_file("y", Elems, Opts),
     gpb_parse:post_process_all_files(Elems2, Opts).
 
 do_process_sort_several_defs(ListOfDefs) ->
@@ -1288,7 +1353,7 @@ do_process_sort_several_defs(ListOfDefs, Opts) ->
     AllElems =
         lists:append(
           [begin
-               {ok, Elems2} = gpb_parse:post_process_one_file(Elems, Opts),
+               {ok, Elems2} = gpb_parse:post_process_one_file("z", Elems, Opts),
                Elems2
            end
            || Elems <- ListOfDefs]),

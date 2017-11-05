@@ -3261,6 +3261,25 @@ any_translation_options_test() ->
           ["-any_translate", "e=me:fe,d=md:fd,v=mv:fv",
            "x.proto"]).
 
+no_type_specs_test() ->
+    {ok, {[{type_specs, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-no_type", "x.proto"]).
+
+dashes_and_underscores_are_interchangeable_in_options_test() ->
+    {ok, {[{target_erlang_version,18}, {target_erlang_version,18}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-for-version", "18", % norm
+                                         "-for_version", "18", % also accepted
+                                         "x.proto"]),
+    {ok, {[{erlc_compile_options, "debug_info, inline_list_funcs"},
+           {erlc_compile_options, "debug_info, inline_list_funcs"}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-erlc_compile_options", "debug_info, inline_list_funcs", % norm
+           "-erlc-compile-options", "debug_info, inline_list_funcs", % ok too
+           "x.proto"]).
+
+
 %% --- auxiliaries -----------------
 
 %% vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv

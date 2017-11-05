@@ -157,6 +157,7 @@
 %% run-time for the code-generating code) to this module.
 %% The generated code has no dependency to this module, though.
 %% @end
+%% @private
 
 -module(gpb_codegen).
 -export([parse_transform/2]).
@@ -164,6 +165,7 @@
 -export([runtime_expr_transform/1, runtime_expr_transform/2]).
 -export([runtime_exprs_transform/2]).
 -export([erl_prettypr_format_nl/1]).
+-export([with_increased_backtrace_depth/1]).
 
 %% Exported just to be able to give a (more informative) error than undef
 -export([mk_fn/2, mk_fn/3, format_fn/2, format_fn/3]).
