@@ -78,6 +78,7 @@
 -export([get_defs_as_maps_or_records/1]).
 -export([get_epb_functions_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
+-export([target_has_lists_join/1]).
 -export([proto2_type_default/3]).
 -export([proto3_type_default/3]).
 
@@ -98,6 +99,16 @@
 -export([split_indent_iolist/2]).
 -export([iolist_to_utf8_or_escaped_binary/2]).
 -export([nowarn_dialyzer_attr/3]).
+
+-export([comma_join/1]).
+-export([nl_join/1]).
+-export([or_join/1]).
+-export([dot_join/1]).
+-export([is_substr/2]).
+-export([string_slice/2]).
+-export([string_lexemes/2]).
+-export([lowercase/1]).
+-export([uppercase/1]).
 
 -include("../include/gpb.hrl").
 
@@ -543,7 +554,7 @@ is_current_major_version_at_least(VsnMin) ->
             try list_to_integer(RelStr) of
                 N when is_integer(N) -> N >= VsnMin
             catch error:badarg ->
-                    [NStr | _] = string:tokens(RelStr, ".-"),
+                    [NStr | _] = string_lexemes(RelStr, ".-"),
                     try list_to_integer(NStr) of
                         N when is_integer(N) -> N >= VsnMin
                     catch error:badarg ->
@@ -554,6 +565,9 @@ is_current_major_version_at_least(VsnMin) ->
 
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
+
+target_has_lists_join(Opts) ->
+    is_target_major_version_at_least(19, Opts).
 
 proto2_type_default(Type, Defs, Opts) ->
     type_default(Type, Defs, Opts, fun gpb:proto2_type_default/2).
@@ -708,3 +722,63 @@ nowarn_dialyzer_attr(FnName,Arity,Opts) ->
 
 can_do_dialyzer_attr(Opts) ->
     is_target_major_version_at_least(18, Opts).
+
+-ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
+
+comma_join(Elements) ->
+    lists:append(lists:join(", ", Elements)).
+
+nl_join(Elements) ->
+    lists:append(lists:join("\n", Elements)).
+
+or_join(Alternatives) ->
+    lists:append(lists:join(" | ", Alternatives)).
+
+dot_join(Alternatives) ->
+    lists:append(lists:join(".", Alternatives)).
+
+is_substr(SearchPattern, String) ->
+    string:find(String, SearchPattern) /= nomatch.
+
+string_slice(String, Start) ->
+    string:slice(String, Start).
+
+string_lexemes(String, Separators) ->
+    string:lexemes(String, Separators).
+
+lowercase(Str) ->
+    string:lowercase(Str).
+
+uppercase(Str) ->
+    string:uppercase(Str).
+
+-else.  % NO_HAVE_ERL20_STR_FUNCTIONS
+
+comma_join(Elements) ->
+    string:join(Elements, ", ").
+
+nl_join(Elements) ->
+    string:join(Elements, "\n").
+
+or_join(Alternatives) ->
+    string:join(Alternatives, " | ").
+
+dot_join(Alternatives) ->
+    string:join(Alternatives, ".").
+
+is_substr(SearchPattern, String) ->
+    string:str(String, SearchPattern) > 0.
+
+string_slice(String, Start0) ->
+    string:substr(String, Start0 + 1).
+
+string_lexemes(String, Separators) ->
+    string:tokens(String, Separators).
+
+lowercase(Str) ->
+    string:to_lower(Str).
+
+uppercase(Str) ->
+    string:to_upper(Str).
+
+-endif. % NO_HAVE_ERL20_STR_FUNCTIONS

@@ -1280,7 +1280,7 @@ verify_strings_present(Str, StringsToTestFor) ->
         Missing -> erlang:error(missing_substring, [Missing, Str])
     end.
 
-is_present(Str, ToTest) -> string:str(Str, ToTest) > 0.
+is_present(Str, ToTest) -> gpb_lib:is_substr(ToTest, Str).
 
 %% test helpers
 parse_sort_several_file_lines(ProtoLines, Opts) ->
@@ -1314,7 +1314,7 @@ is_import_line("import \""++_) -> true;
 is_import_line(_) -> false.
 
 protobase_by_importline(Line) ->
-    ["import"++_, ImportTxt | _] = string:tokens(Line, "\""),
+    ["import"++_, ImportTxt | _] = gpb_lib:string_lexemes(Line, "\""),
     filename:basename(ImportTxt).
 
 

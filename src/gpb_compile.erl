@@ -1109,7 +1109,7 @@ parse_opt(Opt, {OptName, 'string_maybe_appended()', OptTag, _Descr}, Rest) ->
             {error, "Missing argument for option -" ++ OptName};
         _ ->
             true = lists:prefix(OptName, Opt),
-            OptArg = string:substr(Opt, length(OptName)+1),
+            OptArg = gpb_lib:string_slice(Opt, length(OptName)),
             {ok, {{OptTag, OptArg}, Rest}}
     end;
 parse_opt(_, {_OptName, undefined, OptTag, _Descr}, Rest) ->
@@ -1306,7 +1306,7 @@ opt_no_type_specs(OptTag, Rest) ->
 
 opt_any_translate(OptTag, [S | Rest]) ->
     try
-        Ts = string:tokens(S, ","),
+        Ts = gpb_lib:string_lexemes(S, ","),
         Opt = {OptTag, [opt_any_translate_mfa(T) || T <- Ts]},
         {ok, {Opt, Rest}}
     catch throw:{badopt,ErrText} ->
@@ -1321,7 +1321,7 @@ opt_any_translate_mfa("v="++MF) -> {verify,opt_mf_str_verify(MF)};
 opt_any_translate_mfa(X) -> throw({badopt,"Invalid translation spec: "++X}).
 
 opt_mf_str(S, Arity) ->
-    case string:tokens(S, ":") of
+    case gpb_lib:string_lexemes(S, ":") of
         [M,F] -> {list_to_atom(M),list_to_atom(F),opt_arg_template(Arity)};
         _     -> throw({badopt,"Invalid Mod:Fn spec: "++S})
     end.
@@ -1924,10 +1924,9 @@ format_hrl(Mod, Defs, Opts) ->
        "\n",
        ?f("-define(~p, \"~s\").~n", [ModVsn, gpb:version_as_string()]),
        "\n",
-       string:join(
+       gpb_lib:nl_join(
          [gpb_gen_types:format_msg_record(Msg, Fields, Opts, Defs)
-          || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)],
-         "\n"),
+          || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)]),
        "\n",
        ?f("-endif.~n")],
       Opts).
@@ -2109,7 +2108,7 @@ record_to_text(RecordName, Fields, DefaultR) ->
          end
          || {FName,Default} <- lists:zip(Fields, tl(tuple_to_list(DefaultR)))],
     ?f("-record(~p, {~s}).~n",
-       [RecordName, string:join(FieldTexts, ", ")]).
+       [RecordName, gpb_lib:comma_join(FieldTexts)]).
 
 combine_erl_and_possible_nif(ErlCompilationResult, '$not_generated'=_Nif) ->
     ErlCompilationResult;

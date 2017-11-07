@@ -1067,9 +1067,11 @@ verify_optional(Value, Type, Path, MsgDefs) ->
     verify_value_2(Value, Type, Path, MsgDefs).
 
 mk_type_error(Error, ValueSeen, Path) ->
-    Path2 = if Path == [] -> top_level;
-               true -> list_to_atom(string:join([atom_to_list(E) || E <- Path],
-                                                "."))
+    Path2 = if Path == [] ->
+                    top_level;
+               true ->
+                    PStr = gpb_lib:dot_join([atom_to_list(E) || E <- Path]),
+                    list_to_atom(PStr)
             end,
     erlang:error({gpb_type_error, {Error, [{value, ValueSeen},{path, Path2}]}}).
 

@@ -372,7 +372,7 @@ mk_attr(AttrName, AttrValue) ->
 
 mk_export_attr(Exports) ->
     Fns = [io_lib:format("~p/~w", [F,A]) || {F,A} <- Exports],
-    S = ["-export([", string:join(Fns, ","), "])."],
+    S = ["-export([", gpb_lib:comma_join(Fns), "])."],
     {ok,Tokens,_} = erl_scan:string(lists:flatten(S)),
     {ok,Form} = erl_parse:parse_form(Tokens),
     Form.

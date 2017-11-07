@@ -11,7 +11,19 @@ NoHaveRandOpts = try rand:uniform() of
                  catch error:undef -> [{d,'NO_HAVE_RAND',true}]
                  end.
 
-ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts.
+%% In Erlang 21, a number of string module functions are deprecated:
+%%   string:join/2 -> lists:join/2       (appeared in Erlang 19)
+%%   string:str/2  -> string:find/2      (appeared in Erlang 20)
+%%   string:substr/2 -> string:slice/2   (appeared in Erlang 20)
+%%   string:tokens/2 -> string:lexemes/2 (appeared in Erlang 20)
+%%   string:{to_lower,to_upper}/1 ->  and string:{lowercase,uppercase}/1
+NoHaveErl20StrFunctions =
+                 try string:find("abc", "b") of
+                     "bc" -> []
+                 catch error:undef -> [{d,'NO_HAVE_ERL20_STR_FUNCTIONS'}]
+                 end.
+
+ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions.
 
 [{require_otp_vsn, ".*"},
 

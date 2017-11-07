@@ -349,16 +349,14 @@ defs_as_maps_means_no_include_of_gpb_hrl_test() ->
     %% Check that (only) one -include line is present:
     %% "dummy_defs_as_maps.hrl" (since no option msgs_as_maps)
     %% but not: "gpb.hrl" (since we've option defs_as_maps)
-    Lines = string:tokens(binary_to_list(Bin), "\n"),
+    Lines = gpb_lib:string_lexemes(binary_to_list(Bin), "\n"),
     [Inc] = lines_matching("-include", Lines),
-    {true,false,_} = {is_substr("dummy_defs_as_maps.hrl",Inc),
-                      is_substr("gpb.hrl", Inc),
+    {true,false,_} = {gpb_lib:is_substr("dummy_defs_as_maps.hrl",Inc),
+                      gpb_lib:is_substr("gpb.hrl", Inc),
                       Inc}.
 
 lines_matching(Text, Lines) ->
-    [Line || Line <- Lines, is_substr(Text, Line)].
-
-is_substr(Needle, Haystack) ->  string:str(Haystack, Needle) > 0.
+    [Line || Line <- Lines, gpb_lib:is_substr(Text, Line)].
 
 map_to_sorted_list(M) ->
     lists:sort(maps:to_list(M)).
@@ -438,11 +436,11 @@ type_syntax_for_required_fields_test() ->
 
     S1 = compile_to_string(Proto, [{target_erlang_version,18} | CommonOpts]),
     T1 = get_type(S1),
-    [true, false] = [is_substr(X, T1) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, T1) || X <- ["=>", ":="]],
 
     S2 = compile_to_string(Proto, [{target_erlang_version,19} | CommonOpts]),
     T2 = get_type(S2),
-    [false, true] = [is_substr(X, T2) || X <- ["=>", ":="]].
+    [false, true] = [gpb_lib:is_substr(X, T2) || X <- ["=>", ":="]].
 
 compile_to_string(Proto, Opts) ->
     Self = self(),
@@ -457,7 +455,7 @@ compile_to_string(Proto, Opts) ->
     {data,Bin} = ?recv({data,_}),
     binary_to_list(Bin).
 
-get_type(S) -> get_type_2(string:tokens(S, "\n")).
+get_type(S) -> get_type_2(gpb_lib:string_lexemes(S, "\n")).
 
 get_type_2(["-type"++_=S | Rest]) -> get_type_3(Rest, [S]);
 get_type_2([_ | Rest])            -> get_type_2(Rest);
@@ -466,10 +464,10 @@ get_type_2([])                    -> "".
 get_type_3([Line | Rest], Acc) ->
     case Line of
         "  "++_ -> get_type_3(Rest, [Line | Acc]);
-        _       -> string:join(lists:reverse(Acc), "\n")
+        _       -> gpb_lib:nl_join(lists:reverse(Acc))
     end;
 get_type_3([], Acc) ->
-    string:join(lists:reverse(Acc), "\n").
+    gpb_lib:nl_join(lists:reverse(Acc)).
 
 %% merge ------------------------------------------------
 merge_maps_with_opts_present_undefined_test() ->

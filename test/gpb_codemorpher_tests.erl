@@ -136,7 +136,7 @@ explode_record_fields_to_params_test() ->
          end,
     {module,M} = ls(?dummy_mod,
                     [["-record(r, {",
-                      string:join([atom_to_list(N) || N <- FieldNames],","),
+                      gpb_lib:comma_join([atom_to_list(N) || N <- FieldNames]),
                       "})."],
                      {F1, ["fn_1(Bin) ->
                                  fn_x(Bin, #r{})."]},
@@ -166,7 +166,7 @@ explode_record_fields_to_params_with_passthrough_test() ->
          end,
     {module,M} = ls(?dummy_mod,
                     [["-record(r, {",
-                      string:join([atom_to_list(N) || N <- FieldNames],","),
+                      gpb_lib:comma_join([atom_to_list(N) || N <- FieldNames]),
                       "})."],
                      {F1, ["fn_1(Bin) ->
                                  fastpath(Bin, #r{})."]},
@@ -296,7 +296,7 @@ rework_records_to_maps_unset_optionals_present_undefined_test() ->
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",
-                     %% string:join([atom_to_list(N) || N <- FieldNames],","),
+                     %% comma_join([atom_to_list(N) || N <- FieldNames]),
                      %% "})."],
                      {F, ["fn_1(Bin) ->
                                 fn_x(Bin, #r{a=undefined, b=0,
@@ -356,7 +356,7 @@ rework_records_to_maps_unset_optionals_omitted_test() ->
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",
-                     %% string:join([atom_to_list(N) || N <- FieldNames],","),
+                     %% comma_join([atom_to_list(N) || N <- FieldNames]),
                      %% "})."],
                      {F, ["fn_1(Bin) ->
                                 fn_x(Bin, #r{b=0})."]},
@@ -462,7 +462,7 @@ mk_attr(AttrName, AttrValue) ->
 
 mk_export_attr(Exports) ->
     Fns = [io_lib:format("~p/~w", [F,A]) || {F,A} <- Exports],
-    S = ["-export([", string:join(Fns, ","), "])."],
+    S = ["-export([", gpb_lib:comma_join(Fns), "])."],
     {ok,Tokens,_} = erl_scan:string(lists:flatten(S)),
     {ok,Form} = erl_parse:parse_form(Tokens),
     Form.

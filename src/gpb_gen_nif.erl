@@ -812,10 +812,10 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                     case Setter of
                         set ->
                             ?f("~s->set_~s(~s);",
-                               [MsgVar, LCFName, string:join(Exprs, ", ")]);
+                               [MsgVar, LCFName, gpb_lib:comma_join(Exprs)]);
                         add ->
                             ?f("~s->add_~s(~s);",
-                               [MsgVar, LCFName, string:join(Exprs, ", ")]);
+                               [MsgVar, LCFName, gpb_lib:comma_join(Exprs)]);
                         {set_var, V} ->
                             case Exprs of
                                 [Val] -> ?f("~s = ~s;", [V, Val]);
@@ -1481,10 +1481,10 @@ mk_cctype_name(Type, _Defs) ->
     end.
 
 to_lower(A) when is_atom(A) ->
-    list_to_atom(string:to_lower(atom_to_list(A))).
+    list_to_atom(gpb_lib:lowercase(atom_to_list(A))).
 
 to_upper(A) when is_atom(A) ->
-    list_to_atom(string:to_upper(atom_to_list(A))).
+    list_to_atom(gpb_lib:uppercase(atom_to_list(A))).
 
 camel_case(A) when is_atom(A) ->
     list_to_atom(camel_case(atom_to_list(A), true)).
@@ -1523,5 +1523,5 @@ d_r("."++Rest, New) -> New ++ d_r(Rest, New);
 d_r([C|Rest], New)  -> [C | d_r(Rest, New)];
 d_r("", _New)       -> "".
 
-is_dotted(S) when is_list(S) -> string:str(S, ".") > 0;
+is_dotted(S) when is_list(S) -> gpb_lib:is_substr(".", S);
 is_dotted(S) when is_atom(S) -> is_dotted(atom_to_list(S)).

@@ -162,6 +162,22 @@ ERLC_FLAGS += -DNO_HAVE_RAND=true
 endif
 endif
 
+ifdef NO_HAVE_ERL20_STR_FUNCTIONS
+ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
+else
+## attempt to auto-detect
+ERL_HAS_ERL20_STR_FUNCTIONS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                             try string:find("abc", "b") of \
+                                "bc" -> io:format("true~n") \
+                             catch error:undef -> io:format("false~n") \
+                             end, \
+                             receive after 10 -> ok end.' \
+                         -s erlang halt)
+ifeq ($(ERL_HAS_ERL20_STR_FUNCTIONS),false)
+ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
+endif
+endif
+
 
 # Sorting it also eliminates duplicates
 # (eg: gpb_parse due to both .yrl and .erl on rebuild, ditto for gpb_scan)

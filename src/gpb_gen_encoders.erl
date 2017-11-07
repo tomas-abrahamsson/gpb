@@ -81,19 +81,17 @@ format_encoders_top_function_msgs(Defs, Opts) ->
         case Mapping of
             records ->
                 {[],
-                 string:join([?f("#~p{}", [M]) || M <- MsgNames],
-                             " | "),
+                 gpb_lib:or_join([?f("#~p{}", [M]) || M <- MsgNames]),
                  ""};
             maps ->
-                MsgNameType = string:join([?f("~p", [M]) || M <- MsgNames],
-                                          " | "),
+                MsgNameType = gpb_lib:or_join(
+                                [?f("~p", [M]) || M <- MsgNames]),
                 MsgMapType =
                     case gpb_lib:get_type_specs_by_opts(Opts) of
                         false ->
                             "map()";
                         true ->
-                            string:join([?f("~p()", [M]) || M <- MsgNames],
-                                        " | ")
+                            gpb_lib:or_join([?f("~p()", [M]) || M <- MsgNames])
                     end,
                 {[?expr(MsgName)],
                  MsgMapType,

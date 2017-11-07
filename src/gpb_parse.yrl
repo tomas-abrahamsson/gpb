@@ -999,8 +999,7 @@ name_to_absdstr(['.' | Name]) -> "." ++ name_to_dstr(Name);
 name_to_absdstr(Name) -> name_to_dstr(Name).
 
 name_to_dstr(Name) when is_list(Name) ->
-    string:join([atom_to_list(P) || P <- Name, P /= '.'],
-                ".");
+    gpb_lib:dot_join([atom_to_list(P) || P <- Name, P /= '.']);
 name_to_dstr(Name) when is_atom(Name) ->
     atom_to_list(Name).
 
@@ -1011,7 +1010,7 @@ format_post_process_error({error, Reasons}) ->
 
 fmt_err({multiple_pkg_specifiers, Pkgs}) ->
     ?f("package specified more than once: ~s~n",
-       [string:join([atom_to_list(Pkg) || Pkg <- Pkgs], ", ")]);
+       [gpb_lib:comma_join([atom_to_list(Pkg) || Pkg <- Pkgs])]);
 fmt_err({ref_to_undefined_msg_or_enum, {{Msg, Field}, To}}) ->
     ?f("in msg ~s, field ~s: undefined reference  ~s",
        [name_to_dstr(Msg), name_to_dstr(Field), name_to_absdstr(To)]);
@@ -1119,9 +1118,7 @@ reformat_enum_opt_names(Def) ->
      || Item <- Def].
 
 reformat_name(Name) ->
-    list_to_atom(string:join([atom_to_list(P) || P <- Name,
-                                                 P /= '.'],
-                             ".")).
+    list_to_atom(gpb_lib:dot_join([atom_to_list(P) || P <- Name, P /= '.'])).
 
 reformat_rpcs(RPCs) ->
     lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}=R) ->
@@ -1335,7 +1332,7 @@ prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name) ->
 
 maybe_tolower_or_snake_name(Name, false) -> Name;
 maybe_tolower_or_snake_name(Name, to_lower) ->
-    list_to_atom(string:to_lower(atom_to_list(Name)));
+    list_to_atom(gpb_lib:lowercase(atom_to_list(Name)));
 maybe_tolower_or_snake_name(Name, snake_case) ->
     NameString = atom_to_list(Name),
     Snaked = lists:foldl(fun(RE, Snaking) ->
@@ -1348,7 +1345,7 @@ maybe_tolower_or_snake_name(Name, snake_case) ->
                                           %% uppercase with lowercase
                                           %% or digit before it
                                           "([a-z0-9])([A-Z])"]),
-    list_to_atom(string:to_lower(Snaked)).
+    list_to_atom(gpb_lib:lowercase(Snaked)).
 
 prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
     lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}=R) ->

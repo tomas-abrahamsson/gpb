@@ -105,7 +105,7 @@ format_verifiers(Defs, AnRes, Opts) ->
      format_enum_verifiers(Defs, AnRes, Opts),
      format_type_verifiers(AnRes, Opts),
      format_map_verifiers(AnRes, Opts),
-     format_verifier_auxiliaries(Defs)
+     format_verifier_auxiliaries(Defs, Opts)
     ].
 
 format_msg_verifiers(Defs, AnRes, Opts) ->
@@ -633,7 +633,7 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
                ++ TrUserDataReplacements)
      end].
 
-format_verifier_auxiliaries(Defs) ->
+format_verifier_auxiliaries(Defs, Opts) ->
     ["-spec mk_type_error(_, _, list()) -> no_return().\n",
      gpb_codegen:format_fn(
        mk_type_error,
@@ -649,14 +649,33 @@ format_verifier_auxiliaries(Defs) ->
                prettify_path,
                fun([]) -> top_level end);
          true ->
-             gpb_codegen:format_fn(
-               prettify_path,
-               fun([]) ->
-                       top_level;
-                  (PathR) ->
-                       list_to_atom(
-                         string:join(
-                           lists:map(fun atom_to_list/1, lists:reverse(PathR)),
-                           "."))
-               end)
+             case gpb_lib:target_has_lists_join(Opts) of
+                 true ->
+                     format_prettify_path_with_lists_join();
+                 false ->
+                     format_prettify_path_with_string_join()
+             end
      end].
+
+format_prettify_path_with_lists_join() ->
+    gpb_codegen:format_fn(
+      prettify_path,
+      fun([]) ->
+              top_level;
+         (PathR) ->
+              list_to_atom(
+                lists:append(
+                  lists:join(".", lists:map(fun atom_to_list/1,
+                                            lists:reverse(PathR)))))
+      end).
+
+format_prettify_path_with_string_join() ->
+    gpb_codegen:format_fn(
+      prettify_path,
+      fun([]) ->
+              top_level;
+         (PathR) ->
+              list_to_atom(string:join(lists:map(fun atom_to_list/1,
+                                                 lists:reverse(PathR)),
+                                       "."))
+      end).

@@ -410,9 +410,9 @@ no_dialyzer_attributes_for_erlang_version_pre_18_test() ->
     %% such attributes are emitted for verifiers and map translators
     Proto = "message m { map<uint32,string> m = 1; }",
     S1 = compile_to_string(Proto, [{target_erlang_version,17}]),
-    false = is_substr("-dialyzer(", S1),
+    false = gpb_lib:is_substr("-dialyzer(", S1),
     S2 = compile_to_string(Proto, [{target_erlang_version,18}]),
-    true = is_substr("-dialyzer(", S2).
+    true = gpb_lib:is_substr("-dialyzer(", S2).
 
 empty_group_test() ->
     M = compile_iolist("syntax = \"proto2\";
@@ -1010,11 +1010,11 @@ generates_escaped_utf8_for_old_erlang_versions_test() ->
              "  required string f1 = 1 [default=\"",Unicode,"\"];",
              "}"],
     S1 = compile_to_string_get_hrl(Proto, [{target_erlang_version,15}]),
-    true = is_substr("x{ff}", S1), %% 255 = 16#ff
+    true = gpb_lib:is_substr("x{ff}", S1), %% 255 = 16#ff
     S2 = compile_to_string_get_hrl(Proto, [{target_erlang_version,16}]),
-    true = is_substr(binary_to_list(Utf8), S2),
-    [Line1 | _] = string:tokens(S2, "\n"),
-    true = is_substr("coding: ", Line1).
+    true = gpb_lib:is_substr(binary_to_list(Utf8), S2),
+    [Line1 | _] = gpb_lib:string_lexemes(S2, "\n"),
+    true = gpb_lib:is_substr("coding: ", Line1).
 
 %% -- translation of google.protobuf.Any ----------
 
@@ -1847,7 +1847,8 @@ compile_and_assert_that_format_x_produces_iolist(Contents,
     IsIoList = io_lib:deep_char_list(Txt),
     ?assertMatch({true, _}, {IsIoList, Txt}),
     FlatTxt = lists:flatten(Txt),
-    PhrasesFound = [string:str(FlatTxt, Word) > 0 || Word <- ExpectedPhrases],
+    PhrasesFound = [gpb_lib:is_substr(Word, FlatTxt)
+                    || Word <- ExpectedPhrases],
     AllPhrasesFound = lists:all(fun id/1, PhrasesFound),
     ?assertMatch({true,_,_}, {AllPhrasesFound, FlatTxt, PhrasesFound}).
 
@@ -2417,8 +2418,8 @@ error_if_both_any_translations_and_nif() ->
               {{return,{error, _}},
                {output,Output1}} =
                   compile_file_get_output(DefsTxt, Opts),
-              true = string:str(Output1, "nif") > 0,
-              true = string:str(Output1, "any_translate") > 0,
+              true = gpb_lib:is_substr("nif", Output1),
+              true = gpb_lib:is_substr("any_translate", Output1),
 
               {{return,{error, _, []}},
                {output,""}} =
@@ -2719,7 +2720,8 @@ cachingly_check(CacheKey, F) ->
 
 find_protoc_version() ->
     Output = os:cmd(find_protoc() ++ " --version"),
-    case find_protoc_version_aux(string:tokens(Output, " \t\r\n"), Output) of
+    Words = gpb_lib:string_lexemes(Output, " \t\r\n"),
+    case find_protoc_version_aux(Words, Output) of
         {ok, _}=Res -> Res;
         {error, X}=Res ->
             ?debugFmt("Trouble finding protoc version in ~s~n", [X]),
@@ -2727,7 +2729,8 @@ find_protoc_version() ->
     end.
 
 find_protoc_version_aux(["libprotoc", VersionStr | _], All) ->
-    try {ok, [list_to_integer(X) || X <- string:tokens(VersionStr, ".")]}
+    Components = gpb_lib:string_lexemes(VersionStr, "."),
+    try {ok, [list_to_integer(X) || X <- Components]}
     catch error:badarg -> {error, {failed_to_interpret, VersionStr, All}}
     end;
 find_protoc_version_aux([_ | Rest], All) ->
@@ -2828,8 +2831,8 @@ format_type(Type) ->
 ccompile(F, A) ->
     Cmd = f(F, A),
     Output = os:cmd("LC_ALL=C; export LC_ALL; " ++ Cmd ++ "; echo $?\n"),
-    [LastLine | _Rest] = lists:reverse(string:tokens(Output, "\r\n")),
-    try list_to_integer(string:strip(LastLine)) of
+    [LastLine | _Rest] = lists:reverse(gpb_lib:string_lexemes(Output, "\r\n")),
+    try list_to_integer(string_trim(LastLine)) of
         0 -> ok;
         _ -> ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~ts~n~n",
                        [Cmd, Output]),
@@ -2986,7 +2989,7 @@ get_erlang_otp_major() ->
             %% allow for some (possible?) variation
             try list_to_integer(RelStr)
             catch error:badarg ->
-                    [NStr | _] = string:tokens(RelStr, ".-"),
+                    [NStr | _] = gpb_lib:string_lexemes(RelStr, ".-"),
                     try list_to_integer(NStr)
                     catch error:badarg -> error({unexpected_otp_version,RelStr})
                     end
@@ -3472,8 +3475,6 @@ id(X) -> X.
 
 f(Fmt, Args) -> lists:flatten(io_lib:format(Fmt, Args)).
 
-is_substr(Needle, Haystack) -> string:str(Haystack, Needle) > 0.
- 
 -ifndef(NO_HAVE_RAND).
 %% Erlang 19 or later
 rand_uniform(Limit) -> rand:uniform(Limit).
@@ -3486,3 +3487,14 @@ rand_seed() ->
     random:seed(erlang:phash2(A+B+C), erlang:phash2(B+C), erlang:phash2(A+C)).
 -endif. % NO_HAVE_RAND
 
+-ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
+
+string_trim(Str) ->
+    string:trim(Str).
+
+-else.  % NO_HAVE_ERL20_STR_FUNCTIONS
+
+string_trim(Str) ->
+    string:strip(Str).
+
+-endif. % NO_HAVE_ERL20_STR_FUNCTIONS

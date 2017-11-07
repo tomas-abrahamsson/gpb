@@ -31,7 +31,7 @@
 -include("gpb_compile.hrl").
 
 format_msg_record(Msg, Fields, Opts, Defs) ->
-    Def = list_to_atom(string:to_upper(lists:concat([Msg, "_PB_H"]))),
+    Def = list_to_atom(gpb_lib:uppercase(lists:concat([Msg, "_PB_H"]))),
     [?f("-ifndef(~p).~n", [Def]),
      ?f("-define(~p, true).~n", [Def]),
      ?f("-record(~p,~n", [Msg]),
@@ -44,7 +44,7 @@ format_msg_record(Msg, Fields, Opts, Defs) ->
 format_maps_as_msgs_record_defs(MapsAsMsgs) ->
     [begin
          FNames = [atom_to_list(FName) || #?gpb_field{name=FName} <- Fields],
-         ?f("-record(~p,{~s}).~n", [MsgName, string:join(FNames,", ")])
+         ?f("-record(~p,{~s}).~n", [MsgName, gpb_lib:comma_join(FNames)])
      end
      || {{msg,MsgName},Fields} <- MapsAsMsgs].
 
@@ -55,32 +55,29 @@ format_export_types(Defs, Opts) ->
         true ->
             iolist_to_binary(
               ["%% enumerated types\n",
-               string:join([format_enum_typespec(Enum, Enumeration)
-                            || {{enum, Enum}, Enumeration} <- Defs],
-                           "\n"),
+               gpb_lib:nl_join([format_enum_typespec(Enum, Enumeration)
+                                || {{enum, Enum}, Enumeration} <- Defs]),
                "\n",
                ?f("-export_type([~s]).",
-                  [string:join(["'"++atom_to_list(Enum)++"'/0"
-                                || {{enum, Enum}, _} <- Defs], ", ")]),
+                  [gpb_lib:comma_join(["'"++atom_to_list(Enum)++"'/0"
+                                       || {{enum, Enum}, _} <- Defs])]),
                "\n\n",
                "%% message types\n",
-               string:join(
+               gpb_lib:nl_join(
                  [format_record_typespec(Name, Fields, Defs, Opts)
-                  || {_, Name, Fields} <- gpb_lib:msgs_or_groups(Defs)],
-                 "\n"),
+                  || {_, Name, Fields} <- gpb_lib:msgs_or_groups(Defs)]),
                "\n",
                ?f("-export_type([~s]).",
-                  [string:join(
+                  [gpb_lib:comma_join(
                      ["'"++atom_to_list(Name)++"'/0"
-                      || {_, Name, _} <- gpb_lib:msgs_or_groups(Defs)],
-                     ", ")]),
+                      || {_, Name, _} <- gpb_lib:msgs_or_groups(Defs)])]),
                "\n"])
     end.
 
 format_enum_typespec(Enum, Enumeration) ->
   ?f("-type '~s'() :: ~s.", [Enum,
-    string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumeration],
-                " | ")]).
+    gpb_lib:or_join(
+      ["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumeration])]).
 
 
 format_record_typespec(Msg, Fields, Defs, Opts) ->
@@ -114,7 +111,7 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                 end,
     MapTypeFieldsRepr = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(
                           Opts),
-    string:join(
+    gpb_lib:nl_join(
       lists:map(
         fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
                             occurrence=Occur}=Field}) ->
@@ -213,8 +210,7 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                 ?f("~s~s% ~s",
                    [FieldTxt2, LineUpStr2, TypeComment])
         end,
-        gpb_lib:index_seq(Fields)),
-      "\n").
+        gpb_lib:index_seq(Fields))).
 
 find_last_nonopt_field_index(Fields) ->
     lists:foldl(fun({I, F}, Acc) ->
@@ -301,11 +297,10 @@ type_to_typestr(_, #gpb_oneof{fields=OFields}, Defs, Opts) ->
                       {maps, present_undefined} -> ["undefined"];
                       {maps, omitted}           -> []
                   end,
-    string:join(
+    gpb_lib:or_join(
       [?f("{~s, ~s}", [Name, type_to_typestr_2(Type, Defs, Opts)])
        || #?gpb_field{name=Name, type=Type} <- OFields]
-      ++ OrUndefined,
-      " | ").
+      ++ OrUndefined).
 
 type_to_typestr_2(sint32, _Defs, _Opts)   -> "integer()";
 type_to_typestr_2(sint64, _Defs, _Opts)   -> "integer()";
@@ -357,8 +352,8 @@ enum_typestr(E, Defs, Opts) ->
                        true  -> ""
                    end,
     {value, {{enum,E}, Enumerations}} = lists:keysearch({enum,E}, 1, Defs),
-    string:join(["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumerations],
-                " | ")
+    gpb_lib:or_join(
+      ["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumerations])
         ++ UnknownEnums.
 
 type_to_comment(#?gpb_field{type=Type}, true=_TypeSpec) ->
