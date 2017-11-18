@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.0.2
+2017-Nov-18
+
+        * Prepare for Erlang 21 by using string functions that are new
+        in Erlang 20 and stop using the ones that are going to be
+        deprecated in Erlang 21.
+
 Version 4.0.1
 2017-Nov-07
 
