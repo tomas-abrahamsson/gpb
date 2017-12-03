@@ -1088,6 +1088,27 @@ can_to_snake_record_names_test() ->
                  output=msg_name_2} %% .. and result msgs to be to-lower
       ]}] = do_process_sort_defs(Defs, [msg_name_to_snake_case]).
 
+to_snake_case_with_packages_test() ->
+    {ok, Defs} = parse_lines(["package TopPkg.SubPkg;",
+                              "message MsgName1 {required MsgName2   f1=1;}",
+                              "message MsgName2 {required uint32 g1=1;}",
+                              "service SvcName1 {",
+                              "  rpc RpcReq(MsgName1) returns (MsgName2) {};",
+                              "}",
+                              "extend MsgName1 { optional uint32 fm2=2; }"]),
+    [{package, 'top_pkg.sub_pkg'},
+     {{msg,'top_pkg.sub_pkg.msg_name_1'},
+      [#?gpb_field{name=f1, type={msg,'top_pkg.sub_pkg.msg_name_2'}},
+       #?gpb_field{name=fm2}]},
+     {{msg,'top_pkg.sub_pkg.msg_name_2'}, [#?gpb_field{name=g1}]},
+     {{msg_containment,_}, ['top_pkg.sub_pkg.msg_name_1',
+                            'top_pkg.sub_pkg.msg_name_2']},
+     {{service,'top_pkg.sub_pkg.svc_name_1'},
+      [#?gpb_rpc{name=rpc_req,
+                 input='top_pkg.sub_pkg.msg_name_1',
+                 output='top_pkg.sub_pkg.msg_name_2'}]}] =
+        do_process_sort_defs(Defs, [msg_name_to_snake_case, use_packages]).
+
 can_tolower_record_names_with_packages_test() ->
     {ok, Defs} = parse_lines(["package Pkg1;",
                               "message Msg1 {required Msg2   f1=1;}",

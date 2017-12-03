@@ -109,6 +109,7 @@
 -export([string_lexemes/2]).
 -export([lowercase/1]).
 -export([uppercase/1]).
+-export([snake_case/1]).
 
 -include("../include/gpb.hrl").
 
@@ -782,3 +783,16 @@ uppercase(Str) ->
     string:to_upper(Str).
 
 -endif. % NO_HAVE_ERL20_STR_FUNCTIONS
+
+snake_case(Str) ->
+    lowercase(
+      lists:foldl(fun(RE, Snaking) ->
+                          re:replace(Snaking, RE, "\\1_\\2", [{return, list},
+                                                              global])
+                  end, Str, [%% uppercase followed by lowercase
+                             "([^.])([A-Z][a-z]+)",
+                             %% any consecutive digits
+                             "([^.])([0-9]+)",
+                             %% uppercase with lowercase
+                             %% or digit before it
+                             "([a-z0-9])([A-Z])"])).

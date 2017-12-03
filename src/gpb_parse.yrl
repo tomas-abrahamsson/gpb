@@ -1334,18 +1334,7 @@ maybe_tolower_or_snake_name(Name, false) -> Name;
 maybe_tolower_or_snake_name(Name, to_lower) ->
     list_to_atom(gpb_lib:lowercase(atom_to_list(Name)));
 maybe_tolower_or_snake_name(Name, snake_case) ->
-    NameString = atom_to_list(Name),
-    Snaked = lists:foldl(fun(RE, Snaking) ->
-                             re:replace(Snaking, RE, "\\1_\\2", [{return, list},
-                                                                 global])
-                         end, NameString, [%% uppercase followed by lowercase
-                                          "(.)([A-Z][a-z]+)",
-                                          %% any consecutive digits
-                                          "(.)([0-9]+)",
-                                          %% uppercase with lowercase
-                                          %% or digit before it
-                                          "([a-z0-9])([A-Z])"]),
-    list_to_atom(gpb_lib:lowercase(Snaked)).
+    list_to_atom(gpb_lib:snake_case(atom_to_list(Name))).
 
 prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
     lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}=R) ->
