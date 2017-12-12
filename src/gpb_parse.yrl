@@ -399,12 +399,11 @@ Erlang code.
                {{extensions, MsgName::atom()}, [field_number_extension()]} |
                {{extend, MsgName::atom()}, MoreFields::[field()]} |
                {proto3_msgs, [MsgName::atom()]} |
-               {{msg_containment, ProtoName::string()},[MsgName::atom()]} |
                {{reserved_numbers, MsgName::atom()}, [integer()]} |
                {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
                {import, ProtoFile::string()} |
                {{msg_options, MsgName::atom()}, [msg_option()]} |
-               {{msg_containment, ProtoName::string()}, MsgNames::[atom()]}.
+               {{msg_containment, ProtoName::string()}, [MsgName::atom()]}.
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
