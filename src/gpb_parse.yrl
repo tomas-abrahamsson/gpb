@@ -403,7 +403,11 @@ Erlang code.
                {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
                {import, ProtoFile::string()} |
                {{msg_options, MsgName::atom()}, [msg_option()]} |
-               {{msg_containment, ProtoName::string()}, [MsgName::atom()]}.
+               {{msg_containment, ProtoName::string()}, [MsgName::atom()]} |
+               {{pkg_containment, ProtoName::string()}, PkgName::atom()} |
+               {{service_containment, ProtoName::string()},
+                [ServiceName::atom()]} |
+               {{rpc_containment, ProtoName::string()}, [RpcName::atom()]}.
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
@@ -437,9 +441,8 @@ post_process_one_file(FileName, Defs, Opts) ->
                           flatten_qualify_defnames(Defs, Package)))),
             FileExt = filename:extension(FileName),
             ProtoName = filename:basename(FileName, FileExt),
-            MsgContainment = {{msg_containment, ProtoName},
-                              lists:sort(gpb_lib:msg_names(Defs1))},
-            {ok, [MsgContainment | Defs1]};
+            MetaInfo = mk_meta_info(ProtoName, Defs1, Opts),
+            {ok, MetaInfo ++ Defs1};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -1078,8 +1081,17 @@ reformat_names(Defs) ->
                       {{extend,reformat_name(Name)}, reformat_fields(Fields)};
                  ({{service,Name}, RPCs}) ->
                       {{service,reformat_name(Name)}, reformat_rpcs(RPCs)};
+                 ({{service_containment, ProtoName}, ServiceNames}) ->
+                      {{service_containment,ProtoName},
+                       [reformat_name(Name) || Name <- ServiceNames]};
+                 ({{rpc_containment, ProtoName}, RpcNames}) ->
+                      {{rpc_containment,ProtoName},
+                       [{reformat_name(ServiceName), RpcName}
+                        || {ServiceName,RpcName} <- RpcNames]};
                  ({package, Name}) ->
                       {package, reformat_name(Name)};
+                 ({{pkg_containment, ProtoName}, PkgName}) ->
+                      {{pkg_containment,ProtoName}, reformat_name(PkgName)};
                  ({proto3_msgs,Names}) ->
                       {proto3_msgs,[reformat_name(Name) || Name <- Names]};
                  ({{reserved_numbers,Name}, Ns}) ->
@@ -1354,3 +1366,37 @@ prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
 -spec fetch_imports(defs()) -> [ProtoFile::string()].
 fetch_imports(Defs) ->
     [Path || {import,Path} <- Defs].
+
+mk_meta_info(ProtoName, Defs, Opts) ->
+    meta_msg_containment(ProtoName, Defs)
+        ++ meta_pkg_containment(ProtoName, Defs, Opts)
+        ++ meta_service_and_rpc_containment(ProtoName, Defs).
+
+meta_msg_containment(ProtoName, Defs) ->
+    [{{msg_containment, ProtoName}, lists:sort(gpb_lib:msg_names(Defs))}].
+
+meta_pkg_containment(ProtoName, Defs, Opts) ->
+    case proplists:get_value(package, Defs, '$undefined') of
+        '$undefined' ->
+            [];
+        Pkg ->
+            case proplists:get_bool(use_packages, Opts) of
+                false ->
+                    [];
+                true ->
+                    [{{pkg_containment,ProtoName}, Pkg}]
+            end
+    end.
+
+meta_service_and_rpc_containment(ProtoName, Defs) ->
+    Services = [{Name,RPCs} || {{service,Name}, RPCs} <- Defs],
+    if Services == [] ->
+            [];
+       true ->
+            ServiceNames = [Name || {Name, _RPCs} <- Services],
+            RpcNames = lists:append([[{SName, RName}
+                                      || {RName, _In,_Out, _Opts} <- RPCs]
+                                     || {SName, RPCs} <- Services]),
+            [{{service_containment, ProtoName}, lists:sort(ServiceNames)},
+             {{rpc_containment, ProtoName}, RpcNames}]
+    end.
