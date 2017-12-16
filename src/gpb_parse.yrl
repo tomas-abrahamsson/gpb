@@ -447,16 +447,14 @@ post_process_one_file(FileName, Defs, Opts) ->
             {error, Reasons}
     end.
 
-post_process_all_files(Defs, Opts) ->
+post_process_all_files(Defs, _Opts) ->
     case resolve_names(Defs) of
         {ok, Defs2} ->
             {ok, normalize_msg_field_options(
                    handle_proto_syntax_version_all_files(
-                     possibly_prefix_suffix_msgs(
-                       enumerate_msg_fields(
-                         reformat_names(
-                           extend_msgs(Defs2))),
-                       Opts)))};
+                     enumerate_msg_fields(
+                       reformat_names(
+                         extend_msgs(Defs2)))))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -1211,155 +1209,6 @@ opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
         false -> lists:keydelete(Opt, 1, Opts);
         true  -> [Opt | lists:keydelete(Opt, 1, Opts)]
     end.
-
-possibly_prefix_suffix_msgs(Defs, Opts) ->
-    Prefix = proplists:get_value(msg_name_prefix, Opts, ""),
-    Suffix = proplists:get_value(msg_name_suffix, Opts, ""),
-    ToLower = case proplists:get_value(msg_name_to_lower, Opts, false) of
-                  false ->
-                      false;
-                  true ->
-                      to_lower
-              end,
-    ToLowerOrSnake =
-        case proplists:get_value(msg_name_to_snake_case, Opts, ToLower) of
-            true ->
-                snake_case;
-            T ->
-                T
-        end,
-
-    if Prefix == "", Suffix == "", ToLowerOrSnake == false ->
-            Defs;
-       true ->
-            Defs1 = prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs),
-            prefix_suffix_msg_containment(Prefix, Suffix, ToLowerOrSnake, Defs1)
-    end.
-
-find_proto(_, []) ->
-    undefined;
-find_proto(Name, [{{msg_containment, Proto}, Msgs} | Rest]) ->
-      case lists:member(Name, Msgs) of
-          true ->
-              Proto;
-          false ->
-              find_proto(Name, Rest)
-      end;
-find_proto(Name, [_ | Rest]) ->
-    find_proto(Name, Rest).
-
-maybe_prefix_by_proto(Name, {by_proto, PrefixList}, Defs) ->
-    case find_proto(Name, Defs) of
-        undefined ->
-            "";
-        ProtoName ->
-            proplists:get_value(list_to_atom(ProtoName), PrefixList, "")
-    end;
-maybe_prefix_by_proto(_Name, Prefix, _Defs) ->
-    Prefix.
-
-prefix_suffix_msgs(Prefix, Suffix, ToLowerOrSnake, Defs) ->
-    lists:map(fun({{msg,Name}, Fields}) ->
-                      Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
-                      {{msg,prefix_suffix_name(Prefix1, Suffix,
-                                             ToLowerOrSnake, Name)},
-                        prefix_suffix_fields(Prefix, Suffix,
-                                             ToLowerOrSnake, Fields, Defs)};
-                 ({{group,Name}, Fields}) ->
-                      Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
-                      {{group,prefix_suffix_name(Prefix1, Suffix,
-                                                 ToLowerOrSnake, Name)},
-                        prefix_suffix_fields(Prefix, Suffix,
-                                             ToLowerOrSnake, Fields, Defs)};
-                 ({{extensions,Name}, Exts}) ->
-                      Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
-                      {{extensions,
-                        prefix_suffix_name(Prefix1, Suffix,
-                                           ToLowerOrSnake, Name)},
-                       Exts};
-                 ({{service,Name}, RPCs}) ->
-                      {{service, maybe_tolower_or_snake_name(Name,
-                                                             ToLowerOrSnake)},
-                        prefix_suffix_rpcs(Prefix, Suffix,
-                                           ToLowerOrSnake, RPCs, Defs)};
-                 ({package,Name}) ->
-                      {package, maybe_tolower_or_snake_name(Name,
-                                                            ToLowerOrSnake)};
-                 ({proto3_msgs,Names}) ->
-                      {proto3_msgs,
-                       [begin
-                            Prefix1 = maybe_prefix_by_proto(Name, Prefix, Defs),
-                            prefix_suffix_name(Prefix1, Suffix,
-                                               ToLowerOrSnake, Name)
-                        end || Name <- Names]};
-                 (OtherElem) ->
-                      OtherElem
-              end,
-              Defs).
-
-prefix_suffix_fields(Prefix, Suffix, ToLowerOrSnake, Fields, Defs) ->
-    lists:map(
-      fun(#?gpb_field{type={msg,MsgName}}=F) ->
-              Prefix1 = maybe_prefix_by_proto(MsgName, Prefix, Defs),
-              NewMsgName = prefix_suffix_name(Prefix1, Suffix,
-                                              ToLowerOrSnake, MsgName),
-              F#?gpb_field{type={msg,NewMsgName}};
-         (#?gpb_field{type={group,MsgName}}=F) ->
-              Prefix1 = maybe_prefix_by_proto(MsgName, Prefix, Defs),
-              NewMsgName = prefix_suffix_name(Prefix1, Suffix,
-                                              ToLowerOrSnake, MsgName),
-              F#?gpb_field{type={group,NewMsgName}};
-         (#?gpb_field{type={map,KeyType,{msg,MsgName}}}=F) ->
-              Prefix1 = maybe_prefix_by_proto(MsgName, Prefix, Defs),
-              NewMsgName = prefix_suffix_name(Prefix1, Suffix,
-                                              ToLowerOrSnake, MsgName),
-              F#?gpb_field{type={map,KeyType,{msg,NewMsgName}}};
-         (#gpb_oneof{fields=Fs}=F) ->
-              Fs2 = prefix_suffix_fields(Prefix, Suffix,
-                                         ToLowerOrSnake, Fs, Defs),
-              F#gpb_oneof{fields=Fs2};
-         (#?gpb_field{}=F) ->
-              F
-      end,
-      Fields).
-
-prefix_suffix_msg_containment(Prefix, Suffix, ToLowerOrSnake, Defs) ->
-    lists:map(
-      fun({{msg_containment, Proto}, MsgNames}=Elem) ->
-              MsgNames1 = [prefix_suffix_name(
-                             maybe_prefix_by_proto(Name, Prefix, [Elem]),
-                             Suffix, ToLowerOrSnake, Name)
-                           || Name <- MsgNames],
-              {{msg_containment, Proto}, MsgNames1};
-         (OtherElem) ->
-              OtherElem
-      end,
-      Defs).
-
-prefix_suffix_name(Prefix, Suffix, ToLowerOrSnake, Name) ->
-    Name1 = maybe_tolower_or_snake_name(Name, ToLowerOrSnake),
-    Name2 = lists:concat([Prefix, Name1, Suffix]),
-    list_to_atom(Name2).
-
-maybe_tolower_or_snake_name(Name, false) -> Name;
-maybe_tolower_or_snake_name(Name, to_lower) ->
-    list_to_atom(gpb_lib:lowercase(atom_to_list(Name)));
-maybe_tolower_or_snake_name(Name, snake_case) ->
-    list_to_atom(gpb_lib:snake_case(atom_to_list(Name))).
-
-prefix_suffix_rpcs(Prefix, Suffix, ToLowerOrSnake, RPCs, Defs) ->
-    lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}=R) ->
-                      PrefixArg = maybe_prefix_by_proto(Arg, Prefix, Defs),
-                      PrefixReturn = maybe_prefix_by_proto(Return,Prefix,Defs),
-                      NewArg = prefix_suffix_name(PrefixArg, Suffix,
-                                                  ToLowerOrSnake, Arg),
-                      NewReturn = prefix_suffix_name(PrefixReturn, Suffix,
-                                                     ToLowerOrSnake, Return),
-                      R#?gpb_rpc{name=maybe_tolower_or_snake_name(RpcName, ToLowerOrSnake),
-                                 input=NewArg,
-                                 output=NewReturn}
-              end,
-              RPCs).
 
 %% Fetch the `import'ed files.
 %% `Defs' is expected to be parsed, but not necessarily post_processed.

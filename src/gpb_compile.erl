@@ -71,9 +71,10 @@
                boolean_opt(include_as_lib) |
                boolean_opt(use_packages) |
                {erlc_compile_options,string()} |
+               {rename, renaming()} |
                {msg_name_prefix,
                 string() | atom() |
-                {by_proto, [{atom(), string() | atom()}]}} |
+                {by_proto, prefix_by_proto()}} |
                {msg_name_suffix, string() | atom()} |
                boolean_opt(msg_name_to_snake_case) |
                boolean_opt(msg_name_to_lower) |
@@ -88,6 +89,24 @@
                {import_fetcher, import_fetcher_fun()} |
                {target_erlang_version, integer() | current} |
                term().
+
+-type renaming() :: {pkg_name, name_change()} |
+                    {msg_name, msg_name_change()} |
+                    {msg_fqname, msg_name_change()} |
+                    {service_name, name_change()} |
+                    {service_fqname, name_change()} |
+                    {rpc_name, name_change()}.
+
+-type name_change() :: {prefix, string() | atom()} |
+                       {suffix, string() | atom()} |
+                       lowercase |
+                       snake_case.
+
+-type msg_name_change() :: name_change() |
+                           {prefix, {by_proto, prefix_by_proto()}}.
+
+-type prefix_by_proto() :: [{ProtoName::atom(), Prefix::string() | atom()}].
+
 
 -type translation() :: {encode, mod_fn_argtemplate()} |
                        {decode, mod_fn_argtemplate()} |
@@ -310,10 +329,39 @@ file(File) ->
 %% If the the `{erlc_compile_options,string()}' option is set,
 %% then the genereted code will contain a directive `-compile([String]).'
 %%
+%% The `{rename,{What,How}}' can transform message names, package names,
+%% service and rpc names in various ways. This option supersedes the
+%% options `{msg_name_prefix,Prefix}', `{msg_name_suffix,Suffix}',
+%% `msg_name_to_lower' and `msg_name_to_snake_case', while at the same
+%% time giving more fine-grained control. It is for example possible to
+%% apply snake_casing only to the message name, while keeping the
+%% package name, the service name and the rpc name intact. This can be
+%% useful with grpc, where these name components are exposed. The
+%% `msg_fqname' refers to the fully qualified message name, as in
+%% `Package.MsgName', while the `msg_name' refers to just the message
+%% name without package. The `service_fqname' and `service_name' specifiers
+%% work analogously.
+%%
+%% It is possible to stack `rename' options, and they will be applied in
+%% the order they are specified. So it is for example possible to
+%% snake_case a name, and then also prefix it.
+%%
 %% The `{msg_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to each message. This might be useful for resolving colliding names,
 %% when incorporating several protocol buffer definitions into the same
 %% project. The `{msg_name_suffix,Suffix}' works correspondingly.
+%%
+%% The `{msg_name_prefix,Prefix}' option expands
+%% to `[{rename,{pkg_name,Prefix}},{rename,{msg_fqname,{prefix,Prefix}}}]',
+%% and ditto for suffixes.
+%%
+%% For backwards compatibility, the `{msg_name_prefix,{by_proto,PrefixList}}'
+%% expands to just `{rename,{msg_fqname,{prefix,PrefixList}}}'.
+%%
+%% The `msg_name_to_lower' and `msg_name_to_snake_case' options expands
+%% to `[{rename,{pkg_name,X}},{rename,{service_fqname,X}},
+%% {rename,{rpc_name,X}},{rename,{msg_fqname,X}}]' where `X' is
+%% `lowercase' or `snake_case' respectively.
 %%
 %% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to the generated code and definition files. The `{module_name_suffix,Suffix}'
@@ -445,10 +493,11 @@ do_file_or_string(In, Opts0) ->
     Opts1 = normalize_opts(Opts0),
     case parse_file_or_string(In, Opts1) of
         {ok, Defs} ->
+            Defs1 = gpb_names:rename_defs(Defs, Opts1),
             Mod = find_out_mod(In, Opts1),
             DefaultOutDir = find_default_out_dir(In),
             Opts2 = Opts1 ++ [{o,DefaultOutDir}],
-            do_proto_defs_aux1(Mod, Defs, Opts2);
+            do_proto_defs_aux1(Mod, Defs1, Opts2);
         {error, Reason} = Error ->
             possibly_report_error(Error, Opts1),
             case proplists:get_bool(return_warnings, Opts1) of
