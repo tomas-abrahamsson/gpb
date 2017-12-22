@@ -17,15 +17,56 @@
 %%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 %%% MA  02110-1301  USA
 
-%%% @doc Transformation of names in parsed definitions, such as lowercasing of
-%%% message names etc.
-%%% @private
+%%% @doc Transformation of module names and names in parsed
+%%% definitions, such as prefixing and lowercasing of message names etc.
 
 -module(gpb_names).
 
+-export([file_name_to_module_name/2]).
+-export([rename_module/2]).
 -export([rename_defs/2]).
 
 -include("../include/gpb.hrl").
+
+%% @doc Given a file name of a proto file, turn it into a module name,
+%% possibly with name transformations, such as prefix or suffix
+%% according to options.
+-spec file_name_to_module_name(string(), gpb_compile:opts()) -> atom().
+file_name_to_module_name(ProtoFileName, Opts) ->
+    Ext = filename:extension(ProtoFileName),
+    BaseNameNoExt = filename:basename(ProtoFileName, Ext),
+    rename_module(BaseNameNoExt, Opts).
+
+%% @doc Given a module name, rename it according to opts, for example
+%% by prefixing it.
+-spec rename_module(atom() | string(), gpb_compile:opts()) -> atom().
+rename_module(Mod, Opts) when is_atom(Mod) ->
+    rename_module(atom_to_list(Mod), Opts);
+rename_module(Mod, Opts) when is_list(Mod) ->
+    list_to_atom(possibly_suffix_mod(
+                   possibly_prefix_mod(
+                     mod_name_from_opts_or_else_filename(Mod, Opts),
+                     Opts),
+                   Opts)).
+
+mod_name_from_opts_or_else_filename(FileBaseName, Opts) ->
+    proplists:get_value(module_name, Opts, FileBaseName).
+
+possibly_prefix_mod(BaseNameNoExt, Opts) ->
+    case proplists:get_value(module_name_prefix, Opts) of
+        undefined ->
+            BaseNameNoExt;
+        Prefix ->
+            lists:concat([Prefix, BaseNameNoExt])
+    end.
+
+possibly_suffix_mod(BaseNameNoExt, Opts) ->
+    case proplists:get_value(module_name_suffix, Opts) of
+        undefined ->
+            BaseNameNoExt;
+        Suffix ->
+            lists:concat([BaseNameNoExt, Suffix])
+    end.
 
 %% @doc Rename definitions according to options, for example
 %% lowercasing message names.

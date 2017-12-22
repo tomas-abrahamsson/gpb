@@ -573,33 +573,7 @@ is_option_defined(Key, Opts) ->
 find_out_mod({Mod, _S}, _Opts) ->
     Mod;
 find_out_mod(File, Opts) ->
-    Ext = filename:extension(File),
-    list_to_atom(possibly_suffix_mod(
-                   possibly_prefix_mod(
-                     mod_name_from_opts_or_else_filename(
-                       filename:basename(File, Ext),
-                       Opts),
-                     Opts),
-                   Opts)).
-
-mod_name_from_opts_or_else_filename(FileBaseName, Opts) ->
-    proplists:get_value(module_name, Opts, FileBaseName).
-
-possibly_prefix_mod(BaseNameNoExt, Opts) ->
-    case proplists:get_value(module_name_prefix, Opts) of
-        undefined ->
-            BaseNameNoExt;
-        Prefix ->
-            lists:concat([Prefix, BaseNameNoExt])
-    end.
-
-possibly_suffix_mod(BaseNameNoExt, Opts) ->
-    case proplists:get_value(module_name_suffix, Opts) of
-        undefined ->
-            BaseNameNoExt;
-        Suffix ->
-            lists:concat([BaseNameNoExt, Suffix])
-    end.
+    gpb_names:file_name_to_module_name(File, Opts).
 
 find_default_out_dir({_Mod, _S}) -> ".";
 find_default_out_dir(File) -> filename:dirname(File).
