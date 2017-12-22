@@ -100,7 +100,8 @@
 -type name_change() :: {prefix, string() | atom()} |
                        {suffix, string() | atom()} |
                        lowercase |
-                       snake_case.
+                       snake_case |
+                       dots_to_underscores.
 
 -type msg_name_change() :: name_change() |
                            {prefix, {by_proto, prefix_by_proto()}}.

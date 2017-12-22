@@ -89,6 +89,33 @@ rename_package_affects_all_occurrences_test() ->
         lists:sort(gpb_names:rename_defs(
                      Defs0,
                      [{rename, {pkg_name, snake_case}}])).
+
+dots_to_underscores_for_nested_msgs_test() ->
+    Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
+    %% msg_name => don't touch Package part, just the msg name path.
+    %% Over grpc, Package, Service and Rpc is exposed.
+    [{package,'TopPkg.SubPkg'},
+     {{msg,'TopPkg.SubPkg.msg_name_1'},
+      [#?gpb_field{type={msg,'TopPkg.SubPkg.msg_name_1_msg_name_2'}},
+       #?gpb_field{}]},
+     {{msg,'TopPkg.SubPkg.msg_name_1_msg_name_2'},
+      [#?gpb_field{}]},
+     {{msg_containment,"x"},
+      ['TopPkg.SubPkg.msg_name_1','TopPkg.SubPkg.msg_name_1_msg_name_2']},
+     {{pkg_containment,"x"},'TopPkg.SubPkg'},
+     {{rpc_containment,"x"},[{'TopPkg.SubPkg.SvcName1','RpcReq'}]},
+     {{service,'TopPkg.SubPkg.SvcName1'},
+      [#?gpb_rpc{name='RpcReq',
+                 input='TopPkg.SubPkg.msg_name_1',
+                 output='TopPkg.SubPkg.msg_name_1_msg_name_2'}]},
+     {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
+        lists:sort(gpb_names:rename_defs(
+                     Defs0,
+                     [{rename, {msg_name, snake_case}},
+                      {rename, {msg_name, dots_to_underscores}}])).
+
+
+
 x_proto() ->
     [{"x.proto",
       ["package TopPkg.SubPkg;",

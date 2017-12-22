@@ -174,7 +174,13 @@ do_prim_op({suffix, Suffix}, Name) ->
 do_prim_op(lowercase, Name) ->
     list_to_atom(gpb_lib:lowercase(atom_to_list(Name)));
 do_prim_op(snake_case, Name) ->
-    list_to_atom(gpb_lib:snake_case(atom_to_list(Name))).
+    list_to_atom(gpb_lib:snake_case(atom_to_list(Name)));
+do_prim_op(dots_to_underscores, Name) ->
+    list_to_atom(do_dot_uscore(atom_to_list(Name))).
+
+do_dot_uscore("."++Rest)  -> "_" ++ do_dot_uscore(Rest);
+do_dot_uscore([C | Rest]) -> [C | do_dot_uscore(Rest)];
+do_dot_uscore("")         -> "".
 
 %% -- Compute old-name -> new name mappings -----------
 %%
