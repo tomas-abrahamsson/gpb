@@ -101,7 +101,8 @@
                        {suffix, string() | atom()} |
                        lowercase |
                        snake_case |
-                       dots_to_underscores.
+                       dots_to_underscores |
+                       base_name.
 
 -type msg_name_change() :: name_change() |
                            {prefix, {by_proto, prefix_by_proto()}}.

@@ -114,6 +114,24 @@ dots_to_underscores_for_nested_msgs_test() ->
                         [{rename, {msg_name, snake_case}},
                          {rename, {msg_name, dots_to_underscores}}]))).
 
+base_name_test() ->
+    Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
+    [{package,'TopPkg.SubPkg'},
+     {{msg,msg_name_1}, [#?gpb_field{type={msg, msg_name_2}},
+                         #?gpb_field{}]},
+     {{msg,msg_name_2}, [#?gpb_field{}]},
+     {{msg_containment,"x"},[msg_name_1, msg_name_2]},
+     {{pkg_containment,"x"},'TopPkg.SubPkg'},
+     {{rpc_containment,"x"},[{'TopPkg.SubPkg.SvcName1','RpcReq'}]},
+     {{service,'TopPkg.SubPkg.SvcName1'},
+      [#?gpb_rpc{name='RpcReq',
+                 input=msg_name_1,
+                 output=msg_name_2}]},
+     {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs0,
+                        [{rename, {msg_fqname, base_name}},
+                         {rename, {msg_fqname, snake_case}}]))).
 
 x_proto() ->
     [{"x.proto",
