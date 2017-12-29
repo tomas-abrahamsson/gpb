@@ -26,7 +26,11 @@
 -export([rename_module/2]).
 -export([rename_defs/2]).
 
+-export([format_error/1]).
+
 -include("../include/gpb.hrl").
+
+-define(f(Fmt, Args), io_lib:format(Fmt, Args)).
 
 %% @doc Given a file name of a proto file, turn it into a module name,
 %% possibly with name transformations, such as prefix or suffix
@@ -70,16 +74,40 @@ possibly_suffix_mod(BaseNameNoExt, Opts) ->
 
 %% @doc Rename definitions according to options, for example
 %% lowercasing message names.
--spec rename_defs(gpb_parse:defs(), gpb_compile:opts()) -> gpb_parse:defs().
+-spec rename_defs(gpb_parse:defs(), gpb_compile:opts()) ->
+                         {ok, gpb_parse:defs()} |
+                         {error, Reason::term()}.
 rename_defs(Defs, Opts) ->
     Opts1 = convert_legacy_opts(Opts),
     case mk_rename_operations(Opts1) of
         [] ->
-            Defs;
+            {ok, Defs};
         RenameOpFs ->
-            RF = mk_renamer(RenameOpFs, Defs),
-            do_rename(RF, Defs)
+            case mk_renamer(RenameOpFs, Defs) of
+                {ok, RF} ->
+                    {ok, do_rename(RF, Defs)};
+                {error, Reason} ->
+                    {error, {rename_defs, Reason}}
+            end
     end.
+
+format_error({error, {rename_defs, Reason}}) -> fmt_err(Reason);
+format_error({rename_defs, Reason}) -> fmt_err(Reason);
+format_error(Reason) -> fmt_err(Reason).
+
+%% Note: do NOT include trailing newline (\n or ~n)
+fmt_err({duplicates, Dups}) ->
+    ["Renaming to same name:\n",
+     gpb_lib:nl_join(
+       lists:append(
+         [[case K of
+               {Service,Rpc} -> ?f("  ~s/~s -> ~s", [Service, Rpc, V]);
+               K             -> ?f("  ~s -> ~s", [K, V])
+           end
+           || K <- Ks]
+          || {Ks, V} <- Dups]))];
+fmt_err(X) ->
+    ?f("Unexpected error ~p", [X]).
 
 %% -- Converting legacy opts ------------------
 
@@ -198,14 +226,22 @@ mk_renamer(RenameOps, Defs) ->
     ServiceRenamings = service_renamings(PkgByProto, PkgRenamings, Defs,
                                          RenameOps),
     RpcRenamings = rpc_renamings(Defs, RenameOps),
-    fun(package, Name) ->
-            dict_fetch(Name, PkgRenamings);
-       (msg, Name) ->
-            dict_fetch(Name, MsgRenamings);
-       (service, Name) ->
-            dict_fetch(Name, ServiceRenamings);
-       ({rpc, ServiceName}, RpcName) ->
-            dict_fetch({ServiceName, RpcName}, RpcRenamings)
+    AllRenamings = [PkgRenamings, MsgRenamings, ServiceRenamings,
+                    RpcRenamings],
+    case check_no_dups(AllRenamings) of
+        ok ->
+            RF = fun(package, Name) ->
+                         dict_fetch(Name, PkgRenamings);
+                    (msg, Name) ->
+                         dict_fetch(Name, MsgRenamings);
+                    (service, Name) ->
+                         dict_fetch(Name, ServiceRenamings);
+                    ({rpc, ServiceName}, RpcName) ->
+                         dict_fetch({ServiceName, RpcName}, RpcRenamings)
+                 end,
+            {ok, RF};
+        {error, Reason}  ->
+            {error, Reason}
     end.
 
 calc_package_by_proto(Defs) ->
@@ -306,6 +342,29 @@ dict_fetch(Key, Dict) ->
         error ->
             error({not_found_in_dict, Key, dict:to_list(Dict)})
     end.
+
+check_no_dups(Renamings) ->
+    Errs = lists:foldl(
+             fun(RenamingDict, Errs) ->
+                     Errs ++ renaming_dups(RenamingDict)
+             end,
+             [],
+             Renamings),
+    if Errs == [] ->
+            ok;
+       true ->
+            {error, {duplicates, Errs}}
+    end.
+
+renaming_dups(Dict) ->
+    RDict = dict:fold(fun(K, V, RDict) -> dict:append(V, K, RDict) end,
+                      dict:new(),
+                      Dict),
+    DupsDict = dict:filter(fun(_V, [_K1,_K2|_]) -> true; % >= 2 entries
+                              (_V, [_]) -> false
+                           end,
+                           RDict),
+    [{Keys, V} || {V, Keys} <- dict:to_list(DupsDict)].
 
 %% -- Traversing defs, doing rename ----------
 

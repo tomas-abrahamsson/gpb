@@ -41,9 +41,9 @@ renames_just_msg_test() ->
                  input='TopPkg.SubPkg.msg_name_1',
                  output='TopPkg.SubPkg.msg_name_1.msg_name_2'}]},
      {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
-        lists:sort(gpb_names:rename_defs(
-                     Defs0,
-                     [{rename, {msg_name, snake_case}}])).
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs0,
+                        [{rename, {msg_name, snake_case}}]))).
 
 renames_msg_full_path_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
@@ -65,9 +65,9 @@ renames_msg_full_path_test() ->
                  input='top_pkg.sub_pkg.msg_name_1',
                  output='top_pkg.sub_pkg.msg_name_1.msg_name_2'}]},
      {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
-        lists:sort(gpb_names:rename_defs(
-                     Defs0,
-                     [{rename, {msg_fqname, snake_case}}])).
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs0,
+                        [{rename, {msg_fqname, snake_case}}]))).
 
 rename_package_affects_all_occurrences_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
@@ -86,9 +86,9 @@ rename_package_affects_all_occurrences_test() ->
                  input='top_pkg.sub_pkg.MsgName1',
                  output='top_pkg.sub_pkg.MsgName1.MsgName2'}]},
      {{service_containment,"x"}, ['top_pkg.sub_pkg.SvcName1']}] =
-        lists:sort(gpb_names:rename_defs(
-                     Defs0,
-                     [{rename, {pkg_name, snake_case}}])).
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs0,
+                        [{rename, {pkg_name, snake_case}}]))).
 
 dots_to_underscores_for_nested_msgs_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
@@ -109,11 +109,10 @@ dots_to_underscores_for_nested_msgs_test() ->
                  input='TopPkg.SubPkg.msg_name_1',
                  output='TopPkg.SubPkg.msg_name_1_msg_name_2'}]},
      {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
-        lists:sort(gpb_names:rename_defs(
-                     Defs0,
-                     [{rename, {msg_name, snake_case}},
-                      {rename, {msg_name, dots_to_underscores}}])).
-
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs0,
+                        [{rename, {msg_name, snake_case}},
+                         {rename, {msg_name, dots_to_underscores}}]))).
 
 
 x_proto() ->
@@ -156,11 +155,11 @@ rename_msg_by_proto_with_legacy_opts_test() ->
                  output=p2_m2} %% ... and result msgs to be prefixed
       ]},
      {{service_containment, "proto2"}, [s1]}] =
-        lists:sort(gpb_names:rename_defs(
-                     Defs,
-                     [{msg_name_prefix,
-                       {by_proto, [{proto1, "p1_"},
-                                   {proto2, "p2_"}]}}])).
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs,
+                        [{msg_name_prefix,
+                          {by_proto, [{proto1, "p1_"},
+                                      {proto2, "p2_"}]}}]))).
 
 prefix_record_names_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -185,7 +184,9 @@ prefix_record_names_with_legacy_opts_test() ->
                  input=p_m1,     %% both argument ...
                  output=p_m2}]}, %% ... and result msgs to be prefixed
      {{service_containment,_}, [s1]}] =
-        lists:sort(gpb_names:rename_defs(Defs, [{msg_name_prefix, "p_"}])).
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs,
+                        [{msg_name_prefix, "p_"}]))).
 
 can_suffix_record_names_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -210,7 +211,9 @@ can_suffix_record_names_with_legacy_opts_test() ->
                  input=m1_s,     %% both argument ...
                  output=m2_s}]}, %% .. and result msgs to be prefixed
      {{service_containment,_}, [s1]}] =
-        lists:sort(gpb_names:rename_defs(Defs, [{msg_name_suffix, "_s"}])).
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs,
+                        [{msg_name_suffix, "_s"}]))).
 
 can_tolower_record_names_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -232,7 +235,7 @@ can_tolower_record_names_with_legacy_opts_test() ->
                  input=msg1,     %% both argument ...
                  output=msg2}]}, %% .. and result msgs to be to-lower
      {{service_containment,_}, [svc1]}] =
-        lists:sort(gpb_names:rename_defs(Defs, [msg_name_to_lower])).
+        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
 
 can_tolower_record_names_with_oneof_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -247,7 +250,7 @@ can_tolower_record_names_with_oneof_with_legacy_opts_test() ->
     [{{msg,msg1}, [#gpb_oneof{fields=[#?gpb_field{name=a,type={msg,msg1}},
                                       #?gpb_field{name=b}]}]},
      {{msg_containment,_}, [msg1]}] =
-        lists:sort(gpb_names:rename_defs(Defs, [msg_name_to_lower])).
+        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
 
 can_tolower_record_names_with_map_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -262,7 +265,7 @@ can_tolower_record_names_with_map_with_legacy_opts_test() ->
     [{{msg,msg1}, [#?gpb_field{}]},
      {{msg,msg2}, [#?gpb_field{type={map,string,{msg,msg1}}}]},
      {{msg_containment,_}, [msg1, msg2]}] =
-        lists:sort(gpb_names:rename_defs(Defs, [msg_name_to_lower])).
+        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
 
 can_to_snake_record_names_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -284,7 +287,7 @@ can_to_snake_record_names_with_legacy_opts_test() ->
                  input=msg_name_1,     %% both argument ...
                  output=msg_name_2}]}, %% .. and result msgs to be snake_cased
      {{service_containment,_},[svc_name_1]}] =
-        lists:sort(gpb_names:rename_defs(Defs, [msg_name_to_snake_case])).
+        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_snake_case]))).
 
 to_snake_case_with_packages_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -311,7 +314,7 @@ to_snake_case_with_packages_with_legacy_opts_test() ->
                  input='top_pkg.sub_pkg.msg_name_1',
                  output='top_pkg.sub_pkg.msg_name_2'}]},
      {{service_containment,_}, ['top_pkg.sub_pkg.svc_name_1']}] =
-        lists:sort(gpb_names:rename_defs(Defs, [msg_name_to_snake_case])).
+        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_snake_case]))).
 
 can_tolower_record_names_with_packages_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -336,7 +339,34 @@ can_tolower_record_names_with_packages_with_legacy_opts_test() ->
                  input='pkg1.msg1',     %% both argument ...
                  output='pkg1.msg2'}]}, %% .. and result msgs to be to-lower
      {{service_containment,"x"},['pkg1.svc1']}] =
-        lists:sort(gpb_names:rename_defs(Defs, [msg_name_to_lower])).
+        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
+
+error_for_duplicates_after_rename_test() ->
+    Defs = parse_sort_several_file_lines(
+             [{"upper.proto",
+               ["package PKG1;",
+                "message MSG1 {required MSG2   f1=1;}",
+                "message MSG2 {required uint32 g1=1;}",
+                "service SVC1 {",
+                "  rpc REQ(MSG1) returns (MSG2) {};",
+                "}",
+                "extend MSG1 { optional uint32 fm2=2; }"]},
+              {"lower.proto",
+               ["package pkg1;",
+                "message msg1 {required msg2   f1=1;}",
+                "message msg2 {required uint32 g1=1;}",
+                "service svc1 {",
+                "  rpc req(msg1) returns (msg2) {};",
+                "}",
+                "extend msg1 { optional uint32 fm2=2; }"]}],
+             [use_packages]),
+    {error, Reason} = gpb_names:rename_defs(Defs, [msg_name_to_lower]),
+    Txt = lists:flatten(gpb_names:format_error(Reason)),
+    {true, true, true, false} =
+        {gpb_lib:is_substr("same", Txt),
+         gpb_lib:is_substr("MSG1", Txt),
+         gpb_lib:is_substr("msg1", Txt),
+         gpb_lib:is_substr("Unexpected error", Txt)}.
 
 %% test helpers
 parse_sort_several_file_lines(ProtoLines, Opts) ->
@@ -390,3 +420,5 @@ parse_lines(Lines) ->
             io:format("Scan error:~n  ~p~n", [Reason]),
             erlang:error({scan_error,Lines,Reason})
     end.
+
+ok({ok, V}) -> V.

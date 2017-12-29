@@ -494,11 +494,19 @@ do_file_or_string(In, Opts0) ->
     Opts1 = normalize_opts(Opts0),
     case parse_file_or_string(In, Opts1) of
         {ok, Defs} ->
-            Defs1 = gpb_names:rename_defs(Defs, Opts1),
-            Mod = find_out_mod(In, Opts1),
-            DefaultOutDir = find_default_out_dir(In),
-            Opts2 = Opts1 ++ [{o,DefaultOutDir}],
-            do_proto_defs_aux1(Mod, Defs1, Opts2);
+            case gpb_names:rename_defs(Defs, Opts1) of
+                {ok, Defs1} ->
+                    Mod = find_out_mod(In, Opts1),
+                    DefaultOutDir = find_default_out_dir(In),
+                    Opts2 = Opts1 ++ [{o,DefaultOutDir}],
+                    do_proto_defs_aux1(Mod, Defs1, Opts2);
+                {error, Reason} = Error ->
+                    possibly_report_error(Error, Opts1),
+                    case proplists:get_bool(return_warnings, Opts1) of
+                        true  -> {error, Reason, []};
+                        false -> Error
+                    end
+            end;
         {error, Reason} = Error ->
             possibly_report_error(Error, Opts1),
             case proplists:get_bool(return_warnings, Opts1) of
@@ -842,6 +850,8 @@ fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
         "'encode_msg' and 'decode_msg'";
+fmt_err({rename_defs, Reason}) ->
+    gpb_names:format_error(Reason);
 fmt_err(X) ->
     ?f("Unexpected error ~p", [X]).
 
