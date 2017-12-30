@@ -1,5 +1,23 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.0
+2017-Dec-30
+
+        * Rework renaming options, to make it easier to work with grpc
+        where package, service and rpc names are exposed. The new
+        options are {rename,{What,How}} where What can specify eg msg_name
+        or msg_fqname to operate on only the msg name or the fully
+        qualified name, ie prepended with package name. How can be eg
+        lowercase or snake_case.
+
+        New renaming possibilities for How are: base_name and
+        dots_to_underscores.
+
+        The old msg_name_* options are still handled in backwards
+        compatible way.
+
+        Thanks to Tristan Sloughter for the suggestions.
+
 Version 4.0.2
 2017-Nov-18
 
