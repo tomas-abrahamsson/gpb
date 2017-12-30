@@ -93,6 +93,8 @@
 -type renaming() :: {pkg_name, name_change()} |
                     {msg_name, msg_name_change()} |
                     {msg_fqname, msg_name_change()} |
+                    {group_name, name_change()} |
+                    {group_fqname, name_change()} |
                     {service_name, name_change()} |
                     {service_fqname, name_change()} |
                     {rpc_name, name_change()}.
@@ -354,15 +356,17 @@ file(File) ->
 %% project. The `{msg_name_suffix,Suffix}' works correspondingly.
 %%
 %% The `{msg_name_prefix,Prefix}' option expands
-%% to `[{rename,{pkg_name,Prefix}},{rename,{msg_fqname,{prefix,Prefix}}}]',
+%% to `[{rename,{pkg_name,Prefix}},{rename,{msg_fqname,{prefix,Prefix}}},
+%% {rename,{group_fqname,{prefix,Prefix}}}}]',
 %% and ditto for suffixes.
 %%
 %% For backwards compatibility, the `{msg_name_prefix,{by_proto,PrefixList}}'
-%% expands to just `{rename,{msg_fqname,{prefix,PrefixList}}}'.
+%% expands to just `[{rename,{msg_fqname,{prefix,PrefixList}}}]'.
 %%
 %% The `msg_name_to_lower' and `msg_name_to_snake_case' options expands
 %% to `[{rename,{pkg_name,X}},{rename,{service_fqname,X}},
-%% {rename,{rpc_name,X}},{rename,{msg_fqname,X}}]' where `X' is
+%% {rename,{rpc_name,X}},{rename,{msg_fqname,X}},
+%% {rename,{rpc_name,X}},{rename,{group_fqname,X}}]' where `X' is
 %% `lowercase' or `snake_case' respectively.
 %%
 %% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)

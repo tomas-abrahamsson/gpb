@@ -157,13 +157,15 @@ l_msg_lowercase_opts() ->
 
 l_msg_only_opts(Value) ->
     [{rename, {pkg_name, Value}},
-     {rename, {msg_fqname, Value}}].
+     {rename, {msg_fqname, Value}},
+     {rename, {group_fqname, Value}}].
 
 l_msg_and_service_and_rpc_opts(Value) ->
     [{rename, {pkg_name, Value}},
      {rename, {service_fqname, Value}},
      {rename, {rpc_name, Value}},
-     {rename, {msg_fqname, Value}}].
+     {rename, {msg_fqname, Value}},
+     {rename, {group_fqname, Value}}].
 
 %% -- Renaming opts -> renaming functions ------------------
 
@@ -173,6 +175,8 @@ mk_rename_operations(Opts) ->
 mk_rename_op(pkg_name, How) -> mk_pkg_rename_op(How);
 mk_rename_op(msg_fqname, How) -> mk_msg_rename_op(How);
 mk_rename_op(msg_name, How) -> mk_msg_rename_op(How);
+mk_rename_op(group_fqname, How) -> mk_msg_rename_op(How);
+mk_rename_op(group_name, How) -> mk_group_rename_op(How);
 mk_rename_op(service_fqname, How) -> mk_service_rename_op(How);
 mk_rename_op(service_name, How) -> mk_service_rename_op(How);
 mk_rename_op(rpc_name, How) -> mk_rpc_rename_op(How).
@@ -187,6 +191,9 @@ mk_msg_rename_op({prefix, {by_proto, PrefixList}}) ->
             list_to_atom(lists:concat([Prefix, Name]))
     end;
 mk_msg_rename_op(PrimOp) ->
+    fun(Name, _Proto) -> do_prim_op(PrimOp, Name) end.
+
+mk_group_rename_op(PrimOp) ->
     fun(Name, _Proto) -> do_prim_op(PrimOp, Name) end.
 
 mk_service_rename_op(PrimOp) ->
@@ -226,17 +233,21 @@ mk_renamer(RenameOps, Defs) ->
     PkgByProto = calc_package_by_proto(Defs),
     PkgRenamings = pkg_renamings(PkgByProto, RenameOps),
     MsgRenamings = msg_renamings(PkgByProto, PkgRenamings, Defs, RenameOps),
+    GroupRenamings = group_renamings(PkgByProto, PkgRenamings, Defs,
+                                     RenameOps),
     ServiceRenamings = service_renamings(PkgByProto, PkgRenamings, Defs,
                                          RenameOps),
     RpcRenamings = rpc_renamings(Defs, RenameOps),
-    AllRenamings = [PkgRenamings, MsgRenamings, ServiceRenamings,
-                    RpcRenamings],
+    AllRenamings = [PkgRenamings, MsgRenamings, GroupRenamings,
+                    ServiceRenamings, RpcRenamings],
     case check_no_dups(AllRenamings) of
         ok ->
             RF = fun(package, Name) ->
                          dict_fetch(Name, PkgRenamings);
                     (msg, Name) ->
                          dict_fetch(Name, MsgRenamings);
+                    (group, Name) ->
+                         dict_fetch(Name, GroupRenamings);
                     (service, Name) ->
                          dict_fetch(Name, ServiceRenamings);
                     ({rpc, ServiceName}, RpcName) ->
@@ -277,6 +288,30 @@ msg_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
               || FqName <- MsgNames]
          end
          || {{msg_containment, Proto}, MsgNames} <- Defs])).
+
+group_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
+    ProtoByMsg = dict:from_list(
+                   lists:append(
+                     [[{MsgName, Proto} || MsgName <- MsgNames]
+                      || {{msg_containment, Proto}, MsgNames} <- Defs])),
+    dict:from_list(
+      [begin
+           MsgName = group_name_to_msg_name(GroupFqName),
+           Proto = dict:fetch(MsgName, ProtoByMsg),
+           Pkg = dict_fetch_or_default(Proto, PkgByProto, ''),
+           Name = drop_prefix(Pkg, GroupFqName),
+           Name1 = run_ops(group_name, Name, Proto, RenameOps),
+           Pkg1 = dict_fetch_or_default(Pkg, PkgRenamings, ''),
+           FqName1 = prefix(Pkg1, Name1),
+           FqName2 = run_ops(group_fqname, FqName1, Proto, RenameOps),
+           {GroupFqName, FqName2}
+       end
+       || {{group,GroupFqName}, _Fields} <- Defs]).
+
+group_name_to_msg_name(GName) ->
+    Components = gpb_lib:string_lexemes(atom_to_list(GName), "."),
+    [_G | ButLast] = lists:reverse(Components),
+    list_to_atom(gpb_lib:dot_join(lists:reverse(ButLast))).
 
 service_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
     dict:from_list(
@@ -375,6 +410,8 @@ do_rename(RF, Defs) ->
     lists:map(
       fun({{msg,Name}, Fields}) ->
               {{msg, RF(msg, Name)}, rename_fields(RF, Fields, Defs)};
+         ({{group,Name}, Fields}) ->
+              {{group, RF(group, Name)}, rename_fields(RF, Fields, Defs)};
          ({{extensions,Name}, Exts}) ->
               {{extensions, RF(msg, Name)}, Exts};
          ({{service,Name}, Rpcs}) ->
@@ -405,6 +442,8 @@ rename_fields(RF, Fields, Defs) ->
               F#?gpb_field{type={msg, RF(msg, MsgName)}};
          (#?gpb_field{type={map,KeyType,{msg,MsgName}}}=F) ->
               F#?gpb_field{type={map,KeyType,{msg, RF(msg, MsgName)}}};
+         (#?gpb_field{type={group,MsgName}}=F) ->
+              F#?gpb_field{type={group, RF(group, MsgName)}};
          (#gpb_oneof{fields=Fs}=F) ->
               F#gpb_oneof{fields=rename_fields(RF, Fs, Defs)};
          (#?gpb_field{}=F) ->

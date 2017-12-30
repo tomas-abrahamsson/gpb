@@ -145,6 +145,30 @@ x_proto() ->
        "}",
        "extend MsgName1 { optional uint32 fm2=2; }"]}].
 
+renames_groups_test() ->
+    Defs = parse_sort_several_file_lines(
+             [{"x.proto",
+               ["package TopPkg.SubPkg;",
+                "message MsgName1 {",
+                "  required group GROUP_NAME = 1 {",
+                "    required MsgName2 gf1 = 11;",
+                "  }",
+                "  message MsgName2 {required uint32 m21=21;}"
+                "};"]}],
+             [use_packages]),
+    [{package,'TopPkg.SubPkg'},
+     {{group,'TopPkg.SubPkg.msgname1.group_name'},
+      [#?gpb_field{type={msg,'TopPkg.SubPkg.MsgName1.MsgName2'}}]},
+     {{msg,'TopPkg.SubPkg.MsgName1'},
+      [#?gpb_field{name='GROUP_NAME',
+                   type={group,'TopPkg.SubPkg.msgname1.group_name'}}]},
+     {{msg,'TopPkg.SubPkg.MsgName1.MsgName2'}, [#?gpb_field{}]},
+     {{msg_containment,"x"},
+      ['TopPkg.SubPkg.MsgName1','TopPkg.SubPkg.MsgName1.MsgName2']},
+     {{pkg_containment,"x"},'TopPkg.SubPkg'}] =
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs,
+                        [{rename, {group_name, lowercase}}]))).
 
 rename_msg_by_proto_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
