@@ -238,9 +238,9 @@ mk_renamer(RenameOps, Defs) ->
     ServiceRenamings = service_renamings(PkgByProto, PkgRenamings, Defs,
                                          RenameOps),
     RpcRenamings = rpc_renamings(Defs, RenameOps),
-    AllRenamings = [PkgRenamings, MsgRenamings, GroupRenamings,
-                    ServiceRenamings, RpcRenamings],
-    case check_no_dups(AllRenamings) of
+    MostRenamings = [PkgRenamings, MsgRenamings, GroupRenamings,
+                    ServiceRenamings],
+    case check_no_dups(MostRenamings, RpcRenamings) of
         ok ->
             RF = fun(package, Name) ->
                          dict_fetch(Name, PkgRenamings);
@@ -381,20 +381,16 @@ dict_fetch(Key, Dict) ->
             error({not_found_in_dict, Key, dict:to_list(Dict)})
     end.
 
-check_no_dups(Renamings) ->
-    Errs = lists:foldl(
-             fun(RenamingDict, Errs) ->
-                     Errs ++ renaming_dups(RenamingDict)
-             end,
-             [],
-             Renamings),
-    if Errs == [] ->
+check_no_dups(Renamings, RpcRenamings) ->
+    Errs1 = lists:foldl(fun renaming_dups/2, [], Renamings),
+    Errs2 = renaming_rpc_dups(RpcRenamings, Errs1),
+    if Errs2 == [] ->
             ok;
        true ->
-            {error, {duplicates, Errs}}
+            {error, {duplicates, Errs2}}
     end.
 
-renaming_dups(Dict) ->
+renaming_dups(Dict, Errs) ->
     RDict = dict:fold(fun(K, V, RDict) -> dict:append(V, K, RDict) end,
                       dict:new(),
                       Dict),
@@ -402,7 +398,25 @@ renaming_dups(Dict) ->
                               (_V, [_]) -> false
                            end,
                            RDict),
-    [{Keys, V} || {V, Keys} <- dict:to_list(DupsDict)].
+    [{Keys, V} || {V, Keys} <- dict:to_list(DupsDict)] ++ Errs.
+
+%% check for dups on a per service basis
+renaming_rpc_dups(Dict, Errs) ->
+    %% split into dict of dicts, one per service (service name is used as key)
+    Ds = dict:fold(
+           fun({Service,_Rpc}=Entry, NewName, D) ->
+                   ED = case dict:find(Service, D) of
+                            error    -> dict:store(Entry, NewName, dict:new());
+                            {ok,ED0} -> dict:store(Entry, NewName, ED0)
+                        end,
+                   dict:store(Service, ED, D)
+           end,
+           dict:new(),
+           Dict),
+    lists:foldl(fun renaming_dups/2,
+                Errs,
+                [D || {_Service,D} <- dict:to_list(Ds)]).
+
 
 %% -- Traversing defs, doing rename ----------
 
