@@ -410,6 +410,24 @@ error_for_duplicates_after_rename_test() ->
          gpb_lib:is_substr("msg1", Txt),
          gpb_lib:is_substr("Unexpected error", Txt)}.
 
+no_error_for_same_rpc_name_in_different_services_test() ->
+    Defs = parse_sort_several_file_lines(
+             [{"a.proto",
+               ["message M { required uint32 f1 = 1; };",
+                "service Account { rpc Create (M) returns (M); }",
+                "service Device  { rpc Create (M) returns (M); }"]}],
+             []),
+    [{{msg,'M'}, _},
+     {{msg_containment,_},_},
+     {{rpc_containment,_},[{account,create},{device,create}]},
+     {{service,account}, [#?gpb_rpc{name=create}]},
+     {{service,device},  [#?gpb_rpc{name=create}]},
+     {{service_containment,_},[_,_]}] =
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs,
+                        [{rename,{rpc_name,lowercase}},
+                         {rename,{service_name,lowercase}}]))).
+
 %% test helpers
 parse_sort_several_file_lines(ProtoLines, Opts) ->
     {AllProtoNames, _AllLines} = lists:unzip(ProtoLines),
