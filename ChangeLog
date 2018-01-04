@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.1
+2018-Jan-04
+
+        * Bugfix a renaming check: Check for duplicate rpc names only per
+        service. The same rpc name can be used in different services, but in
+        4.1.0, this was not allowed. Thanks to Tristan Sloughter for reporting.
+
 Version 4.1.0
 2017-Dec-30
 
