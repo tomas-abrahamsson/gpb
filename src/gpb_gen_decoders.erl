@@ -190,9 +190,6 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     %% - The pass_as_params feature (improves performance),
     %%   is also done post-generation using the code-morpher.
     %%
-    ROpts = [{msgs_as_maps,false},
-             {mapfields_as_maps,false}
-             | lists:keydelete(maps_unset_optional, 1, Opts)],
     TrUserDataVar = ?expr(TrUserData),
     InitExprs = init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts),
     #anres{d_field_pass_method=FPass} = AnRes,
@@ -201,7 +198,7 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     Fns = lists:flatten(
             [format_msg_decoder_read_field(MsgName, MsgDef, InitExprs,
                                            RAnRes),
-             format_field_decoders(MsgName, MsgDef, RAnRes, ROpts),
+             format_field_decoders(MsgName, MsgDef, RAnRes, Opts),
              format_field_skippers(MsgName)]),
     FieldPass = gpb_lib:get_field_pass(MsgName, AnRes),
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
