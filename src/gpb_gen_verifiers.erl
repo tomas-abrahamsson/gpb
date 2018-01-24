@@ -649,12 +649,13 @@ format_verifier_auxiliaries(Defs, Opts) ->
                prettify_path,
                fun([]) -> top_level end);
          true ->
-             case gpb_lib:target_has_lists_join(Opts) of
-                 true ->
-                     format_prettify_path_with_lists_join();
-                 false ->
-                     format_prettify_path_with_string_join()
-             end
+             [gpb_lib:nowarn_dialyzer_attr(prettify_path, 1, Opts),
+              case gpb_lib:target_has_lists_join(Opts) of
+                  true ->
+                      format_prettify_path_with_lists_join();
+                  false ->
+                      format_prettify_path_with_string_join()
+              end]
      end].
 
 format_prettify_path_with_lists_join() ->
