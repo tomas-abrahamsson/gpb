@@ -248,12 +248,19 @@ format_field_merge_expr(#?gpb_field{name=FName, occurrence=Occur}=Field,
             Append = gpb_gen_translators:find_translation(
                        ElemPath, merge, AnRes, 'erlang_++'),
             Tr = fun (_,_) -> Append end,
-            {merge, {{PF, NF}, Tr, 'erlang_++'}};
+            {cond_merge, {{PF, NF}, Tr, 'erlang_++'}};
+        msgmerge when Occur == required ->
+            Tr = gpb_gen_translators:mk_find_tr_fn_elem_or_default(
+                   MsgName, Field, false, AnRes),
+            #?gpb_field{type={_msg_or_group,SubMsgName}}=Field,
+            MergeFn = gpb_lib:mk_fn(merge_msg_, SubMsgName),
+            {uncond_merge, {{PF, NF}, Tr, MergeFn}};
         msgmerge ->
             Tr = gpb_gen_translators:mk_find_tr_fn_elem_or_default(
                    MsgName, Field, false, AnRes),
             #?gpb_field{type={_msg_or_group,SubMsgName}}=Field,
-            {merge, {{PF, NF}, Tr, gpb_lib:mk_fn(merge_msg_, SubMsgName)}}
+            MergeFn = gpb_lib:mk_fn(merge_msg_, SubMsgName),
+            {cond_merge, {{PF, NF}, Tr, MergeFn}}
     end;
 format_field_merge_expr(#gpb_oneof{name=CFName, fields=OFields},
                         PF, NF, MsgName, AnRes) ->
@@ -275,8 +282,8 @@ reshape_cases_for_maps_find(Merges, PMsg, NMsg) ->
     [{FName, case Merge of
                  {overwrite, {_, _}} ->
                      {overwrite, {PMsg, NMsg}};
-                 {merge, {{_, _}, Tr, MergeFn}} ->
-                     {merge, {{PMsg, NMsg}, Tr, MergeFn}};
+                 {cond_merge, {{_, _}, Tr, MergeFn}} ->
+                     {cond_merge, {{PMsg, NMsg}, Tr, MergeFn}};
                  {oneof, {{_, _}, OFMerges}} ->
                      {oneof, {{PMsg, NMsg}, OFMerges}};
                  {expr, Expr} ->
@@ -299,7 +306,13 @@ render_field_merger({overwrite, {PF, NF}}, _TrUserDataVar) ->
            replace_tree('NF', NF)]);
 render_field_merger({expr, Expr}, _TrUserDataVar) ->
     Expr;
-render_field_merger({merge, {{PF, NF}, Tr, MergeFn}}, TrUserDataVar) ->
+render_field_merger({uncond_merge, {{PF, NF}, Tr, MergeFn}}, TrUserDataVar) ->
+    ?expr('merge'('PF', 'NF', 'TrUserData'),
+          [replace_tree('PF', PF),
+           replace_tree('NF', NF),
+           replace_term('merge', Tr(merge, MergeFn)),
+           replace_tree('TrUserData', TrUserDataVar)]);
+render_field_merger({cond_merge, {{PF, NF}, Tr, MergeFn}}, TrUserDataVar) ->
     ?expr(if 'PF' /= undefined, 'NF' /= undefined -> 'merge'('PF', 'NF',
                                                              'TrUserData');
              'PF' == undefined -> 'NF';
@@ -338,7 +351,7 @@ render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var,
               _                     -> 'Var'
           end,
           std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar));
-render_omissible_merger({FName, {merge, {{PMsg, NMsg}, Tr, MergeFn}}}, Var,
+render_omissible_merger({FName, {cond_merge, {{PMsg, NMsg}, Tr, MergeFn}}}, Var,
                         TrUserDataVar) ->
     Trs = std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar),
     MergeCallTmpl = ?expr('merge'('PF','NF', 'TrUserData'), Trs),
