@@ -511,7 +511,9 @@ Thus, to create a new version of gpb, the single source from where
 this version is fetched, is the git tag.   (If you are importing
 gpb into another version control system than git, or using another
 build tool than rebar, you might have to adapt rebar.config and
-src/gpb.app.src accordingly.)
+src/gpb.app.src accordingly. See also the section below about
+[building outside of a git work tree](README.md#building-outside-of-a-git-work-tree) for info on
+exporting gpb from git.)
 
 The version number on the master branch of the gpb on github is
 intended to always be only integers with dots, in order to be
@@ -526,6 +528,21 @@ Places to update when making a new version:
 * Write about the changes in the ChangeLog file,
   if it is a non-minor version bump.
 * tag it in git
+
+
+Building outside of a git work tree
+-----------------------------------
+
+The gpb build process requires a git work tree, with tags, to get the
+version numbering right, as described in the
+[Version numbering section](REAMDE.md#version-numbering). To export gpb
+for building outside of a git work tree, run the
+`helpers/export-from-git` script from a git work tree. The export script
+will create a tar file with the version number already substituted.
+
+In particular, the initial requirement on a git work tree to get the
+version number right, unfortunately also means that it does not work
+to build gitbub's automatically created release tar balls.
 
 
 Related projects

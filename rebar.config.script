@@ -31,7 +31,7 @@ ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions.
   [{compile,
     %% invoking shell script as an argument to sh appears to  be
     %% needed with rebar for windows/cygwin
-    "sh build/mk_version_hrl"
+    "bash build/mk_version_hrl"
     "    < include/gpb_version.hrl.in"
     "    > include/gpb_version.hrl "}
   ]},

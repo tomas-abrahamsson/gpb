@@ -1,0 +1,70 @@
+#! /bin/bash
+
+usage () {
+    cat <<EOF
+Usage: $(basename "$0")
+Demonstration script to create a tar file of gpb,
+such that it can build outside of the gpb git repo.
+EOF
+}
+
+cdup=$(git rev-parse --show-toplevel) &&
+cd "$cdup" || {
+    echo >&2 "Cannot chdir to $cdup, the toplevel of the working tree"
+    exit 1
+}
+
+dest_dir=$(mktemp -d "tmp-export-XXXXXXXX")
+trap "ec=\$?; /bin/rm -rf '$dest_dir'; exit \$ec" 0 INT QUIT TERM
+
+set -e
+
+vsn=$(git describe --always --tags --match '[0-9]*.[0-9]*')
+echo "Exporting version $vsn -> gpb-$vsn.tar.gz"
+
+mkdir "$dest_dir/gpb-$vsn"
+
+git archive --format=tar HEAD | (cd "$dest_dir/gpb-$vsn" && tar xfp -)
+
+./build/mk_version_hrl \
+    < include/gpb_version.hrl.in \
+    > "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in"
+cp  "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in" \
+    "$dest_dir/gpb-$vsn/include/gpb_version.hrl"
+( echo "#! /bin/bash";
+  echo
+  echo "# This script was turned into a no-op during extraction from"
+  echo "# the gpb git repo by $(basename "$0")"
+  echo
+  echo "cat" ) \
+    > "$dest_dir/gpb-$vsn/build/mk_version_hrl"
+
+# Fix version number in .gitignore (it is no longer an auto-generated file)
+sed -i -e 's,^.*gpb_version.hrl.*$,,g' "$dest_dir/gpb-$vsn/.gitignore"
+# Fix version number eunit test in in gpb_tests (and gpb_compile_tests)
+awk '{ if ($0 ~ /^version_test/) {
+    print "%%%% Outcommented test during the import";
+    print "%%%% since we have hard-wired the version, instead of finding it";
+    print "%%%% from git which the original gpb does";
+    do {
+      print "%% " $0;
+      success=getline;
+    } while (success && $0 !~ /^[a-z]/);
+    if (success) print $0;
+  } else {
+    print $0;
+  }
+}' \
+    < "$dest_dir/gpb-$vsn/test/gpb_tests.erl" \
+    > "$dest_dir/gpb-$vsn/test/gpb_tests.erl.new"
+mv "$dest_dir/gpb-$vsn/test/gpb_tests.erl.new" \
+   "$dest_dir/gpb-$vsn/test/gpb_tests.erl"
+
+# Remove some development auxiliaries
+/bin/rm -rf "$dest_dir/gpb-$vsn/helpers"
+
+(
+    cd "$dest_dir"
+    tar cfpz "gpb-$vsn.tar.gz" "gpb-$vsn"
+)
+mv "$dest_dir/gpb-$vsn.tar.gz" .
