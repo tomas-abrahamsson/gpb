@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.2
+2018-Jan-26
+
+        * Fix Dialyzer issues in generated code. This regression was
+        introduced already in 3.23.0, but only if the type_specs (-type)
+        option was specified. That option was on by default in 4.0.0.
+        Thanks to GeraldXv for reporting.
+
 Version 4.1.1
 2018-Jan-04
 
