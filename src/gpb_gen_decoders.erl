@@ -213,22 +213,22 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                   [explode_param_init(MsgName, InitExprs, 4),
                    explode_param_pass(MsgName, FNames, 4),
                    underscore_unused_vars()];
-              {{maps, present_undefined},pass_as_record} ->
+              {#maps{unset_optional=present_undefined},pass_as_record} ->
                   [rework_records_to_maps(4, undefined),
                    underscore_unused_vars(),
                    finalize_marked_map_exprs()];
-              {{maps, present_undefined},pass_as_params} ->
+              {#maps{unset_optional=present_undefined},pass_as_params} ->
                   [explode_param_init(MsgName, InitExprs, 4),
                    explode_param_pass(MsgName, FNames, 4),
                    implode_to_map_exprs_all_mandatory(),
                    underscore_unused_vars(),
                    finalize_marked_map_exprs()];
-              {{maps, omitted}, pass_as_record} ->
+              {#maps{unset_optional=omitted}, pass_as_record} ->
                   [change_undef_marker_in_clauses('$undef'),
                    rework_records_to_maps(4, '$undef'),
                    underscore_unused_vars(),
                    finalize_marked_map_exprs()];
-              {{maps, omitted}, pass_as_params} ->
+              {#maps{unset_optional=omitted}, pass_as_params} ->
                   [change_undef_marker_in_clauses('$undef'),
                    explode_param_init(MsgName, InitExprs, 4),
                    explode_param_pass(MsgName, FNames, 4),
@@ -306,10 +306,11 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
     case gpb_lib:get_field_pass(MsgName, AnRes) of
         pass_as_params ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                X when X == records;
-                       X == {maps, present_undefined} ->
+                records ->
                     [{FName, Expr} || {FName, _, Expr, _MOExpr} <- ExprInfos2];
-                {maps, omitted} ->
+                #maps{unset_optional=present_undefined} ->
+                    [{FName, Expr} || {FName, _, Expr, _MOExpr} <- ExprInfos2];
+                #maps{unset_optional=omitted} ->
                     [{FName, MapsOmittedExpr}
                      || {FName, _, _Expr, MapsOmittedExpr} <- ExprInfos2]
             end;
@@ -318,9 +319,9 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
                 records ->
                     [{FName, Expr} || {FName, P, Expr, _} <- ExprInfos2,
                                       P == m orelse P == d];
-                {maps, present_undefined} ->
+                #maps{unset_optional=present_undefined} ->
                     [{FName, Expr} || {FName, _, Expr, _} <- ExprInfos2];
-                {maps, omitted} ->
+                #maps{unset_optional=omitted} ->
                     [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos2]
             end
     end.

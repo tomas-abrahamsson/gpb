@@ -368,8 +368,10 @@ mapping_update(Var, RName, FieldsValues, Opts) ->
             record_update(Var, RName, FieldsValues);
         maps ->
             case get_mapping_and_unset_by_opts(Opts) of
-                {maps, present_undefined} -> map_update(Var, FieldsValues);
-                {maps, omitted}           -> map_set(Var, FieldsValues)
+                #maps{unset_optional=present_undefined} ->
+                    map_update(Var, FieldsValues);
+                #maps{unset_optional=omitted} ->
+                    map_set(Var, FieldsValues)
             end
     end.
 
@@ -498,7 +500,9 @@ get_mapping_and_unset_by_opts(Opts) ->
             records;
         maps ->
             Default = omitted,
-            {maps, proplists:get_value(maps_unset_optional, Opts, Default)}
+            UnseOptional = proplists:get_value(maps_unset_optional, Opts,
+                                               Default),
+            #maps{unset_optional=UnseOptional}
     end.
 
 get_strings_as_binaries_by_opts(Opts) ->

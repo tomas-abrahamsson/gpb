@@ -267,8 +267,8 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     AtomVars0 = [{mk_c_var(gpb_aa_, minus_to_m(A)), A} || A <- Atoms],
     NoValue = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                   records -> undefined;
-                  {maps, present_undefined} -> undefined;
-                  {maps, omitted} -> '$undef'
+                  #maps{unset_optional=present_undefined} -> undefined;
+                  #maps{unset_optional=omitted} -> '$undef'
               end,
     AtomVars1 = [{"gpb_x_no_value", NoValue} | AtomVars0],
     [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars1],
@@ -1174,12 +1174,12 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
          records ->
              ?f("    res = enif_make_tuple(env, ~w, rname~s);\n",
                 [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]]);
-         {maps, present_undefined} ->
+         #maps{unset_optional=present_undefined} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [?f("    enif_make_map_put(env, res, gpb_aa_~s, elem~w, &res);\n",
                   [gpb_lib:get_field_name(Field), I])
                || {I, Field} <- gpb_lib:index_seq(Fields)]];
-         {maps, omitted} ->
+         #maps{unset_optional=omitted} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [begin
                    Put = ?f("enif_make_map_put("++

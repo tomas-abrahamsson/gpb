@@ -254,10 +254,11 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
     FnName = gpb_lib:mk_fn(e_msg_, MsgName),
     FieldMatching =
         case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-            X when X == records;
-                   X == {maps, present_undefined} ->
+            records ->
                 gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
-            {maps, omitted} ->
+            #maps{unset_optional=present_undefined} ->
+                gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
+            #maps{unset_optional=omitted} ->
                 FMap = gpb_lib:zip_for_non_opt_fields(MsgDef, FVars),
                 if length(FMap) == length(FNames) ->
                         gpb_lib:map_match(FMap);
@@ -352,8 +353,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                             | Transforms])
                 end,
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                X when X == records;
-                       X == {maps, present_undefined} ->
+                records ->
                     ?expr(
                        if '<F>' == undefined ->
                                '<Bin>';
@@ -361,7 +361,15 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                '<encodeit>'
                        end,
                        [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
-                {maps, omitted} ->
+                #maps{unset_optional=present_undefined} ->
+                    ?expr(
+                       if '<F>' == undefined ->
+                               '<Bin>';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
                            '#{fieldname := <F>}' ->
@@ -377,8 +385,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
             end;
         repeated ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                X when X == records;
-                       X == {maps, present_undefined} ->
+                records ->
                     ?expr(
                        begin
                            'TrF' = 'Tr'('<F>', 'TrUserData'),
@@ -387,7 +394,16 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                            end
                        end,
                    Transforms);
-                {maps, omitted} ->
+                #maps{unset_optional=present_undefined} ->
+                    ?expr(
+                       begin
+                           'TrF' = 'Tr'('<F>', 'TrUserData'),
+                           if 'TrF' == [] -> '<Bin>';
+                              true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
+                           end
+                       end,
+                   Transforms);
+                #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
                            '#{fieldname := <F>}' ->
@@ -422,10 +438,11 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                             replace_tree('<OF>', OFVar)]),
              MatchPattern =
                  case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                     X when X == records;
-                            X == {maps, present_undefined} ->
+                     records ->
                          OFVal;
-                     {maps, omitted} ->
+                     #maps{unset_optional=present_undefined} ->
+                         OFVal;
+                     #maps{unset_optional=omitted} ->
                          gpb_lib:map_match([{FName, OFVal}])
                  end,
              %% undefined is already handled, we have a match,
@@ -440,8 +457,7 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
          end
          || #?gpb_field{name=Name}=OField <- OFields],
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        X when X == records;
-               X == {maps, present_undefined} ->
+        records ->
             ?expr(case '<F>' of
                       undefined    -> '<Bin>';
                       '<oneof...>' -> '<expr>'
@@ -449,7 +465,15 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                   [replace_tree('<F>', FVar),
                    replace_tree('<Bin>', PrevBVar),
                    repeat_clauses('<oneof...>', OneofClauseTransforms)]);
-        {maps, omitted} ->
+        #maps{unset_optional=present_undefined} ->
+            ?expr(case '<F>' of
+                      undefined    -> '<Bin>';
+                      '<oneof...>' -> '<expr>'
+                  end,
+                  [replace_tree('<F>', FVar),
+                   replace_tree('<Bin>', PrevBVar),
+                   repeat_clauses('<oneof...>', OneofClauseTransforms)]);
+        #maps{unset_optional=omitted} ->
             ?expr(case 'M' of
                       '<oneof...>' -> '<expr>';
                       _ -> '<Bin>'

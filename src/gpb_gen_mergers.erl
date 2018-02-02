@@ -191,14 +191,19 @@ format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
     NFields = lists:zip(FNames, NFVars),
     Infos = zip4(FNames, PFVars, NFVars, MsgDef),
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        X when X == records;
-               X == {maps, present_undefined} ->
+        records ->
             PFields1 = [{FName,PFVar} || {FName,PFVar} <- PFields,
                                          PFVar /= none],
             P = gpb_lib:mapping_match(MsgName, PFields1, Opts),
             N = gpb_lib:mapping_match(MsgName, NFields, Opts),
             {P, N, {pr, Infos}};
-        {maps, omitted} ->
+        #maps{unset_optional=present_undefined} ->
+            PFields1 = [{FName,PFVar} || {FName,PFVar} <- PFields,
+                                         PFVar /= none],
+            P = gpb_lib:mapping_match(MsgName, PFields1, Opts),
+            N = gpb_lib:mapping_match(MsgName, NFields, Opts),
+            {P, N, {pr, Infos}};
+        #maps{unset_optional=omitted} ->
             {OptInfos, MandInfos} = gpb_lib:key_partition_on_optionality(4,
                                                                          Infos),
             PMsg = ?expr(PMsg),
