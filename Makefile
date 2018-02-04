@@ -309,6 +309,42 @@ $(ebin)/gpb_gen_nif.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_lib.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_codemorpher.beam: $(ebin)/gpb_codegen.beam
 
+$(ebin)/gpb_analyzer.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_analyzer.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_codemorpher.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_compile.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_compile.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_compile.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_decoders.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_decoders.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_gen_decoders.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_encoders.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_encoders.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_gen_encoders.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_introspect.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_introspect.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_gen_introspect.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_mergers.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_mergers.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_gen_mergers.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_nif.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_nif.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_gen_nif.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_translators.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_translators.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_gen_translators.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_types.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_types.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_verifiers.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_verifiers.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_gen_verifiers.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_lib.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_lib.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_lib.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_names.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_parse.beam: $(incdir)/gpb.hrl
+
 # To compile gpb_codegen_tests, we first need the parse transform in gpb_codegen
 $(test)/gpb_codegen_tests.beam: $(ebin)/gpb_codegen.beam
 
