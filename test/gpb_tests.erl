@@ -528,6 +528,9 @@ error_for_mapfield_with_missing_msgvalue_test() ->
     ?assertError({gpb_error,_}, decode_msg(B1m, m1, Defs)).
 
 decode_packed_repeated_with_without_packed_test() ->
+    {timeout,10,fun decode_packed_repeated_with_without_packed_test_aux/0}.
+
+decode_packed_repeated_with_without_packed_test_aux() ->
     %% "Protocol buffer parsers must be able to parse repeated fields
     %% that were compiled as packed as if they were not packed, and vice
     %% versa. [...]"

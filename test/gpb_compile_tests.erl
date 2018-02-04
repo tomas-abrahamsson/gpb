@@ -292,6 +292,9 @@ epb_compatibility_opt_implies_defaults_for_omitted_optionals_test() ->
     unload_code(M).
 
 field_pass_as_params_test() ->
+    {timeout,10,fun field_pass_as_params_test_aux/0}.
+
+field_pass_as_params_test_aux() ->
     MsgDef = ["message m2 { required uint32 f22 = 1; }"
               "message m1 { required uint32  f1 = 1;",
               "             optional fixed32 f2 = 2;",
@@ -1295,7 +1298,7 @@ call_tr_userdata_fn(Fn, Result, Op) ->
 
 never_generates_unused_translator_functions_test_() ->
     %% On my slow machine (1.6 GHz Atom N270), it currently takes ~21 seconds
-    {timeout,40,fun never_generates_unused_translator_functions_aux/0}.
+    {timeout,60,fun never_generates_unused_translator_functions_aux/0}.
 
 never_generates_unused_translator_functions_aux() ->
     Enum   = {{enum,ee},[{a,0},{b,1}]},
