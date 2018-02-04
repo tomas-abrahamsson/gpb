@@ -33,6 +33,7 @@
 %% NIF related
 -export([nif_tests_check_prerequisites/1]).
 -export([nif_oneof_tests_check_prerequisites/1]).
+-export([nif_oneof_tests_check_prerequisites/3]).
 -export([nif_mapfield_tests_check_prerequisites/1]).
 -export([nif_proto3_tests_check_prerequisites/1]).
 -export([increase_timeouts/1]).
@@ -2002,8 +2003,11 @@ nif_verify_prerequisites() ->
     nif_verify_prerequisites() == ok.
 
 nif_oneof_tests_check_prerequisites(Tests) ->
+    nif_oneof_tests_check_prerequisites("Nif with oneof fields", fun id/1, Tests).
+
+nif_oneof_tests_check_prerequisites(Title, ExtraPrereq, Tests) ->
     case 'do_nif?'() andalso check_protoc_can_do_oneof() of
-        true  -> {"Nif with oneof fields", Tests};
+        true  -> {Title, ExtraPrereq(Tests)};
         false -> {"Protoc < 2.6.0, not testing nifs with oneof", []}
     end.
 
@@ -3207,6 +3211,11 @@ opt_test() ->
         gpb_compile:parse_opts_and_args(
           ["-pldefs",
            "-maps", "-msgs-as-maps", "-mapfields-as-maps", "-defs-as-maps",
+           "x.proto"]),
+    {ok, {[maps, {maps_oneof, flat}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-maps", "-maps_oneof", "flat",
            "x.proto"]),
     {ok, {[{erlc_compile_options, "debug_info, inline_list_funcs"}],
           ["x.proto"]}} =

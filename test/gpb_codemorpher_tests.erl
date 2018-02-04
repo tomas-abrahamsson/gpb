@@ -320,10 +320,12 @@ rework_clauses_for_records_to_maps_for_oneof_submsg_test() ->
 
 rework_records_to_maps_unset_optionals_present_undefined_test() ->
     _FieldNames = [a,b,c,d],
+    FieldInfos = [{a,optional}, {b,required}, {c,repeated}, {d,optional}],
     F = fun(FnSTree) ->
                 gpb_codemorpher:marked_map_expr_to_map_expr(
-                  gpb_codemorpher:rework_records_to_maps(FnSTree, 2,
-                                                         undefined))
+                  gpb_codemorpher:rework_records_to_maps(
+                    FnSTree, 2, FieldInfos,
+                    undefined))
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",
@@ -377,13 +379,13 @@ rework_records_to_maps_unset_optionals_present_undefined_test() ->
     ok.
 
 rework_records_to_maps_unset_optionals_omitted_test() ->
-    _FieldNames = [a,b,c,d],
+    FieldInfos = [{a,optional}, {b,required}, {c,repeated}, {d,optional}],
     F = fun(FnSTree) ->
                 gpb_codemorpher:marked_map_expr_to_map_expr(
                   gpb_codemorpher:rework_records_to_maps(
                     gpb_codemorpher:change_undef_marker_in_clauses(
                       FnSTree, '$undef'),
-                    2, '$undef'))
+                    2, FieldInfos, '$undef'))
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",

@@ -30,7 +30,7 @@
 -export([implode_to_map_expr/1]).
 -export([change_undef_marker_in_clauses/2]).
 -export([locate_record_param/1]).
--export([rework_records_to_maps/3, rework_records_to_maps/4]).
+-export([rework_records_to_maps/4]).
 -export([marked_map_expr_to_map_expr/1]).
 
 -export([rework_clauses_for_records_to_maps/3]). % intended for testing
@@ -666,11 +666,6 @@ atom_changer(Old, New) ->
 %%
 %% NB: An `Undef' value of `undefined' assumes the context is
 %% maps_unset_optional = `present_undefined', otherwise assumes `omitted'.
-
-%% Transitory gap-filler function of arity 3
-rework_records_to_maps(FnSTree, RecordParamPos, Undef) ->
-    rework_records_to_maps(FnSTree, RecordParamPos, [], Undef).
-
 -spec rework_records_to_maps(Function, pos(), FieldInfos, atom()) ->
                                     Function when
       Function :: syntax_tree(),

@@ -99,16 +99,22 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
     MappingAndUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     TypespecsCanIndicateMapItemPresence =
         can_specify_map_item_presence_in_typespecs(Opts),
+    Fields1 = case MappingAndUnset of
+                  #maps{unset_optional=omitted, oneof=flat} ->
+                      gpb_lib:flatten_oneof_fields(Fields);
+                  _ ->
+                      Fields
+              end,
     LastIndex = case MappingAndUnset of
                     records ->
-                        length(Fields);
+                        length(Fields1);
                     #maps{unset_optional=present_undefined} ->
-                        length(Fields);
+                        length(Fields1);
                     #maps{unset_optional=omitted} ->
                         if TypespecsCanIndicateMapItemPresence ->
-                                length(Fields); % do typespecs for all fields
+                                length(Fields1); % do typespecs for all fields
                            true ->
-                                find_last_nonopt_field_index(Fields)
+                                find_last_nonopt_field_index(Fields1)
                         end
                 end,
     MapTypeFieldsRepr = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(
@@ -214,7 +220,7 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                 ?f("~s~s% ~s",
                    [FieldTxt2, LineUpStr2, TypeComment])
         end,
-        gpb_lib:index_seq(Fields))).
+        gpb_lib:index_seq(Fields1))).
 
 find_last_nonopt_field_index(Fields) ->
     lists:foldl(fun({I, F}, Acc) ->

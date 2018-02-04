@@ -20,7 +20,8 @@
           has_p3_opt_strings  % :: boolean()
         }).
 -record(maps, {
-          unset_optional % :: omitted | present_undefined
+          unset_optional, % :: omitted | present_undefined
+          oneof           % :: tuples | flat
          }).
 
 -define(f(Fmt),        io_lib:format(Fmt, [])).

@@ -137,7 +137,13 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                 [];
             #maps{unset_optional=present_undefined} ->
                 [];
-            #maps{unset_optional=omitted} ->
+            #maps{unset_optional=omitted}=Mapping ->
+                Names = case Mapping of
+                            #maps{oneof=tuples} ->
+                                FNames;
+                            #maps{oneof=flat} ->
+                                field_names_oneofs_expanded(MsgDef)
+                        end,
                 [?expr(lists:foreach(
                          fun('<Key>') ->
                                  ok;
@@ -148,7 +154,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                          maps:keys('M')),
                        [repeat_clauses('<Key>',
                                        [[replace_term('<Key>', Key)]
-                                         || Key <- FNames]),
+                                         || Key <- Names]),
                         replace_tree('M', MsgVar)])]
         end,
 
@@ -205,6 +211,12 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                  replace_term('NonOptKeys', NonOptKeys)]]
                        end),
         replace_term('<MsgName>', MsgName)])].
+
+field_names_oneofs_expanded(MsgDef) ->
+    gpb_lib:fold_msgdef_fields(
+      fun(#?gpb_field{name=FName}, Acc) -> [FName | Acc] end,
+      [],
+      MsgDef).
 
 field_verifiers(MsgName, Fields, FVars, MsgVar, TrUserDataVar, AnRes, Opts) ->
     [field_verifier(MsgName, Field, FVar, MsgVar, TrUserDataVar, AnRes, Opts)
@@ -356,7 +368,6 @@ field_verifier(MsgName,
     end;
 field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
-    IsOneof = {true, FName},
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         records ->
             field_oneof_present_undefined_verifier(
@@ -368,52 +379,16 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
               MsgName, FName, OFields,
               FVar, MsgVar, TrUserDataVar,
               AnRes);
-        #maps{unset_optional=omitted} ->
-            ?expr(
-               case 'M' of
-                   '<oneof-pattern>' ->
-                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
-                                     'MaybeTrUserData');
-                   '#{<FName> := <F>}' ->
-                       mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path]);
-                   _ ->
-                       ok
-               end,
-               [replace_tree('<F>', FVar),
-                replace_term('<FName>', FName),
-                replace_tree('M', MsgVar),
-                replace_tree('#{<FName> := <F>}',
-                             gpb_lib:map_match([{FName, FVar}])),
-                repeat_clauses(
-                  '<oneof-pattern>',
-                  [begin
-                       FVerifierFn =
-                           case Type of
-                               {msg,FMsgName} ->
-                                   gpb_lib:mk_fn(v_msg_, FMsgName);
-                               {enum,EnumName} ->
-                                   gpb_lib:mk_fn(v_enum_, EnumName);
-                               Type ->
-                                   gpb_lib:mk_fn(v_type_, Type)
-                           end,
-                       ElemPath = gpb_gen_translators:mk_elempath_elem(
-                                    MsgName, F, IsOneof),
-                       FVerifierFn2 = gpb_gen_translators:find_translation(
-                                        ElemPath, verify, AnRes,
-                                        FVerifierFn),
-                       OFVar = gpb_lib:prefix_var("O", FVar),
-                       Trs1 = [replace_tree('<OFVar>', OFVar),
-                               replace_term('<OFName>', OFName)],
-                       OFPat = ?expr({'<OFName>','<OFVar>'}, Trs1),
-                       [replace_tree('<oneof-pattern>',
-                                     gpb_lib:map_match([{FName, OFPat}])),
-                        replace_term('<verify-fn>', FVerifierFn2),
-                        splice_trees('MaybeTrUserData',
-                                     gpb_gen_translators:maybe_userdata_param(
-                                       F, TrUserDataVar))
-                        | Trs1]
-                   end
-                   || #?gpb_field{name=OFName, type=Type}=F <- OFields])])
+        #maps{unset_optional=omitted, oneof=tuples} ->
+            field_oneof_omitted_tuples_verifier(
+              MsgName, FName, OFields,
+              FVar, MsgVar, TrUserDataVar,
+              AnRes);
+        #maps{unset_optional=omitted, oneof=flat} ->
+            field_oneof_omitted_flat_verifier(
+              MsgName, FName, OFields,
+              FVar, MsgVar, TrUserDataVar,
+              AnRes)
     end.
 
 field_oneof_present_undefined_verifier(MsgName, FName, OFields,
@@ -458,6 +433,102 @@ field_oneof_present_undefined_verifier(MsgName, FName, OFields,
                 splice_trees('MaybeTrUserData',
                              gpb_gen_translators:maybe_userdata_param(
                                F, TrUserDataVar))]
+           end
+           || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
+
+field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
+                                    FVar, MsgVar, TrUserDataVar,
+                                    AnRes) ->
+    ?expr(
+       case 'M' of
+           '<oneof-pattern>' ->
+               '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
+                             'MaybeTrUserData');
+           '#{<FName> := <F>}' ->
+               mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path]);
+           _ ->
+               ok
+       end,
+       [replace_tree('<F>', FVar),
+        replace_term('<FName>', FName),
+        replace_tree('M', MsgVar),
+        replace_tree('#{<FName> := <F>}',
+                     gpb_lib:map_match([{FName, FVar}])),
+        repeat_clauses(
+          '<oneof-pattern>',
+          [begin
+               FVerifierFn =
+                   case Type of
+                       {msg,FMsgName} -> gpb_lib:mk_fn(v_msg_, FMsgName);
+                       {enum,EnumName} -> gpb_lib:mk_fn(v_enum_, EnumName);
+                       Type -> gpb_lib:mk_fn(v_type_, Type)
+                   end,
+               ElemPath = gpb_gen_translators:mk_elempath_elem(
+                            MsgName, F, {true, FName}),
+               FVerifierFn2 = gpb_gen_translators:find_translation(
+                                ElemPath, verify, AnRes,
+                                FVerifierFn),
+               OFVar = gpb_lib:prefix_var("O", FVar),
+               Trs1 = [replace_tree('<OFVar>', OFVar),
+                       replace_term('<OFName>', OFName)],
+               OFPat = ?expr({'<OFName>','<OFVar>'}, Trs1),
+               [replace_tree('<oneof-pattern>',
+                             gpb_lib:map_match([{FName, OFPat}])),
+                replace_term('<verify-fn>', FVerifierFn2),
+                splice_trees('MaybeTrUserData',
+                             gpb_gen_translators:maybe_userdata_param(
+                               F, TrUserDataVar))
+                | Trs1]
+           end
+           || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
+
+field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
+                                  FVar, MsgVar, TrUserDataVar,
+                                  AnRes) ->
+    %% FIXME: Verify at most one oneof field is set
+    OFNames = gpb_lib:get_field_names(OFields),
+    ?expr(
+       case 'M' of
+           '#{OFName := OFVar}' ->
+               case maps:keys(maps:with('OFNames', 'M')) of
+                   [_] ->
+                       ok;
+                   'OFDups' ->
+                       mk_type_error({multiple_oneof_keys, 'OFDups', 'FName'},
+                                     'M', ['FName' | Path])
+               end,
+               'verify-fn'('OFVar', ['OFName' | Path], 'MaybeTrUserData');
+           _ ->
+               ok
+       end,
+       [replace_tree('M', MsgVar),
+        replace_term('FName', FName),
+        replace_term('OFNames', OFNames),
+        repeat_clauses(
+          '#{OFName := OFVar}',
+          [begin
+               FVerifierFn =
+                   case Type of
+                       {msg,FMsgName} -> gpb_lib:mk_fn(v_msg_, FMsgName);
+                       {enum,EnumName} -> gpb_lib:mk_fn(v_enum_, EnumName);
+                       Type -> gpb_lib:mk_fn(v_type_, Type)
+                   end,
+               ElemPath = gpb_gen_translators:mk_elempath_elem(
+                            MsgName, F, {true, FName}),
+               FVerifierFn2 = gpb_gen_translators:find_translation(
+                                ElemPath, verify, AnRes,
+                                FVerifierFn),
+               OFVar = gpb_lib:prefix_var("O", FVar),
+               Trs1 = [replace_tree('OFVar', OFVar),
+                       replace_term('OFName', OFName)],
+               [replace_tree('#{OFName := OFVar}',
+                             gpb_lib:map_match([{OFName, OFVar}])),
+                replace_tree('OFDups', gpb_lib:prefix_var("OFDups", OFVar)),
+                replace_term('verify-fn', FVerifierFn2),
+                splice_trees('MaybeTrUserData',
+                             gpb_gen_translators:maybe_userdata_param(
+                               F, TrUserDataVar))
+                | Trs1]
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
 
