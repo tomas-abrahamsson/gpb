@@ -208,6 +208,37 @@ implode_to_map_exprs_test() ->
 
     #{c := [3,2,1]} = Map2 = M:fn_f(<<>>, '$novalue', '$novalue', [1,2,3]),
     1 = maps:size(Map2).
+
+
+implode_to_map_exprs_with_flat_oneof_test() ->
+    case gpb_lib:is_target_major_version_at_least(19, []) of
+        true  -> implode_to_map_exprs_with_flat_oneof_aux();
+        false -> ok
+    end.
+
+implode_to_map_exprs_with_flat_oneof_aux() ->
+    F = fun(FnSTree) ->
+                gpb_codemorpher:marked_map_expr_to_map_expr(
+                  gpb_codemorpher:underscore_unused_vars(
+                    gpb_codemorpher:implode_to_map_exprs(
+                      FnSTree, 2,
+                      [{a, optional},
+                       {b, flatten_oneof},
+                       {c, required}],
+                      '$novalue')))
+        end,
+    {module,M} = ls(?dummy_mod,
+                    [{F, ["fn_f(<<>>, A, B, C) ->
+                               #r{a = A-1,
+                                  b = {b1,B},
+                                  c = lists:reverse(C)}."]}]),
+    #{a  := 0,
+      b1 := b1_val,
+      c  := [3,2,1]} = Map1 = M:fn_f(<<>>, 1, b1_val, [1,2,3]),
+    3 = maps:size(Map1),
+
+    #{c := [3,2,1]} = Map2 = M:fn_f(<<>>, '$novalue', '$novalue', [1,2,3]),
+    1 = maps:size(Map2).
 -endif. % NO_HAVE_MAPS
 
 analyze_case_clauses_test() ->
@@ -401,6 +432,72 @@ rework_records_to_maps_unset_optionals_omitted_test() ->
     #{b := 100, d := {u2,1}} = Msg8 = M:fn_1(<<41,42>>),
     2 = maps:size(Msg8),
     #{b := 100, d := {u2,2}} = Msg9 = M:fn_1(<<41,42,42>>),
+    2 = maps:size(Msg9),
+    ok.
+
+rework_records_to_maps_with_flat_oneof_test() ->
+    case gpb_lib:is_target_major_version_at_least(19, []) of
+        true  -> rework_records_to_maps_with_flat_oneof_aux();
+        false -> ok
+    end.
+
+rework_records_to_maps_with_flat_oneof_aux() -> % implies omitted
+    FieldInfos = [{a,optional}, {b,required}, {c,repeated}, {d,flatten_oneof}],
+    F = fun(FnSTree) ->
+                gpb_codemorpher:marked_map_expr_to_map_expr(
+                  gpb_codemorpher:rework_records_to_maps(
+                    gpb_codemorpher:change_undef_marker_in_clauses(
+                      FnSTree, '$undef'),
+                    2, FieldInfos, '$undef'))
+        end,
+    {module,M} = ls(?dummy_mod,
+                    [%%["-record(r, {",
+                     %% comma_join([atom_to_list(N) || N <- FieldNames]),
+                     %% "})."],
+                     {F, ["fn_1(Bin) ->
+                                fn_x(Bin, #r{b=0})."]},
+                     {F, ["fn_x(<<1,Rest/binary>>, M) ->
+                                fn_x(Rest, M#r{a=1});
+                           fn_x(<<2,Rest/binary>>, #r{b=B}=M) ->
+                                fn_x(Rest, M#r{b=B+1});
+                           %% This one is similar to the code generated
+                           %% for merging a optional or required sub msg field
+                           fn_x(<<3,Rest/binary>>, #r{c=C}=M) ->
+                                fn_x(Rest, M#r{c=if C == undefined -> 1;
+                                                    true -> C+1
+                                                 end});
+                           %% two function clauses for (flat) oneof field 'd'
+                           fn_x(<<41,Rest/binary>>, #r{d=D}=M) ->
+                                fn_x(Rest, M#r{d=case D of
+                                                    undefined -> {u1,1};
+                                                    {u1,U} -> {u1,U+1};
+                                                    _ -> {u1,1}
+                                                 end});
+                           fn_x(<<42,Rest/binary>>, #r{d=D}=M) ->
+                                fn_x(Rest, M#r{d=case D of
+                                                    undefined -> {u2,1};
+                                                    {u2,U} -> {u2,U+1};
+                                                    _ -> {u2,1}
+                                                 end});
+                           fn_x(<<>>, #r{b=B}=M) ->
+                                M#r{b=100+B}."]}]),
+    #{b := 100} = Msg1 = M:fn_1(<<>>),
+    1 = maps:size(Msg1),
+    #{a := 1, b := 100} = Msg2 = M:fn_1(<<1>>),
+    2 = maps:size(Msg2),
+    #{b := 103} = Msg3 = M:fn_1(<<2,2,2>>),
+    1 = maps:size(Msg3),
+    #{b := 100, c := 1} = Msg4 = M:fn_1(<<3>>),
+    2 = maps:size(Msg4),
+    #{b := 100, c := 2} = Msg5 = M:fn_1(<<3,3>>),
+    2 = maps:size(Msg5),
+    #{b := 100, u1 := 1} = Msg6 = M:fn_1(<<41>>), % flat oneof
+    2 = maps:size(Msg6),
+    #{b := 100, u1 := 2} = Msg7 = M:fn_1(<<41,41>>), % flat oneof
+    2 = maps:size(Msg7),
+    #{b := 100, u2 := 1} = Msg8 = M:fn_1(<<41,42>>), % flat oneof
+    2 = maps:size(Msg8),
+    #{b := 100, u2 := 2} = Msg9 = M:fn_1(<<41,42,42>>), % flat oneof
     2 = maps:size(Msg9),
     ok.
 
