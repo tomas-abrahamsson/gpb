@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.3
+2018-Feb-08
+
+        * Build changes: Provide better errors when building
+        outside of a git repo, and provide a helper script,
+        helers/export-from-git, to extract gpb from git in a way such
+        that it can be compiled outside fo git.
+
 Version 4.1.2
 2018-Jan-26
 
