@@ -317,7 +317,7 @@ type_to_typestr_2(float, _Defs, _Opts)    -> float_spec();
 type_to_typestr_2(double, _Defs, _Opts)   -> float_spec();
 type_to_typestr_2(string, _Defs, Opts)    ->
   string_to_typestr(gpb_lib:get_strings_as_binaries_by_opts(Opts));
-type_to_typestr_2(bytes, _Defs, _Opts)    -> "binary()";
+type_to_typestr_2(bytes, _Defs, _Opts)    -> "iodata()";
 type_to_typestr_2({enum,E}, Defs, Opts)   -> enum_typestr(E, Defs, Opts);
 type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts);
 type_to_typestr_2({group,G}, _Defs, Opts) -> msg_to_typestr(G, Opts);
