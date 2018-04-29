@@ -139,6 +139,9 @@
 -export_type([opts/0, opt/0]).
 -export_type([comp_ret/0]).
 
+-ifndef(NO_HAVE_STACKTRACE_SYNTAX).
+-compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
+-endif.
 
 %% @equiv file(File, [])
 -spec file(string()) -> comp_ret().

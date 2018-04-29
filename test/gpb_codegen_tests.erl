@@ -22,6 +22,10 @@
 -include("../src/gpb_codegen.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+-ifndef(NO_HAVE_STACKTRACE_SYNTAX).
+-compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
+-endif.
+
 %-compile(export_all).
 
 -define(dummy_mod, list_to_atom(lists:concat([?MODULE, "-test"]))).

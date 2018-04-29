@@ -23,7 +23,23 @@ NoHaveErl20StrFunctions =
                  catch error:undef -> [{d,'NO_HAVE_ERL20_STR_FUNCTIONS'}]
                  end.
 
-ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions.
+%% In Erlang 21, the function erlang:get_stacktrace() is deprecated,
+%% and there is new syntax for retrieving the stacktrace:
+%%   try ...
+%%   catch Class:Reason:Stacktrace -> ...
+%%   end
+NoHaveStacktraceSyntax =
+                 case erlang:system_info(otp_release) of
+                     "R"++_  -> [{d,'NO_HAVE_STACKTRACE_SYNTAX'}];
+                     "17"++_ -> [{d,'NO_HAVE_STACKTRACE_SYNTAX'}];
+                     "18"++_ -> [{d,'NO_HAVE_STACKTRACE_SYNTAX'}];
+                     "19"++_ -> [{d,'NO_HAVE_STACKTRACE_SYNTAX'}];
+                     "20"++_ -> [{d,'NO_HAVE_STACKTRACE_SYNTAX'}];
+                     _       -> []
+                 end.
+
+ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
+                 NoHaveStacktraceSyntax.
 
 [{require_otp_vsn, ".*"},
 
