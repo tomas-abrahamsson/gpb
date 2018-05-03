@@ -1,5 +1,10 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.4
+2018-May-04
+
+        * Fix type spec for field of types bytes. Thanks to Marc Nijdam.
+
 Version 4.1.3
 2018-Feb-08
 
