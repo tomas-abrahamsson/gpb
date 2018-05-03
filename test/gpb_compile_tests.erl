@@ -54,6 +54,10 @@
 %% Translators for user-data and op
 -export([any_e_atom/3, any_d_atom/3, any_m_atom/4, any_v_atom/4]).
 
+-ifndef(NO_HAVE_STACKTRACE_SYNTAX).
+-compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
+-endif.
+
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
 %% for gpb and for the code that gpb_compile generates.

@@ -178,6 +178,25 @@ ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
 endif
 endif
 
+ifdef NO_HAVE_STACKTRACE_SYNTAX
+ERLC_FLAGS += -DNO_HAVE_STACKTRACE_SYNTAX=true
+else
+## attempt to auto-detect
+ERL_HAS_STACKTRACE_SYNTAX := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                 case erlang:system_info(otp_release) of \
+                     "R"++_  -> io:format("false~n"); \
+                     "17"++_ -> io:format("false~n"); \
+                     "18"++_ -> io:format("false~n"); \
+                     "19"++_ -> io:format("false~n"); \
+                     "20"++_ -> io:format("false~n"); \
+                     _       -> io:format("true~n") \
+                 end.' \
+                         -s erlang halt)
+ifeq ($(ERL_HAS_STACKTRACE_SYNTAX),false)
+ERLC_FLAGS += -DNO_HAVE_STACKTRACE_SYNTAX=true
+endif
+endif
+
 
 # Sorting it also eliminates duplicates
 # (eg: gpb_parse due to both .yrl and .erl on rebuild, ditto for gpb_scan)
