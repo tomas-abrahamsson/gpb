@@ -98,7 +98,7 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
     MapsOrRecords = gpb_lib:get_records_or_maps_by_opts(Opts),
     MappingAndUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     TypespecsCanIndicateMapItemPresence =
-        can_specify_map_item_presence_in_typespecs(Opts),
+        gpb_lib:target_can_specify_map_item_presence_in_typespecs(Opts),
     LastIndex = case MappingAndUnset of
                     records -> length(Fields);
                     {maps, present_undefined} -> length(Fields);
@@ -264,13 +264,10 @@ mandatory_map_item_type_sep(Opts) ->
     %% pre-compiled with an old Erlang-version to be compatible with
     %% many environments.  Better to check version at run-time.)
     %%
-    case can_specify_map_item_presence_in_typespecs(Opts) of
+    case gpb_lib:target_can_specify_map_item_presence_in_typespecs(Opts) of
         true  -> ":=";
         false -> "=>"
     end.
-
-can_specify_map_item_presence_in_typespecs(Opts) ->
-    gpb_lib:is_target_major_version_at_least(19, Opts).
 
 type_to_typestr(_MsgName, #?gpb_field{type=Type, occurrence=Occurrence},
                 Defs, Opts) ->

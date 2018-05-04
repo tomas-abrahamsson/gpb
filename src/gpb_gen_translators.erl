@@ -330,7 +330,7 @@ format_default_map_translators(#anres{map_types=MapTypes,
                  [replace_tree('#{}', gpb_lib:map_create([]))]),
                "\n",
                [[inline_attr(mt_add_item_m,2),
-                 case gpb_lib:is_target_major_version_at_least(18, Opts) of
+                 case gpb_lib:target_has_variable_key_map_update(Opts) of
                      true ->
                          gpb_codegen:format_fn(
                            mt_add_item_m,
@@ -356,7 +356,7 @@ format_default_map_translators(#anres{map_types=MapTypes,
                  end]
                 || HaveMapNonSubmsgs],
                [[inline_attr(mt_add_item_m_verify_value,2),
-                 case gpb_lib:is_target_major_version_at_least(18, Opts) of
+                 case gpb_lib:target_has_variable_key_map_update(Opts) of
                      true ->
                          gpb_codegen:format_fn(
                            mt_add_item_m_verify_value,

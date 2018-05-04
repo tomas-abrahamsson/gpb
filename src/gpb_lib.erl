@@ -79,6 +79,8 @@
 -export([get_epb_functions_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
 -export([target_has_lists_join/1]).
+-export([target_has_variable_key_map_update/1]).
+-export([target_can_specify_map_item_presence_in_typespecs/1]).
 -export([target_has_stacktrace_syntax/1]).
 -export([reformat_stacktrace_call_to_catch_var/2]).
 -export([proto2_type_default/3]).
@@ -569,18 +571,45 @@ is_current_major_version_at_least(VsnMin) ->
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
 
+%% Whether target version has the function lists:join/2.
 target_has_lists_join(Opts) ->
     is_target_major_version_at_least(19, Opts).
 
+%% Whether target version supports M#{K => V} when K is a variable.
+%% If before this support was added, one must use maps:put(K, V, M) instead.
+target_has_variable_key_map_update(Opts) ->
+    is_target_major_version_at_least(18, Opts).
+
+%% Whether target version supports #{key := type()} type spec syntax.
+%% In Erlang 19, := indicates mandatory presence and => optional presence.
+%% In Erlang 18, only => was supported.
+target_can_specify_map_item_presence_in_typespecs(Opts) ->
+    is_target_major_version_at_least(19, Opts).
+
+%% In Erlang 21, the function erlang:get_stacktrace/0 was deprecated
+%% and there is new syntax for retrieving the stacktrace:
+%%
+%%   try ...
+%%   catch Class:Reason:Stacktrace -> ...
+%%   end
 target_has_stacktrace_syntax(Opts) ->
-    %% In Erlang 21, the function erlang:get_stacktrace/0 was deprecated
-    %% and there is new syntax for retrieving the stacktrace:
-    %%
-    %%   try ..
-    %%   catch Class:Reason:Stacktrace -> ...
-    %%   end
     is_target_major_version_at_least(21, Opts).
 
+%% If target supports the new stacktrace syntax, then reformat code like:
+%%
+%%    try ...
+%%    catch Class:Reason ->
+%%        SomeVar = erlang:get_stacktrace(),
+%%        more_expressions()
+%%    end
+%%
+%% to this:
+%%
+%%    try ...
+%%    catch Class:Reason:SomeVar ->
+%%        more_expressions()
+%%    end
+%%
 reformat_stacktrace_call_to_catch_var(FormAsTxt, Opts) ->
     case target_has_stacktrace_syntax(Opts) of
         false ->
