@@ -1,5 +1,20 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.6
+2018-May-08
+
+        * Make the Erlang 21 stacktrace syntax choice overridable.
+        In addition to the targetting version described in 4.1.5 below,
+        make it possible to override the stacktrace selection:
+
+        When targeting Erlang 21 or later, generate code that uses the new
+        stacktrace syntax, but if the user defines 'GPB_FUNCTION_STACK' when
+        compiling the generated code, it overrides.
+
+        When targeting Erlang 20 or earlier, generate erlang:get_stacktrace/0
+        calls, but if the user defines 'GPB_PATTERN_STACK' when compiling
+        the generated code, it overrides.
+
 Version 4.1.5
 2018-May-04
 
