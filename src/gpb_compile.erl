@@ -2090,6 +2090,10 @@ nepp2_ifdef(Rest, SkipCond, ModAsStr, Hrl, N, Ds, Acc) ->
         _ -> nepp2_skip(Rest3, 1, ModAsStr, Hrl, N+1, Ds, Acc)
     end.
 
+nepp2_skip(<<"-else.\n", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
+    if Depth == 1 -> nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, Acc);
+       Depth >  1 -> nepp2_skip(Rest, Depth-1, ModAsStr, Hrl, N+1, Ds, Acc)
+    end;
 nepp2_skip(<<"-endif.\n", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
     if Depth == 1 -> nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, Acc);
        Depth >  1 -> nepp2_skip(Rest, Depth-1, ModAsStr, Hrl, N+1, Ds, Acc)

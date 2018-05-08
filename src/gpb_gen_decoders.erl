@@ -90,6 +90,24 @@ format_decoders_top_function_no_msgs(Opts) ->
 
 format_decoders_top_function_msgs(Defs, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
+    MaybeTrUserDataArg = if DoNif -> "";
+                            true  -> ", TrUserData"
+                         end,
+    Error = ("error({gpb_error," ++
+             ""     "{decoding_failure," ++
+             ""     " {Bin, MsgName, {Class, Reason, StackTrace}}}})"),
+    DecodeMsg1Catch_GetStackTraceAsPattern =
+        ?f("decode_msg_1_catch(Bin, MsgName~s) ->~n"
+           "    try decode_msg_2_doit(MsgName, Bin~s)~n"
+           "    catch Class:Reason:StackTrace -> ~s~n"
+           "    end.~n", [MaybeTrUserDataArg, MaybeTrUserDataArg, Error]),
+    DecodeMsg1Catch_GetStackTraceAsCall =
+        ?f("decode_msg_1_catch(Bin, MsgName~s) ->~n"
+           "    try decode_msg_2_doit(MsgName, Bin~s)~n"
+           "    catch Class:Reason ->~n"
+           "        StackTrace = erlang:get_stacktrace(),~n"
+           "        ~s~n"
+           "    end.~n", [MaybeTrUserDataArg, MaybeTrUserDataArg, Error]),
     [if DoNif -> "";
         true ->
              gpb_codegen:format_fn(
@@ -99,41 +117,53 @@ format_decoders_top_function_msgs(Defs, Opts) ->
                end,
                [])
      end,
-     possibly_reformat_stacktrace_call_to_catch_var(
-       gpb_codegen:format_fn(
-         decode_msg,
-         fun(Bin, MsgName, 'Opts') when is_binary(Bin) ->
-                 'TrUserData = proplists:get_value(user_data, Opts)',
-                 case MsgName of
-                     '<MsgName>' ->
-                         try '<decode-call>'(Bin, 'TrUserData')
-                         catch Class:Reason ->
-                                 StackTrace = erlang:get_stacktrace(),
-                                 error({gpb_error,
-                                        {decoding_failure,
-                                         {Bin, '<MsgName>',
-                                          {Class, Reason, StackTrace}}}})
-                         end
-                 end
-         end,
-         [splice_trees('Opts', if DoNif -> [];
-                                  true  -> [?expr(Opts)]
-                               end),
-          splice_trees(
-            'TrUserData = proplists:get_value(user_data, Opts)',
-            if DoNif -> [];
-               true  -> [?expr(TrUserData =
-                                   proplists:get_value(user_data, Opts))]
-            end),
-          repeat_clauses('<MsgName>',
-                         [[replace_term('<MsgName>', MsgName),
-                           replace_term('<decode-call>',
-                                        gpb_lib:mk_fn(d_msg_, MsgName))]
-                          || {{msg,MsgName}, _Fields} <- Defs]),
-          splice_trees('TrUserData', if DoNif -> [];
-                                        true  -> [?expr(TrUserData)]
-                                     end)]),
-       Opts),
+     gpb_codegen:format_fn(
+       decode_msg,
+       fun(Bin, MsgName, 'Opts') when is_binary(Bin) ->
+               'TrUserData = proplists:get_value(user_data, Opts)',
+               decode_msg_1_catch(Bin, MsgName, 'TrUserData')
+       end,
+       [splice_trees('Opts', if DoNif -> [];
+                                true  -> [?expr(Opts)]
+                             end),
+        splice_trees(
+          'TrUserData = proplists:get_value(user_data, Opts)',
+          if DoNif -> [];
+             true  -> [?expr(TrUserData =
+                                 proplists:get_value(user_data, Opts))]
+          end),
+        splice_trees('TrUserData', if DoNif -> [];
+                                      true  -> [?expr(TrUserData)]
+                                   end)]),
+     %% Default (if no symbol defined) is the -else. .. -endif. section,
+     %% but it is overridable.
+     case gpb_lib:target_has_stacktrace_syntax(Opts) of
+         true ->   % Eralng 21 or newer
+             ["-ifdef('GPB_FUNCTION_STACK').\n",
+              DecodeMsg1Catch_GetStackTraceAsCall,
+              "-else.\n",
+              DecodeMsg1Catch_GetStackTraceAsPattern,
+              "-endif.\n\n"];
+         false ->  % Erlang 20 or older
+             ["-ifdef('GPB_PATTERN_STACK').\n",
+              DecodeMsg1Catch_GetStackTraceAsPattern,
+              "-else.\n",
+              DecodeMsg1Catch_GetStackTraceAsCall,
+              "-endif.\n\n"]
+     end,
+     gpb_codegen:format_fn(
+       decode_msg_2_doit,
+       fun('MsgName', Bin, 'TrUserData') ->
+               'decode-fn'(Bin, 'TrUserData')
+       end,
+       [repeat_clauses(
+          'MsgName',
+          [[replace_term('MsgName', MsgName),
+            replace_term('decode-fn', gpb_lib:mk_fn(d_msg_, MsgName))]
+           || {{msg, MsgName}, _Fields} <- Defs]),
+        splice_trees('TrUserData', if DoNif -> [];
+                                      true  -> [?expr(TrUserData)]
+                                   end)]),
      [["\n",
        "%% epb compatibility\n",
        gpb_codegen:format_fn(
@@ -1384,10 +1414,6 @@ add_binding({Key, Value}, Bindings) ->
 
 fetch_binding(Key, Bindings) ->
     dict:fetch(Key, Bindings).
-
-possibly_reformat_stacktrace_call_to_catch_var(FormAsTxt, Opts) ->
-    gpb_lib:reformat_stacktrace_call_to_catch_var(lists:flatten(FormAsTxt),
-                                                  Opts).
 
 %% The fun takes two args: Fun(#?gpb_field{}, IsOneofField) -> term()
 map_msgdef_fields_o(Fun, Fields) ->

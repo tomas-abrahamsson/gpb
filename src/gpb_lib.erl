@@ -80,7 +80,6 @@
 -export([is_target_major_version_at_least/2]).
 -export([target_has_lists_join/1]).
 -export([target_has_stacktrace_syntax/1]).
--export([reformat_stacktrace_call_to_catch_var/2]).
 -export([proto2_type_default/3]).
 -export([proto3_type_default/3]).
 
@@ -580,65 +579,6 @@ target_has_stacktrace_syntax(Opts) ->
     %%   catch Class:Reason:Stacktrace -> ...
     %%   end
     is_target_major_version_at_least(21, Opts).
-
-reformat_stacktrace_call_to_catch_var(FormAsTxt, Opts) ->
-    case target_has_stacktrace_syntax(Opts) of
-        false ->
-            FormAsTxt;
-        true ->
-            {ok, Tokens, _End} = erl_scan:string(FormAsTxt),
-            {ok, Form} = erl_parse:parse_form(Tokens),
-            erl_prettypr:format(
-              erl_syntax_lib:map(
-                fun reformat_stacktrace_call_to_catch_var_aux/1,
-                Form))
-    end.
-
-reformat_stacktrace_call_to_catch_var_aux(Node) ->
-    case erl_syntax:type(Node) of
-        try_expr ->
-            Body = erl_syntax:try_expr_body(Node),
-            Clauses = erl_syntax:try_expr_clauses(Node),
-            Handlers = erl_syntax:try_expr_handlers(Node),
-            After = erl_syntax:try_expr_after(Node),
-            Handlers1 = [reformat_stacktrace_call_to_catch_var_aux_handler(H)
-                         || H <- Handlers],
-            erl_syntax:copy_pos(
-              Node,
-              erl_syntax:try_expr(Body, Clauses, Handlers1, After));
-        _ ->
-            Node
-    end.
-
--ifndef(NO_HAVE_STACKTRACE_SYNTAX).
-reformat_stacktrace_call_to_catch_var_aux_handler(Node) ->
-    [Cq] = erl_syntax:clause_patterns(Node),
-    G = erl_syntax:clause_guard(Node),
-    [StacktraceCall | Body1] = erl_syntax:clause_body(Node),
-    Arg = erl_syntax:class_qualifier_argument(Cq),
-    Reason = erl_syntax:class_qualifier_body(Cq),
-    match_expr = erl_syntax:type(StacktraceCall),
-    StacktraceVar = erl_syntax:match_expr_pattern(StacktraceCall),
-    Cq1 = erl_syntax:copy_pos(
-            Cq, erl_syntax:class_qualifier(Arg, Reason, StacktraceVar)),
-    erl_syntax:copy_pos(Node, erl_syntax:clause([Cq1], G, Body1)).
-
--else. % NO_HAVE_STACKTRACE_SYNTAX
-
-reformat_stacktrace_call_to_catch_var_aux_handler(Node) ->
-    [Cq] = erl_syntax:clause_patterns(Node),
-    G = erl_syntax:clause_guard(Node),
-    [StacktraceCall | Body1] = erl_syntax:clause_body(Node),
-    Arg = erl_syntax:class_qualifier_argument(Cq),
-    Reason = erl_syntax:class_qualifier_body(Cq),
-    match_expr = erl_syntax:type(StacktraceCall),
-    StacktraceVar = erl_syntax:match_expr_pattern(StacktraceCall),
-    Cq1Txt = ?ff("~s:~s:~s", [erl_prettypr:format(Arg),
-                              erl_prettypr:format(Reason),
-                              erl_prettypr:format(StacktraceVar)]),
-    Cq1 = erl_syntax:copy_pos(Cq, Cq1Txt),
-    erl_syntax:copy_pos(Node, erl_syntax:clause([Cq1], G, Body1)).
--endif. % NO_HAVE_STACKTRACE_SYNTAX
 
 proto2_type_default(Type, Defs, Opts) ->
     type_default(Type, Defs, Opts, fun gpb:proto2_type_default/2).
