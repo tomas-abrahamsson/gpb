@@ -1075,7 +1075,6 @@ reformat_names(Defs) ->
                  ({{extensions,Name}, Exts}) ->
                       {{extensions,reformat_name(Name)}, Exts};
                  ({{extend,Name}, Fields}) ->
-                      %% FIXME: extend
                       {{extend,reformat_name(Name)}, reformat_fields(Fields)};
                  ({{service,Name}, RPCs}) ->
                       {{service,reformat_name(Name)}, reformat_rpcs(RPCs)};
@@ -1140,7 +1139,7 @@ reformat_rpcs(RPCs) ->
 %% `Defs' is expected to be flattened and may or may not be reformatted
 %% `Defs' is expected to be verified, to not extend missing messages
 extend_msgs(Defs0) ->
-    Extendings = [E || {{extend,_MsgToExtend},_Mor91eFields}=E <- Defs0],
+    Extendings = [E || {{extend,_MsgToExtend},_MoreFields}=E <- Defs0],
     lists:foldl(fun possibly_extend_msg/2, Defs0, Extendings).
 
 
