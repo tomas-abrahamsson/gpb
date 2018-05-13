@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.7
+2018-May-13
+
+        * Fix improper interpretation of nested extend block. If inside
+        a message, extending another message, the surrounding message
+        was wrongly extended, but this as now been fixed. Thanks to Paul
+        Guyot for reporting.
+
 Version 4.1.6
 2018-May-08
 
