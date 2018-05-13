@@ -542,8 +542,8 @@ flatten_qualify_defnames(Defs, Root) ->
                 [{{extensions,Root},Exts} | Acc];
            ({{extend,{eref1,Name}}, FieldsOrDefs}, Acc) ->
                 FullNameCandidates =
-                    compute_roots(prepend_path(Root, Name)) ++
-                    compute_roots(prepend_path(empty_pkg_root(), Name)),
+                    rootward_names(Root, Name) ++
+                    rootward_names(empty_pkg_root(), Name),
                 {Fields2, Defs2} = flatten_fields(FieldsOrDefs, Root),
                 [{{extend,{eref2,Root,FullNameCandidates}},Fields2} | Defs2] ++
                     Acc;
@@ -739,6 +739,14 @@ find_typename(Name, [{{msg,Name}, _SubElems} | _]) -> {found, {msg,Name}};
 find_typename(Name, [{{group,Name}, _Elems} | _])  -> {found, {group,Name}};
 find_typename(Name, [_ | Rest])                    -> find_typename(Name, Rest);
 find_typename(_Name,[])                            -> not_found.
+
+%% Similar to compute_roots/1, but always keep `Name' last.
+%% Example: rootward_names(['.',m1,'.',m2],  x) ->
+%%            [['.',m1,'.',m2,'.',x],
+%%             ['.',m1,'.',x]
+%%             ['.',x]]
+rootward_names(Path, Name) ->
+    [prepend_path(R, Name) || R <- compute_roots(Path)].
 
 %% Turn ['.',m1,'.',m2,'.',m3]
 %% into [['.',m1,'.',m2,'.',m3],

@@ -678,6 +678,23 @@ scope_when_resolving_extend_field_refs_test() ->
      {{pkg_containment,"b"}, b}] =
         AllDefs.
 
+nested_extended_block_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"a.proto",
+                  ["message A {",
+                   "}",
+                   "",
+                   "message B {",
+                   "    extend A {",
+                   "        optional B b = 42;",
+                   "    }",
+                   "}"]}],
+                []),
+    [{{msg,'A'},[#?gpb_field{name=b,type={msg,'B'}}]},
+     {{msg,'B'},[]},
+     {{msg_containment,"a"},_}] =
+        AllDefs.
+
 group_test() ->
     {ok,Defs} = parse_lines(["message m1 {",
                              "  required m2 f = 1;",
