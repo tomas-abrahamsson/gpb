@@ -45,7 +45,7 @@
 -type directory() :: string().
 
 -type opts() :: [opt()].
--type opt() :: type_specs | {type_specs, boolean() | preferably} |
+-type opt() :: type_specs | {type_specs, boolean()} |
                {verify, optionally | always | never} |
                {copy_bytes, true | false | auto | integer() | float()} |
                {strings_as_binaries, boolean()} | strings_as_binaries |
@@ -160,9 +160,8 @@ file(File) ->
 %% several times, they will be searched in the order specified.
 %%
 %% The `type_specs' option enables or disables `::Type()' annotations
-%% in the generated .hrl file. Default is `true' if there are no
-%% cyclic message dependencies. The default changed in gpb version 4.0.0.
-%% Previously, the default was `false'.
+%% in the generated .hrl file. Default is `true'. The default changed
+%% in gpb version 4.0.0. Previously, the default was `false'.
 %% If you have messages referencing other messages cyclically, and get into
 %% troubles when compiling the generated files, set this to `false'.
 %%
@@ -607,12 +606,9 @@ proto_defs(Mod, Defs) ->
 proto_defs(Mod, Defs, Opts) ->
     do_proto_defs_aux1(Mod, Defs, normalize_opts(Opts)).
 
-do_proto_defs_aux1(Mod, Defs0, Opts0) ->
-    {IsAcyclic, Defs} = try_topsort_defs(Defs0),
-    possibly_probe_defs(Defs, Opts0),
-    Warns0 = check_unpackables_marked_as_packed(Defs),
-    {Warns1, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
-    Warns = Warns0 ++ Warns1,
+do_proto_defs_aux1(Mod, Defs, Opts1) ->
+    possibly_probe_defs(Defs, Opts1),
+    Warns = check_unpackables_marked_as_packed(Defs),
     AnRes = gpb_analyzer:analyze_defs(Defs, Opts1),
     case verify_opts(Defs, Opts1) of
         ok ->
@@ -868,8 +864,6 @@ fmt_err(X) ->
 %% @end
 %% Note: do NOT include trailing newline (\n or ~n)
 -spec format_warning(warning()) -> iolist().
-format_warning(cyclic_message_dependencies) ->
-    ?f("Warning: omitting type specs due to cyclic message references.");
 format_warning({ignored_field_opt_packed_for_unpackable_type,
                 MsgName, FName, Type, _Opts}) ->
     ?f("Warning: ignoring option packed for non-packable field ~s.~s "
@@ -1656,51 +1650,6 @@ sanity_check_installation_wellknown_proto3(WellknownDir) ->
                     ++ WellknownDir})
     end.
 
-try_topsort_defs(Defs) ->
-    G = digraph:new(),
-    %% Build a dependency graph {msg|group, Name} -> {msg|group,Name}
-    [digraph:add_vertex(G, _Key={Type,Name})
-     || {Type,Name,_Fields} <- gpb_lib:msgs_or_groups(Defs)],
-    gpb_lib:fold_msg_or_group_fields(
-      fun(Type, From, #?gpb_field{type={msg,To}}, _) ->
-              digraph:add_edge(G, {Type,From}, {msg,To});
-         (Type, From, #?gpb_field{type={group,To}}, _) ->
-              digraph:add_edge(G, {Type,From}, {group,To});
-         (Type, From, #?gpb_field{type={map,_,{msg, To}}}, _) ->
-              digraph:add_edge(G, {Type,From}, {msg,To});
-         (_Type, _MsgName, _Feild, _Acc) ->
-              ok
-      end,
-      ok,
-      Defs),
-    case digraph_utils:topsort(G) of
-        false ->
-            digraph:delete(G),
-            {false, Defs};
-        Order ->
-            digraph:delete(G),
-            ROrder = lists:reverse(Order),
-            OrderedMsgOrGroupDefs =
-                [lists:keyfind(Key,1,Defs) || Key <- ROrder],
-            {true, OrderedMsgOrGroupDefs ++ (Defs -- OrderedMsgOrGroupDefs)}
-    end.
-
-possibly_adjust_typespec_opt(IsAcyclic, Opts0) ->
-    CyclicDeps = not IsAcyclic,
-    TypeSpecs = gpb_lib:get_type_specs_by_opts(Opts0),
-    Opts1 = lists:keydelete(type_specs, 1, Opts0 -- [type_specs]),
-    if not CyclicDeps, TypeSpecs == preferably ->
-            {[], [{type_specs, true} | Opts1]};
-       CyclicDeps, TypeSpecs == preferably ->
-            Opts2 = [{type_specs, false} | Opts1],
-            {[], Opts2};
-       not CyclicDeps ->
-            {[], Opts0};
-       CyclicDeps, TypeSpecs ->
-            {[cyclic_message_dependencies], [{type_specs, false} | Opts1]};
-       CyclicDeps, not TypeSpecs ->
-            {[], Opts0}
-    end.
 
 %% Input .proto file appears to be expected to be UTF-8 by Google's protobuf.
 %% In 3.0.0, it accepts a byte order mark (BOM), but in 2.6.1 it does not.
@@ -1954,7 +1903,8 @@ possibly_format_hrl(Mod, Defs, Opts) ->
         maps    -> '$not_generated'
     end.
 
-format_hrl(Mod, Defs, Opts) ->
+format_hrl(Mod, Defs, Opts1) ->
+    Opts = [{module, Mod}|Opts1],
     ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
       [?f("%% Automatically generated, do not edit~n"
