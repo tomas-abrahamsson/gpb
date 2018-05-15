@@ -160,9 +160,8 @@ file(File) ->
 %% several times, they will be searched in the order specified.
 %%
 %% The `type_specs' option enables or disables `::Type()' annotations
-%% in the generated .hrl file. Default is `true' if there are no
-%% cyclic message dependencies. The default changed in gpb version 4.0.0.
-%% Previously, the default was `false'.
+%% in the generated .hrl file. Default is `true'. The default changed
+%% in gpb version 4.0.0. Previously, the default was `false'.
 %% If you have messages referencing other messages cyclically, and get into
 %% troubles when compiling the generated files, set this to `false'.
 %%
