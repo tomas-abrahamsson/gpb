@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.8
+2018-May-25
+
+        * Use the OTP_RELEASE macro in generated code, so it can compile
+        cleanly with different OTP versions.  The OTP_RELEASE will
+        appear in Erlang 21; it has been merged to master, but it is not
+        in Erlang 21-rc1, so still honour the GPB_FUNCTION_STACK and
+        GPB_PATTERN_STACK macros described for 4.1.6 below.
+
 Version 4.1.7
 2018-May-13
 
