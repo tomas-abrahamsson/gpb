@@ -2008,15 +2008,24 @@ compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
          hrl,
          defs}).
 
-nano_epp(Code, ModAsStr, HrlText, _Opts) ->
+nano_epp(Code, ModAsStr, HrlText, Opts) ->
     %% nepp = nano-erlang-preprocessor. Couldn't find a way to run
     %% the epp from a string, and don't want or need to use the file
     %% system when everything is already in memory.
 
     %% Setup a dictionary, mostly to handle -ifdef...-endif
     %% in hrls and in the decoders.
+    %% The OTP_RELEASE first appeared in Erlang 21.
     D0 = dict:new(),
-    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=D0},
+    OtpRelease = gpb_lib:current_otp_release(),
+    TargetOtpRelease = proplists:get_value(target_erlang_version, Opts,
+                                           OtpRelease),
+    D1 = if TargetOtpRelease >= 21 ->
+                 dict:store('OTP_RELEASE', OtpRelease, D0);
+            TargetOtpRelease < 21 ->
+                 D0
+         end,
+    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=D1},
     {Txt, <<>>, _EndNState, _EndLine} = nepp1(Code, NState, _Line=1, []),
     Txt.
 

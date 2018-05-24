@@ -135,22 +135,34 @@ format_decoders_top_function_msgs(Defs, Opts) ->
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]
                                    end)]),
-     %% Default (if no symbol defined) is the -else. .. -endif. section,
-     %% but it is overridable.
-     case gpb_lib:target_has_stacktrace_syntax(Opts) of
-         true ->   % Eralng 21 or newer
-             ["-ifdef('GPB_FUNCTION_STACK').\n",
-              DecodeMsg1Catch_GetStackTraceAsCall,
-              "-else.\n",
-              DecodeMsg1Catch_GetStackTraceAsPattern,
-              "-endif.\n\n"];
-         false ->  % Erlang 20 or older
-             ["-ifdef('GPB_PATTERN_STACK').\n",
-              DecodeMsg1Catch_GetStackTraceAsPattern,
-              "-else.\n",
-              DecodeMsg1Catch_GetStackTraceAsCall,
-              "-endif.\n\n"]
-     end,
+     ["-ifdef('OTP_RELEASE').\n", % This macro appeared in Erlang 21
+      DecodeMsg1Catch_GetStackTraceAsPattern,
+      "-else.\n",
+      %% Default (if no symbol defined) is the -else. .. -endif. section,
+      %% but it is overridable.
+      %%
+      %% Keep this for a while, until Erlang 21 is out. No release or
+      %% pre-release exists yet with the OTP_RELEASE macro. Thus if no
+      %% OTP_RELEASE, it may still be an Erlang 21.0-rc1 release where
+      %% erlang:get_stacktrace/0 is deprecated.
+      %%
+      %% When Erlang 21 is out and no rc is any longer relevant, replace
+      %% this case expression with DecodeMsg1Catch_GetStackTraceAsCall
+      case gpb_lib:target_has_stacktrace_syntax(Opts) of
+          true ->   % Eralng 21-rc1 or newer
+              ["-ifdef('GPB_FUNCTION_STACK').\n",
+               DecodeMsg1Catch_GetStackTraceAsCall,
+               "-else.\n",
+               DecodeMsg1Catch_GetStackTraceAsPattern,
+               "-endif.\n\n"];
+          false ->  % Erlang 20 or older
+              ["-ifdef('GPB_PATTERN_STACK').\n",
+               DecodeMsg1Catch_GetStackTraceAsPattern,
+               "-else.\n",
+               DecodeMsg1Catch_GetStackTraceAsCall,
+               "-endif.\n\n"]
+      end,
+      "-endif.\n\n"],
      gpb_codegen:format_fn(
        decode_msg_2_doit,
        fun('MsgName', Bin, 'TrUserData') ->

@@ -82,6 +82,7 @@
 -export([target_has_variable_key_map_update/1]).
 -export([target_can_specify_map_item_presence_in_typespecs/1]).
 -export([target_has_stacktrace_syntax/1]).
+-export([current_otp_release/0]).
 -export([proto2_type_default/3]).
 -export([proto3_type_default/3]).
 
@@ -547,25 +548,27 @@ is_target_major_version_at_least(VsnMin, Opts) ->
     end.
 
 is_current_major_version_at_least(VsnMin) ->
+    current_otp_release() >= VsnMin.
+
+current_otp_release() ->
     case erlang:system_info(otp_release) of
         "R"++Rest -> % R16 or ealier
             FirstChunkOfDigits = lists:takewhile(fun is_digit/1, Rest),
-            list_to_integer(FirstChunkOfDigits) >= VsnMin;
+            list_to_integer(FirstChunkOfDigits);
         RelStr ->
             %% In Erlang 17 the leading "R" was dropped
             %% The exact format isn't super documented,
             %% so be prepared for some (future?) alternatives.
             try list_to_integer(RelStr) of
-                N when is_integer(N) -> N >= VsnMin
+                N when is_integer(N) -> N
             catch error:badarg ->
-                    [NStr | _] = string_lexemes(RelStr, ".-"),
-                    try list_to_integer(NStr) of
-                        N when is_integer(N) -> N >= VsnMin
-                    catch error:badarg ->
-                            false
-                    end
+                    Rel = lists:dropwhile(fun is_not_digit/1, RelStr),
+                    FirstChunkOfDigits = lists:takewhile(fun is_digit/1, Rel),
+                    list_to_integer(FirstChunkOfDigits)
             end
     end.
+
+is_not_digit(C) -> not is_digit(C).
 
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
