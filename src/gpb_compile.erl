@@ -1985,7 +1985,7 @@ possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
 
 compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
     ModAsStr = flatten_iolist(?f("~p", [Mod])),
-    ErlCode2 = nano_epp(ErlCode, ModAsStr, HrlText),
+    ErlCode2 = nano_epp(ErlCode, ModAsStr, HrlText, Opts),
     {ok, Toks, _EndLine} = erl_scan:string(ErlCode2),
     FormToks = split_toks_at_dot(Toks),
     Forms = [case erl_parse:parse_form(Ts) of
@@ -2002,15 +2002,25 @@ compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
     combine_erl_and_possible_nif(compile:noenv_forms(Forms, Opts),
                                  PossibleNifCode).
 
-nano_epp(Code, ModAsStr, HrlText) ->
+-record(nepp, %% nano-epp state
+        {depth, %% for ifdef/else/endif processing
+         mod, %% ModAsStr,
+         hrl,
+         defs}).
+
+nano_epp(Code, ModAsStr, HrlText, _Opts) ->
     %% nepp = nano-erlang-preprocessor. Couldn't find a way to run
     %% the epp from a string, and don't want or need to use the file
     %% system when everything is already in memory.
+
+    %% Setup a dictionary, mostly to handle -ifdef...-endif
+    %% in hrls and in the decoders.
     D0 = dict:new(),
-    {Txt, _EndLine, _Defs} = nepp1(Code, ModAsStr, HrlText, 1, D0, []),
+    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=D0},
+    {Txt, <<>>, _EndNState, _EndLine} = nepp1(Code, NState, _Line=1, []),
     Txt.
 
-nepp1(<<"%% -*- coding:",_/binary>>=B, ModAsStr, HrlText, N, Ds, Acc) ->
+nepp1(<<"%% -*- coding:",_/binary>>=B, #nepp{mod=ModAsStr}=NState, N, Acc) ->
     %% First (non-coding) line must be a -file(...) directive,
     %% or else unused record definitions in included files will
     %% produce warnings: eg: {27,erl_lint,{unused_record,gpb_oneof}}.
@@ -2018,39 +2028,41 @@ nepp1(<<"%% -*- coding:",_/binary>>=B, ModAsStr, HrlText, N, Ds, Acc) ->
     Erl = (ModAsStr -- "''") ++ ".erl",
     CodingAndFileDirective = CodingLine ++ "\n" ++ file_directive(Erl, 1),
     Acc2 = lists:reverse(CodingAndFileDirective, Acc),
-    nepp2_nl(Rest, ModAsStr, HrlText, N, Ds, Acc2);
-nepp1(Rest, ModAsStr, HrlText, N, Ds, Acc) ->
+    nepp2_nl(Rest, NState, N, Acc2);
+nepp1(Rest, #nepp{mod=ModAsStr}=NState, N, Acc) ->
     Erl = (ModAsStr -- "''") ++ ".erl",
     FileDirective = file_directive(Erl, 1),
     Acc2 = lists:reverse(FileDirective, Acc),
-    nepp2_nl(Rest, ModAsStr, HrlText, N, Ds, Acc2).
+    nepp2_nl(Rest, NState, N, Acc2).
 
+nepp2(<<"?MODULE", Rest/binary>>, #nepp{mod=ModAsStr}=NState, N, Acc) ->
+    nepp2(Rest, NState, N, lists:reverse(ModAsStr, Acc));
+nepp2(<<$\n, Rest/binary>>, NState, N, Acc) ->
+    nepp2_nl(Rest, NState, N+1, [$\n | Acc]);
+nepp2(<<C, Rest/binary>>, NState, N, Acc) ->
+    nepp2(Rest, NState, N, [C | Acc]);
+nepp2(<<>>, NState, N, Acc) ->
+    {lists:reverse(Acc), <<>>, NState, N}.
 
-nepp2(<<"?MODULE", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2(Rest, ModAsStr, Hrl, N, Ds, lists:reverse(ModAsStr, Acc));
-nepp2(<<$\n, Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, [$\n | Acc]);
-nepp2(<<C, Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2(Rest, ModAsStr, Hrl, N, Ds, [C | Acc]);
-nepp2(<<>>, _ModAsStr, _Hrl, N, Ds, Acc) ->
-    {lists:reverse(Acc), N, Ds}.
+%% collect and handle pre-processor directives
+nepp2_nl(<<"-include", Rest/binary>>, NState, N, Acc) ->
+    nepp2_inc(Rest,NState, N, Acc);
+nepp2_nl(<<"-include_lib", Rest/binary>>, NState, N, Acc) ->
+    nepp2_inc(Rest, NState, N, Acc);
+nepp2_nl(<<"-define", Rest/binary>>, NState, N, Acc) ->
+    nepp2_def(Rest, NState, N, Acc);
+nepp2_nl(<<"-ifdef", Rest/binary>>, NState, N, Acc) ->
+    nepp2_ifdef(Rest, ifdef, NState, N, Acc);
+nepp2_nl(<<"-ifndef", Rest/binary>>, NState, N, Acc) ->
+    nepp2_ifdef(Rest, ifndef, NState, N, Acc);
+nepp2_nl(<<"-else.\n", Rest/binary>>, #nepp{depth=1}=NState, N, Acc) ->
+    nepp2_skip(Rest, NState, N+1, Acc);
+nepp2_nl(<<"-endif.\n", Rest/binary>>, #nepp{depth=1}=NState, N, Acc) ->
+    {lists:reverse(Acc), Rest, NState, N+1};
+nepp2_nl(X, NState, N, Acc) ->
+    nepp2(X, NState, N, Acc).
 
-nepp2_nl(<<"-include", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_inc(Rest, ModAsStr, Hrl, N, Ds, Acc);
-nepp2_nl(<<"-include_lib", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_inc(Rest, ModAsStr, Hrl, N, Ds, Acc);
-nepp2_nl(<<"-define", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_def(Rest, ModAsStr, Hrl, N, Ds, Acc);
-nepp2_nl(<<"-ifdef", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_ifdef(Rest, ifdef, ModAsStr, Hrl, N, Ds, Acc);
-nepp2_nl(<<"-ifndef", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_ifdef(Rest, ifndef, ModAsStr, Hrl, N, Ds, Acc);
-nepp2_nl(<<"-endif.\n", Rest/binary>>, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, Acc);
-nepp2_nl(X, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2(X, ModAsStr, Hrl, N, Ds, Acc).
-
-nepp2_inc(Rest, ModAsStr, Hrl, N, Ds, Acc) ->
+nepp2_inc(Rest, #nepp{mod=ModAsStr, hrl=Hrl}=NState, N, Acc) ->
     {_,    Rest1} = read_until(Rest,  "(", ""),
     {Inc1, Rest2} = read_until(Rest1, ")", ""),
     {_,    Rest3} = read_until(Rest2, "\n", ""),
@@ -2064,50 +2076,53 @@ nepp2_inc(Rest, ModAsStr, Hrl, N, Ds, Acc) ->
             Txt = lists:flatten([file_directive(Inc, 1),
                                  FieldDef, OneofDef, RpcDef]),
             Acc2 = lists:reverse(Txt ++ file_directive(Erl, N+1), Acc),
-            nepp2_nl(Rest3, ModAsStr, Hrl, N+1, Ds, Acc2);
+            nepp2_nl(Rest3, NState, N+1, Acc2);
         mod_hrl when Hrl /= '$not_generated' ->
-            {Txt1, _End, Ds2} = nepp2_nl(Hrl, ModAsStr, Hrl, 1, Ds, []),
+            {Txt1, <<>>, NState2, _EndLine} = nepp2_nl(Hrl, NState, 1, []),
             Txt2 = lists:flatten([file_directive(Inc, 1), Txt1]),
             Acc2 = lists:reverse(Txt2 ++ file_directive(Erl, N+1), Acc),
-            nepp2_nl(Rest3, ModAsStr, Hrl, N+1, Ds2, Acc2)
+            nepp2_nl(Rest3, NState2, N+1, Acc2)
     end.
 
-nepp2_def(Rest, ModAsStr, Hrl, N, Ds, Acc) ->
+nepp2_def(Rest, #nepp{defs=Ds}=NState, N, Acc) ->
     {_,   Rest1} = read_until(Rest,  "(", ""),
     {Sym, Rest2} = read_until(Rest1, ",", ""),
     {Val, Rest3} = read_until(Rest2, ")", ""),
     {_,   Rest4} = read_until(Rest3, "\n", ""),
     Ds1 = dict:store(parse_term(Sym), parse_term(Val), Ds),
-    nepp2_nl(Rest4, ModAsStr, Hrl, N+1, Ds1, Acc).
+    nepp2_nl(Rest4, NState#nepp{defs=Ds1}, N+1, Acc).
 
-nepp2_ifdef(Rest, SkipCond, ModAsStr, Hrl, N, Ds, Acc) ->
+nepp2_ifdef(Rest, SkipCond, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
     {_,   Rest1} = read_until(Rest,  "(", ""),
     {Sym, Rest2} = read_until(Rest1, ")", ""),
     {_,   Rest3} = read_until(Rest2, "\n", ""),
+    {Txt, Rest4, NState2, N2} =
     case {dict:is_key(parse_term(Sym), Ds), SkipCond} of
-        {true,  ifdef}  -> nepp2_nl(Rest3, ModAsStr, Hrl, N+1, Ds, Acc);
-        {false, ifndef} -> nepp2_nl(Rest3, ModAsStr, Hrl, N+1, Ds, Acc);
-        _ -> nepp2_skip(Rest3, 1, ModAsStr, Hrl, N+1, Ds, Acc)
-    end.
+        {true,  ifdef}  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
+        {false, ifndef} -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
+        _ -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
 
-nepp2_skip(<<"-else.\n", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
-    if Depth == 1 -> nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, Acc);
-       Depth >  1 -> nepp2_skip(Rest, Depth-1, ModAsStr, Hrl, N+1, Ds, Acc)
+    end,
+    nepp2_nl(Rest4, NState2#nepp{depth=Depth}, N2, lists:reverse(Txt, Acc)).
+
+nepp2_skip(<<"-else.\n", Rest/binary>>, #nepp{depth=Depth}=NState, N, Acc) ->
+    if Depth == 1 -> nepp2_nl(Rest, NState, N+1, Acc);
+       Depth >  1 -> nepp2_skip(Rest, NState, N+1, Acc)
     end;
-nepp2_skip(<<"-endif.\n", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
-    if Depth == 1 -> nepp2_nl(Rest, ModAsStr, Hrl, N+1, Ds, Acc);
-       Depth >  1 -> nepp2_skip(Rest, Depth-1, ModAsStr, Hrl, N+1, Ds, Acc)
+nepp2_skip(<<"-endif.\n", Rest/binary>>, #nepp{depth=Depth}=NState, N, Acc) ->
+    if Depth == 1 -> {lists:reverse(Acc), Rest, NState, N+1};
+       Depth >  1 -> nepp2_skip(Rest, NState#nepp{depth=Depth-1}, N+1, Acc)
     end;
-nepp2_skip(<<"-ifdef", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
+nepp2_skip(<<"-ifdef", Rest/binary>>, #nepp{depth=Depth}=NState, N, Acc) ->
     {_, Rest2} = read_until(Rest, "\n", ""),
-    nepp2_skip(Rest2, Depth+1, ModAsStr, Hrl, N+1, Ds, Acc);
-nepp2_skip(<<"-ifndef", Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
+    nepp2_skip(Rest2, NState#nepp{depth=Depth+1}, N+1, Acc);
+nepp2_skip(<<"-ifndef", Rest/binary>>, #nepp{depth=Depth}=NState, N, Acc) ->
     {_, Rest2} = read_until(Rest, "\n", ""),
-    nepp2_skip(Rest2, Depth+1, ModAsStr, Hrl, N+1, Ds, Acc);
-nepp2_skip(<<$\n, Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_skip(Rest, Depth, ModAsStr, Hrl, N+1, Ds, Acc);
-nepp2_skip(<<_, Rest/binary>>, Depth, ModAsStr, Hrl, N, Ds, Acc) ->
-    nepp2_skip(Rest, Depth, ModAsStr, Hrl, N, Ds, Acc).
+    nepp2_skip(Rest2, NState#nepp{depth=Depth+1}, N+1, Acc);
+nepp2_skip(<<$\n, Rest/binary>>, NState, N, Acc) ->
+    nepp2_skip(Rest, NState, N+1, Acc);
+nepp2_skip(<<_, Rest/binary>>, NState, N, Acc) ->
+    nepp2_skip(Rest, NState, N, Acc).
 
 read_until(<<C, Rest/binary>>, Delims, Acc) ->
     case lists:member(C, Delims) of
