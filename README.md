@@ -105,7 +105,10 @@ Mapping of protocol buffer datatypes to erlang
         When encoding, iolists, too, are accepted</td></tr>
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <tr><td>oneof</td>
-    <td><tt>{ChosenFieldName, Value}</tt></td></tr>
+    <td><tt>{ChosenFieldName, Value}</tt><br/>
+        or <tt>ChosenFieldName => Value</tt> if the {maps_oneof,flat}
+        (-maps_oneof flat) option is specified (requires maps and
+        maps_unset_optional = omitted)</td></tr>
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <tr><td>map<_,_></td>
     <td>An unordered list of 2-tuples, <tt>[{Key,Value}]</tt><br/>
@@ -200,6 +203,12 @@ A oneof field is automatically always optional.
    #{u => {b, "hello"}}
    #{}                   % If maps_unset_optional = omitted (default)
    #{u => undefined}     % With maps_unset_optional set to present_undefined
+
+   %% With the {maps_oneof,flat} option (requires maps_unset_optional = omitted)
+   #{a => 17}
+   #{b => "hello"}
+   #{}
+
 ```
 
 #### Map fields

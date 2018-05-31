@@ -56,6 +56,7 @@
                boolean_opt(mapfields_as_maps) |
                boolean_opt(defs_as_maps) |
                {maps_unset_optional, omitted | present_undefined} |
+               {maps_oneof, tuples | flat} |
                boolean_opt(nif) |
                {load_nif, string()} |
                {i, directory()} |
@@ -269,6 +270,17 @@ file(File) ->
 %%   <dd>This means it is present and has the value `undefined'.
 %%       This <em>was</em> the default before gpb version 4.0.0.
 %%   </dd>
+%% </dl>
+%%
+%% The `maps_oneof' option can be used for messages as maps, and can only
+%% take effect if `maps_unset_optional' is `omitted' (default since 4.0.0).
+%% It changes the representation of oneof fields as described below, if
+%% we would have a oneof-field, `xf' with two alternatives `a1' and `a2':
+%% <dl>
+%%   <dt>`{maps_oneof,tuples}'</dt>
+%%   <dd>`#{xf => {a1, Value}}' or `#{xf => {a2, Value}}'</dd>
+%%   <dt>`{maps_oneof,flat}'</dt>
+%%   <dd>`#{a1 => Value}}' or `#{a2 => Value}}'</dd>
 %% </dl>
 %%
 %% The `nif' option will cause the compiler to generate nif C++ code
