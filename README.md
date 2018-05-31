@@ -412,7 +412,7 @@ Interaction with rebar
 ----------------------
 
 For info on how to use gpb with rebar3, see
-https://www.rebar3.org/docs/using-available-plugins#section-using-gpb
+https://www.rebar3.org/docs/using-available-plugins#protocol-buffers
 
 In rebar there is support for gpb since version 2.6.0. See the
 proto compiler section of rebar.sample.config file at
