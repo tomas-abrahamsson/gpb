@@ -677,6 +677,7 @@ format_nif_cc_packers(_Mod, Defs, Opts) ->
 
 format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    Mapping = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     PackFnName = mk_c_fn(p_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     ["static int\n",
@@ -701,14 +702,36 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
               ""
               "    while (enif_map_iterator_get_pair(env, &iter, &k, &v))\n",
               "    {\n",
-              [?f("        ~sif (enif_is_identical(k, ~s))\n"
-                  "            elem[~w] = v;\n",
-                  [if I == 1 -> "";
-                      I >  1 -> "else "
-                   end,
-                   mk_c_var(gpb_aa_, gpb_lib:get_field_name(Field)),
-                   gpb_lib:get_field_rnum(Field)-1])
-               || {I, Field} <- gpb_lib:index_seq(Fields)],
+              gpb_lib:split_indent_iolist(
+                8,
+                [begin
+                     ElemIndex = gpb_lib:get_field_rnum(Field)-1,
+                     SrcVar = ?f("elem[~w]",[ElemIndex]),
+                     ?f("~sif (enif_is_identical(k, ~s))\n"
+                        "{\n"
+                        "    elem[~w] = v;\n"
+                        "~s\n"
+                        "}\n",
+                        [if I == 1 -> "";
+                            I >  1 -> "else "
+                         end,
+                         mk_c_var(gpb_aa_, gpb_lib:get_field_name(Field)),
+                         ElemIndex,
+                         gpb_lib:split_indent_iolist(
+                           4,
+                           format_nif_cc_field_packer(
+                             SrcVar, "m",
+                             case Mapping of
+                                 #maps{unset_optional=omitted} ->
+                                     %% No need anymore to check for presence
+                                     %% int the field packer. We've done that.
+                                     optional_to_mandatory(Field);
+                                 #maps{unset_optional=present_undefined} ->
+                                     Field
+                             end,
+                             Defs, Opts))])
+                 end
+                 || {I, Field} <- gpb_lib:index_seq(Fields)]),
               "        enif_map_iterator_next(env, &iter);\n",
               "    }\n",
               "    enif_map_iterator_destroy(env, &iter);\n",
@@ -723,19 +746,29 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
               ?f("    if (arity != ~w)\n"
                  "        return 0;\n",
                  [length(Fields) + 1]),
-              "\n"]
+              "\n",
+              [begin
+                   SrcVar = ?f("elem[~w]",[I]),
+                   gpb_lib:split_indent_iolist(
+                     4,
+                     format_nif_cc_field_packer(SrcVar, "m", Field, Defs,
+                                                Opts))
+               end
+               || {I, Field} <- gpb_lib:index_seq(Fields)]]
      end,
-     [begin
-          SrcVar = ?f("elem[~w]",[I]),
-          gpb_lib:split_indent_iolist(
-            4,
-            format_nif_cc_field_packer(SrcVar, "m", Field, Defs, Opts))
-      end
-      || {I, Field} <- gpb_lib:index_seq(Fields)],
      "\n"
      "    return 1;\n"
      "}\n",
      "\n"].
+
+optional_to_mandatory(#?gpb_field{occurrence=Occurrence}=Field) ->
+    case Occurrence of
+        optional -> Field#?gpb_field{occurrence=required};
+        required -> Field;
+        repeated -> Field
+    end;
+optional_to_mandatory(#gpb_oneof{}=Field) ->
+    Field.
 
 format_nif_cc_field_packer(SrcVar, MsgVar, #?gpb_field{}=Field, Defs, Opts) ->
     #?gpb_field{occurrence=Occurrence, type=Type}=Field,
