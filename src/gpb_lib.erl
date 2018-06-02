@@ -97,6 +97,8 @@
 -export([indent/2, indent_lines/2]).
 -export([outdent_first/1]).
 -export([split_indent_iolist/2]).
+-export([split_indent_butfirst_iolist/2]).
+-export([cond_split_indent_iolist/3]).
 -export([iolist_to_utf8_or_escaped_binary/2]).
 -export([nowarn_dialyzer_attr/3]).
 
@@ -661,6 +663,19 @@ outdent_first(IoList) ->
 
 indent_lines(Indent, Lines) ->
     [indent(Indent, Line) || Line <- Lines].
+
+split_indent_butfirst_iolist(Indent, IoList) ->
+    strip_left(iolist_to_binary(split_indent_iolist(Indent, IoList))).
+
+strip_left(<<" ", Rest/binary>>) -> strip_left(Rest);
+strip_left(Other)                -> Other.
+
+cond_split_indent_iolist(Condition, Indent, IoList) ->
+    B = iolist_to_binary(IoList),
+    case Condition(B) of
+        true  -> split_indent_iolist(Indent, IoList);
+        false -> B
+    end.
 
 split_indent_iolist(Indent, IoList) ->
     [if Line == <<>> -> "\n"; %% don't indent empty lines
