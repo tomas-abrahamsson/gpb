@@ -277,9 +277,7 @@ file(File) ->
 %% The `nif' option will cause the compiler to generate nif C++ code
 %% for encoding and decoding. The generated nif C++ code can be linked
 %% with the Google protobuf C++ library.  Read the file
-%% `README.nif-cc' for more info. This option is not compatible with
-%% the `maps' option; the generated C++ decoding code would still
-%% create records.
+%% `README.nif-cc' for more info.
 %%
 %% The `binary' option will cause the generated and compiled code to be
 %% returned as a binary. No files will be written. The return value
@@ -381,7 +379,7 @@ file(File) ->
 %% generated code freely, instead of basing it on the proto file name.
 %% The name specified with `module_name' can be prefixed and suffixed with
 %% the `module_name_prefix' and `module_name_suffix' options.
-
+%%
 %% The `any_translate' option can be used to provide packer and
 %% unpacker functions for `google.protobuf.Any' messages.  The merge
 %% translator is optional, and is called either via the `merge_msgs'
@@ -478,7 +476,7 @@ file(File) ->
 %% file pass through the normal file import, or `{ok,string()}' if it
 %% has fetched the file itself, or `{error,term()}'.
 %%
-%% The `target_erlang_version` can be used to specify another major
+%% The `target_erlang_version' can be used to specify another major
 %% version of Erlang/OTP to generate code for. The default, `current'
 %% means that the generated code is expected to be compiled and run
 %% on the same major version as gpb runs on.
