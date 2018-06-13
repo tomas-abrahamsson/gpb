@@ -88,7 +88,8 @@ rename_package_affects_all_occurrences_test() ->
      {{service_containment,"x"}, ['top_pkg.sub_pkg.SvcName1']}] =
         lists:sort(ok(gpb_names:rename_defs(
                         Defs0,
-                        [{rename, {pkg_name, snake_case}}]))).
+                        [{rename, {pkg_name, snake_case}},
+                         use_packages]))).
 
 dots_to_underscores_for_nested_msgs_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
@@ -356,7 +357,8 @@ to_snake_case_with_packages_with_legacy_opts_test() ->
                  input='top_pkg.sub_pkg.msg_name_1',
                  output='top_pkg.sub_pkg.msg_name_2'}]},
      {{service_containment,_}, ['top_pkg.sub_pkg.svc_name_1']}] =
-        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_snake_case]))).
+        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_snake_case,
+                                                   use_packages]))).
 
 can_tolower_record_names_with_packages_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -381,6 +383,19 @@ can_tolower_record_names_with_packages_with_legacy_opts_test() ->
                  input='pkg1.msg1',     %% both argument ...
                  output='pkg1.msg2'}]}, %% .. and result msgs to be to-lower
      {{service_containment,"x"},['pkg1.svc1']}] =
+        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower,
+                                                   use_packages]))).
+
+can_tolower_with_package_def_but_without_use_package_opt_test() ->
+    Defs = parse_sort_several_file_lines(
+             [{"x.proto",
+               ["package pkg1;",
+                "message Msg1 {required uint32 f1=1;}"]}],
+             [%% Not: use_packages even though there's package pkg1; line
+             ]),
+    [{package, 'pkg1'},
+     {{msg,msg1}, [#?gpb_field{}]},
+     {{msg_containment,_}, [msg1]}] =
         lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
 
 error_for_duplicates_after_rename_test() ->

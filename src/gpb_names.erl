@@ -83,7 +83,7 @@ rename_defs(Defs, Opts) ->
         [] ->
             {ok, Defs};
         RenameOpFs ->
-            case mk_renamer(RenameOpFs, Defs) of
+            case mk_renamer(RenameOpFs, Defs, Opts1) of
                 {ok, RF} ->
                     {ok, do_rename(RF, Defs)};
                 {error, Reason} ->
@@ -229,7 +229,7 @@ do_dot_uscore("")         -> "".
 %% for the message name, again for each field of that type.)
 %%
 
-mk_renamer(RenameOps, Defs) ->
+mk_renamer(RenameOps, Defs, Opts) ->
     PkgByProto = calc_package_by_proto(Defs),
     PkgRenamings = pkg_renamings(PkgByProto, RenameOps),
     MsgRenamings = msg_renamings(PkgByProto, PkgRenamings, Defs, RenameOps),
@@ -240,10 +240,17 @@ mk_renamer(RenameOps, Defs) ->
     RpcRenamings = rpc_renamings(Defs, RenameOps),
     MostRenamings = [PkgRenamings, MsgRenamings, GroupRenamings,
                     ServiceRenamings],
+    UsePackages = proplists:get_bool(use_packages, Opts),
     case check_no_dups(MostRenamings, RpcRenamings) of
         ok ->
             RF = fun(package, Name) ->
-                         dict_fetch(Name, PkgRenamings);
+                         if UsePackages ->
+                                 dict_fetch(Name, PkgRenamings);
+                            not UsePackages ->
+                                 %% No pkg_containment items present in Defs
+                                 %% when the use_packages option is not set.
+                                 Name
+                         end;
                     (msg, Name) ->
                          dict_fetch(Name, MsgRenamings);
                     (group, Name) ->
