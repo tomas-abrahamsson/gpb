@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 4.1.9
+2018-Jun-14
+
+        * Bugfix crash when using the renaming options such as
+        msg_name_to_lower, when the protobuf files contains package
+        definitions, and the use_packages option is not specified. Thanks
+        to Mark Geib for reporting. (#139)
+
 Version 4.1.8
 2018-May-25
 
