@@ -262,8 +262,7 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
                     not Maps ->
                          []
                  end,
-    MiscAtoms3 = MiscAtoms2 ++ FieldAtoms,
-    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms3),
+    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms2),
     AtomVars0 = [{mk_c_var(gpb_aa_, minus_to_m(A)), A} || A <- Atoms],
     NoValue = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                   records -> undefined;
@@ -271,12 +270,16 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
                   #maps{unset_optional=omitted} -> '$undef'
               end,
     AtomVars1 = [{"gpb_x_no_value", NoValue} | AtomVars0],
+    FieldAtomVars = [{mk_c_var(gpb_fa_, minus_to_m(A)), A} || A <- FieldAtoms],
     [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars1],
+     [?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- FieldAtomVars],
      "\n",
      ["static void install_atoms(ErlNifEnv *env)\n"
       "{\n",
       [?f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
        || {AtomVar, Atom} <- AtomVars1],
+      [?f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
+       || {AtomVar, Atom} <- FieldAtomVars],
       "}\n",
       "\n"]].
 
@@ -715,7 +718,7 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
                         [if I == 1 -> "";
                             I >  1 -> "else "
                          end,
-                         mk_c_var(gpb_aa_, gpb_lib:get_field_name(Field)),
+                         mk_c_var(gpb_fa_, gpb_lib:get_field_name(Field)),
                          ElemIndex,
                          gpb_lib:split_indent_iolist(
                            4,
@@ -1202,14 +1205,14 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
                 [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]]);
          #maps{unset_optional=present_undefined} ->
              [?f("    res = enif_make_new_map(env);\n"),
-              [?f("    enif_make_map_put(env, res, gpb_aa_~s, elem~w, &res);\n",
+              [?f("    enif_make_map_put(env, res, gpb_fa_~s, elem~w, &res);\n",
                   [gpb_lib:get_field_name(Field), I])
                || {I, Field} <- gpb_lib:index_seq(Fields)]];
          #maps{unset_optional=omitted} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [begin
                    Put = ?f("enif_make_map_put("++
-                                "env, res, gpb_aa_~s, elem~w, &res);",
+                                "env, res, gpb_fa_~s, elem~w, &res);",
                             [gpb_lib:get_field_name(Field), I]),
                    Test = ?f("if (!enif_is_identical(elem~w, gpb_x_no_value))",
                              [I]),
