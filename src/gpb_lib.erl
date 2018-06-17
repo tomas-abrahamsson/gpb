@@ -59,13 +59,14 @@
 
 -export([mapping_match/3]).
 -export([mapping_create/3]).
+-export([mapping_create/4]).
 -export([mapping_update/4]).
 -export([record_match/2]).
 -export([record_create/2]).
 -export([record_update/3]).
--export([map_match/1]).
--export([map_create/1]).
--export([map_set/2]).
+-export([map_match/2]).
+-export([map_create/2]).
+-export([map_set/3]).
 
 -export([get_2tuples_or_maps_for_maptype_fields_by_opts/1]).
 -export([get_records_or_maps_by_opts/1]).
@@ -85,6 +86,7 @@
 -export([current_otp_release/0]).
 -export([proto2_type_default/3]).
 -export([proto3_type_default/3]).
+-export([get_maps_key_type_by_opts/1]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
@@ -356,16 +358,18 @@ fold_msgdef_fields_o(Fun, InitAcc, Fields) ->
 mapping_match(RName, Fields, Opts) ->
     case get_records_or_maps_by_opts(Opts) of
         records -> record_match(RName, Fields);
-        maps    -> map_match(Fields)
+        maps    -> map_match(Fields, Opts)
     end.
 
 mapping_create(RName, Fields, Opts) when is_list(Opts) ->
     Fn = fun() -> get_records_or_maps_by_opts(Opts) end,
-    mapping_create(RName, Fields, Fn);
-mapping_create(RName, Fields, RecordsOrMaps) when is_function(RecordsOrMaps) ->
+    mapping_create(RName, Fields, Fn, Opts).
+
+mapping_create(RName, Fields, RecordsOrMaps, Opts)
+  when is_function(RecordsOrMaps) ->
     case RecordsOrMaps() of
         records -> record_create(RName, Fields);
-        maps    -> map_create(Fields)
+        maps    -> map_create(Fields, Opts)
     end.
 
 mapping_update(Var, RName, FieldsValues, Opts) ->
@@ -375,9 +379,9 @@ mapping_update(Var, RName, FieldsValues, Opts) ->
         maps ->
             case get_mapping_and_unset_by_opts(Opts) of
                 #maps{unset_optional=present_undefined} ->
-                    map_update(Var, FieldsValues);
+                    map_update(Var, FieldsValues, Opts);
                 #maps{unset_optional=omitted} ->
-                    map_set(Var, FieldsValues)
+                    map_set(Var, FieldsValues, Opts)
             end
     end.
 
@@ -400,71 +404,120 @@ record_update(Var, RecordName, FieldsValueTrees) ->
 
 %% maps
 -ifndef(NO_HAVE_MAPS).
-map_match(Fields) ->
+map_match(Fields, Opts) ->
+    Literal = mapkey_literal_by_opts(Opts),
     erl_syntax:map_expr(
-      [erl_syntax:map_field_exact(erl_syntax:atom(FName), Expr)
+      [erl_syntax:map_field_exact(Literal(FName), Expr)
        || {FName, Expr} <- Fields]).
 
-map_create(Fields) ->
-    map_set(none, Fields).
+map_create(Fields, Opts) ->
+    map_set(none, Fields, Opts).
 
-map_update(Var, []) when Var /= none ->
+map_update(Var, [], _Opts) when Var /= none ->
     %% No updates to be made, maybe no fields
     Var;
-map_update(Var, FieldsValueTrees) ->
+map_update(Var, FieldsValueTrees, Opts) ->
+    Literal = mapkey_literal_by_opts(Opts),
     erl_syntax:map_expr(
       Var,
-      [erl_syntax:map_field_exact(erl_syntax:atom(FName), Expr)
+      [erl_syntax:map_field_exact(Literal(FName), Expr)
        || {FName, Expr} <- FieldsValueTrees]).
 
-map_set(Var, []) when Var /= none ->
+map_set(Var, [], _Opts) when Var /= none ->
     %% No updates to be made, maybe no fields
     Var;
-map_set(Var, FieldsValueTrees) ->
+map_set(Var, FieldsValueTrees, Opts) ->
+    Literal = mapkey_literal_by_opts(Opts),
+    ExprF = mapkey_expr_by_opts(Opts),
     erl_syntax:map_expr(
       Var,
       [if is_atom(FName) ->
-               erl_syntax:map_field_assoc(erl_syntax:atom(FName), Expr);
+               erl_syntax:map_field_assoc(Literal(FName), Expr);
           true -> % Key can be a variable or other type too.
-               erl_syntax:map_field_assoc(FName, Expr)
+               erl_syntax:map_field_assoc(ExprF(FName), Expr)
        end
        || {FName, Expr} <- FieldsValueTrees]).
 
+mapkey_literal_by_opts(Opts) ->
+    case get_maps_key_type_by_opts(Opts) of
+        atom ->
+            fun(Atom) -> erl_syntax:atom(Atom) end;
+        binary ->
+            fun(Atom) ->
+                    erl_syntax:binary(
+                           [erl_syntax:binary_field(
+                              erl_syntax:string(atom_to_list(Atom)))])
+            end
+    end.
+
+mapkey_expr_by_opts(Opts) ->
+    case get_maps_key_type_by_opts(Opts) of
+        atom ->
+            fun(Expr) -> Expr end;
+        binary ->
+            fun(Expr) ->
+                    erl_syntax:binary(
+                      [erl_syntax:binary_field(
+                         erl_syntax:application(erl_syntax:atom(erlang),
+                                                erl_syntax:atom(atom_to_list),
+                                                [Expr]))])
+            end
+    end.
+
 -else. %% on a pre Erlang 17 system
 
-map_match(Fields) ->
-    erl_syntax:text(
-      ?ff("#{~s}", [string:join([?ff("~p := ~s", [FName, Var])
-                                 || {FName, Var} <- map_kvars(Fields)],
-                                ", ")])).
+map_match(Fields, Opts) ->
+    KVs = case get_maps_key_type_by_opts(Opts) of
+              atom ->
+                  [?ff("~p := ~s", [FName, Var])
+                   || {FName, Var} <- map_kvars(Fields)];
+              binary ->
+                  [?ff("<<\"~s\">> := ~s", [FName, Var])
+                   || {FName, Var} <- map_kvars(Fields)]
+          end,
+    erl_syntax:text(?ff("#{~s}", [string:join(KVs, ", ")])).
 
-map_create(Fields) ->
-    erl_syntax:text(
-      ?ff("#{~s}", [string:join([?ff("~p => ~s", [FName, Val])
-                                 || {FName, Val} <- map_kvalues(Fields)],
-                                ", ")])).
+map_create(Fields, Opts) ->
+    KVs = case get_maps_key_type_by_opts(Opts) of
+              atom ->
+                  [?ff("~p => ~s", [FName, Val])
+                   || {FName, Val} <- map_kvalues(Fields)];
+              binary ->
+                  [?ff("<<\"~s\">> => ~s", [FName, Val])
+                   || {FName, Val} <- map_kvalues(Fields)]
+          end,
+    erl_syntax:text(?ff("#{~s}", [string:join(KVs, ", ")])).
 
-map_update(Var, []) when Var /= none ->
+map_update(Var, [], _Opts) when Var /= none ->
     %% No updates to be made, maybe no fields
     Var;
-map_update(Var, FieldsValueTrees) ->
-    erl_syntax:text(
-      ?ff("~s#{~s}",
-          [var_literal(Var),
-           string:join([?ff("~p := ~s", [FName, Val])
-                        || {FName, Val} <- map_kvalues(FieldsValueTrees)],
-                       ", ")])).
+map_update(Var, FieldsValueTrees, Opts) ->
+    KVs = case get_maps_key_type_by_opts(Opts) of
+              atom ->
+                  [?ff("~p := ~s", [FName, Val])
+                   || {FName, Val} <- map_kvalues(FieldsValueTrees)];
+              binary ->
+                  [?ff("<<\"~s\">> := ~s", [FName, Val])
+                   || {FName, Val} <- map_kvalues(FieldsValueTrees)]
+          end,
+    erl_syntax:text(?ff("~s#{~s}", [var_literal(Var), string:join(KVs, ", ")])).
 
-map_set(Var, []) when Var /= none ->
+
+map_set(Var, [], _Opts) when Var /= none ->
     %% No updates to be made, maybe no fields
     Var;
-map_set(Var, FieldsValueTrees) ->
-    erl_syntax:text(
-      ?ff("~s#{~s}",
-          [var_literal(Var),
-           string:join([?ff("~p => ~s", [FName, Val])
-                        || {FName, Val} <- map_kvalues(FieldsValueTrees)],
-                       ", ")])).
+map_set(Var, FieldsValueTrees, Opts) ->
+    KVs = case get_maps_key_type_by_opts(Opts) of
+              atom ->
+                  [?ff("~p => ~s", [FName, Val])
+                   || {FName, Val} <- map_kvalues(FieldsValueTrees)];
+              binary ->
+
+                  [?ff("<<\"~s\">> => ~s", [FName, Val])
+                   || {FName, Val} <- map_kvalues(FieldsValueTrees)]
+          end,
+    erl_syntax:text(?ff("~s#{~s}", [var_literal(Var), string:join(KVs, ", ")])).
+
 
 %% -> [{atom(), string()}]
 map_kvars(KVars) ->
@@ -620,6 +673,9 @@ type_default(Type, Defs, Opts, GetTypeDefault) ->
        Type /= string ->
             GetTypeDefault(Type, Defs)
     end.
+
+get_maps_key_type_by_opts(Opts) ->
+    proplists:get_value(maps_key_type, Opts, atom).
 
 %% Syntax tree stuff ----
 

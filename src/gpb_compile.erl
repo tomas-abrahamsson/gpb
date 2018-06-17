@@ -56,6 +56,7 @@
                boolean_opt(mapfields_as_maps) |
                boolean_opt(defs_as_maps) |
                {maps_unset_optional, omitted | present_undefined} |
+               {maps_key_type, atom | binary} |
                boolean_opt(nif) |
                {load_nif, string()} |
                {i, directory()} |
@@ -273,6 +274,9 @@ file(File) ->
 %%       This <em>was</em> the default before gpb version 4.0.0.
 %%   </dd>
 %% </dl>
+%%
+%% For messages as maps, the `maps_key_type' option makes it possible
+%% to control whether keys should be atoms (default) or binaries.
 %%
 %% The `nif' option will cause the compiler to generate nif C++ code
 %% for encoding and decoding. The generated nif C++ code can be linked
@@ -1005,6 +1009,8 @@ c() ->
 %%       for more info.</dd>
 %%   <dt>`-maps_unset_optional omitted | present_undefined'</dt>
 %%   <dd>Specifies the internal format for optional fields that are unset.</dd>
+%%   <dt>`-maps_key_type atom | binary'</dt>
+%%   <dd>Specifies the key type for maps.</dd>
 %%   <dt>`-msgs-as-maps'</dt>
 %%   <dd>Specifies that messages should be maps. No `.hrl' file will
 %%       be generated.
@@ -1269,6 +1275,9 @@ opt_specs() ->
       "omitted | present_undefined\n"
       "       Specifies the internal format for optional fields\n"
       "       that are unset.\n"},
+     {"maps_key_type", {atom, binary}, maps_key_type,
+      "atom | binary\n"
+      "       Specifies the key type for maps.\n"},
      {"msgs-as-maps", undefined, msgs_as_maps, "\n"
       "        Specifies that messages should be maps.\n"
       "        Otherwise, they will be records.\n"},

@@ -3212,6 +3212,11 @@ opt_test() ->
           ["-pldefs",
            "-maps", "-msgs-as-maps", "-mapfields-as-maps", "-defs-as-maps",
            "x.proto"]),
+    {ok, {[maps, {maps_key_type, binary}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-maps", "-maps-key-type", "binary",
+           "x.proto"]),
     {ok, {[{erlc_compile_options, "debug_info, inline_list_funcs"}],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(

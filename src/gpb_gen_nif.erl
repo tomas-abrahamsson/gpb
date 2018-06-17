@@ -106,6 +106,8 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
        format_nif_cc_mk_consts(Mod, Defs, AnRes, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
+       format_nif_cc_mk_is_key(Mod, Defs, AnRes, Opts),
+       format_nif_cc_mk_mk_key(Mod, Defs, AnRes, Opts),
        format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
        format_nif_cc_encoders(Mod, Defs, Opts),
        format_nif_cc_packers(Mod, Defs, Opts),
@@ -236,6 +238,7 @@ format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
 
 format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
     EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
                                || {{enum, _}, EnumDef} <- Defs]),
     RecordAtoms = [MsgName
@@ -272,14 +275,24 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     AtomVars1 = [{"gpb_x_no_value", NoValue} | AtomVars0],
     FieldAtomVars = [{mk_c_var(gpb_fa_, minus_to_m(A)), A} || A <- FieldAtoms],
     [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars1],
-     [?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- FieldAtomVars],
+     if Maps, MapsKeyType == binary ->
+             [?f("static const char *~s = \"~s\";\n", [Var, Atom])
+              || {Var,Atom} <- FieldAtomVars];
+        true ->
+             [?f("static ERL_NIF_TERM ~s;\n", [Var])
+              || {Var,_Atom} <- FieldAtomVars]
+     end,
      "\n",
      ["static void install_atoms(ErlNifEnv *env)\n"
       "{\n",
       [?f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
        || {AtomVar, Atom} <- AtomVars1],
-      [?f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
-       || {AtomVar, Atom} <- FieldAtomVars],
+      if Maps, MapsKeyType == binary ->
+              "";
+         true ->
+              [?f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
+               || {AtomVar, Atom} <- FieldAtomVars]
+      end,
       "}\n",
       "\n"]].
 
@@ -308,6 +321,55 @@ collect_oneof_fields(Defs) ->
            || #?gpb_field{name=FOFName} <- OFields]
           || #gpb_oneof{fields=OFields} <- Fields]
          || {_msg_or_group, _, Fields} <- gpb_lib:msgs_or_groups(Defs)])).
+
+format_nif_cc_mk_is_key(_Mod, _Defs, _AnRes, Opts) ->
+    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
+    if Maps, MapsKeyType == binary ->
+            ["static int is_key(ErlNifEnv *env,\n"
+             "                  const ERL_NIF_TERM x,\n"
+             "                  const char *key_to_check_for)\n",
+             "{\n",
+             "    ErlNifBinary xb;\n"
+             "    size_t key_len;\n"
+             "    if (!enif_inspect_binary(env, x, &xb))\n"
+             "        return 0;\n"
+             "    key_len = strlen(key_to_check_for);\n"
+             "    return (xb.size == key_len &&\n"
+             "            memcmp(xb.data, key_to_check_for, key_len) == 0);\n"
+             "}\n"];
+       true ->
+            ["static int is_key(ErlNifEnv *env,\n"
+             "                  const ERL_NIF_TERM x,\n"
+             "                  const ERL_NIF_TERM key_to_check_for)\n",
+             "{\n",
+             "    return enif_is_identical(x, key_to_check_for);\n"
+             "}\n"]
+    end.
+
+format_nif_cc_mk_mk_key(_Mod, _Defs, _AnRes, Opts) ->
+    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
+    if Maps, MapsKeyType == binary ->
+            ["static ERL_NIF_TERM mk_key(ErlNifEnv *env,\n"
+             "                           const char *key)\n",
+             "{\n",
+             "    ERL_NIF_TERM   b;\n"
+             "    unsigned char *data;\n"
+             "    size_t         len;\n"
+             "\n"
+             "    len = strlen(key);\n"
+             "    data = enif_make_new_binary(env, len, &b);\n"
+             "    memmove(data, key, len);\n"
+             "    return b;\n"
+             "}\n"];
+       true ->
+            ["static ERL_NIF_TERM mk_key(ErlNifEnv *env,\n"
+             "                           const ERL_NIF_TERM key)\n",
+             "{\n",
+             "    return key;\n"
+             "}\n"]
+    end.
 
 format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, Opts) ->
     case is_any_field_of_type_string(AnRes) of
@@ -710,7 +772,7 @@ format_nif_cc_packer(CPkg, MsgName, Fields, Defs, Opts) ->
                 [begin
                      ElemIndex = gpb_lib:get_field_rnum(Field)-1,
                      SrcVar = ?f("elem[~w]",[ElemIndex]),
-                     ?f("~sif (enif_is_identical(k, ~s))\n"
+                     ?f("~sif (is_key(env, k, ~s))\n"
                         "{\n"
                         "    elem[~w] = v;\n"
                         "~s\n"
@@ -1205,14 +1267,18 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
                 [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]]);
          #maps{unset_optional=present_undefined} ->
              [?f("    res = enif_make_new_map(env);\n"),
-              [?f("    enif_make_map_put(env, res, gpb_fa_~s, elem~w, &res);\n",
+              [?f("    enif_make_map_put(env, res,\n"
+                  "                      mk_key(env, gpb_fa_~s), elem~w,\n"
+                  "                      &res);\n",
                   [gpb_lib:get_field_name(Field), I])
                || {I, Field} <- gpb_lib:index_seq(Fields)]];
          #maps{unset_optional=omitted} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [begin
-                   Put = ?f("enif_make_map_put("++
-                                "env, res, gpb_fa_~s, elem~w, &res);",
+                   Put = ?f("enif_make_map_put(env, res,\n"
+                            "                  mk_key(env, gpb_fa_~s),\n"
+                            "                  elem~w,\n"
+                            "                  &res);",
                             [gpb_lib:get_field_name(Field), I]),
                    Test = ?f("if (!enif_is_identical(elem~w, gpb_x_no_value))",
                              [I]),

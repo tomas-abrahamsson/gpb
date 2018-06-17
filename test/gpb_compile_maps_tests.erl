@@ -640,7 +640,72 @@ extraneous_keys_with_opts_omitted_test() ->
     ?assertError(_, M:verify_msg(#{o2  => {a,11}}, m1)), % misspelling of o1
     unload_code(M).
 
-%% verify ------------------------------------------------
+%% --- binary() map keys ------------
+
+basic_binary_map_keys_test() ->
+    M = compile_iolist(["message m {",
+                        "  required uint32 a = 1;",
+                        "  optional bool   b = 2;",
+                        "  repeated uint32 c = 3;",
+                        "}"],
+                       [maps, {maps_key_type, binary}]),
+    %% encode and decode
+    M1 = #{<<"a">> => 1, <<"b">> => true, <<"c">> => [3,4,5]},
+    B1 = M:encode_msg(M1, m),
+    ?assertEqual(M1, M:decode_msg(B1, m)),
+    %% merge
+    M2 = #{<<"a">> => 11, <<"c">> => [33,44,55]},
+    B2 = M:encode_msg(M2, m),
+    M2M = #{<<"a">> => 11, <<"b">> => true, <<"c">> => [3,4,5,33,44,55]},
+    ?assertEqual(M2M, M:merge_msgs(M1, M2, m)),
+    ?assertEqual(M2M, M:decode_msg(<<B1/binary, B2/binary>>, m)),
+    %% verify
+    ?assertError(_, M:verify_msg(#{}, m)), % required field not set
+    ?assertError(_, M:verify_msg(#{a => 1}, m)), % wrong key type
+    ?assertError(_, M:verify_msg(#{<<"a">> => "abc"}, m)), % wrong value type
+    unload_code(M).
+
+oneof_binary_map_keys_test() ->
+    M = compile_iolist(["message m {",
+                        "  required uint32 a  = 1;",
+                        "  oneof c {",
+                        "    string x = 22;",
+                        "    uint32 y = 23;",
+                        "  }",
+                        "}"],
+                       [maps, {maps_key_type, binary}]),
+    M1 = #{<<"a">> => 11}, % oneof field not set
+    B1 = M:encode_msg(M1, m),
+    ?assertEqual(M1, M:decode_msg(B1, m)),
+
+    M2 = #{<<"a">> => 11, <<"c">> => {x, "x"}}, % oneof field set
+    B2 = M:encode_msg(M2, m),
+    ?assertEqual(M2, M:decode_msg(B2, m)),
+    unload_code(M).
+
+binary_map_keys_not_mixed_with_map_types_test() ->
+    M = compile_iolist(["message m {",
+                        "  required uint32 a  = 1;",
+                        "  map<uint32,string> mm = 2;",
+                        "}"],
+                       [maps, {maps_key_type, binary}]),
+    M1 = #{<<"a">> => 11, <<"mm">> => #{}},
+    B1 = M:encode_msg(M1, m),
+    ?assertEqual(M1, M:decode_msg(B1, m)),
+
+    M2 = #{<<"a">> => 12, <<"mm">> => #{1 => "one", 2 => "two"}},
+    B2 = M:encode_msg(M2, m),
+    ?assertEqual(M2, M:decode_msg(B2, m)),
+
+    M3 = #{<<"a">> => 12, <<"mm">> => #{3 => "three"}},
+    B3 = M:encode_msg(M3, m),
+    M3M = #{<<"a">> => 12, <<"mm">> => #{1 => "one", 2 => "two", 3 => "three"}},
+    ?assertEqual(M3M, M:decode_msg(<<B2/binary, B3/binary>>, m)),
+    ?assertEqual(M3M, M:merge_msgs(M2, M3, m)),
+
+    unload_code(M).
+
+%% nif ------------------------------------------------
 
 nif_test_() ->
     increase_timeouts(
@@ -649,6 +714,8 @@ nif_test_() ->
           fun nif_encode_decode_present_undefined/0},
          {"Nif encode decode with unset optionals omitted",
           fun nif_encode_decode_omitted/0},
+         {"Nif encode decode with binary keys",
+          fun nif_encode_decode_binary_keys/0},
          increase_timeouts(
            nif_mapfield_tests_check_prerequisites(
              [{"Encode decode", fun nif_encode_decode_mapfields/0},
@@ -718,6 +785,42 @@ nif_encode_decode_omitted() ->
                                end,
                         Bin1 = M:encode_msg(Msg1, x_mo),
                         Msg1 = M:decode_msg(Bin1, x_mo),
+                        ok
+                end)
+      end).
+
+nif_encode_decode_binary_keys() ->
+    ProtocCanOneof = check_protoc_can_do_oneof(),
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_bk_ed1,
+              Defs = ["message x_bk {\n",
+                      "    optional uint32 o1 = 1;\n",
+                      "    optional uint32 o2 = 2;\n",
+                      [["    oneof oo1 {\n",
+                        "        uint32 of1 = 3;\n",
+                        "    }\n",
+                        "    oneof oo2 {\n",
+                        "        uint32 of2 = 4;\n",
+                        "    }\n"] || ProtocCanOneof],
+                      "    required uint32 rq = 5;\n",
+                      "    repeated uint32 rp = 6;\n",
+                      "}\n"],
+              Opts = [maps, {maps_key_type, binary}],
+              {ok, Code} = compile_nif_msg_defs(M, Defs, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Msg01 = #{<<"o1">> => 1,
+                                  <<"rq">> => 4,
+                                  <<"rp">> => [5]},
+                        Msg1 = if ProtocCanOneof ->
+                                       Msg01#{<<"oo2">> => {of2,4}};
+                                  true ->
+                                       Msg01
+                               end,
+                        Bin1 = M:encode_msg(Msg1, x_bk),
+                        Msg1 = M:decode_msg(Bin1, x_bk),
                         ok
                 end)
       end).

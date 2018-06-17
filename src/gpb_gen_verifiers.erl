@@ -127,7 +127,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
             #maps{unset_optional=omitted} ->
                 FMap = gpb_lib:zip_for_non_opt_fields(MsgDef, FVars),
                 {?expr('mapmatch' = 'M',
-                       [replace_tree('mapmatch', gpb_lib:map_match(FMap)),
+                       [replace_tree('mapmatch', gpb_lib:map_match(FMap, Opts)),
                         replace_tree('M', MsgVar)]),
                  [K || {K, _} <- FMap]}
         end,
@@ -302,7 +302,8 @@ field_verifier(MsgName,
                               _ -> ok
                           end,
                           [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}])),
+                                        gpb_lib:map_match([{FName, FVar}],
+                                                          Opts)),
                            replace_tree('M', MsgVar) | Replacements])
             end;
         repeated when IsMapField ->
@@ -324,7 +325,8 @@ field_verifier(MsgName,
                                   ok
                           end,
                           [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}])),
+                                        gpb_lib:map_match([{FName, FVar}],
+                                                          Opts)),
                            replace_tree('M', MsgVar) | Replacements])
             end;
         optional ->
@@ -350,7 +352,8 @@ field_verifier(MsgName,
                                   ok
                           end,
                           [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}])),
+                                        gpb_lib:map_match([{FName, FVar}],
+                                                          Opts)),
                            replace_tree('M', MsgVar) | Replacements])
             end
     end;
@@ -383,7 +386,7 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                 replace_term('<FName>', FName),
                 replace_tree('M', MsgVar),
                 replace_tree('#{<FName> := <F>}',
-                             gpb_lib:map_match([{FName, FVar}])),
+                             gpb_lib:map_match([{FName, FVar}], Opts)),
                 repeat_clauses(
                   '<oneof-pattern>',
                   [begin
@@ -406,7 +409,7 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                                replace_term('<OFName>', OFName)],
                        OFPat = ?expr({'<OFName>','<OFVar>'}, Trs1),
                        [replace_tree('<oneof-pattern>',
-                                     gpb_lib:map_match([{FName, OFPat}])),
+                                     gpb_lib:map_match([{FName, OFPat}], Opts)),
                         replace_term('<verify-fn>', FVerifierFn2),
                         splice_trees('MaybeTrUserData',
                                      gpb_gen_translators:maybe_userdata_param(

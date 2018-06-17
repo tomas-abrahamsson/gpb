@@ -115,7 +115,8 @@ field_tree(#?gpb_field{}=F, Opts) ->
       ?gpb_field,
       lists:zip(FNames,
                 [erl_parse:abstract(FValue) || FValue <- FValues]),
-      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts));
+      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts),
+      Opts);
 field_tree(#gpb_oneof{fields=OFields}=F, Opts) ->
     [gpb_oneof | FValues] = tuple_to_list(F),
     FNames = record_info(fields, gpb_oneof),
@@ -125,7 +126,8 @@ field_tree(#gpb_oneof{fields=OFields}=F, Opts) ->
           FName /= fields -> {FName, erl_parse:abstract(FValue)}
        end
        || {FName, FValue} <- lists:zip(FNames, FValues)],
-      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts)).
+      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts),
+      Opts).
 
 format_fetch_msg_defs([]) ->
     ["-spec fetch_msg_def(_) -> no_return().\n",
@@ -357,7 +359,8 @@ rpc_record_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
       ?gpb_rpc,
       lists:zip(RNames,
                 [erl_parse:abstract(RValue) || RValue <- RValues]),
-      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts)).
+      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts),
+      Opts).
 
 rpcs_def_tree(Rpcs, Opts) ->
     case get_rpc_format_by_opts(Opts) of
