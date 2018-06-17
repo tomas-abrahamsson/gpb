@@ -101,6 +101,8 @@
 -export([indent/2, indent_lines/2]).
 -export([outdent_first/1]).
 -export([split_indent_iolist/2]).
+-export([split_indent_butfirst_iolist/2]).
+-export([cond_split_indent_iolist/3]).
 -export([iolist_to_utf8_or_escaped_binary/2]).
 -export([nowarn_dialyzer_attr/3]).
 
@@ -372,8 +374,10 @@ mapping_update(Var, RName, FieldsValues, Opts) ->
             record_update(Var, RName, FieldsValues);
         maps ->
             case get_mapping_and_unset_by_opts(Opts) of
-                {maps, present_undefined} -> map_update(Var, FieldsValues);
-                {maps, omitted}           -> map_set(Var, FieldsValues)
+                #maps{unset_optional=present_undefined} ->
+                    map_update(Var, FieldsValues);
+                #maps{unset_optional=omitted} ->
+                    map_set(Var, FieldsValues)
             end
     end.
 
@@ -502,7 +506,9 @@ get_mapping_and_unset_by_opts(Opts) ->
             records;
         maps ->
             Default = omitted,
-            {maps, proplists:get_value(maps_unset_optional, Opts, Default)}
+            UnseOptional = proplists:get_value(maps_unset_optional, Opts,
+                                               Default),
+            #maps{unset_optional=UnseOptional}
     end.
 
 get_strings_as_binaries_by_opts(Opts) ->
@@ -684,6 +690,19 @@ outdent_first(IoList) ->
 
 indent_lines(Indent, Lines) ->
     [indent(Indent, Line) || Line <- Lines].
+
+split_indent_butfirst_iolist(Indent, IoList) ->
+    strip_left(iolist_to_binary(split_indent_iolist(Indent, IoList))).
+
+strip_left(<<" ", Rest/binary>>) -> strip_left(Rest);
+strip_left(Other)                -> Other.
+
+cond_split_indent_iolist(Condition, Indent, IoList) ->
+    B = iolist_to_binary(IoList),
+    case Condition(B) of
+        true  -> split_indent_iolist(Indent, IoList);
+        false -> B
+    end.
 
 split_indent_iolist(Indent, IoList) ->
     [if Line == <<>> -> "\n"; %% don't indent empty lines

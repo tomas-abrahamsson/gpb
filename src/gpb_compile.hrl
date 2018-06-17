@@ -19,6 +19,9 @@
           group_occurrences,  % :: dict:dict() %% GroupName -> repeated | ...
           has_p3_opt_strings  % :: boolean()
         }).
+-record(maps, {
+          unset_optional % :: omitted | present_undefined
+         }).
 
 -define(f(Fmt),        io_lib:format(Fmt, [])).
 -define(f(Fmt, Args),  io_lib:format(Fmt, Args)).

@@ -118,11 +118,13 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
     MsgVar = ?expr(M),
     {FieldMatching, NonOptKeys} =
         case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-            X when X == records;
-                   X == {maps, present_undefined} ->
+            records ->
                 {gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts),
                  FNames};
-            {maps, omitted} ->
+            #maps{unset_optional=present_undefined} ->
+                {gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts),
+                 FNames};
+            #maps{unset_optional=omitted} ->
                 FMap = gpb_lib:zip_for_non_opt_fields(MsgDef, FVars),
                 {?expr('mapmatch' = 'M',
                        [replace_tree('mapmatch', gpb_lib:map_match(FMap)),
@@ -131,10 +133,11 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
         end,
     ExtraneousFieldsChecks =
         case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-            X2 when X2 == records;
-                    X2 == {maps, present_undefined} ->
+            records ->
                 [];
-            {maps, omitted} ->
+            #maps{unset_optional=present_undefined} ->
+                [];
+            #maps{unset_optional=omitted} ->
                 [?expr(lists:foreach(
                          fun('<Key>') ->
                                  ok;
@@ -244,41 +247,57 @@ field_verifier(MsgName,
                   Replacements);
         repeated when not IsMapField ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                X when X == records;
-                       X == {maps, present_undefined} ->
+                records ->
                     ?expr(if is_list('<F>') ->
-                                 %% _ = [...] to avoid dialyzer error
-                                 %% "Expression produces a value of type
-                                 %% ['ok'], but this value is unmatched"
-                                 %% with the -Wunmatched_returns flag.
-                                 _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                                    'MaybeTrUserData')
-                                      || Elem <- '<F>'],
-                                 ok;
+                                  %% _ = [...] to avoid dialyzer error
+                                  %% "Expression produces a value of type
+                                  %% ['ok'], but this value is unmatched"
+                                  %% with the -Wunmatched_returns flag.
+                                  _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
+                                                     'MaybeTrUserData')
+                                       || Elem <- '<F>'],
+                                  ok;
                              true ->
-                                 mk_type_error(
-                                   {invalid_list_of, '<Type>'},
-                                   '<F>',
-                                   ['<FName>' | Path])
+                                  mk_type_error(
+                                    {invalid_list_of, '<Type>'},
+                                    '<F>',
+                                    ['<FName>' | Path])
                           end,
                           Replacements);
-                {maps, omitted} ->
+                #maps{unset_optional=present_undefined} ->
+                    ?expr(if is_list('<F>') ->
+                                  %% _ = [...] to avoid dialyzer error
+                                  %% "Expression produces a value of type
+                                  %% ['ok'], but this value is unmatched"
+                                  %% with the -Wunmatched_returns flag.
+                                  _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
+                                                     'MaybeTrUserData')
+                                       || Elem <- '<F>'],
+                                  ok;
+                             true ->
+                                  mk_type_error(
+                                    {invalid_list_of, '<Type>'},
+                                    '<F>',
+                                    ['<FName>' | Path])
+                          end,
+                          Replacements);
+                #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
                               '#{<FName> := <F>}' ->
                                   if is_list('<F>') ->
-                                         %% _ = [...] to avoid dialyzer error
-                                         %% "Expression produces a value of type
-                                         %% ['ok'], but this value is unmatched"
-                                         %% with the -Wunmatched_returns flag.
-                                         _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                                            'MaybeTrUserData')
-                                              || Elem <- '<F>'],
-                                         ok;
+                                          %% _ = [...] to avoid dialyzer error
+                                          %% "Expression produces a value of type
+                                          %% ['ok'], but this value is unmatched"
+                                          %% with the -Wunmatched_returns flag.
+                                          _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
+                                                             'MaybeTrUserData')
+                                               || Elem <- '<F>'],
+                                          ok;
                                      true ->
-                                         mk_type_error(
-                                           {invalid_list_of, '<Type>'},
-                                           '<F>',
-                                           ['<FName>' | Path])
+                                          mk_type_error(
+                                            {invalid_list_of, '<Type>'},
+                                            '<F>',
+                                            ['<FName>' | Path])
                                   end;
                               _ -> ok
                           end,
@@ -288,12 +307,15 @@ field_verifier(MsgName,
             end;
         repeated when IsMapField ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                X when X == records;
-                       X == {maps, present_undefined} ->
+                records ->
                     ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
                                         'TrUserData'),
                           Replacements);
-                {maps, omitted} ->
+                #maps{unset_optional=present_undefined} ->
+                    ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
+                                        'TrUserData'),
+                          Replacements);
+                #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
                               '#{<FName> := <F>}' ->
                                   '<verify-fn>'('<F>', ['<FName>' | Path],
@@ -307,14 +329,19 @@ field_verifier(MsgName,
             end;
         optional ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                X when X == records;
-                       X == {maps, present_undefined} ->
+                records ->
                     ?expr(if '<F>' == undefined -> ok;
                              true -> '<verify-fn>'('<F>', ['<FName>' | Path],
-                                                  'MaybeTrUserData')
+                                                   'MaybeTrUserData')
                           end,
                           Replacements);
-                {maps, omitted} ->
+                #maps{unset_optional=present_undefined} ->
+                    ?expr(if '<F>' == undefined -> ok;
+                             true -> '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                   'MaybeTrUserData')
+                          end,
+                          Replacements);
+                #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
                               '#{<FName> := <F>}' ->
                                   '<verify-fn>'('<F>', ['<FName>' | Path],
@@ -331,50 +358,17 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
     IsOneof = {true, FName},
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        X when X == records;
-               X == {maps, present_undefined} ->
-            ?expr(
-               case '<F>' of
-                   undefined ->
-                       ok;
-                   '<oneof-pattern>' ->
-                       '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
-                                     'MaybeTrUserData');
-                   _ ->
-                       mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
-               end,
-               [replace_tree('<F>', FVar),
-                replace_term('<FName>', FName),
-                repeat_clauses(
-                  '<oneof-pattern>',
-                  [begin
-                       FVerifierFn =
-                           case Type of
-                               {msg,FMsgName} ->
-                                   gpb_lib:mk_fn(v_msg_, FMsgName);
-                               {enum,EnumName} ->
-                                   gpb_lib:mk_fn(v_enum_, EnumName);
-                               Type ->
-                                   gpb_lib:mk_fn(v_type_, Type)
-                           end,
-                       ElemPath = gpb_gen_translators:mk_elempath_elem(
-                                    MsgName, F, IsOneof),
-                       FVerifierFn2 = gpb_gen_translators:find_translation(
-                                        ElemPath, verify, AnRes,
-                                        FVerifierFn),
-                       OFVar = gpb_lib:prefix_var("O", FVar),
-                       [replace_tree('M', MsgVar),
-                        replace_tree('<oneof-pattern>',
-                                     ?expr({'<OFName>','<OFVar>'})),
-                        replace_term('<verify-fn>', FVerifierFn2),
-                        replace_tree('<OFVar>', OFVar),
-                        replace_term('<OFName>', OFName),
-                        splice_trees('MaybeTrUserData',
-                                     gpb_gen_translators:maybe_userdata_param(
-                                       F, TrUserDataVar))]
-                   end
-                   || #?gpb_field{name=OFName, type=Type}=F <- OFields])]);
-        {maps, omitted} ->
+        records ->
+            field_oneof_present_undefined_verifier(
+              MsgName, FName, OFields,
+              FVar, MsgVar, TrUserDataVar,
+              AnRes);
+        #maps{unset_optional=present_undefined} ->
+            field_oneof_present_undefined_verifier(
+              MsgName, FName, OFields,
+              FVar, MsgVar, TrUserDataVar,
+              AnRes);
+        #maps{unset_optional=omitted} ->
             ?expr(
                case 'M' of
                    '<oneof-pattern>' ->
@@ -422,6 +416,50 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                    || #?gpb_field{name=OFName, type=Type}=F <- OFields])])
     end.
 
+field_oneof_present_undefined_verifier(MsgName, FName, OFields,
+                                       FVar, MsgVar, TrUserDataVar,
+                                       AnRes) ->
+    ?expr(
+       case '<F>' of
+           undefined ->
+               ok;
+           '<oneof-pattern>' ->
+               '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
+                             'MaybeTrUserData');
+           _ ->
+               mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
+       end,
+       [replace_tree('<F>', FVar),
+        replace_term('<FName>', FName),
+        repeat_clauses(
+          '<oneof-pattern>',
+          [begin
+               FVerifierFn =
+                   case Type of
+                       {msg,FMsgName} ->
+                           gpb_lib:mk_fn(v_msg_, FMsgName);
+                       {enum,EnumName} ->
+                           gpb_lib:mk_fn(v_enum_, EnumName);
+                       Type ->
+                           gpb_lib:mk_fn(v_type_, Type)
+                   end,
+               ElemPath = gpb_gen_translators:mk_elempath_elem(
+                            MsgName, F, {true, FName}),
+               FVerifierFn2 = gpb_gen_translators:find_translation(
+                                ElemPath, verify, AnRes,
+                                FVerifierFn),
+               OFVar = gpb_lib:prefix_var("O", FVar),
+               [replace_tree('M', MsgVar),
+                replace_tree('<oneof-pattern>',
+                             ?expr({'<OFName>','<OFVar>'})),
+                replace_term('<verify-fn>', FVerifierFn2),
+                replace_tree('<OFVar>', OFVar),
+                replace_term('<OFName>', OFName),
+                splice_trees('MaybeTrUserData',
+                             gpb_gen_translators:maybe_userdata_param(
+                               F, TrUserDataVar))]
+           end
+           || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
 
 can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
     sets:is_element({msg,MsgName}, UsedTypes)

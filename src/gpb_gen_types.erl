@@ -100,9 +100,11 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
     TypespecsCanIndicateMapItemPresence =
         gpb_lib:target_can_specify_map_item_presence_in_typespecs(Opts),
     LastIndex = case MappingAndUnset of
-                    records -> length(Fields);
-                    {maps, present_undefined} -> length(Fields);
-                    {maps, omitted} ->
+                    records ->
+                        length(Fields);
+                    #maps{unset_optional=present_undefined} ->
+                        length(Fields);
+                    #maps{unset_optional=omitted} ->
                         if TypespecsCanIndicateMapItemPresence ->
                                 length(Fields); % do typespecs for all fields
                            true ->
@@ -116,11 +118,12 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
         fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
                             occurrence=Occur}=Field}) ->
                 TypeSpecifierSep = calc_field_type_sep(Field, Opts),
-                LineLead = if MappingAndUnset == {maps, omitted},
-                              Occur == optional,
-                              not TypespecsCanIndicateMapItemPresence ->
+                LineLead = case MappingAndUnset of
+                               #maps{unset_optional=omitted} when
+                                     Occur == optional,
+                                     not TypespecsCanIndicateMapItemPresence ->
                                    "%% ";
-                              true ->
+                              _ ->
                                    ""
                            end,
                 DefaultStr =
@@ -182,10 +185,11 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                     [", " || TypeComment /= ""], TypeComment]);
            ({I, #gpb_oneof{name=Name}=Field}) ->
                 TypeSpecifierSep = calc_field_type_sep(Field, Opts),
-                LineLead = if MappingAndUnset == {maps, omitted},
-                              not TypespecsCanIndicateMapItemPresence->
+                LineLead = case MappingAndUnset of
+                               #maps{unset_optional=omitted} when
+                                     not TypespecsCanIndicateMapItemPresence->
                                    "%% ";
-                              true ->
+                               _ ->
                                    ""
                            end,
                 TypeStr = ?f("~s", [type_to_typestr(MsgName, Field, Defs, Opts)]),
@@ -227,9 +231,9 @@ calc_field_type_sep(#?gpb_field{occurrence=Occurrence}, Opts) ->
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         records ->
             "::";
-        {maps, present_undefined} ->
+        #maps{unset_optional=present_undefined} ->
             mandatory_map_item_type_sep(Opts);
-        {maps, omitted} ->
+        #maps{unset_optional=omitted} ->
             case Occurrence of
                 required -> mandatory_map_item_type_sep(Opts);
                 repeated -> "=>";
@@ -239,7 +243,7 @@ calc_field_type_sep(#?gpb_field{occurrence=Occurrence}, Opts) ->
 calc_field_type_sep(#gpb_oneof{}, Opts) ->
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         records   -> "::";
-        {maps, _} -> "=>"
+        #maps{} -> "=>"
     end.
 
 mandatory_map_item_type_sep(Opts) ->
@@ -272,9 +276,12 @@ mandatory_map_item_type_sep(Opts) ->
 type_to_typestr(_MsgName, #?gpb_field{type=Type, occurrence=Occurrence},
                 Defs, Opts) ->
     OrUndefined = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                      records                   -> " | undefined";
-                      {maps, present_undefined} -> " | undefined";
-                      {maps, omitted}           -> ""
+                      records ->
+                          " | undefined";
+                      #maps{unset_optional=present_undefined} ->
+                          " | undefined";
+                      #maps{unset_optional=omitted} ->
+                          ""
                   end,
     case Occurrence of
         required ->
@@ -290,9 +297,12 @@ type_to_typestr(_MsgName, #?gpb_field{type=Type, occurrence=Occurrence},
     end;
 type_to_typestr(_, #gpb_oneof{fields=OFields}, Defs, Opts) ->
     OrUndefined = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                      records                   -> ["undefined"];
-                      {maps, present_undefined} -> ["undefined"];
-                      {maps, omitted}           -> []
+                      records ->
+                          ["undefined"];
+                      #maps{unset_optional=present_undefined} ->
+                          ["undefined"];
+                      #maps{unset_optional=omitted} ->
+                          []
                   end,
     gpb_lib:or_join(
       [?f("{~s, ~s}", [Name, type_to_typestr_2(Type, Defs, Opts)])
