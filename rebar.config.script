@@ -60,6 +60,11 @@ ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
  %% This line is useful if you have gpb_eqc.erl symlinked to
  %% the symlink in the test/ directory.
  {eunit_compile_opts, [{i,"../include"}]},
+ {profiles,
+  [{test, [{deps, [proper]}
+          %% ,{plugins, [rebar3_proper]}
+          ]}
+  ]},
 
  {edoc_opts, [{preprocess,true}, {pretty_printer,erl_pp}]},
 
