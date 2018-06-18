@@ -215,7 +215,7 @@ DESCR_MODULES := \
 	$(patsubst $(priv)/proto3/google/protobuf/%.proto,gpb_%,$(DESCR_PROTO))
 
 TEST_MODULES := \
-	$(patsubst $(test)/%.erl,%,$(wildcard $(test)/*.erl))
+	$(patsubst $(test)/%.erl,%,$(wildcard $(test)/gpb_*.erl))
 
 # Run eunit on these modules:
 # - If module M and M_tests exist, only include M (M_tests is then implicit)

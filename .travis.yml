@@ -17,3 +17,8 @@ env:
 script:
   - make
   - make test
+  - |
+    if [[ $TRAVIS_OTP_RELEASE == '21.0' ]]; then
+      protoc --version
+      rebar3 eunit -m prop_gpb
+    fi
