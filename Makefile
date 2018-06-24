@@ -68,7 +68,7 @@ EDOC_DEST_DIR=.
 endif
 
 ifndef EDOC_OPTS
-EDOC_OPTS={preprocess,true}
+EDOC_OPTS={preprocess,true},{pretty_printer,erl_pp}
 endif
 
 ## Check verbosity
