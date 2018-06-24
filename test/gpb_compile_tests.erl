@@ -54,6 +54,9 @@
 %% Translators for user-data and op
 -export([any_e_atom/3, any_d_atom/3, any_m_atom/4, any_v_atom/4]).
 
+%% Translators for {translate_type, {{msg,uuid},...}} option tests:
+-export([uuid_e/1, uuid_d/1, uuid_m/2, uuid_v/1]).
+
 -ifndef(NO_HAVE_STACKTRACE_SYNTAX).
 -compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
 -endif.
@@ -69,6 +72,8 @@
 -else.  %% gpb_compile_common_tests
 -record(m1,{a}).
 -endif. %% gpb_compile_common_tests
+
+-define(is_string(X), is_list(X)).
 
 parses_non_importing_file_test() ->
     Contents = iolist_to_binary(
@@ -1357,6 +1362,66 @@ needs_submsg({msg,s}) -> true;
 needs_submsg({map,_,{msg,s}}) -> true;
 needs_submsg(_) -> false.
 
+%% -- translation of other messages ----------
+
+translate_msg_type_test() ->
+    %% in this test, the internal representation of the uuid message
+    %% is an integer.
+    M = compile_iolist(
+          ["message m {",
+           "  repeated uuid f1=1;",
+           "  required uuid f2=2;",
+           "  optional uuid f3=3;",
+           "  oneof f4 { uuid f5=5; }",
+           "}",
+           "message uuid { required string id = 1; }",
+           "",
+           %% For comparison: similar message x, with similar sub message u2,
+           %% which should encode to the same, so we can verify encoding.
+           "message x {",
+           "  repeated u f1=1;",
+           "  required u f2=2;",
+           "  optional u f3=3;",
+           "  oneof f4 { u f5=5; }",
+           "}",
+           "message u { required string id = 1; }"],
+          [%% The translation changes #uuid{id=string()} <-> integer()
+           {translate_type,
+            {{msg,uuid},
+             [{encode, {?MODULE, uuid_e, ['$1']}},
+              {decode, {?MODULE, uuid_d, ['$1']}},
+              {merge,  {?MODULE, uuid_m, ['$1','$2']}},
+              {verify, {?MODULE, uuid_v, ['$1']}}]}}]),
+    M1 = {m, [11,12], 22, 33, {f5,55}},
+    X1 = {x, [{u,"11"}, {u,"12"}], {u,"22"}, {u,"33"}, {f5,{u,"55"}}},
+    ok = M:verify_msg(M1),
+    B1 = M:encode_msg(M1),
+    B1 = M:encode_msg(X1),
+    M2 = {m, [13,14], 23, 34, {f5,56}},
+    X2 = {x, [{u,"13"}, {u,"14"}], {u,"23"}, {u,"34"}, {f5,{u,"56"}}},
+    B2 = M:encode_msg(M2),
+    B2 = M:encode_msg(X2),
+    Expected = {m,
+                [11,12, 13,14],
+                22 bxor 23, % the "odd" merge operation is bitwise xor
+                33 bxor 34,
+                {f5, 55 bxor 56}},
+    Expected = M:decode_msg(<<B1/binary, B2/binary>>, m),
+    Expected = M:merge_msgs(M1, M2),
+    unload_code(M).
+
+uuid_e(Uuid) when is_integer(Uuid) ->
+    {uuid, integer_to_list(Uuid)}.
+
+uuid_d({uuid,UuidStr}) when ?is_string(UuidStr) ->
+    list_to_integer(UuidStr).
+
+uuid_v(Uuid) when is_integer(Uuid) -> ok;
+uuid_v(X) -> error({non_int_uuid,X}).
+
+uuid_m(Uuid1, Uuid2) when is_integer(Uuid1), is_integer(Uuid2) ->
+    Uuid1 bxor Uuid2.
+
 %% --- misc ----------
 
 only_enums_no_msgs_test() ->
@@ -1976,7 +2041,7 @@ nif_code_test_() ->
           fun nif_with_list_indata_for_bytes/0},
          {"Nif and +-Inf/NaN", fun nif_with_non_normal_floats/0},
          {"Error if both Any translations and nif",
-          fun error_if_both_any_translations_and_nif/0}])).
+          fun error_if_both_translations_and_nif/0}])).
 
 increase_timeouts({Descr, Tests}) ->
     %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
@@ -2407,7 +2472,7 @@ nif_with_non_normal_floats() ->
                 end)
       end).
 
-error_if_both_any_translations_and_nif() ->
+error_if_both_translations_and_nif() ->
     %% This is expected to fail, already at option verification, ie
     %% not produce any files at all, but should it accidentally
     %% succeed (due to a bug or so), it is useful to have it included
@@ -2426,7 +2491,7 @@ error_if_both_any_translations_and_nif() ->
                {output,Output1}} =
                   compile_file_get_output(DefsTxt, Opts),
               true = gpb_lib:is_substr("nif", Output1),
-              true = gpb_lib:is_substr("any_translate", Output1),
+              true = gpb_lib:is_substr("translat", Output1),
 
               {{return,{error, _, []}},
                {output,""}} =
@@ -3269,6 +3334,17 @@ any_translation_options_test() ->
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-any_translate", "e=me:fe,d=md:fd,v=mv:fv",
+           "x.proto"]).
+
+type_translation_options_test() ->
+    {ok, {[{translate_type, {{msg,m},
+                             [{encode, {me,fe,['$1']}},
+                              {decode, {md,fd,['$1']}},
+                              {merge,  {mm,fm,['$1','$2']}},
+                              {verify, {mv,fv,['$1']}}]}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-translate_type", "type=msg:m,e=me:fe,d=md:fd,m=mm:fm,V=mv:fv",
            "x.proto"]).
 
 no_type_specs_test() ->

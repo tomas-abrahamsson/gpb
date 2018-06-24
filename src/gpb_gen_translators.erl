@@ -37,8 +37,8 @@
 -export([mk_elempath_elem/3]).
 -export([find_translation/3, find_translation/4]).
 -export([default_fn_by_op/2]).
--export([default_any_merge_translator/0]).
--export([default_any_verify_translator/0]).
+-export([default_merge_translator/0]).
+-export([default_verify_translator/0]).
 -export([exists_tr_for_msg/3]).
 -export([args_by_op2/1]).
 -export([maybe_userdata_param/2]).
@@ -420,8 +420,8 @@ format_default_merge_translators(#anres{map_types=MapTypes}, Opts) ->
      || HaveMaps].
 
 format_default_any_translators(#anres{translations=Translations}, _Opts) ->
-    Defaults = [{merge, default_any_merge_translator()},
-                {verify, default_any_verify_translator()}],
+    Defaults = [{merge, default_merge_translator()},
+                {verify, default_verify_translator()}],
     Needs = compute_needed_default_translations(Translations, Defaults),
     [[[inline_attr(any_m_overwrite,2),
        gpb_codegen:format_fn(
@@ -515,9 +515,9 @@ default_fn_by_op(_, undefined) ->
 default_fn_by_op(_, Fn) ->
     Fn.
 
-default_any_merge_translator() -> {any_m_overwrite,['$2','$user_data']}.
+default_merge_translator() -> {any_m_overwrite,['$2','$user_data']}.
 
-default_any_verify_translator() -> {any_v_no_check,['$1', '$user_data']}.
+default_verify_translator() -> {any_v_no_check,['$1', '$user_data']}.
 
 exists_tr_for_msg(MsgName, Op, #anres{translations=Translations}) ->
     dict:fold(fun(_Key, _OpCalls, true) ->

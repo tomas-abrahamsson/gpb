@@ -81,6 +81,7 @@
                {module_name_prefix, string() | atom()} |
                {module_name_suffix, string() | atom()} |
                {module_name, string() | atom()} |
+               {translate_type, {gpb_field_type(), [translation()]}} |
                {any_translate, [translation()]} |
                boolean_opt(epb_compatibility) |
                boolean_opt(epb_functions) |
@@ -381,12 +382,15 @@ file(File) ->
 %% generated code freely, instead of basing it on the proto file name.
 %% The name specified with `module_name' can be prefixed and suffixed with
 %% the `module_name_prefix' and `module_name_suffix' options.
-
-%% The `any_translate' option can be used to provide packer and
-%% unpacker functions for `google.protobuf.Any' messages.  The merge
-%% translator is optional, and is called either via the `merge_msgs'
+%%
+%% The `translate_type' option can be used to provide packer and unpacker
+%% functions for message fields of a certain type. For now, the only type
+%% supported is `{msg,MsgName}', and for now only when they occur as
+%% submessages.  For messages, the `MsgName' refers to a name <em>after</em>
+%% renaming has taken place.
+%% The merge translator is optional, and is called either via the `merge_msgs'
 %% function in the generated code, or when the decoder sees another
-%% `Any' message. The default merge operation is to let the second
+%% field of the same type. The default merge operation is to let the second
 %% element overwrite previous elements. The verify translator is
 %% optional too, since verification can be disabled.
 %% The translation calls are specified as `{Mod,Fn,ArgTemplate}' where
@@ -406,7 +410,7 @@ file(File) ->
 %%   <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
 %%       unpacked terms to a resulting Term3. The `$1' is the
 %%       previously seen term (during decoding, on encountering a
-%%       second `Any' field), or the first argument to the
+%%       second field of the same type), or the first argument to the
 %%       `merge_msgs' function. The `$2' is the lastly seen term, or
 %%       the second argument to the `merge_msgs' function.</dd>
 %%   <dt>Verify</dt>
@@ -437,6 +441,10 @@ file(File) ->
 %%   `encode_msg' and for `verify_msg'. The `$op' marker makes it
 %%   possible to tell these two call sites apart, if needed.</dd>
 %% </dl>
+%%
+%% The option `{any_translate,Translations}' is retained for backwards
+%% compatibility, and expands to
+%% <code>{translate_type,{'google.protobuf.Any',Translations}}</code>.
 %%
 %% The `epb_compatibility' option is an umbrella-option for
 %% compatibility with the Erlang protobuffs library. It will expand to
@@ -532,7 +540,8 @@ normalize_alias_opts(Opts) ->
                 Opts,
                 [fun norm_opt_alias_to_msg_proto_defs/1,
                  fun norm_opt_epb_compat_opt/1,
-                 fun norm_opt_map_opts/1]).
+                 fun norm_opt_map_opts/1,
+                 fun norm_opt_any_translate/1]).
 
 norm_opt_alias_to_msg_proto_defs(Opts) ->
     lists:map(fun(to_msg_defs)         -> to_proto_defs;
@@ -560,6 +569,15 @@ norm_opt_map_opts(Opts) ->
                        {mapfields_as_maps, false},
                        {defs_as_maps, false}]}],
       Opts).
+
+norm_opt_any_translate(Opts) ->
+    AnyType = {msg, 'google.protobuf.Any'},
+    lists:map(fun({any_translate, Transls}) ->
+                      {translate_type, {AnyType, Transls}};
+                 (Opt) ->
+                      Opt
+              end,
+              Opts).
 
 normalize_return_report_opts(Opts1) ->
     Opts2 = expand_opt(return, [return_warnings, return_errors], Opts1),
@@ -626,7 +644,8 @@ do_proto_defs_aux1(Mod, Defs0, Opts0) ->
     end.
 
 verify_opts(Defs, Opts) ->
-    while_ok([fun() -> verify_opts_any_translate_and_nif(Opts) end,
+    while_ok([fun() -> verify_opts_translation_and_nif(Opts) end,
+              fun() -> verify_translation_opts_only_for_msgs(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end]).
 
 while_ok(Funs) ->
@@ -636,14 +655,35 @@ while_ok(Funs) ->
                 ok,
                 Funs).
 
-verify_opts_any_translate_and_nif(Opts) ->
-    case {proplists:get_value(any_translate, Opts),
+verify_opts_translation_and_nif(Opts) ->
+    case {proplists:get_value(translate_type, Opts),
           proplists:get_bool(nif, Opts)} of
         {Translations, true} when Translations /= undefined ->
-            {error, {invalid_options,any_translate,nif}};
+            {error, {invalid_options, translation, nif}};
         _ ->
             ok
     end.
+
+verify_translation_opts_only_for_msgs(Opts) ->
+    TrOpts = lists:filter(fun({translate_type, _}) -> true;
+                                  (_) -> false
+                               end,
+                               Opts),
+    {_Ok,Errs} = lists:partition(
+                  fun({translate_type, {Type, _Translations}}) ->
+                          case Type of
+                              {msg, _} -> true;
+                              _        -> false
+                          end
+                  end,
+                  TrOpts),
+    case Errs of
+        [] ->
+            ok;
+        [{translate_type, {Type, _Tr}} | _] ->
+            {error, {unsupported_translation, Type, non_msg_type}}
+    end.
+
 
 verify_opts_epb_compat(Defs, Opts) ->
     while_ok(
@@ -849,8 +889,10 @@ fmt_err({post_process, Reasons}) ->
     gpb_parse:format_post_process_error({error, Reasons});
 fmt_err({write_failed, File, Reason}) ->
     ?f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
-fmt_err({invalid_options,any_translate,nif}) ->
-    "Option error: Not supported: both any_translate and nif";
+fmt_err({invalid_options, translation, nif}) ->
+    "Option error: Not supported: both translation option and nif";
+fmt_err({unsupported_translation, _Type, non_msg_type}) ->
+    "Option to translate is supported only for message types, for now";
 fmt_err({invalid_options, epb_functions, maps}) ->
     "Option error: Not supported: both epb_compatibility (or epb_functions) "
         "and maps";
@@ -938,22 +980,26 @@ c() ->
 %%       If no package is defined, nothing will be prepended.
 %%       Default is to not prepend package names for backwards
 %%       compatibility, but it is needed for some proto files.</dd>
-%%   <dt>`-any_translate MsFs'</dt>
-%%   <dd>Call functions in `MsFs' to pack, unpack, merge and verify
-%%       `google.protobuf.Any' messages. The `MsFs' is a string on the
-%%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
-%%       The specified modules and functinos are called and used as follows:
+%%   <dt>`-translate_type WMsFs'</dt>
+%%   <dd>Call functions in `TMsFs' to pack, unpack, merge and verify
+%%       for specifed submessages. The `TMsFs' is a string on the
+%%       following format: `type=Type,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
+%%       The Type and specified modules and functions are called and used
+%%       as follows:
 %%       <dl>
-%%         <dt>e=Mod:Fn</dt>
+%%         <dt>`type=msg:MsgName'</dt>
+%%         <dd>Specfies that the translations apply to messages with name
+%%             `MsgName' (after any renaming operations).</dd>
+%%         <dt>`e=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term)' to pack the `Term' to
 %%             a `google.protobuf.Any' message.</dd>
-%%         <dt>d=Mod:Fn</dt>
+%%         <dt>`d=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Any)' to unpack the `Any' to
 %%             unpack a `google.protobuf.Any' message to a term.</dd>
-%%         <dt>m=Mod:Fn</dt>
+%%         <dt>`m=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
 %%             unpacked terms to a resulting Term3.</dd>
-%%         <dt>V=Mod:Fn</dt>
+%%         <dt>`V=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%             If `Term' is valid, the function is expected to just return
 %%             any value, which is ignored and discarded.
@@ -963,12 +1009,17 @@ c() ->
 %%             reason for error.
 %%             If you want to use a verifier, this is the new preferred
 %%             approach.</dd>
-%%         <dt>v=Mod:Fn</dt>
+%%         <dt>`v=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
 %%             This exists for backwards compatibility, and its use
 %%             is deprecated.</dd>.
 %%       </dl>
 %%   </dd>
+%%   <dt>`-any_translate MsFs'</dt>
+%%   <dd>Call functions in `MsFs' to pack, unpack, merge and verify
+%%       `google.protobuf.Any' messages. The `MsFs' is a string on the
+%%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
+%%       See the translate option for details on the string components.</dd>
 %%   <dt>`-msgprefix Prefix'</dt>
 %%   <dd>Prefix each message with `Prefix'. This can be useful to
 %%       when including different sub-projects that have colliding
@@ -1233,6 +1284,13 @@ opt_specs() ->
       "       If no package is defined, nothing will be prepended.\n"
       "       Default is to not prepend package names for backwards\n"
       "       compatibility, but it is needed for some proto files.\n"},
+     {"translate_type", fun opt_translate_type/2, translate_type,
+      " type=msg:MsgName,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
+      "       For the specified submessage, call Mod:Fn to:\n"
+      "       - encode (calls Mod:Fn(Term) -> AnyMessage to pack)\n"
+      "       - decode (calls Mod:Fn(AnyMessage) -> Term to unpack)\n"
+      "       - merge  (calls Mod:Fn(Term,Term2) -> Term3 to merge unpacked)\n"
+      "       - verify (calls Mod:Fn(Term) -> _ to verify unpacked)\n"},
      {"any_translate", fun opt_any_translate/2, any_translate,
       " e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
       "       For a google.protobuf.Any message, call Mod:Fn to:\n"
@@ -1346,21 +1404,34 @@ opt_no_type_specs(OptTag, Rest) ->
     Opt = {OptTag, false},
     {ok, {Opt, Rest}}.
 
-opt_any_translate(OptTag, [S | Rest]) ->
+opt_translate_type(OptTag, [S | Rest]) ->
     try
-        Ts = gpb_lib:string_lexemes(S, ","),
-        Opt = {OptTag, [opt_any_translate_mfa(T) || T <- Ts]},
+        [W | Ts] = gpb_lib:string_lexemes(S, ","),
+        Opt = {OptTag, {opt_translate_what(W),
+                        [opt_translate_mfa(T) || T <- Ts]}},
         {ok, {Opt, Rest}}
     catch throw:{badopt,ErrText} ->
             {error, ErrText}
     end.
 
-opt_any_translate_mfa("e="++MF) -> {encode,opt_mf_str(MF, 1)};
-opt_any_translate_mfa("d="++MF) -> {decode,opt_mf_str(MF, 1)};
-opt_any_translate_mfa("m="++MF) -> {merge, opt_mf_str(MF, 2)};
-opt_any_translate_mfa("V="++MF) -> {verify,opt_mf_str(MF, 1)};
-opt_any_translate_mfa("v="++MF) -> {verify,opt_mf_str_verify(MF)};
-opt_any_translate_mfa(X) -> throw({badopt,"Invalid translation spec: "++X}).
+opt_any_translate(OptTag, [S | Rest]) ->
+    try
+        Ts = gpb_lib:string_lexemes(S, ","),
+        Opt = {OptTag, [opt_translate_mfa(T) || T <- Ts]},
+        {ok, {Opt, Rest}}
+    catch throw:{badopt,ErrText} ->
+            {error, ErrText}
+    end.
+
+opt_translate_what("type=msg:"++MsgName) -> {msg,list_to_atom(MsgName)};
+opt_translate_what(X) -> throw({badopt,"Invalid translation target: "++X}).
+
+opt_translate_mfa("e="++MF) -> {encode,opt_mf_str(MF, 1)};
+opt_translate_mfa("d="++MF) -> {decode,opt_mf_str(MF, 1)};
+opt_translate_mfa("m="++MF) -> {merge, opt_mf_str(MF, 2)};
+opt_translate_mfa("V="++MF) -> {verify,opt_mf_str(MF, 1)};
+opt_translate_mfa("v="++MF) -> {verify,opt_mf_str_verify(MF)};
+opt_translate_mfa(X) -> throw({badopt,"Invalid translation spec: "++X}).
 
 opt_mf_str(S, Arity) ->
     case gpb_lib:string_lexemes(S, ":") of
