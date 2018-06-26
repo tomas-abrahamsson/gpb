@@ -442,8 +442,10 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                          OFVal;
                      #maps{unset_optional=present_undefined} ->
                          OFVal;
-                     #maps{unset_optional=omitted} ->
-                         gpb_lib:map_match([{FName, OFVal}])
+                     #maps{unset_optional=omitted, oneof=tuples} ->
+                         gpb_lib:map_match([{FName, OFVal}]);
+                     #maps{unset_optional=omitted, oneof=flat} ->
+                         gpb_lib:map_match([{Name, OFVar}])
                  end,
              %% undefined is already handled, we have a match,
              %% the field occurs, as if it had been required

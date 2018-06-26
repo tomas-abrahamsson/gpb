@@ -56,6 +56,7 @@
                boolean_opt(mapfields_as_maps) |
                boolean_opt(defs_as_maps) |
                {maps_unset_optional, omitted | present_undefined} |
+               {maps_oneof, tuples | flat} |
                boolean_opt(nif) |
                {load_nif, string()} |
                {i, directory()} |
@@ -272,6 +273,17 @@ file(File) ->
 %%   <dd>This means it is present and has the value `undefined'.
 %%       This <em>was</em> the default before gpb version 4.0.0.
 %%   </dd>
+%% </dl>
+%%
+%% The `maps_oneof' option can be used for messages as maps, and can only
+%% take effect if `maps_unset_optional' is `omitted' (default since 4.0.0).
+%% It changes the representation of oneof fields as described below, if
+%% we would have a oneof-field, `xf' with two alternatives `a1' and `a2':
+%% <dl>
+%%   <dt>`{maps_oneof,tuples}'</dt>
+%%   <dd>`#{xf => {a1, Value}}' or `#{xf => {a2, Value}}'</dd>
+%%   <dt>`{maps_oneof,flat}'</dt>
+%%   <dd>`#{a1 => Value}}' or `#{a2 => Value}}'</dd>
 %% </dl>
 %%
 %% The `nif' option will cause the compiler to generate nif C++ code
@@ -610,7 +622,8 @@ do_proto_defs_aux1(Mod, Defs0, Opts0) ->
     possibly_probe_defs(Defs, Opts0),
     Warns0 = check_unpackables_marked_as_packed(Defs),
     {Warns1, Opts1} = possibly_adjust_typespec_opt(IsAcyclic, Opts0),
-    Warns = Warns0 ++ Warns1,
+    Warns2 = check_maps_flat_oneof_may_fail_on_compilation(Opts1),
+    Warns = Warns0 ++ Warns1 ++ Warns2,
     AnRes = gpb_analyzer:analyze_defs(Defs, Opts1),
     case verify_opts(Defs, Opts1) of
         ok ->
@@ -625,7 +638,8 @@ do_proto_defs_aux1(Mod, Defs0, Opts0) ->
 
 verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_any_translate_and_nif(Opts) end,
-              fun() -> verify_opts_epb_compat(Defs, Opts) end]).
+              fun() -> verify_opts_epb_compat(Defs, Opts) end,
+              fun() -> verify_opts_flat_oneof(Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -668,6 +682,34 @@ verify_opts_epb_compat(Defs, Opts) ->
                        ok
                end
        end]).
+
+verify_opts_flat_oneof(Opts) ->
+    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+        #maps{oneof=flat} ->
+            case gpb_lib:target_can_do_flat_oneof_for_maps(Opts) of
+                true ->
+                    ok;
+                false -> {error, maps_flat_oneof_not_supported_for_target_version}
+            end;
+        _ ->
+            ok
+    end.
+
+check_maps_flat_oneof_may_fail_on_compilation(Opts) ->
+    CanFlatOnoef = gpb_lib:target_can_do_flat_oneof_for_maps(Opts),
+    MayFail = gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps(Opts),
+    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+        #maps{oneof=flat} ->
+            if CanFlatOnoef, MayFail ->
+                    [maps_flat_oneof_generated_code_may_fail_to_compile];
+               not CanFlatOnoef ->
+                    []; % a later check will signal an error
+               true ->
+                    []
+            end;
+        _ ->
+            []
+    end.
 
 %% @equiv msg_defs(Mod, Defs, [])
 %% @doc Deprecated, use proto_defs/2 instead.
@@ -856,6 +898,8 @@ fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
         "'encode_msg' and 'decode_msg'";
+fmt_err(maps_flat_oneof_not_supported_for_target_version) ->
+    "Flat oneof for maps is only supported on Erlang 18 and later";
 fmt_err({rename_defs, Reason}) ->
     gpb_names:format_error(Reason);
 fmt_err(X) ->
@@ -872,6 +916,9 @@ format_warning({ignored_field_opt_packed_for_unpackable_type,
                 MsgName, FName, Type, _Opts}) ->
     ?f("Warning: ignoring option packed for non-packable field ~s.~s "
        "of type ~p", [MsgName, FName, Type]);
+format_warning(maps_flat_oneof_generated_code_may_fail_to_compile) ->
+    "Warning: Generated code for flat oneof for maps may fail to compile "
+        "on 18.3.4.6, or later Erlang 18 versions, due to a compiler issue";
 format_warning(X) ->
     case io_lib:deep_char_list(X) of
         true  -> X;
@@ -1005,6 +1052,8 @@ c() ->
 %%       for more info.</dd>
 %%   <dt>`-maps_unset_optional omitted | present_undefined'</dt>
 %%   <dd>Specifies the internal format for optional fields that are unset.</dd>
+%%   <dt>`-maps_oneof tuples | flat'</dt>
+%%   <dd>Specifies the internal format for oneof fields in maps.</dd>
 %%   <dt>`-msgs-as-maps'</dt>
 %%   <dd>Specifies that messages should be maps. No `.hrl' file will
 %%       be generated.
@@ -1269,6 +1318,11 @@ opt_specs() ->
       "omitted | present_undefined\n"
       "       Specifies the internal format for optional fields\n"
       "       that are unset.\n"},
+     {"maps_oneof", {tuples, flat}, maps_oneof,
+      "tuples | flat\n"
+      "       Specifies the representation for oneof fields in maps:\n"
+      "       as tuples, #{..., OneofField => {Tag, Value}, ...}   (default)\n"
+      "       or flat,   #{..., Tag => Value, ...}\n"},
      {"msgs-as-maps", undefined, msgs_as_maps, "\n"
       "        Specifies that messages should be maps.\n"
       "        Otherwise, they will be records.\n"},

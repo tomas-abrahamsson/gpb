@@ -38,6 +38,7 @@ no_maps_tests__test() ->
 -import(gpb_compile_tests, [unload_code/1]).
 
 -import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
+-import(gpb_compile_tests, [nif_oneof_tests_check_prerequisites/3]).
 -import(gpb_compile_tests, [nif_mapfield_tests_check_prerequisites/1]).
 -import(gpb_compile_tests, [increase_timeouts/1]).
 -import(gpb_compile_tests, [with_tmpdir/1]).
@@ -267,6 +268,86 @@ map_type_with_mapfields_as_maps_option_test() ->
     Msg2 = M2:decode_msg(B2, m2),
     Msg2 = M2:merge_msgs(Msg2, Msg2, m2),
     unload_code(M2).
+
+flat_map_prerequisites(Tests) ->
+    CanDoFlatMaps = gpb_lib:target_can_do_flat_oneof_for_maps([]),
+    MayFailCompilation =
+        gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps([]),
+    if CanDoFlatMaps,
+       MayFailCompilation ->
+            {"flat oneof for maps skipped (may hit compiler error)", []};
+       CanDoFlatMaps,
+       not MayFailCompilation ->
+            {"flat oneof for maps", Tests};
+       not CanDoFlatMaps ->
+            {"flat oneof for maps skipped (Erlang 17 or earlier)", []}
+    end.
+
+flat_oneof_maps_test_() ->
+    flat_map_prerequisites(
+      [{"pass as params", fun() -> flat_oneof_maps_test_aux(pass_as_params) end},
+       {"pass as record", fun() -> flat_oneof_maps_test_aux(pass_as_record) end}]).
+
+flat_oneof_maps_test_aux(FieldPass) ->
+    M = compile_iolist(["message m1 {",
+                        "  oneof x {",
+                        "    uint32 a = 1;",
+                        "    string b = 2;",
+                        "    m3     c = 3;",
+                        "    m4     d = 4;",
+                        "  }",
+                        "}",
+                        "message m3 { required uint32 f = 3; }",
+                        "message m4 { repeated uint32 g = 4; }"],
+                        [maps, {maps_unset_optional,omitted},
+                         {maps_oneof, flat},
+                         {field_pass_method, FieldPass}]),
+    <<8,100>>     = B1A = M:encode_msg(#{a => 100}, m1),
+    <<18, 1,"x">> = B1B = M:encode_msg(#{b => "x"}, m1),
+    ok = M:verify_msg(#{a => 1}, m1),
+    ok = M:verify_msg(#{c => #{f => 103}}, m1),
+    ?verify_gpb_err(M:verify_msg(#{a => 1, b => 2}, m1)), % dup fields
+    ?verify_gpb_err(M:verify_msg(#{x => {a, 1}}, m1)), % x is extraneous
+    ?verify_gpb_err(M:verify_msg(#{x => {a, 1}}, m1)), % x is extraneous
+    #{a := 100} = M:decode_msg(B1A, m1),
+    #{b := "x"} = M:decode_msg(B1B, m1),
+    ?assertEqual(#{b => "x"},
+                 M:decode_msg(<<B1A/binary, B1B/binary>>, m1)), % merge -> b
+    ?assertEqual(#{a => 100},
+                 M:decode_msg(<<B1B/binary, B1A/binary>>, m1)), % merge -> a
+    ?assertEqual(#{b => "x"},
+                 M:merge_msgs(#{a => 100}, #{b => "x"}, m1)),
+    ?assertEqual(#{a => 100},
+                 M:merge_msgs(#{b => "x"}, #{a => 100}, m1)),
+
+    %% -- Now for when there are sub msgs --
+    %%
+    <<26,2, 24,103>> = B1Ca = M:encode_msg(#{c => #{f => 103}}, m1),
+    <<26,2, 24,113>> = B1Cb = M:encode_msg(#{c => #{f => 113}}, m1),
+    #{c := #{f := 103}}     = M:decode_msg(B1Ca, m1),
+    <<34,2, 32,104>> = B1Da  = M:encode_msg(#{d => #{g => [104]}}, m1),
+    <<34,2, 32,114>> = B1Db  = M:encode_msg(#{d => #{g => [114]}}, m1),
+    %% merging same oneof
+    ?assertEqual(#{c => #{f => 103}},
+                 M:decode_msg(<<B1Cb/binary, B1Ca/binary>>, m1)),
+    ?assertEqual(#{d => #{g => [104,114]}},
+                 M:decode_msg(<<B1Da/binary, B1Db/binary>>, m1)),
+    %% merging different oneofs
+    ?assertEqual(#{d => #{g => [104]}},
+                 M:decode_msg(<<B1Ca/binary, B1Da/binary>>, m1)),
+    ?assertEqual(#{b => "x"},
+                 M:decode_msg(<<B1Ca/binary, B1B/binary>>, m1)),
+
+    ?assertEqual(#{c => #{f => 113}},
+                 M:merge_msgs(#{c => #{f => 103}}, #{c => #{f => 113}}, m1)),
+    ?assertEqual(#{d => #{g => [104]}},
+                 M:merge_msgs(#{c => #{f => 103}}, #{d => #{g => [104]}}, m1)),
+    ?assertEqual(#{d => #{g => [104,114]}},
+                 M:merge_msgs(#{d => #{g => [104]}}, #{d => #{g => [114]}},
+                              m1)),
+    ?assertEqual(#{b => "x"},
+                 M:merge_msgs(#{c => #{f => 103}}, #{b => "x"}, m1)),
+    unload_code(M).
 
 required_group_test() ->
     Mod = compile_iolist(
@@ -649,6 +730,11 @@ nif_test_() ->
           fun nif_encode_decode_present_undefined/0},
          {"Nif encode decode with unset optionals omitted",
           fun nif_encode_decode_omitted/0},
+         nif_oneof_tests_check_prerequisites(
+           "Nif encode decode with flat oneof",
+           fun flat_map_prerequisites/1,
+           [{"nif_encode_decode_flat_oneof",
+             fun nif_encode_decode_flat_oneof/0}]),
          increase_timeouts(
            nif_mapfield_tests_check_prerequisites(
              [{"Encode decode", fun nif_encode_decode_mapfields/0},
@@ -718,6 +804,41 @@ nif_encode_decode_omitted() ->
                                end,
                         Bin1 = M:encode_msg(Msg1, x_mo),
                         Msg1 = M:decode_msg(Bin1, x_mo),
+                        ok
+                end)
+      end).
+
+nif_encode_decode_flat_oneof() -> % this test only called if prerequisite true
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_fo_ed1,
+              Defs = ["message x_fo {",
+                      "  oneof x {",
+                      "    uint32 a = 1;",
+                      "    string b = 2;",
+                      "    x_fo3  c = 3;",
+                      "    x_fo4  d = 4;",
+                      "  }",
+                      "}",
+                      "message x_fo3 { required uint32 f = 3; }",
+                      "message x_fo4 { repeated uint32 g = 4; }"],
+              Opts = [maps, {maps_unset_optional,omitted}, {maps_oneof, flat}],
+              {ok, Code} = compile_nif_msg_defs(M, Defs, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        <<8, 100>>  = B1A = M:encode_msg(#{a => 100}, x_fo),
+                        #{a := 100} = M1A = M:decode_msg(B1A, x_fo),
+                        1 = maps:size(M1A),
+                        <<26,2, 24,13>> = B1C =
+                            M:encode_msg(#{c => #{f => 13}}, x_fo),
+                        #{c := #{f := 13}} = M:decode_msg(B1C, x_fo),
+
+                        <<34,4, 32,14, 32,24>> = B1D =
+                            M:encode_msg(#{d => #{g => [14,24]}}, x_fo),
+                        #{d := #{g := [14,24]}} = M1D =
+                            M:decode_msg(B1D, x_fo),
+                        1 = maps:size(M1D),
                         ok
                 end)
       end).

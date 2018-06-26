@@ -248,7 +248,12 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     FieldPass = gpb_lib:get_field_pass(MsgName, AnRes),
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     FNames = [FName || {FName, _InitExpr} <- InitExprs],
-    FOccurrences = field_occurrences(MsgDef),
+    FieldInfos = case MappingUnset of
+                     #maps{unset_optional=omitted, oneof=flat} ->
+                         field_infos_for_flat_oneof(MsgDef);
+                     _ ->
+                         field_infos(MsgDef)
+                 end,
     %% Compute extra post-generation operations needed for maps
     %% and pass_as_params
     Ops = case {MappingUnset, FieldPass} of
@@ -259,7 +264,7 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                    explode_param_pass(MsgName, FNames, 4),
                    underscore_unused_vars()];
               {#maps{unset_optional=present_undefined},pass_as_record} ->
-                  [rework_records_to_maps(4, undefined),
+                  [rework_records_to_maps(4, FieldInfos, undefined),
                    underscore_unused_vars(),
                    finalize_marked_map_exprs()];
               {#maps{unset_optional=present_undefined},pass_as_params} ->
@@ -270,14 +275,14 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                    finalize_marked_map_exprs()];
               {#maps{unset_optional=omitted}, pass_as_record} ->
                   [change_undef_marker_in_clauses('$undef'),
-                   rework_records_to_maps(4, '$undef'),
+                   rework_records_to_maps(4, FieldInfos, '$undef'),
                    underscore_unused_vars(),
                    finalize_marked_map_exprs()];
               {#maps{unset_optional=omitted}, pass_as_params} ->
                   [change_undef_marker_in_clauses('$undef'),
                    explode_param_init(MsgName, InitExprs, 4),
                    explode_param_pass(MsgName, FNames, 4),
-                   implode_to_map_exprs(4, FOccurrences, '$undef'),
+                   implode_to_map_exprs(4, FieldInfos, '$undef'),
                    underscore_unused_vars(),
                    finalize_marked_map_exprs()]
           end,
@@ -371,8 +376,17 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
             end
     end.
 
-field_occurrences(MsgDef) ->
+field_infos(MsgDef) ->
     [{gpb_lib:get_field_name(Field), gpb_lib:get_field_occurrence(Field)}
+     || Field <- MsgDef].
+
+field_infos_for_flat_oneof(MsgDef) ->
+    [case Field of
+         #?gpb_field{name=FName} ->
+             {FName, gpb_lib:get_field_occurrence(Field)};
+         #gpb_oneof{name=FName} ->
+             {FName, flatten_oneof}
+     end
      || Field <- MsgDef].
 
 run_morph_ops([Op | Rest], Fns) ->
@@ -452,23 +466,23 @@ implode_to_map_exprs_all_mandatory() ->
                      Fns)
     end.
 
-implode_to_map_exprs(F1Pos, FOccurrences, Undef) ->
+implode_to_map_exprs(F1Pos, FieldInfos, Undef) ->
     fun(Fns) ->
             loop_fns(
               fun(FnTree) ->
                       gpb_codemorpher:implode_to_map_exprs(
-                        FnTree, F1Pos, FOccurrences, Undef)
+                        FnTree, F1Pos, FieldInfos, Undef)
               end,
               process_finalizers(),
               Fns)
     end.
 
-rework_records_to_maps(RecordParamPos, Undef) ->
+rework_records_to_maps(RecordParamPos, FieldInfos, Undef) ->
     fun(Fns) ->
             loop_fns(
               fun(FnTree) ->
                       gpb_codemorpher:rework_records_to_maps(
-                        FnTree, RecordParamPos, Undef)
+                        FnTree, RecordParamPos, FieldInfos, Undef)
               end,
               process_initializers_finalizers_and_msg_passers(),
               Fns)

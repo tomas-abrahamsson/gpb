@@ -51,6 +51,7 @@
 -export([is_packed/1]).
 -export([key_partition_on_optionality/2, key_partition_on_optionality/3]).
 -export([classify_field_merge_action/1]).
+-export([flatten_oneof_fields/1]).
 
 -export([fold_msg_fields/3]).
 -export([fold_msg_or_group_fields/3]).
@@ -81,6 +82,8 @@
 -export([target_has_lists_join/1]).
 -export([target_has_variable_key_map_update/1]).
 -export([target_can_specify_map_item_presence_in_typespecs/1]).
+-export([target_can_do_flat_oneof_for_maps/1]).
+-export([target_may_fail_compilation_for_flat_oneof_for_maps/1]).
 -export([target_has_stacktrace_syntax/1]).
 -export([current_otp_release/0]).
 -export([proto2_type_default/3]).
@@ -279,6 +282,13 @@ classify_field_merge_action(FieldDef) ->
         #?gpb_field{occurrence=optional}                  -> overwrite;
         #?gpb_field{occurrence=repeated}                  -> seqadd
     end.
+
+flatten_oneof_fields([#?gpb_field{}=F | Rest]) ->
+    [F | flatten_oneof_fields(Rest)];
+flatten_oneof_fields([#gpb_oneof{fields=OFields} | Rest]) ->
+    OFields ++ flatten_oneof_fields(Rest);
+flatten_oneof_fields([]) ->
+    [].
 
 %% Msg iteration --------
 
@@ -505,10 +515,11 @@ get_mapping_and_unset_by_opts(Opts) ->
         records ->
             records;
         maps ->
-            Default = omitted,
+            DefaultUnsetOptional = omitted,
             UnseOptional = proplists:get_value(maps_unset_optional, Opts,
-                                               Default),
-            #maps{unset_optional=UnseOptional}
+                                               DefaultUnsetOptional),
+            Oneof = proplists:get_value(maps_oneof, Opts, tuples),
+            #maps{unset_optional=UnseOptional, oneof=Oneof}
     end.
 
 get_strings_as_binaries_by_opts(Opts) ->
@@ -593,6 +604,33 @@ target_has_variable_key_map_update(Opts) ->
 %% In Erlang 18, only => was supported.
 target_can_specify_map_item_presence_in_typespecs(Opts) ->
     is_target_major_version_at_least(19, Opts).
+
+target_can_do_flat_oneof_for_maps(Opts) ->
+    %% Not possible in Erlang 17 because:
+    %%    Variables as map keys appeared in 18.0. In 17, supports only literals
+    %%    as map keys.
+    is_target_major_version_at_least(18, Opts).
+
+target_may_fail_compilation_for_flat_oneof_for_maps(Opts) ->
+    %% In Erlang 18.3.4.6 .. 18.3.4.9
+    %% (ie the currently last/highest 4 Erlang 18 versions) this happens:
+    %% --
+    %%    % erlc <erl for flat oneof>.erl
+    %%    beamvalidatorerror: function v_msg_m1/3+75:
+    %%      Internal consistency check failed - please report this bug.
+    %%      Instruction: {move,{x,2},{y,0}}
+    %%      Error:       {uninitialized_reg,{x,2}}:
+    %% --
+    %% (introduced in c803276c9)
+    %% All Erlang 19 versions and later seems fine.
+    case target_can_do_flat_oneof_for_maps(Opts) of
+        true ->
+            AtLeast19 = is_target_major_version_at_least(19, Opts),
+            AtLeast18 = is_target_major_version_at_least(18, Opts),
+            AtLeast18 andalso (not AtLeast19);
+        false ->
+            true % On pre-18, it will definitely fail
+    end.
 
 %% In Erlang 21, the function erlang:get_stacktrace/0 was deprecated
 %% and there is new syntax for retrieving the stacktrace:
