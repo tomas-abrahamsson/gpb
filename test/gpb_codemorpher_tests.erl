@@ -211,9 +211,14 @@ implode_to_map_exprs_test() ->
 
 
 implode_to_map_exprs_with_flat_oneof_test() ->
-    case gpb_lib:is_target_major_version_at_least(19, []) of
-        true  -> implode_to_map_exprs_with_flat_oneof_aux();
-        false -> ok
+    case gpb_lib:target_can_do_flat_oneof_for_maps([]) of
+        true  ->
+            case gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps([]) of
+                false -> implode_to_map_exprs_with_flat_oneof_aux();
+                true  -> ok
+            end;
+        false ->
+            ok
     end.
 
 implode_to_map_exprs_with_flat_oneof_aux() ->
@@ -438,9 +443,14 @@ rework_records_to_maps_unset_optionals_omitted_test() ->
     ok.
 
 rework_records_to_maps_with_flat_oneof_test() ->
-    case gpb_lib:is_target_major_version_at_least(19, []) of
-        true  -> rework_records_to_maps_with_flat_oneof_aux();
-        false -> ok
+    case gpb_lib:target_can_do_flat_oneof_for_maps([]) of
+        true ->
+            case gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps([]) of
+                false -> rework_records_to_maps_with_flat_oneof_aux();
+                true  -> ok
+            end;
+        false ->
+            ok
     end.
 
 rework_records_to_maps_with_flat_oneof_aux() -> % implies omitted
