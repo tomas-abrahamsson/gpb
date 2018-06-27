@@ -28,6 +28,10 @@
 -include("../include/gpb.hrl").
 -include("gpb_compile.hrl").
 
+-define(is_map_type(X), (is_tuple(X)
+                         andalso tuple_size(X) =:= 3
+                         andalso element(1, X) =:= map)).
+
 %% -- analysis -----------------------------------------------------
 
 analyze_defs(Defs, Opts) ->
@@ -334,7 +338,7 @@ compute_translations(Defs, Opts) ->
           end,
           dict:new(),
           [{map_translations, compute_map_translations(Defs, Opts)},
-           {any_translations, compute_any_translations(Defs, Opts)}]))).
+           {type_translations, compute_type_translations(Defs, Opts)}]))).
 
 remove_merge_translations_for_repeated_elements(D) ->
     dict:map(fun(Key, Ops) ->
@@ -394,59 +398,89 @@ mk_map_transls(MsgName, FName, _KeyType, ValueType, maps)->
        {decode_repeated_finalize, {id,               ['$1', '$user_data']}},
        {merge,                    {mt_merge_maps_m,  ['$1', '$2']}}]}].
 
-compute_any_translations(Defs, Opts) ->
-    case proplists:get_value(any_translate,Opts) of
-        undefined ->
+compute_type_translations(Defs, Opts) ->
+    TypeTranslations =
+        lists:foldl(fun({translate_type, {Type, Transls}}, Acc) ->
+                            [{Type, Transls} | Acc];
+                       (_Opt, Acc) ->
+                            Acc
+                    end,
+                    [],
+                    Opts),
+    if TypeTranslations == [] ->
             dict:new();
-        AnyTranslations ->
-            compute_any_translations_2(Defs, AnyTranslations)
+       true ->
+            compute_type_translations_2(Defs, TypeTranslations)
     end.
 
-compute_any_translations_2(Defs, AnyTranslations) ->
-    P3AnyInfos =
-        gpb_lib:fold_msg_or_group_fields_o(
-          fun(_Type,
-              MsgName, #?gpb_field{name=FName, type={msg,Any}, occurrence=Occ},
-              Oneof,
-              Acc) when Any == 'google.protobuf.Any' ->
-                  Path = case {Oneof, Occ} of
-                             {false, repeated}  -> [MsgName,FName,[]];
-                             {false, _}         -> [MsgName,FName];
-                             {{true,CFName}, _} -> [MsgName,CFName,FName]
-                         end,
-                  [Path | Acc];
-             (_Type,
-              _MsgName, #?gpb_field{type={map,KeyType,{msg,Any}=ValueType}},
-              _Oneof,
-              Acc) when Any == 'google.protobuf.Any' ->
-                  MsgAsMapName = gpb_lib:map_type_to_msg_name(
-                                   KeyType, ValueType),
-                  Path = [MsgAsMapName,value],
-                  [Path | Acc];
-             (_Type, _MsgName, _Field, _Oneof, Acc) ->
-                  Acc
-          end,
-          [],
-          Defs),
-    Encode = {encode, fetch_any_translation(encode, AnyTranslations)},
-    Decode = {decode, fetch_any_translation(decode, AnyTranslations)},
-    Merge  = {merge,  fetch_any_translation(
-                        merge,  AnyTranslations,
-                        gpb_gen_translators:default_any_merge_translator())},
-    Verify = {verify, fetch_any_translation(
-                        verify, AnyTranslations,
-                        gpb_gen_translators:default_any_verify_translator())},
+compute_type_translations_2(Defs, TypeTranslations) ->
+    Infos = compute_type_translation_infos(Defs, TypeTranslations),
     dict:from_list(
-      [{Path, ([Encode,Decode,Verify]
-               ++ [Merge || not is_repeated_elem_path(Path)])}
-       || Path <- P3AnyInfos]).
+      [begin
+           Trs = [{encode, fetch_encode_tr(Type, Translations)},
+                  {decode, fetch_decode_tr(Type, Translations)},
+                  {verify, fetch_verify_tr(Type, Translations)}
+                  | [{merge, fetch_merge_tr(Type, Translations)}
+                     || not is_repeated_elem_path(Path)]],
+           {Path, Trs}
+       end
+       || {Type, Path, Translations} <- Infos]).
 
-fetch_any_translation(Op, Translations) ->
-    fetch_any_translation(Op, Translations, undefined).
-fetch_any_translation(Op, Translations, Default) ->
+compute_type_translation_infos(Defs, TypeTranslations) ->
+    gpb_lib:fold_msg_or_group_fields_o(
+      fun(_MsgOrGroup,
+          MsgName, #?gpb_field{name=FName, type=FType, occurrence=Occ},
+          Oneof,
+          Acc) when not ?is_map_type(FType) ->
+              case lists:keyfind(FType, 1, TypeTranslations) of
+                  {FType, Translations} ->
+                      Path =
+                          case {Oneof, Occ} of
+                              {false, repeated}  -> [MsgName,FName,[]];
+                              {false, _}         -> [MsgName,FName];
+                              {{true,CFName}, _} -> [MsgName,CFName,FName]
+                          end,
+                      [{FType, Path, Translations} | Acc];
+                  false ->
+                      Acc
+              end;
+         (_MsgOrGroup,
+          _MsgName, #?gpb_field{type={map,KeyType,ValueType}},
+          _Oneof,
+          Acc) ->
+              MsgName2 = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
+              Fields2 = gpb:map_item_pseudo_fields(KeyType, ValueType),
+              Defs2 = [{{msg, MsgName2}, Fields2}],
+              compute_type_translation_infos(Defs2, TypeTranslations) ++ Acc;
+         (_Type, _MsgName, _Field, _Oneof, Acc) ->
+              Acc
+      end,
+      [],
+      Defs).
+
+fetch_encode_tr(Type, Translations) ->
+    fetch_op_translation(encode, Translations, Type).
+
+fetch_decode_tr(Type, Translations) ->
+    fetch_op_translation(decode, Translations, Type).
+
+fetch_merge_tr(Type, Translations) ->
+    Default = gpb_gen_translators:default_merge_translator(),
+    fetch_op_translation(merge,  Translations, Default, Type).
+
+fetch_verify_tr(Type, Translations) ->
+    Default = gpb_gen_translators:default_verify_translator(),
+    fetch_op_translation(verify, Translations, Default, Type).
+
+fetch_op_translation(Op, Translations, Type) ->
+    fetch_op_translation(Op, Translations, undefined, Type).
+
+fetch_op_translation(Op, Translations, Default, Type) ->
     case proplists:get_value(Op, Translations, Default) of
         undefined ->
-            error({error, {missing_any_translation, {op,Op}, Translations}});
+            error({error, {missing_translation,
+                           {op,Op}, {type,Type},
+                           Translations}});
         {M,F,ArgTempl} ->
             {M,F,ArgTempl};
         {F,ArgTempl} ->
