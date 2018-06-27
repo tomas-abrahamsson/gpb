@@ -348,7 +348,9 @@ float_spec() ->
 
 msg_to_typestr(M, Opts) ->
   case gpb_lib:get_records_or_maps_by_opts(Opts) of
-    records -> ?f("#~p{}", [M]);
+    records ->
+      Mod = proplists:get_value(module, Opts),
+      ?f("~p:~p()", [Mod, M]);
     maps -> ?f("~p()", [M])
   end.
 

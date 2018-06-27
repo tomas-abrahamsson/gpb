@@ -189,8 +189,8 @@ parses_file_to_binary_test() ->
 
 parses_file_to_msg_defs_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
-    {ok, [{{msg,'Msg'},[#?gpb_field{}]},
-          {{msg_containment,"X"},['Msg']}]=MsgDefs} =
+    {ok, [{{msg_containment,"X"},['Msg']},
+          {{msg,'Msg'},[#?gpb_field{}]}]=MsgDefs} =
         gpb_compile:file(
           "X.proto",
           [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
@@ -1633,11 +1633,9 @@ get_proto_defs(clean_code) ->
     [{{msg,m1}, [#?gpb_field{name=field11, type=uint32, occurrence=optional,
                              fnum=1, rnum=2, opts=[]}]}];
 get_proto_defs(warningful_code) ->
-    %% circular msg definitions ==> warning about omitting type specs
-    [{{msg,m1}, [#?gpb_field{name=field11, type={msg,m2}, occurrence=optional,
-                             fnum=1, rnum=2, opts=[]}]},
-     {{msg,m2}, [#?gpb_field{name=field22, type={msg,m1}, occurrence=optional,
-                             fnum=2, rnum=2, opts=[]}]}];
+    %% warning: packed field of type bytes
+    [{{msg,m1}, [#?gpb_field{name=field11, type=bytes, occurrence=optional,
+                             fnum=1, rnum=2, opts=[packed]}]}];
 get_proto_defs(write_fails) ->
     get_proto_defs(clean_code).
 
@@ -1645,9 +1643,8 @@ get_proto_file(clean_code) ->
     "message m1 { optional uint32 field11 = 1; }\n" ++
     "message MessageInfo1 { optional uint32 field11 = 1; }\n";
 get_proto_file(warningful_code) ->
-    %% circular msg definitions ==> warning about omitting type specs
-    ["message m1 { optional m2 field11 = 1; }\n"
-     "message m2 { optional m1 field22 = 2; }\n"];
+    %% warning: packed field of type bytes
+    ["message m1 { optional bytes field11 = 1 [packed]; }\n"];
 get_proto_file(erroneous_code) ->
     "g&~#";
 get_proto_file(write_fails) ->
