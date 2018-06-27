@@ -1,5 +1,22 @@
 -*- coding: utf-8 -*-
 
+Version 4.2.0
+2018-Jun-27
+
+        * Add an option, translate_type (-translate_type). Previously the
+        any_translate option could generate code that called translation
+        functions for google.protobuf.Any messages. Translator functions can now
+        be called for any types of (sub) message. Thanks to Tristan Sloughter
+        for asking the question that prompted this.
+
+        * Add an option {maps_oneof,flat}. For maps, it changes the
+        Erlang representaiton of oneof fields from #{..., c => {x,Value}, ...}
+        to #{..., x => Value}, ...}
+
+        * Generate type specifications for records, and refer to them. This
+        makes it possible to generate types also when there are cyclic
+        dependencies. Thanks to Peter Zeller.
+
 Version 4.1.9
 2018-Jun-14
 
