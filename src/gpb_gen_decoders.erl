@@ -827,8 +827,7 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
               TrUserData) ->
                   Len = X bsl N + Acc,
                   <<PackedBytes:Len/binary, Rest2/binary>> = Rest,
-                  NewSeq = decode_packed(PackedBytes, 0, 0, E,
-                                         'MaybeTrUserData'),
+                  NewSeq = decode_packed(PackedBytes, 0, 0, E, TrUserData),
                   '<call-read-field>'(Rest2, 0, 0,
                                       Msg#'MsgName'{field=NewSeq},
                                       TrUserData)
@@ -838,11 +837,7 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
            replace_term('<call-read-field>',
                         gpb_lib:mk_fn(dfp_read_field_def_, MsgName)),
            replace_term('MsgName', MsgName),
-           replace_term(field, FName),
-           splice_trees('MaybeTrUserData',
-                        gpb_gen_translators:maybe_userdata_param(
-                          FieldDef,
-                          ?expr(TrUserData)))]),
+           replace_term(field, FName)]),
     [#fn{name = packed_field,
          passes_msg = true,
          tree = T},
@@ -863,15 +858,17 @@ format_packed_field_seq_decoder(MsgName, #?gpb_field{type=Type}=Field,
 format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 32, float) ->
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
-          fun(<<0:16,128,127, Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, [infinity | AccSeq]);
-             (<<0:16,128,255, Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, ['-infinity' | AccSeq]);
-             (<<_:16,1:1,_:7,_:1,127:7, Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, [nan | AccSeq]);
-             (<<Value:32/little-float, Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, [Value | AccSeq]);
-             (<<>>, _, _, AccSeq) ->
+          fun(<<0:16,128,127, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
+                  call_self(Rest, Z1, Z2, [infinity | AccSeq], TrUserData);
+             (<<0:16,128,255, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
+                  call_self(Rest, Z1, Z2, ['-infinity' | AccSeq], TrUserData);
+             (<<_:16,1:1,_:7,_:1,127:7, Rest/binary>>, Z1, Z2, AccSeq,
+              TrUserData) ->
+                  call_self(Rest, Z1, Z2, [nan | AccSeq], TrUserData);
+             (<<Value:32/little-float, Rest/binary>>, Z1, Z2, AccSeq,
+              TrUserData) ->
+                  call_self(Rest, Z1, Z2, [Value | AccSeq], TrUserData);
+             (<<>>, _, _, AccSeq, _TrUserData) ->
                   AccSeq
           end,
           []),
@@ -880,15 +877,16 @@ format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 32, float) ->
 format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 64, double) ->
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
-          fun(<<0:48,240,127, Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, [infinity | AccSeq]);
-             (<<0:48,240,255, Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, ['-infinity' | AccSeq]);
-             (<<_:48,15:4,_:4,_:1,127:7, Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, [nan | AccSeq]);
-             (<<Value:64/little-float, Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, [Value | AccSeq]);
-             (<<>>, _, _, AccSeq) ->
+          fun(<<0:48,240,127, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
+                  call_self(Rest, Z1, Z2, [infinity | AccSeq], TrUserData);
+             (<<0:48,240,255, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
+                  call_self(Rest, Z1, Z2, ['-infinity' | AccSeq], TrUserData);
+             (<<_:48,15:4,_:4,_:1,127:7, Rest/binary>>, Z1, Z2, AccSeq,
+              TrUserData) ->
+                  call_self(Rest, Z1, Z2, [nan | AccSeq], TrUserData);
+             (<<Value:64/little-float, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
+                  call_self(Rest, Z1, Z2, [Value | AccSeq], TrUserData);
+             (<<>>, _, _, AccSeq, _TrUserData) ->
                   AccSeq
           end,
           []),
@@ -897,9 +895,9 @@ format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 64, double) ->
 format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes) ->
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
-          fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq) ->
-                  call_self(Rest, Z1, Z2, [Value | AccSeq]);
-             (<<>>, _, _, AccSeq) ->
+          fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
+                  call_self(Rest, Z1, Z2, [Value | AccSeq], TrUserData);
+             (<<>>, _, _, AccSeq, _TrUserData) ->
                   AccSeq
           end,
           [replace_term('<N>', BitLen),
@@ -916,22 +914,16 @@ format_dpacked_vi(MsgName, #?gpb_field{name=FName}=FieldDef, AnRes, Opts) ->
     DExpr = decode_int_value(ExtValue, Rest, TrUserDataVar, FieldDef, Tr, Opts),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
-          fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq, 'MaybeTrUserData')
+          fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq, TrUserData)
                 when N < ?NB ->
-                  call_self(Rest, N + 7, X bsl N + Acc, AccSeq,
-                            'MaybeTrUserData');
-             (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq, 'MaybeTrUserData') ->
+                  call_self(Rest, N + 7, X bsl N + Acc, AccSeq, TrUserData);
+             (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq, TrUserData) ->
                   {NewFValue, RestF} = '<decode-expr>',
-                  call_self(RestF, 0, 0, [NewFValue | AccSeq],
-                            'MaybeTrUserData');
-             (<<>>, 0, 0, AccSeq, 'MaybeTrUserData') ->
+                  call_self(RestF, 0, 0, [NewFValue | AccSeq], TrUserData);
+             (<<>>, 0, 0, AccSeq, TrUserData) ->
                   AccSeq
           end,
-          [replace_tree('<decode-expr>', DExpr),
-           splice_trees('MaybeTrUserData',
-                        gpb_gen_translators:maybe_userdata_param(
-                          FieldDef,
-                          TrUserDataVar))]),
+          [replace_tree('<decode-expr>', DExpr)]),
     #fn{name = packed_vi_based,
         tree = T}.
 
