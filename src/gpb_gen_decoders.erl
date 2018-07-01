@@ -846,62 +846,113 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
 format_packed_field_seq_decoder(MsgName, #?gpb_field{type=Type}=Field,
                                 AnRes, Opts) ->
     case Type of
-        fixed32  -> format_dpacked_nonvi(MsgName, Field, 32, [little]);
-        sfixed32 -> format_dpacked_nonvi(MsgName, Field, 32, [little,signed]);
-        float    -> format_dpacked_nonvi(MsgName, Field, 32, float);
-        fixed64  -> format_dpacked_nonvi(MsgName, Field, 64, [little]);
-        sfixed64 -> format_dpacked_nonvi(MsgName, Field, 64, [little,signed]);
-        double   -> format_dpacked_nonvi(MsgName, Field, 64, double);
+        fixed32  -> format_dpacked_nonvi(MsgName, Field, 32, [little],
+                                         AnRes);
+        sfixed32 -> format_dpacked_nonvi(MsgName, Field, 32, [little,signed],
+                                         AnRes);
+        float    -> format_dpacked_nonvi(MsgName, Field, 32, float,
+                                         AnRes);
+        fixed64  -> format_dpacked_nonvi(MsgName, Field, 64, [little],
+                                         AnRes);
+        sfixed64 -> format_dpacked_nonvi(MsgName, Field, 64, [little,signed],
+                                         AnRes);
+        double   -> format_dpacked_nonvi(MsgName, Field, 64, double,
+                                         AnRes);
         _        -> format_dpacked_vi(MsgName, Field, AnRes, Opts)
     end.
 
-format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 32, float) ->
+format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 32, float, AnRes) ->
+    ElemPath = [MsgName, FName, []],
+    TranslFn = gpb_gen_translators:find_translation(ElemPath, decode, AnRes),
+    Cons = gpb_gen_translators:find_translation(
+             ElemPath, decode_repeated_add_elem, AnRes),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
           fun(<<0:16,128,127, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
-                  call_self(Rest, Z1, Z2, [infinity | AccSeq], TrUserData);
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'(infinity, TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
              (<<0:16,128,255, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
-                  call_self(Rest, Z1, Z2, ['-infinity' | AccSeq], TrUserData);
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'('-infinity', TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
              (<<_:16,1:1,_:7,_:1,127:7, Rest/binary>>, Z1, Z2, AccSeq,
               TrUserData) ->
-                  call_self(Rest, Z1, Z2, [nan | AccSeq], TrUserData);
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'(nan, TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
              (<<Value:32/little-float, Rest/binary>>, Z1, Z2, AccSeq,
               TrUserData) ->
-                  call_self(Rest, Z1, Z2, [Value | AccSeq], TrUserData);
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'(Value, TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
              (<<>>, _, _, AccSeq, _TrUserData) ->
                   AccSeq
           end,
-          []),
+          [replace_term('Tr', TranslFn),
+           replace_term('[New|Acc]', Cons)]),
     #fn{name = packed_float,
         tree = T};
-format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 64, double) ->
+format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, 64, double, AnRes) ->
+    ElemPath = [MsgName, FName, []],
+    TranslFn = gpb_gen_translators:find_translation(ElemPath, decode, AnRes),
+    Cons = gpb_gen_translators:find_translation(
+             ElemPath, decode_repeated_add_elem, AnRes),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
           fun(<<0:48,240,127, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
-                  call_self(Rest, Z1, Z2, [infinity | AccSeq], TrUserData);
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'(infinity, TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
              (<<0:48,240,255, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
-                  call_self(Rest, Z1, Z2, ['-infinity' | AccSeq], TrUserData);
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'('-infinity', TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
              (<<_:48,15:4,_:4,_:1,127:7, Rest/binary>>, Z1, Z2, AccSeq,
               TrUserData) ->
-                  call_self(Rest, Z1, Z2, [nan | AccSeq], TrUserData);
-             (<<Value:64/little-float, Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
-                  call_self(Rest, Z1, Z2, [Value | AccSeq], TrUserData);
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'(nan, TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
+             (<<Value:64/little-float, Rest/binary>>, Z1, Z2, AccSeq,
+              TrUserData) ->
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'(Value, TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
              (<<>>, _, _, AccSeq, _TrUserData) ->
                   AccSeq
           end,
-          []),
+          [replace_term('Tr', TranslFn),
+           replace_term('[New|Acc]', Cons)]),
     #fn{name = packed_double,
         tree = T};
-format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes) ->
+format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes,
+                     AnRes) ->
+    ElemPath = [MsgName, FName, []],
+    TranslFn = gpb_gen_translators:find_translation(ElemPath, decode, AnRes),
+    Cons = gpb_gen_translators:find_translation(
+             ElemPath, decode_repeated_add_elem, AnRes),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
           fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
-                  call_self(Rest, Z1, Z2, [Value | AccSeq], TrUserData);
+                  call_self(Rest, Z1, Z2,
+                            '[New|Acc]'('Tr'(Value, TrUserData), AccSeq,
+                                        TrUserData),
+                            TrUserData);
              (<<>>, _, _, AccSeq, _TrUserData) ->
                   AccSeq
           end,
           [replace_term('<N>', BitLen),
-           splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes])]),
+           splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes]),
+           replace_term('Tr', TranslFn),
+           replace_term('[New|Acc]', Cons)]),
     #fn{name = packed_fixint,
         tree = T}.
 
@@ -964,42 +1015,59 @@ format_vi_based_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
 decode_int_value(ExtValueExpr, Rest, TrUserDataVar, FieldDef, Tr, Opts) ->
     #?gpb_field{type=Type}=FieldDef,
     StringsAsBinaries = gpb_lib:get_strings_as_binaries_by_opts(Opts),
+    TrReplacements = [replace_tree('TrUserData', TrUserDataVar),
+                      replace_term('Tr', Tr(decode))],
     case Type of
         sint32 ->
-            tuplify(decode_zigzag(ExtValueExpr), Rest);
+            tuplify(decode_zigzag(ExtValueExpr, Tr, TrUserDataVar), Rest);
         sint64 ->
-            tuplify(decode_zigzag(ExtValueExpr), Rest);
+            tuplify(decode_zigzag(ExtValueExpr, Tr, TrUserDataVar), Rest);
         int32 ->
-            tuplify(decode_uint_to_int(ExtValueExpr, 32), Rest);
+            tuplify(decode_uint_to_int(ExtValueExpr, 32, Tr, TrUserDataVar),
+                    Rest);
         int64 ->
-            tuplify(decode_uint_to_int(ExtValueExpr, 64), Rest);
+            tuplify(decode_uint_to_int(ExtValueExpr, 64, Tr, TrUserDataVar),
+                    Rest);
         uint32 ->
-            tuplify(ExtValueExpr, Rest);
+            tuplify(?expr('Tr'('ExtValueExpr', 'TrUserData'),
+                          [replace_tree('ExtValueExpr', ExtValueExpr)
+                           | TrReplacements]),
+                    Rest);
         uint64 ->
-            tuplify(ExtValueExpr, Rest);
+            tuplify(?expr('Tr'('ExtValueExpr', 'TrUserData'),
+                          [replace_tree('ExtValueExpr', ExtValueExpr)
+                           | TrReplacements]),
+                    Rest);
         bool ->
-            tuplify(?expr(('ExtValueExpr') =/= 0,
-                          [replace_tree('ExtValueExpr', ExtValueExpr)]),
+            tuplify(?expr('Tr'(('ExtValueExpr') =/= 0, 'TrUserData'),
+                          [replace_tree('ExtValueExpr', ExtValueExpr)
+                           | TrReplacements]),
                     Rest);
         {enum, EnumName} ->
             EnumDecodeFn = gpb_lib:mk_fn(d_enum_, EnumName),
-            UintToIntExpr = decode_uint_to_int(ExtValueExpr, 32),
-            ToSym = ?expr('decode-enum'('decode-uint-to-int'),
+            Tr2 = fun(decode) -> id end,
+            UintToIntExpr = decode_uint_to_int(ExtValueExpr, 32,
+                                               Tr2, TrUserDataVar),
+            ToSym = ?expr('Tr'('decode-enum'('decode-uint-to-int'),
+                               'TrUserData'),
                           [replace_term('decode-enum', EnumDecodeFn),
-                           replace_tree('decode-uint-to-int', UintToIntExpr)]),
+                           replace_tree('decode-uint-to-int', UintToIntExpr)
+                           | TrReplacements]),
             tuplify(ToSym, Rest);
         string when StringsAsBinaries ->
-            unpack_bytes(ExtValueExpr, Rest, Opts);
+            unpack_bytes(ExtValueExpr, Rest, Tr, TrUserDataVar, Opts);
         string when not StringsAsBinaries ->
             ?expr(begin
                       Len = 'ExtValueExpr',
                       <<Utf8:Len/binary, Rest2/binary>> = 'Rest',
-                      {unicode:characters_to_list(Utf8, unicode), Rest2}
+                      {'Tr'(unicode:characters_to_list(Utf8, unicode),
+                            'TrUserData'), Rest2}
                   end,
                   [replace_tree('ExtValueExpr', ExtValueExpr),
-                   replace_tree('Rest', Rest)]);
+                   replace_tree('Rest', Rest)
+                   | TrReplacements]);
         bytes ->
-            unpack_bytes(ExtValueExpr, Rest, Opts);
+            unpack_bytes(ExtValueExpr, Rest, Tr, TrUserDataVar, Opts);
         {msg, Msg2Name} ->
             ?expr(begin
                       Len = 'ExtValueExpr',
@@ -1008,16 +1076,15 @@ decode_int_value(ExtValueExpr, Rest, TrUserDataVar, FieldDef, Tr, Opts) ->
                   end,
                   [replace_tree('ExtValueExpr', ExtValueExpr),
                    replace_tree('Rest', Rest),
-                   replace_term('d-msg-X', gpb_lib:mk_fn(d_msg_, Msg2Name)),
-                   replace_term('Tr', Tr(decode)),
-                   replace_tree('TrUserData', TrUserDataVar)]);
+                   replace_term('d-msg-X', gpb_lib:mk_fn(d_msg_, Msg2Name))
+                   | TrReplacements]);
         {map, KeyType, ValueType} ->
             MapAsMsgMame = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
             F2 = FieldDef#?gpb_field{type={msg,MapAsMsgMame}},
             decode_int_value(ExtValueExpr, Rest, TrUserDataVar, F2, Tr, Opts)
     end.
 
-unpack_bytes(ExtValueExpr, Rest, Opts) ->
+unpack_bytes(ExtValueExpr, Rest, Tr, TrUserDataVar, Opts) ->
     CompilerHasBinary = (catch binary:copy(<<1>>)) == <<1>>,
     Copy = case proplists:get_value(copy_bytes, Opts, auto) of
                auto when not CompilerHasBinary -> false;
@@ -1028,19 +1095,21 @@ unpack_bytes(ExtValueExpr, Rest, Opts) ->
                N when is_float(N)              -> N
            end,
     Transforms = [replace_tree('ExtValueExpr', ExtValueExpr),
-                  replace_tree('Rest', Rest)],
+                  replace_tree('Rest', Rest),
+                  replace_term('Tr', Tr(decode)),
+                  replace_tree('TrUserData', TrUserDataVar)],
     if Copy == false ->
             ?expr(begin
                       Len = 'ExtValueExpr',
                       <<Bytes:Len/binary, Rest2/binary>> = 'Rest',
-                      {Bytes, Rest2}
+                      {'Tr'(Bytes, 'TrUserData'), Rest2}
                   end,
                   Transforms);
        Copy == true ->
             ?expr(begin
                       Len = 'ExtValueExpr',
                       <<Bytes:Len/binary, Rest2/binary>> = 'Rest',
-                      {binary:copy(Bytes), Rest2}
+                      {'Tr'(binary:copy(Bytes), 'TrUserData'), Rest2}
                   end,
                   Transforms);
        is_integer(Copy); is_float(Copy) ->
@@ -1049,9 +1118,9 @@ unpack_bytes(ExtValueExpr, Rest, Opts) ->
                       <<Bytes:Len/binary, Rest2/binary>> = 'Rest',
                       Res = case binary:referenced_byte_size(Bytes) of
                                 LB when LB >= byte_size(Bytes) * 'Copy' ->
-                                    binary:copy(Bytes);
+                                    'Tr'(binary:copy(Bytes), 'TrUserData');
                                 _ ->
-                                    Bytes
+                                    'Tr'(Bytes, 'TrUserData')
                             end,
                       {Res, Rest2}
                   end,
@@ -1183,7 +1252,9 @@ decoder_in_param(MsgVar, MsgName, {FieldDef, {true, CFName}}) ->
     end.
 
 format_fixlen_field_decoder(MsgName, XFieldDef, AnRes) ->
-    {#?gpb_field{name=FName, type=Type}, _IsOneof} = XFieldDef,
+    {#?gpb_field{name=FName, type=Type}=Field, IsOneof} = XFieldDef,
+    ElemPath = gpb_gen_translators:mk_elempath_elem(MsgName, Field, IsOneof),
+    TranslFn = gpb_gen_translators:find_translation(ElemPath, decode, AnRes),
     {BitLen, BitTypes} = case Type of
                              fixed32  -> {32, [little]};
                              sfixed32 -> {32, [little,signed]};
@@ -1194,10 +1265,10 @@ format_fixlen_field_decoder(MsgName, XFieldDef, AnRes) ->
                          end,
     MsgVar = ?expr(Msg),
     {InParam, PrevValue} = decoder_in_param(MsgVar, MsgName, XFieldDef),
-    Value = ?expr(Value),
     TrUserDataVar = ?expr(TrUserData),
+    TrValue = ?expr('Tr'(Value, TrUserData), [replace_term('Tr', TranslFn)]),
     Param2 = updated_merged_param(MsgName, XFieldDef, AnRes,
-                                  Value, PrevValue, MsgVar,
+                                  TrValue, PrevValue, MsgVar,
                                   TrUserDataVar),
     ReadFieldDefFnName = gpb_lib:mk_fn(dfp_read_field_def_, MsgName),
     T = gpb_codegen:mk_fn(
@@ -1211,20 +1282,29 @@ format_fixlen_field_decoder(MsgName, XFieldDef, AnRes) ->
            replace_tree('<InParam>', InParam),
            replace_term('<call-read-field>', ReadFieldDefFnName),
            replace_tree('<OutParam>', Param2),
+           replace_term('Tr', TranslFn),
            replace_tree('TrUserData', TrUserDataVar)]),
     #fn{name = fixlen,
         passes_msg = true,
         tree = T}.
 
 format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes) ->
-    {#?gpb_field{name=FName}, _IsOneof} = XFieldDef,
+    {#?gpb_field{name=FName}=Field, IsOneof} = XFieldDef,
+    ElemPath = gpb_gen_translators:mk_elempath_elem(MsgName, Field, IsOneof),
+    TranslFn = gpb_gen_translators:find_translation(ElemPath, decode, AnRes),
     TrUserDataVar = ?expr(TrUserData),
     MsgVar = ?expr(Msg),
     {InParam, PrevValue} = decoder_in_param(MsgVar, MsgName, XFieldDef),
     OutParamReplacements =
-        [replace_tree(Marker, updated_merged_param(MsgName, XFieldDef, AnRes,
-                                                   OutExpr, PrevValue, MsgVar,
-                                                   TrUserDataVar))
+        [begin
+             TrOutExpr = ?expr('Tr'('OutExpr', TrUserData),
+                               [replace_term('Tr', TranslFn),
+                                replace_tree('OutExpr', OutExpr)]),
+             UpdatedOutExpr = updated_merged_param(MsgName, XFieldDef, AnRes,
+                                                   TrOutExpr, PrevValue, MsgVar,
+                                                   TrUserDataVar),
+             replace_tree(Marker, UpdatedOutExpr)
+         end
          || {Marker, OutExpr} <- [{'OutParam', ?expr(Value)},
                                   {'InfinityOutParam', ?expr(infinity)},
                                   {'-InfinityOutParam', ?expr('-infinity')},
@@ -1233,7 +1313,8 @@ format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes) ->
     Replacements =
         [replace_tree('InParam', InParam),
          replace_term('<call-read-field>', ReadFieldDefFnName),
-         replace_tree('TrUserData', TrUserDataVar)] ++
+         replace_tree('TrUserData', TrUserDataVar),
+         replace_term('Tr', TranslFn)] ++
         OutParamReplacements,
     T = case Type of
             float ->
@@ -1291,16 +1372,19 @@ format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes) ->
         passes_msg = true,
         tree = T}.
 
-decode_zigzag(ExtValueExpr) ->
+decode_zigzag(ExtValueExpr, Tr, TrUserDataVar) ->
     ?expr(begin
               ZValue = 'ExtValueExpr',
-              if ZValue band 1 =:= 0 -> ZValue bsr 1;
-                 true                -> -((ZValue + 1) bsr 1)
+              if ZValue band 1 =:= 0 -> 'Tr'(ZValue bsr 1, 'TrUserData');
+                 true                -> 'Tr'(-((ZValue + 1) bsr 1),
+                                             'TrUserData')
               end
           end,
-          [replace_tree('ExtValueExpr', ExtValueExpr)]).
+          [replace_tree('ExtValueExpr', ExtValueExpr),
+           replace_term('Tr', Tr(decode)),
+           replace_term('TrUserData', TrUserDataVar)]).
 
-decode_uint_to_int(ExtValueExpr, NumBits) ->
+decode_uint_to_int(ExtValueExpr, NumBits, Tr, TrUserDataVar) ->
     %% Contrary to the 64 bit encoding done for int32 (and enum),
     %% decode the value as 32 bits, so we decode negatives
     %% given both as 32 bits and as 64 bits wire encodings
@@ -1308,10 +1392,12 @@ decode_uint_to_int(ExtValueExpr, NumBits) ->
     ?expr(begin
               <<Res:'N'/signed-native>> =
                   <<('ExtValueExpr'):'N'/unsigned-native>>,
-              Res
+              'Tr'(Res, 'TrUserData')
           end,
           [replace_term('N', NumBits),
-           replace_tree('ExtValueExpr', ExtValueExpr)]).
+           replace_tree('ExtValueExpr', ExtValueExpr),
+           replace_term('Tr', Tr(decode)),
+           replace_tree('TrUserData', TrUserDataVar)]).
 
 format_read_group_fn() ->
     ["read_group(Bin, FieldNum) ->\n"
