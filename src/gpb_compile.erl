@@ -951,7 +951,7 @@ fmt_err(X) ->
 format_warning({ignored_field_opt_packed_for_unpackable_type,
                 MsgName, FName, Type, _Opts}) ->
     ?f("Warning: ignoring option packed for non-packable field ~s.~s "
-       "of type ~p", [MsgName, FName, Type]);
+       "of type ~w", [MsgName, FName, Type]);
 format_warning(maps_flat_oneof_generated_code_may_fail_to_compile) ->
     "Warning: Generated code for flat oneof for maps may fail to compile "
         "on 18.3.4.6, or later Erlang 18 versions, due to a compiler issue";
