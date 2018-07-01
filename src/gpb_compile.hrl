@@ -13,7 +13,6 @@
                               %                 %%            pass_as_params
           maps_as_msgs,       % :: list() % same format as `Defs'
           translations,       % :: dict:dict(), %% FieldPath -> TranslationOps
-          default_transls,    % :: sets:set({FnName::atom(),Arity::integer()})
           map_types,          % :: sets:set({map,_,_})
           map_value_types,    % :: {boolean(), boolean()} % submsgs?/nonsubmsgs?
           group_occurrences,  % :: dict:dict() %% GroupName -> repeated | ...

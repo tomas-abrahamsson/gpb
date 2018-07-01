@@ -1946,10 +1946,10 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        gpb_gen_verifiers:format_verifiers(Defs, AnRes, Opts),
        "\n",
        if not DoNif ->
-               [gpb_gen_translators:format_aux_transl_helpers(AnRes),
+               [gpb_gen_translators:format_aux_transl_helpers(),
                 gpb_gen_translators:format_translators(Defs, AnRes, Opts)];
           DoNif ->
-               [gpb_gen_translators:format_aux_transl_helpers(AnRes),
+               [gpb_gen_translators:format_aux_transl_helpers(),
                 gpb_gen_translators:format_merge_translators(Defs, AnRes,
                                                              Opts)]
        end,

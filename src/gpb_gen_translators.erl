@@ -27,7 +27,7 @@
 -module(gpb_gen_translators).
 
 -export([format_translators/3]).
--export([format_aux_transl_helpers/1]).
+-export([format_aux_transl_helpers/0]).
 -export([format_merge_translators/3]).
 
 -export([mk_find_tr_fn/3]).
@@ -255,20 +255,23 @@ args_by_op2(decode_repeated_finalize) -> [?expr(L)];
 args_by_op2(merge)                    -> [?expr(X1), ?expr(X2)];
 args_by_op2(verify)                   -> [?expr(V), ?expr(Path)].
 
-format_aux_transl_helpers(#anres{default_transls=UsedDefaultTransls}) ->
-    IsNeeded = fun(F,A) -> sets:is_element({F,A}, UsedDefaultTransls) end,
-    [[[inline_attr(id,2),
-       "id(X, _TrUserData) -> X.\n",
-       "\n"] || IsNeeded(id,2)],
-     [[inline_attr(cons,3),
-       "cons(Elem, Acc, _TrUserData) -> [Elem | Acc].\n",
-       "\n"] || IsNeeded(cons,3)],
-     [[inline_attr('lists_reverse',2),
-       "'lists_reverse'(L, _TrUserData) -> lists:reverse(L)."
-       "\n"] || IsNeeded(lists_reverse,2)],
-     [[inline_attr('erlang_++',3),
-       "'erlang_++'(A, B, _TrUserData) -> A ++ B."
-       "\n"] || IsNeeded('erlang_++',3)]].
+format_aux_transl_helpers() ->
+    [gpb_lib:nowarn_unused_function(id,2),
+     inline_attr(id,2),
+     "id(X, _TrUserData) -> X.\n",
+     "\n",
+     gpb_lib:nowarn_unused_function(cons,3),
+     inline_attr(cons,3),
+     "cons(Elem, Acc, _TrUserData) -> [Elem | Acc].\n",
+     "\n",
+     gpb_lib:nowarn_unused_function('lists_reverse',2),
+     inline_attr('lists_reverse',2),
+     "'lists_reverse'(L, _TrUserData) -> lists:reverse(L)."
+     "\n",
+     gpb_lib:nowarn_unused_function('erlang_++',3),
+     inline_attr('erlang_++',3),
+     "'erlang_++'(A, B, _TrUserData) -> A ++ B."
+     "\n"].
 
 format_default_translators(AnRes, Opts) ->
     [format_default_map_translators(AnRes, Opts),

@@ -49,8 +49,6 @@ analyze_defs(Defs, Opts) ->
                                    MapsAsMsgs ++ Defs, Opts),
            maps_as_msgs        = MapsAsMsgs ++ MapMsgEnums,
            translations        = Translations,
-           default_transls     = compute_used_default_translators(
-                                   Defs, Translations, KnownMsgSize, Opts),
            map_types           = MapTypes,
            map_value_types     = compute_map_value_types(MapTypes),
            group_occurrences   = find_group_occurrences(Defs),
@@ -489,123 +487,6 @@ fetch_op_translation(Op, Translations, Default, Type) ->
 
 is_repeated_elem_path([_MsgName,_FName,[]]) -> true;
 is_repeated_elem_path(_) -> false.
-
-compute_used_default_translators(Defs, Translations, KnownMsgSize, Opts) ->
-    fold_fields_and_paths(
-      fun(Field, Path, _IsOneOf, Acc) ->
-              Calls = get_translations(Field,Path, Translations,
-                                       KnownMsgSize, Opts),
-              lists:foldl(
-                fun({FnName,ArgsTmpl}, A) when is_list(ArgsTmpl) ->
-                        Arity = length(ArgsTmpl),
-                        sets:add_element({FnName, Arity}, A);
-                   ({FnName,Arity}, A) when is_integer(Arity) ->
-                        sets:add_element({FnName, Arity}, A);
-                   (_, A) -> % remote call (ie: to other module)
-                        A
-                end,
-                Acc,
-                Calls)
-      end,
-      sets:new(),
-      Defs).
-
-get_translations(#gpb_oneof{}, _Path, _Translations, _KnownMsgSize, _Opts) ->
-    [];
-get_translations(#?gpb_field{type=Type, occurrence=Occ},
-                 Path, Translations, KnownMsgSize, Opts) ->
-    {IsRepeated, IsKnownSizeElem} =
-        if Occ == repeated ->
-                {true, is_known_size_element(Type, KnownMsgSize)};
-           true ->
-                {false, false}
-        end,
-    IsElem = IsRepeated andalso lists:last(Path) == [],
-    DoNif = proplists:get_bool(nif, Opts),
-    Ops = if DoNif ->
-                  [merge, verify];
-             IsElem ->
-                  [encode,decode,merge,verify];
-             IsRepeated, IsKnownSizeElem ->
-                  [encode,
-                   decode_repeated_add_elem,
-                   decode_repeated_finalize,
-                   merge,
-                   verify];
-             IsRepeated, not IsKnownSizeElem ->
-                  [encode,
-                   decode_init_default,
-                   decode_repeated_add_elem,
-                   decode_repeated_finalize,
-                   merge,
-                   verify];
-             true ->
-                  [encode,decode,merge,verify]
-          end,
-    PathTransls = case dict:find(Path, Translations) of
-                      {ok, Ts} -> Ts;
-                      error    -> []
-                  end,
-    [case lists:keyfind(Op, 1, PathTransls) of
-         {Op, Transl} ->
-             Transl;
-         false ->
-             if Op == merge, IsRepeated, not IsElem ->
-                     {'erlang_++',3};
-                true ->
-                     FnName = gpb_gen_translators:default_fn_by_op(
-                                Op, undefined),
-                     Arity = length(gpb_gen_translators:args_by_op2(Op)) + 1,
-                     {FnName, Arity}
-             end
-     end
-     || Op <- Ops].
-
-is_known_size_element(fixed32, _) -> true;
-is_known_size_element(fixed64, _) -> true;
-is_known_size_element(sfixed32, _) -> true;
-is_known_size_element(sfixed64, _) -> true;
-is_known_size_element(float, _) -> true;
-is_known_size_element(double, _) -> true;
-is_known_size_element({msg,MsgName}, KnownMsgSize) ->
-    dict:find(MsgName, KnownMsgSize) /= error;
-is_known_size_element({group,Name}, KnownMsgSize) ->
-    dict:find(Name, KnownMsgSize) /= error;
-is_known_size_element({map,KeyType,ValueType}, KnownMsgSize) ->
-    MapAsMsgName = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
-    dict:find(MapAsMsgName, KnownMsgSize) /= error;
-is_known_size_element(_Type, _) ->
-    false.
-
-fold_fields_and_paths(F, InitAcc, Defs) ->
-    lists:foldl(
-      fun({{msg, MsgName}, Fields}, Acc) ->
-              fold_field_and_path(F, [MsgName], false, Acc, Fields);
-         ({{group, GroupName}, Fields}, Acc) ->
-              fold_field_and_path(F, [GroupName], false, Acc, Fields);
-         (_Def, Acc) ->
-              Acc
-      end,
-      InitAcc,
-      Defs).
-
-fold_field_and_path(F, Root, IsOneOf, InitAcc, Fields) ->
-    lists:foldl(
-      fun(#?gpb_field{name=FName, occurrence=repeated}=Field, Acc) ->
-              Path = Root ++ [FName],
-              EPath = Root ++ [FName, []],
-              F(Field, EPath, IsOneOf, F(Field, Path, IsOneOf, Acc));
-         (#?gpb_field{name=FName}=Field, Acc) ->
-              Path = Root ++ [FName],
-              F(Field, Path, IsOneOf, Acc);
-         (#gpb_oneof{name=CFName, fields=OFields}=Field, Acc) ->
-              Path = Root ++ [CFName],
-              fold_field_and_path(F, Path, {true, CFName},
-                                  F(Field, Path, IsOneOf, Acc),
-                                  OFields)
-      end,
-      InitAcc,
-      Fields).
 
 find_group_occurrences(Defs) ->
     gpb_lib:fold_msg_or_group_fields_o(
