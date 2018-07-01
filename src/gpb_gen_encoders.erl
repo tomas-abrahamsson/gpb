@@ -171,15 +171,15 @@ format_encoders_top_function_msgs(Defs, Opts) ->
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
-     format_type_encoders(AnRes),
+     format_type_encoders(),
      format_is_empty_string(AnRes)
     ].
 
 format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
     [gpb_codegen:format_fn(
        gpb_lib:mk_fn(e_enum_, EnumName),
-       fun('<EnumSym>', Bin) -> <<Bin/binary, '<varint-bytes>'>>;
-          (V, Bin) -> % integer (for yet unknown enums)
+       fun('<EnumSym>', Bin, _TrUserData) -> <<Bin/binary, '<varint-bytes>'>>;
+          (V, Bin, _TrUserData) -> % integer (for yet unknown enums)
                e_varint(V, Bin)
        end,
        [repeat_clauses('<EnumSym>',
@@ -293,9 +293,6 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                   replace_tree('TrF', TrFVar),
                   replace_term('Tr', Tr(encode)),
                   replace_tree('TrUserData', TrUserDataVar),
-                  splice_trees('MaybeTrUserData',
-                               gpb_gen_translators:maybe_userdata_param(
-                                 Field, TrUserDataVar)),
                   replace_term('<enc>', FEncoder),
                   replace_tree('<Bin>', PrevBVar),
                   splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
@@ -307,7 +304,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                         ?expr(begin
                                   'TrF' = 'Tr'('<F>', 'TrUserData'),
                                   '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
-                                          'MaybeTrUserData')
+                                          'TrUserData')
                               end,
                               Transforms);
                     true when Type == string ->
@@ -319,7 +316,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                       false ->
                                           '<enc>'('TrF',
                                                   <<'<Bin>'/binary, '<Key>'>>,
-                                                  'MaybeTrUserData')
+                                                  'TrUserData')
                                   end
                               end,
                               Transforms);
@@ -332,7 +329,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                       _ ->
                                           '<enc>'('TrF',
                                                   <<'<Bin>'/binary, '<Key>'>>,
-                                                  'MaybeTrUserData')
+                                                  'TrUserData')
                                   end
                               end,
                               Transforms);
@@ -346,7 +343,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                   true ->
                                        '<enc>'('TrF',
                                                <<'<Bin>'/binary, '<Key>'>>,
-                                               'MaybeTrUserData')
+                                               'TrUserData')
                                end
                            end,
                            [replace_term('<TypeDefault>', TypeDefault)
@@ -424,7 +421,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                begin
                    'TrF' = 'Tr'('<F>', 'TrUserData'),
                    '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
-                           'MaybeTrUserData')
+                           'TrUserData')
                end,
                Transforms)
     end;
@@ -616,24 +613,20 @@ format_repeated_field_encoder2(MsgName, FDef, AnRes) ->
       FnName,
       fun([Elem | Rest], Bin, TrUserData) ->
               Bin2 = <<Bin/binary, '<KeyBytes>'>>,
-              Bin3 = '<encode-elem>'('Tr'(Elem, TrUserData), Bin2,
-                                     'MaybeTrUserData'),
+              Bin3 = '<encode-elem>'('Tr'(Elem, TrUserData), Bin2, TrUserData),
               call_self(Rest, Bin3, TrUserData);
          ([], Bin, _TrUserData) ->
               Bin
       end,
       [splice_trees('<KeyBytes>', KeyBytes),
        replace_term('<encode-elem>', ElemEncoderFn),
-       replace_term('Tr', Transl),
-       splice_trees('MaybeTrUserData',
-                    gpb_gen_translators:maybe_userdata_param(
-                      FDef, ?expr(TrUserData)))]).
+       replace_term('Tr', Transl)]).
 
 format_packed_field_encoder2(MsgName, #?gpb_field{type=Type}=FDef, AnRes) ->
     case packed_byte_size_can_be_computed(Type) of
         {yes, BitLen, BitType} ->
             format_knownsize_packed_field_encoder2(MsgName, FDef,
-                                                   BitLen, BitType);
+                                                   BitLen, BitType, AnRes);
         no ->
             format_unknownsize_packed_field_encoder2(MsgName, FDef, AnRes)
     end.
@@ -648,16 +641,18 @@ packed_byte_size_can_be_computed(_)        -> no.
 
 format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
                                                             fnum=FNum}=FDef,
-                                       BitLen, BitType) ->
+                                       BitLen, BitType, AnRes) ->
     FnName = mk_field_encode_fn_name(MsgName, FDef),
     KeyBytes = key_to_binary_fields(FNum, bytes),
     PackedFnName = gpb_lib:mk_fn(e_pfield_, MsgName, FName),
+    ElemPath = [MsgName, FName, []],
+    TranslFn = gpb_gen_translators:find_translation(ElemPath, encode, AnRes),
     [gpb_codegen:format_fn(
        FnName,
-       fun(Elems, Bin, _TrUserData) when Elems =/= [] ->
+       fun(Elems, Bin, TrUserData) when Elems =/= [] ->
                Bin2 = <<Bin/binary, '<KeyBytes>'>>,
                Bin3 = e_varint(length(Elems) * '<ElemLen>', Bin2),
-               '<encode-packed>'(Elems, Bin3);
+               '<encode-packed>'(Elems, Bin3, TrUserData);
           ([], Bin, _TrUserData) ->
                Bin
        end,
@@ -666,21 +661,23 @@ format_knownsize_packed_field_encoder2(MsgName, #?gpb_field{name=FName,
         replace_term('<encode-packed>', PackedFnName)]),
      case BitType of
          float ->
-             format_packed_float_encoder(PackedFnName);
+             format_packed_float_encoder(PackedFnName, TranslFn);
          double ->
-             format_packed_double_encoder(PackedFnName);
+             format_packed_double_encoder(PackedFnName, TranslFn);
          _ ->
              gpb_codegen:format_fn(
                PackedFnName,
-               fun([Value | Rest], Bin) ->
-                       Bin2 = <<Bin/binary, Value:'<Size>'/'<BitType>'>>,
-                       call_self(Rest, Bin2);
-                  ([], Bin) ->
+               fun([Value | Rest], Bin, TrUserData) ->
+                       TrValue = 'Tr'(Value, TrUserData),
+                       Bin2 = <<Bin/binary, TrValue:'<Size>'/'<BitType>'>>,
+                       call_self(Rest, Bin2, TrUserData);
+                  ([], Bin, _TrUserData) ->
                        Bin
                end,
                [replace_term('<Size>', BitLen),
                 splice_trees('<BitType>',
-                             [erl_syntax:atom(T) || T <- BitType])])
+                             [erl_syntax:atom(T) || T <- BitType]),
+                replace_term('Tr', TranslFn)])
      end].
 
 
@@ -711,194 +708,182 @@ format_unknownsize_packed_field_encoder2(MsgName,
      gpb_codegen:format_fn(
        PackedFnName,
        fun([Value | Rest], Bin, TrUserData) ->
-               Bin2 = '<encode-elem>'('Tr'(Value, TrUserData), Bin,
-                                      'MaybeTrUserData'),
+               Bin2 = '<encode-elem>'('Tr'(Value, TrUserData), Bin, TrUserData),
                call_self(Rest, Bin2, TrUserData);
           ([], Bin, _TrUserData) ->
                Bin
        end,
        [replace_term('<encode-elem>', ElemEncoderFn),
-        replace_term('Tr', Transl),
-        splice_trees('MaybeTrUserData',
-                     gpb_gen_translators:maybe_userdata_param(
-                       FDef, ?expr(TrUserData)))])].
+        replace_term('Tr', Transl)])].
 
-format_type_encoders(AnRes) ->
-    [format_varlength_field_encoders(AnRes),
-     format_fixlength_field_encoders(AnRes),
-     [format_varint_encoder() || is_varint_encoder_needed(AnRes)]].
+format_type_encoders() ->
+    [format_varlength_field_encoders(),
+     format_fixlength_field_encoders(),
+     format_varint_encoder()].
 
-format_varlength_field_encoders(#anres{used_types=UsedTypes}) ->
-    IsUsedSint32 = gpb_lib:smember(sint32, UsedTypes),
-    IsUsedSint64 = gpb_lib:smember(sint64, UsedTypes),
-    IsUsedInt32  = gpb_lib:smember(int32, UsedTypes),
-    IsUsedInt64  = gpb_lib:smember(int64, UsedTypes),
-    IsUsedBool   = gpb_lib:smember(bool, UsedTypes),
-    IsUsedString = gpb_lib:smember(string, UsedTypes),
-    IsUsedBytes  = gpb_lib:smember(bytes, UsedTypes),
-    [[format_sint_encoder()         || IsUsedSint32 orelse IsUsedSint64],
-     [format_int_encoder(int32, 32) || IsUsedInt32],
-     [format_int_encoder(int64, 64) || IsUsedInt64],
-     [format_bool_encoder()         || IsUsedBool],
-     [format_string_encoder()       || IsUsedString],
-     [format_bytes_encoder()        || IsUsedBytes]].
+format_varlength_field_encoders() ->
+    [format_sint_encoder(),
+     format_int_encoder(int32, 32),
+     format_int_encoder(int64, 64),
+     format_bool_encoder(),
+     format_string_encoder(),
+     format_bytes_encoder()].
 
-format_fixlength_field_encoders(AnRes) ->
-    NeedsFixed32  = needs_f_enc(fixed32, AnRes),
-    NeedsSFixed32 = needs_f_enc(sfixed32, AnRes),
-    NeedsFloat    = needs_f_enc(float, AnRes),
-    NeedsFixed64  = needs_f_enc(fixed64, AnRes),
-    NeedsSFixed64 = needs_f_enc(sfixed64, AnRes),
-    NeedsDouble   = needs_f_enc(double, AnRes),
-    [[format_fixed_encoder(fixed32,  32, [little])        || NeedsFixed32],
-     [format_fixed_encoder(sfixed32, 32, [little,signed]) || NeedsSFixed32],
-     [format_fixed_encoder(fixed64,  64, [little])        || NeedsFixed64],
-     [format_fixed_encoder(sfixed64, 64, [little,signed]) || NeedsSFixed64],
-     [format_float_encoder(float) || NeedsFloat],
-     [format_double_encoder(double) || NeedsDouble]].
-
-needs_f_enc(FixedType, #anres{used_types=UsedTypes, fixlen_types=FTypes}) ->
-    %% If a fixlength-type occurs _only_ as a packed repeated field,
-    %% we need not generate a special encoder-function for it
-    case [FT || FT <- sets:to_list(FTypes), FT#ft.type == FixedType] of
-        [#ft{occurrence=repeated, is_packed=true}] ->
-            false;
-        _ ->
-            gpb_lib:smember(FixedType, UsedTypes)
-    end.
-
-is_varint_encoder_needed(#anres{used_types=UsedTypes}=AnRes) ->
-    TypesNeedingAVarintEncoder = [int32, int64, uint32, uint64, sint32, sint64,
-                                  string, bytes],
-    gpb_lib:smember_any(TypesNeedingAVarintEncoder, UsedTypes) orelse
-        gpb_lib:any_enum_field_exists(UsedTypes) orelse
-        gpb_lib:any_packed_field_exists(AnRes) orelse
-        gpb_lib:at_least_one_submsg_with_size_not_known_at_compile_time_exists(
-          AnRes).
+format_fixlength_field_encoders() ->
+    [format_fixed_encoder(fixed32,  32, [little]),
+     format_fixed_encoder(sfixed32, 32, [little,signed]),
+     format_fixed_encoder(fixed64,  64, [little]),
+     format_fixed_encoder(sfixed64, 64, [little,signed]),
+     format_float_encoder(float),
+     format_double_encoder(double)].
 
 format_sint_encoder() ->
-    gpb_codegen:format_fn(
-      e_type_sint,
-      fun(Value, Bin) when Value >= 0 ->
-              e_varint(Value * 2, Bin);
-         (Value, Bin) ->
-              e_varint(Value * -2 - 1, Bin)
-      end).
+    [gpb_lib:nowarn_unused_function(e_type_sint,3),
+     gpb_codegen:format_fn(
+       e_type_sint,
+       fun(Value, Bin, _TrUserData) when Value >= 0 ->
+               e_varint(Value * 2, Bin);
+          (Value, Bin, _TrUserData) ->
+               e_varint(Value * -2 - 1, Bin)
+       end)].
 
 format_int_encoder(Type, _BitLen) ->
-    gpb_codegen:format_fn(
-      gpb_lib:mk_fn(e_type_, Type),
-      fun(Value, Bin) when 0 =< Value, Value =< 127 ->
-              <<Bin/binary, Value>>; %% fast path
-         (Value, Bin) ->
-              %% Encode as a 64 bit value, for interop compatibility.
-              %% Some implementations don't decode 32 bits properly,
-              %% and Google's protobuf (C++) encodes as 64 bits
-              <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
-              e_varint(N, Bin)
-      end,
-      []).
+    FnName = gpb_lib:mk_fn(e_type_, Type),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(Value, Bin, _TrUserData) when 0 =< Value, Value =< 127 ->
+               <<Bin/binary, Value>>; %% fast path
+          (Value, Bin, _TrUserData) ->
+               %% Encode as a 64 bit value, for interop compatibility.
+               %% Some implementations don't decode 32 bits properly,
+               %% and Google's protobuf (C++) encodes as 64 bits
+               <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
+               e_varint(N, Bin)
+       end)].
 
 format_bool_encoder() ->
-    gpb_codegen:format_fn(
-      e_type_bool,
-      fun(true, Bin)  -> <<Bin/binary, 1>>;
-         (false, Bin) -> <<Bin/binary, 0>>;
-         (1, Bin) -> <<Bin/binary, 1>>;
-         (0, Bin) -> <<Bin/binary, 0>>
-      end).
+    [gpb_lib:nowarn_unused_function(e_type_bool, 3),
+     gpb_codegen:format_fn(
+       e_type_bool,
+       fun(true, Bin, _TrUserData)  -> <<Bin/binary, 1>>;
+          (false, Bin, _TrUserData) -> <<Bin/binary, 0>>;
+          (1, Bin, _TrUserData) -> <<Bin/binary, 1>>;
+          (0, Bin, _TrUserData) -> <<Bin/binary, 0>>
+       end)].
 
 format_fixed_encoder(Type, BitLen, BitType) ->
-    gpb_codegen:format_fn(
-      gpb_lib:mk_fn(e_type_, Type),
-      fun(Value, Bin) ->
-              <<Bin/binary, Value:'<Sz>'/'<T>'>>
-      end,
-      [replace_term('<Sz>', BitLen),
-       splice_trees('<T>', [erl_syntax:atom(T) || T <- BitType])]).
+    FnName = gpb_lib:mk_fn(e_type_, Type),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(Value, Bin, _TrUserData) ->
+               <<Bin/binary, Value:'<Sz>'/'<T>'>>
+       end,
+       [replace_term('<Sz>', BitLen),
+        splice_trees('<T>', [erl_syntax:atom(T) || T <- BitType])])].
 
-format_packed_float_encoder(FnName) ->
+format_packed_float_encoder(FnName, TranslFn) ->
     gpb_codegen:format_fn(
       FnName,
-      fun([V | Rest], Bin) when is_number(V) ->
-              call_self(Rest, <<Bin/binary, V:32/little-float>>);
-         ([infinity | Rest], Bin) ->
-              call_self(Rest, <<Bin/binary, 0:16,128,127>>);
-         (['-infinity' | Rest], Bin) ->
-              call_self(Rest, <<Bin/binary, 0:16,128,255>>);
-         ([nan | Rest], Bin) ->
-              call_self(Rest, <<Bin/binary, 0:16,192,127>>);
-         ([], Bin) ->
+      fun([V | Rest], Bin, TrUserData) ->
+              TrV = 'Tr'(V, TrUserData),
+              Bin2 = if is_number(TrV) ->
+                             <<Bin/binary, TrV:32/little-float>>;
+                        TrV =:= infinity ->
+                             <<Bin/binary, 0:16,128,127>>;
+                        TrV =:= '-infinity' ->
+                             <<Bin/binary, 0:16,128,255>>;
+                        TrV =:= nan ->
+                             <<Bin/binary, 0:16,192,127>>
+                     end,
+              call_self(Rest, Bin2, TrUserData);
+         ([], Bin, _TrUserData) ->
               Bin
       end,
-      []).
+      [replace_term('Tr', TranslFn)]).
 
-format_packed_double_encoder(FnName) ->
+format_packed_double_encoder(FnName, TranslFn) ->
     gpb_codegen:format_fn(
       FnName,
-      fun([V | Rest], Bin) when is_number(V) ->
-              call_self(Rest, <<Bin/binary, V:64/float-little>>);
-         ([infinity | Rest], Bin) ->
-              call_self(Rest, <<Bin/binary, 0:48,240,127>>);
-         (['-infinity' | Rest], Bin) ->
-              call_self(Rest, <<Bin/binary, 0:48,240,255>>);
-         ([nan | Rest], Bin) ->
-              call_self(Rest, <<Bin/binary, 0:48,248,127>>);
-         ([], Bin) ->
+      fun([V | Rest], Bin, TrUserData) ->
+              TrV = 'Tr'(V, TrUserData),
+              Bin2 = if is_number(TrV) ->
+                             <<Bin/binary, TrV:64/float-little>>;
+                        TrV =:= infinity ->
+                             <<Bin/binary, 0:48,240,127>>;
+                        TrV =:= '-infinity' ->
+                             <<Bin/binary, 0:48,240,255>>;
+                        TrV =:= nan ->
+                             <<Bin/binary, 0:48,248,127>>
+                     end,
+              call_self(Rest, Bin2, TrUserData);
+         ([], Bin, _TrUserData) ->
               Bin
       end,
-      []).
+      [replace_term('Tr', TranslFn)]).
 
 format_float_encoder(Type) ->
-    gpb_codegen:format_fn(
-      gpb_lib:mk_fn(e_type_, Type),
-      fun(V, Bin) when is_number(V) -> <<Bin/binary, V:32/little-float>>;
-         (infinity, Bin)            -> <<Bin/binary, 0:16,128,127>>;
-         ('-infinity', Bin)         -> <<Bin/binary, 0:16,128,255>>;
-         (nan, Bin)                 -> <<Bin/binary, 0:16,192,127>>
-      end,
-      []).
+    FnName = gpb_lib:mk_fn(e_type_, Type),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(V, Bin, _) when is_number(V) -> <<Bin/binary, V:32/little-float>>;
+          (infinity, Bin, _)            -> <<Bin/binary, 0:16,128,127>>;
+          ('-infinity', Bin, _)         -> <<Bin/binary, 0:16,128,255>>;
+          (nan, Bin, _)                 -> <<Bin/binary, 0:16,192,127>>
+       end)].
 
 format_double_encoder(Type) ->
-    gpb_codegen:format_fn(
-      gpb_lib:mk_fn(e_type_, Type),
-      fun(V, Bin) when is_number(V) -> <<Bin/binary, V:64/little-float>>;
-         (infinity, Bin)            -> <<Bin/binary, 0:48,240,127>>;
-         ('-infinity', Bin)         -> <<Bin/binary, 0:48,240,255>>;
-         (nan, Bin)                 -> <<Bin/binary, 0:48,248,127>>
-      end,
-      []).
+    FnName = gpb_lib:mk_fn(e_type_, Type),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(V, Bin, _) when is_number(V) -> <<Bin/binary, V:64/little-float>>;
+          (infinity, Bin, _)            -> <<Bin/binary, 0:48,240,127>>;
+          ('-infinity', Bin, _)         -> <<Bin/binary, 0:48,240,255>>;
+          (nan, Bin, _)                 -> <<Bin/binary, 0:48,248,127>>
+       end)].
 
 format_string_encoder() ->
-    gpb_codegen:format_fn(
-      e_type_string,
-      fun(S, Bin) ->
-              Utf8 = unicode:characters_to_binary(S),
-              Bin2 = e_varint(byte_size(Utf8), Bin),
-              <<Bin2/binary, Utf8/binary>>
-      end).
+    [gpb_lib:nowarn_unused_function(e_type_string, 3),
+     gpb_codegen:format_fn(
+       e_type_string,
+       fun(S, Bin, _TrUserData) ->
+               Utf8 = unicode:characters_to_binary(S),
+               Bin2 = e_varint(byte_size(Utf8), Bin),
+               <<Bin2/binary, Utf8/binary>>
+       end)].
 
 format_bytes_encoder() ->
-    gpb_codegen:format_fn(
-      e_type_bytes,
-      fun(Bytes, Bin) when is_binary(Bytes) ->
-              Bin2 = e_varint(byte_size(Bytes), Bin),
-              <<Bin2/binary, Bytes/binary>>;
-         (Bytes, Bin) when is_list(Bytes) ->
-              BytesBin = iolist_to_binary(Bytes),
-              Bin2 = e_varint(byte_size(BytesBin), Bin),
-              <<Bin2/binary, BytesBin/binary>>
-      end).
+    [gpb_lib:nowarn_unused_function(e_type_bytes, 3),
+     gpb_codegen:format_fn(
+       e_type_bytes,
+       fun(Bytes, Bin, _TrUserData) when is_binary(Bytes) ->
+               Bin2 = e_varint(byte_size(Bytes), Bin),
+               <<Bin2/binary, Bytes/binary>>;
+          (Bytes, Bin, _TrUserData) when is_list(Bytes) ->
+               BytesBin = iolist_to_binary(Bytes),
+               Bin2 = e_varint(byte_size(BytesBin), Bin),
+               <<Bin2/binary, BytesBin/binary>>
+       end)].
 
 format_varint_encoder() ->
-    gpb_codegen:format_fn(
-      e_varint,
-      fun(N, Bin) when N =< 127 ->
-              <<Bin/binary, N>>;
-         (N, Bin) ->
-              Bin2 = <<Bin/binary, (N band 127 bor 128)>>,
-              call_self(N bsr 7, Bin2)
-      end).
+    [gpb_lib:nowarn_unused_function(e_varint, 3),
+     gpb_codegen:format_fn(
+       e_varint,
+       fun(N, Bin, _TrUserData) ->
+               e_varint(N, Bin)
+       end),
+     gpb_lib:nowarn_unused_function(e_varint, 2),
+     gpb_codegen:format_fn(
+       e_varint,
+       fun(N, Bin) when N =< 127 ->
+               <<Bin/binary, N>>;
+          (N, Bin) ->
+               Bin2 = <<Bin/binary, (N band 127 bor 128)>>,
+               call_self(N bsr 7, Bin2)
+       end)].
 
 enum_to_binary_fields(Value) ->
     %% Encode as a 64 bit value, for interop compatibility.
