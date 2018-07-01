@@ -272,7 +272,7 @@ format_aux_transl_helpers(#anres{default_transls=UsedDefaultTransls}) ->
 
 format_default_translators(AnRes, Opts) ->
     [format_default_map_translators(AnRes, Opts),
-     format_default_any_translators(AnRes, Opts)].
+     format_default_msg_translators(AnRes, Opts)].
 
 format_default_map_translators(#anres{map_types=MapTypes,
                                       map_value_types=MVT}=AnRes, Opts) ->
@@ -419,17 +419,17 @@ format_default_merge_translators(#anres{map_types=MapTypes}, Opts) ->
      end
      || HaveMaps].
 
-format_default_any_translators(#anres{translations=Translations}, _Opts) ->
+format_default_msg_translators(#anres{translations=Translations}, _Opts) ->
     Defaults = [{merge, default_merge_translator()},
                 {verify, default_verify_translator()}],
     Needs = compute_needed_default_translations(Translations, Defaults),
-    [[[inline_attr(any_m_overwrite,2),
+    [[[inline_attr(msg_m_overwrite,2),
        gpb_codegen:format_fn(
-         any_m_overwrite,
-         fun(Any2,_) -> Any2 end),
+         msg_m_overwrite,
+         fun(Msg2,_) -> Msg2 end),
        "\n"] || sets:is_element(merge, Needs)],
      [[gpb_codegen:format_fn(
-         any_v_no_check,
+         msg_v_no_check,
          fun(_,_) -> ok end),
        "\n"] || sets:is_element(verify, Needs)]].
 
@@ -515,9 +515,9 @@ default_fn_by_op(_, undefined) ->
 default_fn_by_op(_, Fn) ->
     Fn.
 
-default_merge_translator() -> {any_m_overwrite,['$2','$user_data']}.
+default_merge_translator() -> {msg_m_overwrite,['$2','$user_data']}.
 
-default_verify_translator() -> {any_v_no_check,['$1', '$user_data']}.
+default_verify_translator() -> {msg_v_no_check,['$1', '$user_data']}.
 
 exists_tr_for_msg(MsgName, Op, #anres{translations=Translations}) ->
     dict:fold(fun(_Key, _OpCalls, true) ->
