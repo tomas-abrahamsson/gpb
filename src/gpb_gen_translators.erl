@@ -352,6 +352,14 @@ format_aux_transl_helpers() ->
      inline_attr(id,2),
      "id(X, _TrUserData) -> X.\n",
      "\n",
+     gpb_lib:nowarn_unused_function(v_ok,3),
+     inline_attr(v_ok,3),
+     "v_ok(_Value, _Path, _TrUserData) -> ok.\n",
+     "\n",
+     gpb_lib:nowarn_unused_function(m_overwrite,3),
+     inline_attr(m_overwrite,3),
+     "m_overwrite(_Prev, New, _TrUserData) -> New.\n",
+     "\n",
      gpb_lib:nowarn_unused_function(cons,3),
      inline_attr(cons,3),
      "cons(Elem, Acc, _TrUserData) -> [Elem | Acc].\n",
@@ -610,6 +618,10 @@ default_fn_by_op(decode_repeated_add_elem, undefined) ->
     cons;
 default_fn_by_op(decode_repeated_finalize, undefined) ->
     lists_reverse;
+default_fn_by_op(merge, undefined) ->
+    m_overwrite;
+default_fn_by_op(verify, undefined) ->
+    v_ok;
 default_fn_by_op(_, undefined) ->
     id;
 default_fn_by_op(_, Fn) ->

@@ -58,6 +58,13 @@
 %% Translators for {translate_type, {{msg,uuid},...}} option tests:
 -export([uuid_e/1, uuid_d/1, uuid_m/2, uuid_v/1]).
 
+%% Translators for {translate_type, {bytes,...}} tests
+-export([e_ipv4_addr/2, d_ipv4_addr/2, v_ipv4_addr/2]).
+
+%% Translators for {translate_type, {<Scalar>,...}} tests
+-export([e_astt/1, d_astt/1, v_astt/1]).
+
+
 -ifndef(NO_HAVE_STACKTRACE_SYNTAX).
 -compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
 -endif.
@@ -1365,6 +1372,170 @@ uuid_v(X) -> error({non_int_uuid,X}).
 
 uuid_m(Uuid1, Uuid2) when is_integer(Uuid1), is_integer(Uuid2) ->
     Uuid1 bxor Uuid2.
+
+%% -- translation of other types ----------
+
+basic_translate_with_userdata_test() ->
+    %% For this test, we'll pretend `bytes' values are ipv4 addresses
+    %% and the userdata denotes a network (for instance: "192.168.0.0/16")
+    M = compile_iolist(
+          ["message m {",
+           "  required bytes f = 1;",
+           "}"],
+          [{translate_type,
+            {bytes, % no merge function since bytes is a scalar type
+             [{encode, {?MODULE, e_ipv4_addr, ['$1', '$user_data']}},
+              {decode, {?MODULE, d_ipv4_addr, ['$1', '$user_data']}},
+              {verify, {?MODULE, v_ipv4_addr, ['$1', '$user_data']}}]}}]),
+    Nw = fun(V) -> [{user_data, V}] end,
+    <<10,4, 127,0,0,1>>   = M:encode_msg({m,{127,0,0,1}}, Nw("127.0.0.0/8")),
+    <<10,4, 127,1,2,3>>   = M:encode_msg({m,{255,1,2,3}}, Nw("127.0.0.0/8")),
+    <<10,4, 192,168,2,3>> = M:encode_msg({m,{127,1,2,3}}, Nw("192.168.0.0/16")),
+    {m,{127,0,0,1}}  = M:decode_msg(<<10,4, 127,0,0,1>>,m,Nw("127.0.0.0/8")),
+    {m,{127,1,2,3}}  = M:decode_msg(<<10,4, 255,1,2,3>>,m,Nw("127.0.0.0/8")),
+    {m,{192,168,2,3}}= M:decode_msg(<<10,4, 127,1,2,3>>,m,Nw("192.168.0.0/16")),
+    ok = M:verify_msg({m,{127,0,0,1}}, Nw("127.0.0.0/8")),
+    ?assertError(_, M:verify_msg({m,{10,1,2,3}}, Nw("127.0.0.0/8"))),
+    unload_code(M).
+
+e_ipv4_addr({A,B,C,D}, Net) ->
+    list_to_binary(tuple_to_list(apply_ipv4_netmask({A,B,C,D}, Net))).
+
+d_ipv4_addr(<<A,B,C,D>>, Net) ->
+    apply_ipv4_netmask({A,B,C,D}, Net).
+
+v_ipv4_addr({A,B,C,D}, Net) ->
+    %% verify IP {A,B,C,D} is within Net (on format "10.0.0.0/8")
+    {ok, [N1,N2,N3,N4, Netmask], []} = io_lib:fread("~d.~d.~d.~d/~d", Net),
+    <<Ip:32>> = <<A,B,C,D>>,
+    <<N:32>> = <<N1,N2,N3,N4>>,
+    M = ((1 bsl Netmask) - 1) bsl (32 - Netmask),
+    if ((Ip band M) bxor (N band M)) =:= 0 -> ok;
+       true -> error({address_outside_of_network,{A,B,C,D},Net})
+    end.
+
+apply_ipv4_netmask({A,B,C,D}, Net) ->
+    %% set/change the network bits of ip {A,B,C,D}, to those in Net
+    {ok, [N1,N2,N3,N4, Netmask], []} = io_lib:fread("~d.~d.~d.~d/~d", Net),
+    <<Ip:32>> = <<A,B,C,D>>,
+    <<N:32>> = <<N1,N2,N3,N4>>,
+    Subnetmask = (1 bsl (32 - Netmask)) - 1,
+    Mask = ((1 bsl Netmask) - 1) bsl (32 - Netmask),
+    list_to_tuple(
+      binary_to_list(<<((N band Mask) + (Ip band Subnetmask)):32>>)).
+
+translate_all_scalar_types_test() ->
+    M = compile_iolist(
+          ["message o_i32     { optional int32      f = 1; }",
+           "message o_s32     { optional sint32     f = 1; }",
+           "message o_uf32    { optional fixed32    f = 1; }",
+           "message o_ee      { optional ee         f = 1; }",
+           "message o_bool    { optional bool       f = 1; }",
+           "message o_str     { optional string     f = 1; }",
+           "message o_bytes   { optional bytes      f = 1; }",
+           "message o_float   { optional float      f = 1; }",
+           "message o_double  { optional double     f = 1; }",
+           "",
+           "message u_i32     { oneof u { int32      f = 1; } }",
+           "message u_s32     { oneof u { sint32     f = 1; } }",
+           "message u_uf32    { oneof u { fixed32    f = 1; } }",
+           "message u_ee      { oneof u { ee         f = 1; } }",
+           "message u_bool    { oneof u { bool       f = 1; } }",
+           "message u_str     { oneof u { string     f = 1; } }",
+           "message u_bytes   { oneof u { bytes      f = 1; } }",
+           "message u_float   { oneof u { float      f = 1; } }",
+           "message u_double  { oneof u { double     f = 1; } }",
+           "",
+           "message rq_i32     { required int32     f = 1; }",
+           "message rq_s32     { required sint32    f = 1; }",
+           "message rq_uf32    { required fixed32   f = 1; }",
+           "message rq_ee      { required ee        f = 1; }",
+           "message rq_bool    { required bool      f = 1; }",
+           "message rq_str     { required string    f = 1; }",
+           "message rq_bytes   { required bytes     f = 1; }",
+           "message rq_float   { required float     f = 1; }",
+           "message rq_double  { required double    f = 1; }",
+           "",
+           "message rp_i32     { repeated int32     f = 1; }",
+           "message rp_s32     { repeated sint32    f = 1; }",
+           "message rp_uf32    { repeated fixed32   f = 1; }",
+           "message rp_ee      { repeated ee        f = 1; }",
+           "message rp_bool    { repeated bool      f = 1; }",
+           "message rp_str     { repeated string    f = 1; }",
+           "message rp_bytes   { repeated bytes     f = 1; }",
+           "message rp_float   { repeated float     f = 1; }",
+           "message rp_double  { repeated double    f = 1; }",
+           "",
+           "message rpp_i32     { repeated int32    f = 1 [packed]; }",
+           "message rpp_s32     { repeated sint32   f = 1 [packed]; }",
+           "message rpp_uf32    { repeated fixed32  f = 1 [packed]; }",
+           "message rpp_ee      { repeated ee       f = 1 [packed]; }",
+           "message rpp_bool    { repeated bool     f = 1 [packed]; }",
+           "message rpp_str     { repeated string   f = 1; } // unpackable;\n",
+           "message rpp_bytes   { repeated bytes    f = 1; } // unpackable;\n",
+           "message rpp_float   { repeated float    f = 1 [packed]; }",
+           "message rpp_double  { repeated double   f = 1 [packed]; }",
+           "",
+           "enum ee { zero = 0; one = 1; }"
+          ],
+          [{translate_type,
+            {Scalar,
+             [{encode, {?MODULE, e_astt, ['$1']}},
+              {decode, {?MODULE, d_astt, ['$1']}},
+              {verify, {?MODULE, v_astt, ['$1']}}]}}
+           || Scalar <- [int32, sint32, fixed32, {enum,ee}, bool,
+                         string, bytes, float, double]]),
+
+    [ok = round_trip_translate_test(
+            [{Prefix, i32,    "value:4711"},
+             {Prefix, s32,    "value:4711"},
+             {Prefix, s32,    "value:-4711"},
+             {Prefix, uf32,   "value:4711"},
+             {Prefix, ee,     "value:one"},
+             {Prefix, bool,   "value:true"},
+             {Prefix, str,    "value:\"some-string\""},
+             {Prefix, bytes,  "value:<<13,14,215,216>>"},
+             {Prefix, float,  "value:1.125"},
+             {Prefix, double, "value:1.25"}],
+            M)
+     || Prefix <- [o, u, rq, rp, rpp]],
+        unload_code(M).
+
+round_trip_translate_test([{Prefix, Suffix, IntValue0} | Rest], M) ->
+    IntValues = case Prefix of
+                   o   -> [IntValue0, undefined];
+                   u   -> [{f,IntValue0}, undefined];
+                   rq  -> [IntValue0];
+                   rp  -> [[IntValue0]];
+                   rpp -> [[IntValue0]]
+                end,
+    MsgName = list_to_atom(lists:concat([Prefix, "_", Suffix])),
+    [begin
+         ok = M:verify_msg({MsgName, IntValue}),
+         ?assertError(_, M:verify_msg({MsgName, "bad"++IntValue})),
+         Msg = {MsgName, IntValue},
+         Encoded = M:encode_msg(Msg),
+         Msg = M:decode_msg(Encoded, MsgName)
+     end
+     || IntValue <- IntValues],
+    round_trip_translate_test(Rest, M);
+round_trip_translate_test([], _M) ->
+    ok.
+
+e_astt("value:"++Rest) -> string_to_value(Rest).
+
+d_astt(Value) -> "value:"++value_to_string(Value).
+
+v_astt("value:"++_Rest)   -> ok;
+v_astt("badvalue:"++Rest) -> error({badvalue,Rest}).
+
+string_to_value(S) ->
+    {ok,Tokens,_EndL} = erl_scan:string(S++"."),
+    {ok,Term} = erl_parse:parse_term(Tokens),
+    Term.
+
+value_to_string(V) ->
+    lists:flatten(io_lib:format("~p", [V])).
 
 %% --- misc ----------
 
@@ -3294,6 +3465,22 @@ type_translation_options_test() ->
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-translate_type", "type=msg:m,e=me:fe,d=md:fd,m=mm:fm,V=mv:fv",
+           "x.proto"]),
+    {ok, {[{translate_type, {{enum,ee}, [{encode, {me,fe,['$1']}} | _]}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-translate_type", "type=enum:ee,e=me:fe,d=md:fd,m=mm:fm,V=mv:fv",
+           "x.proto"]),
+    {ok, {[{translate_type, {int32, [{encode, {me,fe,['$1']}} | _]}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-translate_type", "type=int32,e=me:fe,d=md:fd,m=mm:fm,V=mv:fv",
+           "x.proto"]),
+    {ok, {[{translate_type, {{map,int32,{msg,m}},
+                             [{encode, {me,fe,['$1']}} | _]}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-translate_type", "type=map<int32,msg:m>,e=me:fe,d=md:fd,V=mv:fv",
            "x.proto"]).
 
 no_type_specs_test() ->

@@ -393,9 +393,9 @@ file(File) ->
 %% the `module_name_prefix' and `module_name_suffix' options.
 %%
 %% The `translate_type' option can be used to provide packer and unpacker
-%% functions for message fields of a certain type. For now, the only type
-%% supported is `{msg,MsgName}', and for now only when they occur as
-%% submessages.  For messages, the `MsgName' refers to a name <em>after</em>
+%% functions for message fields of a certain type. For now message types,
+%% such as `{msg,MsgName}', can only be translated as submessages.
+%% For messages, the `MsgName' refers to a name <em>after</em>
 %% renaming has taken place.
 %% The merge translator is optional, and is called either via the `merge_msgs'
 %% function in the generated code, or when the decoder sees another
@@ -411,11 +411,11 @@ file(File) ->
 %% <dl>
 %%   <dt>Encode (Packing)</dt>
 %%   <dd>Call `Mod:Fn(Term)' to pack the `Term' (`$1') to
-%%       a `google.protobuf.Any' message.</dd>
+%%       a value of the suitable for normal gpb encoding.</dd>
 %%   <dt>Decode (Unpacking)</dt>
 %%   <dd>Call `Mod:Fn(Any)' to unpack the `Any' (`$1') to
-%%       unpack a `google.protobuf.Any' message to a term.</dd>
-%%   <dt>Merge </dt>
+%%       unpack a normal gpb decoded value to a term.</dd>
+%%   <dt>Merge</dt>
 %%   <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
 %%       unpacked terms to a resulting Term3. The `$1' is the
 %%       previously seen term (during decoding, on encountering a
@@ -653,8 +653,7 @@ do_proto_defs_aux1(Mod, Defs, Opts) ->
 verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_translation_and_nif(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
-              fun() -> verify_opts_flat_oneof(Opts) end,
-              fun() -> verify_translation_opts_only_for_msgs(Opts) end]).
+              fun() -> verify_opts_flat_oneof(Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -671,27 +670,6 @@ verify_opts_translation_and_nif(Opts) ->
         _ ->
             ok
     end.
-
-verify_translation_opts_only_for_msgs(Opts) ->
-    TrOpts = lists:filter(fun({translate_type, _}) -> true;
-                                  (_) -> false
-                               end,
-                               Opts),
-    {_Ok,Errs} = lists:partition(
-                  fun({translate_type, {Type, _Translations}}) ->
-                          case Type of
-                              {msg, _} -> true;
-                              _        -> false
-                          end
-                  end,
-                  TrOpts),
-    case Errs of
-        [] ->
-            ok;
-        [{translate_type, {Type, _Tr}} | _] ->
-            {error, {unsupported_translation, Type, non_msg_type}}
-    end.
-
 
 verify_opts_epb_compat(Defs, Opts) ->
     while_ok(
@@ -1021,14 +999,20 @@ c() ->
 %%       compatibility, but it is needed for some proto files.</dd>
 %%   <dt>`-translate_type WMsFs'</dt>
 %%   <dd>Call functions in `TMsFs' to pack, unpack, merge and verify
-%%       for specifed submessages. The `TMsFs' is a string on the
+%%       for the specifed type. The `TMsFs' is a string on the
 %%       following format: `type=Type,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
 %%       The Type and specified modules and functions are called and used
 %%       as follows:
 %%       <dl>
-%%         <dt>`type=msg:MsgName'</dt>
-%%         <dd>Specfies that the translations apply to messages with name
-%%             `MsgName' (after any renaming operations).</dd>
+%%         <dt>`type=Type'</dt>
+%%         <dd>Specfies that the translations apply to fields of type.
+%%             The `Type' may be either of:
+%%             `msg:MsgName' (after any renaming operations),
+%%             `enum:EnumName', `int32', `int64', `uint32', `uint64',
+%%             `sint32', `sint64', `fixed32', `fixed64', `sfixed32',
+%%             `sfixed64', `bool', `double', `string', `bytes' or
+%%             `map<KeyType,ValueType>'. The last may need quoting in
+%%             the shell.</dd>
 %%         <dt>`e=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term)' to pack the `Term' to
 %%             a `google.protobuf.Any' message.</dd>
@@ -1037,7 +1021,8 @@ c() ->
 %%             unpack a `google.protobuf.Any' message to a term.</dd>
 %%         <dt>`m=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
-%%             unpacked terms to a resulting Term3.</dd>
+%%             unpacked terms to a resulting Term3. Note that this function
+%%             is never called for scalar types.</dd>
 %%         <dt>`V=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%             If `Term' is valid, the function is expected to just return
@@ -1326,12 +1311,17 @@ opt_specs() ->
       "       Default is to not prepend package names for backwards\n"
       "       compatibility, but it is needed for some proto files.\n"},
      {"translate_type", fun opt_translate_type/2, translate_type,
-      " type=msg:MsgName,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
-      "       For the specified submessage, call Mod:Fn to:\n"
+      " type=Type,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
+      "       For fields of the specified type, call Mod:Fn to:\n"
       "       - encode (calls Mod:Fn(Term) -> AnyMessage to pack)\n"
       "       - decode (calls Mod:Fn(AnyMessage) -> Term to unpack)\n"
       "       - merge  (calls Mod:Fn(Term,Term2) -> Term3 to merge unpacked)\n"
-      "       - verify (calls Mod:Fn(Term) -> _ to verify unpacked)\n"},
+      "       - verify (calls Mod:Fn(Term) -> _ to verify unpacked)\n"
+      "       Type can be any of msg:MsgName (after any renaming operations)\n"
+      "       enum:EnumName, int32, int64, uint32, uint64, sint32 sint64,\n"
+      "       fixed32, fixed64, sfixed32, sfixed64, bool, double, string,\n"
+      "       bytes, map<KeyType,ValueType>. The last may need quoting in\n"
+      "       the shell. No merge function is called for scalar fields.\n"},
      {"any_translate", fun opt_any_translate/2, any_translate,
       " e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
       "       For a google.protobuf.Any message, call Mod:Fn to:\n"
@@ -1445,17 +1435,19 @@ opt_specs() ->
         end.
 
 
-
 opt_no_type_specs(OptTag, Rest) ->
     Opt = {OptTag, false},
     {ok, {Opt, Rest}}.
 
 opt_translate_type(OptTag, [S | Rest]) ->
-    try
-        [W | Ts] = gpb_lib:string_lexemes(S, ","),
-        Opt = {OptTag, {opt_translate_what(W),
-                        [opt_translate_mfa(T) || T <- Ts]}},
-        {ok, {Opt, Rest}}
+    try S of
+        "type="++S2 ->
+            {Type,Rest2} = opt_translate_type(S2),
+            Ts = gpb_lib:string_lexemes(Rest2, ","),
+            Opt = {OptTag, {Type, [opt_translate_mfa(T) || T <- Ts]}},
+            {ok, {Opt, Rest}};
+        _ ->
+            {error, "Translation is expected to begin with type="}
     catch throw:{badopt,ErrText} ->
             {error, ErrText}
     end.
@@ -1469,8 +1461,41 @@ opt_any_translate(OptTag, [S | Rest]) ->
             {error, ErrText}
     end.
 
-opt_translate_what("type=msg:"++MsgName) -> {msg,list_to_atom(MsgName)};
-opt_translate_what(X) -> throw({badopt,"Invalid translation target: "++X}).
+opt_translate_type("msg:"++Rest)  -> opt_to_comma_with_tag(Rest, msg);
+opt_translate_type("enum:"++Rest) -> opt_to_comma_with_tag(Rest, enum);
+opt_translate_type("map<"++Rest)  -> opt_translate_map_type(Rest);
+opt_translate_type(Other) ->
+    {S, Rest} = read_s(Other, $,, ""),
+    Type = list_to_atom(S),
+    Allowed = [int32, int64, uint32, uint64, sint32, sint64, fixed32, fixed64,
+               sfixed32, sfixed64, bool, float, double, string, bytes],
+    case lists:member(Type, Allowed) of
+        true -> {Type, Rest};
+        false -> throw({badopt,"Invalid translation type: "++S})
+    end.
+
+opt_translate_map_type(S) ->
+    {KeyType, Rest} = opt_translate_type(S),
+    case gpb:is_allowed_as_key_type(KeyType) of
+        true ->
+            {S2, Rest2} = read_s(Rest, $>, ""),
+            case opt_translate_type(S2++",") of
+                {ValueType, ""} ->
+                    {{map,KeyType,ValueType}, Rest2};
+                {_ValueType, _} ->
+                    throw({badopt,"Trailing garbage text"})
+            end;
+        false ->
+            throw({badopt,"Not allowed as map key type"})
+    end.
+
+opt_to_comma_with_tag(S, Tag) ->
+    {S2, Rest} = read_s(S, $,, ""),
+    {{Tag, list_to_atom(S2)}, Rest}.
+
+read_s([Delim|Rest], Delim, Acc) -> {lists:reverse(Acc), Rest};
+read_s([C|Rest], Delim, Acc)     -> read_s(Rest, Delim, [C | Acc]);
+read_s("", _Delim, _Acc)         -> throw({badopt, "Unexpected end of string"}).
 
 opt_translate_mfa("e="++MF) -> {encode,opt_mf_str(MF, 1)};
 opt_translate_mfa("d="++MF) -> {decode,opt_mf_str(MF, 1)};

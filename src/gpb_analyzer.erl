@@ -441,10 +441,29 @@ compute_type_translations_2(Defs, TypeTranslations) ->
                   {decode, fetch_decode_tr(Type, Translations)},
                   {verify, fetch_verify_tr(Type, Translations)}
                   | [{merge, fetch_merge_tr(Type, Translations)}
-                     || not is_repeated_elem_path(Path)]],
+                     || not is_repeated_elem_path(Path),
+                        not is_scalar_type(Type)]],
            {Path, Trs}
        end
        || {Type, Path, Translations} <- Infos]).
+
+is_scalar_type(int32)    -> true;
+is_scalar_type(int64)    -> true;
+is_scalar_type(uint32)   -> true;
+is_scalar_type(uint64)   -> true;
+is_scalar_type(sint32)   -> true;
+is_scalar_type(sint64)   -> true;
+is_scalar_type(fixed32)  -> true;
+is_scalar_type(fixed64)  -> true;
+is_scalar_type(sfixed32) -> true;
+is_scalar_type(sfixed64) -> true;
+is_scalar_type(bool)     -> true;
+is_scalar_type(float)    -> true;
+is_scalar_type(double)   -> true;
+is_scalar_type({enum,_}) -> true;
+is_scalar_type(string)   -> true;
+is_scalar_type(bytes)    -> true;
+is_scalar_type(_)        -> false. % not: msg | map | group
 
 compute_type_translation_infos(Defs, TypeTranslations) ->
     gpb_lib:fold_msg_or_group_fields_o(
