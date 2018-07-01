@@ -164,10 +164,11 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                       end,
     FnName = gpb_lib:mk_fn(v_msg_, MsgName),
     TrUserDataVar = ?expr(TrUserData),
-    [gpb_lib:nowarn_dialyzer_attr(FnName,3,Opts),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_lib:nowarn_dialyzer_attr(FnName,3,Opts),
      gpb_codegen:format_fn(
        FnName,
-       fun('<msg-match>', '<Path>', 'MaybeTrUserData') ->
+       fun('<msg-match>', '<Path>', 'TrUserData') ->
                '<verify-fields>',
                '<maybe-verify-no-extraneous-fields>',
                ok;
@@ -184,14 +185,9 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                   true ->
                                        ?expr(Path)
                                end),
-        replace_tree('MaybeTrUserData',
-                     case gpb_lib:any_field_is_sub_msg(MsgDef)
-                         orelse gpb_gen_translators:exists_tr_for_msg(MsgName,
-                                                                      verify,
-                                                                      AnRes) of
-                         true  -> TrUserDataVar;
-                         false -> ?expr(_)
-                     end),
+        replace_tree('TrUserData', if FNames /= [] -> TrUserDataVar;
+                                      FNames =:= [] -> ?expr(_)
+                                   end),
         splice_trees('<verify-fields>',
                      field_verifiers(MsgName, MsgDef, FVars, MsgVar,
                                      TrUserDataVar,
@@ -241,11 +237,7 @@ field_verifier(MsgName,
                     replace_tree('<F>', FVar),
                     replace_term('<FName>', FName),
                     replace_term('<Type>', Type),
-                    replace_tree('TrUserData', TrUserDataVar),
-                    splice_trees('MaybeTrUserData',
-                                 gpb_gen_translators:maybe_userdata_param(
-                                   Field,
-                                   TrUserDataVar))],
+                    replace_tree('TrUserData', TrUserDataVar)],
     IsMapField = case Type of
                      {map,_,_} -> true;
                      _ -> false
@@ -255,7 +247,7 @@ field_verifier(MsgName,
             %% FIXME: check especially for `undefined'
             %% and if found, error out with required_field_not_set
             %% specifying expected type
-            ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'MaybeTrUserData'),
+            ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'TrUserData'),
                   Replacements);
         repeated when not IsMapField ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
@@ -266,7 +258,7 @@ field_verifier(MsgName,
                                   %% ['ok'], but this value is unmatched"
                                   %% with the -Wunmatched_returns flag.
                                   _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                                     'MaybeTrUserData')
+                                                     'TrUserData')
                                        || Elem <- '<F>'],
                                   ok;
                              true ->
@@ -283,7 +275,7 @@ field_verifier(MsgName,
                                   %% ['ok'], but this value is unmatched"
                                   %% with the -Wunmatched_returns flag.
                                   _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                                     'MaybeTrUserData')
+                                                     'TrUserData')
                                        || Elem <- '<F>'],
                                   ok;
                              true ->
@@ -302,7 +294,7 @@ field_verifier(MsgName,
                                           %% ['ok'], but this value is unmatched"
                                           %% with the -Wunmatched_returns flag.
                                           _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                                             'MaybeTrUserData')
+                                                             'TrUserData')
                                                || Elem <- '<F>'],
                                           ok;
                                      true ->
@@ -344,20 +336,20 @@ field_verifier(MsgName,
                 records ->
                     ?expr(if '<F>' == undefined -> ok;
                              true -> '<verify-fn>'('<F>', ['<FName>' | Path],
-                                                   'MaybeTrUserData')
+                                                   'TrUserData')
                           end,
                           Replacements);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(if '<F>' == undefined -> ok;
                              true -> '<verify-fn>'('<F>', ['<FName>' | Path],
-                                                   'MaybeTrUserData')
+                                                   'TrUserData')
                           end,
                           Replacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
                               '#{<FName> := <F>}' ->
                                   '<verify-fn>'('<F>', ['<FName>' | Path],
-                                                'MaybeTrUserData');
+                                                'TrUserData');
                               _ ->
                                   ok
                           end,
@@ -400,7 +392,7 @@ field_oneof_present_undefined_verifier(MsgName, FName, OFields,
                ok;
            '<oneof-pattern>' ->
                '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
-                             'MaybeTrUserData');
+                             'TrUserData');
            _ ->
                mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
        end,
@@ -430,9 +422,7 @@ field_oneof_present_undefined_verifier(MsgName, FName, OFields,
                 replace_term('<verify-fn>', FVerifierFn2),
                 replace_tree('<OFVar>', OFVar),
                 replace_term('<OFName>', OFName),
-                splice_trees('MaybeTrUserData',
-                             gpb_gen_translators:maybe_userdata_param(
-                               F, TrUserDataVar))]
+                replace_tree('TrUserData', TrUserDataVar)]
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
 
@@ -443,7 +433,7 @@ field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
        case 'M' of
            '<oneof-pattern>' ->
                '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
-                             'MaybeTrUserData');
+                             'TrUserData');
            '#{<FName> := <F>}' ->
                mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path]);
            _ ->
@@ -475,9 +465,7 @@ field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
                [replace_tree('<oneof-pattern>',
                              gpb_lib:map_match([{FName, OFPat}])),
                 replace_term('<verify-fn>', FVerifierFn2),
-                splice_trees('MaybeTrUserData',
-                             gpb_gen_translators:maybe_userdata_param(
-                               F, TrUserDataVar))
+                replace_tree('TrUserData', TrUserDataVar)
                 | Trs1]
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
@@ -497,7 +485,7 @@ field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
                        mk_type_error({multiple_oneof_keys, 'OFDups', 'FName'},
                                      'M', ['FName' | Path])
                end,
-               'verify-fn'('OFVar', ['OFName' | Path], 'MaybeTrUserData');
+               'verify-fn'('OFVar', ['OFName' | Path], 'TrUserData');
            _ ->
                ok
        end,
@@ -525,9 +513,7 @@ field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
                              gpb_lib:map_match([{OFName, OFVar}])),
                 replace_tree('OFDups', gpb_lib:prefix_var("OFDups", OFVar)),
                 replace_term('verify-fn', FVerifierFn2),
-                splice_trees('MaybeTrUserData',
-                             gpb_gen_translators:maybe_userdata_param(
-                               F, TrUserDataVar))
+                replace_tree('TrUserData', TrUserDataVar)
                 | Trs1]
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
@@ -543,12 +529,16 @@ format_enum_verifiers(Defs, #anres{used_types=UsedTypes}, Opts) ->
 
 format_enum_verifier(EnumName, EnumMembers, Opts) ->
     FnName = gpb_lib:mk_fn(v_enum_, EnumName),
-    [gpb_lib:nowarn_dialyzer_attr(FnName, 2, Opts),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
      gpb_codegen:format_fn(
        FnName,
-       fun('<sym>', _Path) -> ok;
-          (V, Path) when is_integer(V) -> v_type_sint32(V, Path);
-          (X, Path) -> mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
+       fun('<sym>', _Path, _TrUserData) ->
+               ok;
+          (V, Path, TrUserData) when is_integer(V) ->
+               v_type_sint32(V, Path, TrUserData);
+          (X, Path, _TrUserData) ->
+               mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
        end,
        [repeat_clauses('<sym>', [[replace_term('<sym>', EnumSym)]
                                  || {EnumSym, _Value} <- EnumMembers]),
@@ -590,14 +580,15 @@ format_int_verifier(IntType, Signedness, NumBits, Opts) ->
               signed   -> 1 bsl (NumBits-1) - 1
           end,
     FnName = gpb_lib:mk_fn(v_type_, IntType),
-    [gpb_lib:nowarn_dialyzer_attr(FnName, 2, Opts),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
      gpb_codegen:format_fn(
        FnName,
-       fun(N, _Path) when '<Min>' =< N, N =< '<Max>' ->
+       fun(N, _Path, _TrUserData) when '<Min>' =< N, N =< '<Max>' ->
                ok;
-          (N, Path) when is_integer(N) ->
+          (N, Path, _TrUserData) when is_integer(N) ->
                mk_type_error({value_out_of_range, '<details>'}, N, Path);
-          (X, Path) ->
+          (X, Path, _TrUserData) ->
                mk_type_error({bad_integer, '<details>'}, X, Path)
        end,
        [replace_term('<Min>', Min),
@@ -608,41 +599,45 @@ format_int_verifier(IntType, Signedness, NumBits, Opts) ->
 
 format_bool_verifier(Opts) ->
     FnName = gpb_lib:mk_fn(v_type_, bool),
-    [gpb_lib:nowarn_dialyzer_attr(FnName, 2, Opts),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
      gpb_codegen:format_fn(
        FnName,
-       fun(false, _Path) -> ok;
-          (true, _Path)  -> ok;
-          (0, _Path)  -> ok;
-          (1, _Path)  -> ok;
-          (X, Path) -> mk_type_error(bad_boolean_value, X, Path)
+       fun(false, _Path, _TrUserData) -> ok;
+          (true, _Path, _TrUserData)  -> ok;
+          (0, _Path, _TrUserData)  -> ok;
+          (1, _Path, _TrUserData)  -> ok;
+          (X, Path, _TrUserData) -> mk_type_error(bad_boolean_value, X, Path)
        end)].
 
 format_float_verifier(FlType, Opts) ->
     BadTypeOfValue = list_to_atom(lists:concat(["bad_", FlType, "_value"])),
     FnName = gpb_lib:mk_fn(v_type_, FlType),
-    [gpb_lib:nowarn_dialyzer_attr(FnName, 2, Opts),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
      gpb_codegen:format_fn(
        FnName,
-       fun(N, _Path) when is_float(N) -> ok;
+       fun(N, _Path, _TrUserData) when is_float(N) -> ok;
           %% It seems a float for the corresponding integer value is
           %% indeed packed when doing <<Integer:32/little-float>>.
           %% So let verify accept integers too.
           %% When such a value is unpacked, we get a float.
-          (N, _Path) when is_integer(N) -> ok;
-          (infinity, _Path)    -> ok;
-          ('-infinity', _Path) -> ok;
-          (nan, _Path)         -> ok;
-          (X, Path)            -> mk_type_error('<bad_x_value>', X, Path)
+          (N, _Path, _TrUserData) when is_integer(N) -> ok;
+          (infinity, _Path, _TrUserData)    -> ok;
+          ('-infinity', _Path, _TrUserData) -> ok;
+          (nan, _Path, _TrUserData)         -> ok;
+          (X, Path, _TrUserData) ->
+               mk_type_error('<bad_x_value>', X, Path)
        end,
        [replace_term('<bad_x_value>', BadTypeOfValue)])].
 
 format_string_verifier(Opts) ->
     FnName = gpb_lib:mk_fn(v_type_, string),
-    [gpb_lib:nowarn_dialyzer_attr(FnName, 2, Opts),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
      gpb_codegen:format_fn(
        FnName,
-       fun(S, Path) when is_list(S); is_binary(S) ->
+       fun(S, Path, _TrUserData) when is_list(S); is_binary(S) ->
                try unicode:characters_to_binary(S) of
                    B when is_binary(B) ->
                        ok;
@@ -651,20 +646,21 @@ format_string_verifier(Opts) ->
                catch error:badarg ->
                        mk_type_error(bad_unicode_string, S, Path)
                end;
-          (X, Path) ->
+          (X, Path, _TrUserData) ->
                mk_type_error(bad_unicode_string, X, Path)
        end)].
 
 format_bytes_verifier(Opts) ->
     FnName = gpb_lib:mk_fn(v_type_, bytes),
-    [gpb_lib:nowarn_dialyzer_attr(FnName, 2, Opts),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
      gpb_codegen:format_fn(
        FnName,
-       fun(B, _Path) when is_binary(B) ->
+       fun(B, _Path, _TrUserData) when is_binary(B) ->
                ok;
-          (B, _Path) when is_list(B) ->
+          (B, _Path, _TrUserData) when is_list(B) ->
                ok;
-          (X, Path) ->
+          (X, Path, _TrUserData) ->
                mk_type_error(bad_binary_value, X, Path)
        end)].
 
@@ -686,32 +682,18 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
     ValueVerifierFn2 = gpb_gen_translators:find_translation(
                          ElemPath, verify, AnRes,
                          ValueVerifierFn1),
-
-    TrUserDataVar = ?expr(TrUserData),
-    TrUserDataReplacements =
-        case {ValueType,{ValueVerifierFn1, ValueVerifierFn2}} of
-            {{msg,_}, _} ->
-                [replace_tree('MaybeTrUserDataArg', TrUserDataVar),
-                 replace_tree('MaybeTrUserData', TrUserDataVar)];
-            {_, {X,Y}} when X /= Y ->
-                %% Translation exists
-                [replace_tree('MaybeTrUserDataArg', TrUserDataVar),
-                 replace_tree('MaybeTrUserData', TrUserDataVar)];
-            _ ->
-                [replace_tree('MaybeTrUserDataArg', ?expr(_)),
-                 splice_trees('MaybeTrUserData', [])]
-        end,
-    [gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
      case MapsOrTuples of
          '2tuples' ->
              gpb_codegen:format_fn(
                FnName,
-               fun(KVs, Path, 'MaybeTrUserDataArg') when is_list(KVs) ->
+               fun(KVs, Path, TrUserData) when is_list(KVs) ->
                        [case X of
                             {Key, Value} ->
-                                'VerifyKey'(Key, ['key' | Path]),
+                                'VerifyKey'(Key, ['key' | Path], TrUserData),
                                 'VerifyValue'(Value, ['value' | Path],
-                                             'MaybeTrUserData');
+                                              TrUserData);
                             _ ->
                                 mk_type_error(invalid_key_value_tuple, X, Path)
                         end
@@ -721,16 +703,15 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
                        mk_type_error(invalid_list_of_key_value_tuples, X, Path)
                end,
                [replace_term('VerifyKey', KeyVerifierFn),
-                replace_term('VerifyValue', ValueVerifierFn2)]
-               ++ TrUserDataReplacements);
+                replace_term('VerifyValue', ValueVerifierFn2)]);
          maps ->
              gpb_codegen:format_fn(
                FnName,
-               fun(M, Path, 'MaybeTrUserDataArg') when is_map(M) ->
+               fun(M, Path, TrUserData) when is_map(M) ->
                        [begin
-                            'VerifyKey'(Key, ['key' | Path]),
+                            'VerifyKey'(Key, ['key' | Path], TrUserData),
                             'VerifyValue'(Value, ['value' | Path],
-                                         'MaybeTrUserData')
+                                         TrUserData)
                         end
                         || {Key, Value} <- maps:to_list(M)],
                        ok;
@@ -738,12 +719,12 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
                        mk_type_error(invalid_map, X, Path)
                end,
                [replace_term('VerifyKey', KeyVerifierFn),
-                replace_term('VerifyValue', ValueVerifierFn2)]
-               ++ TrUserDataReplacements)
+                replace_term('VerifyValue', ValueVerifierFn2)])
      end].
 
 format_verifier_auxiliaries(Defs, Opts) ->
-    ["-spec mk_type_error(_, _, list()) -> no_return().\n",
+    [gpb_lib:nowarn_unused_function(mk_type_error, 3),
+     "-spec mk_type_error(_, _, list()) -> no_return().\n",
      gpb_codegen:format_fn(
        mk_type_error,
        fun(Error, ValueSeen, Path) ->
@@ -758,7 +739,8 @@ format_verifier_auxiliaries(Defs, Opts) ->
                prettify_path,
                fun([]) -> top_level end);
          true ->
-             [gpb_lib:nowarn_dialyzer_attr(prettify_path, 1, Opts),
+             [gpb_lib:nowarn_unused_function(prettify_path, 1),
+              gpb_lib:nowarn_dialyzer_attr(prettify_path, 1, Opts),
               case gpb_lib:target_has_lists_join(Opts) of
                   true ->
                       format_prettify_path_with_lists_join();
