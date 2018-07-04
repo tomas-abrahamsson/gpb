@@ -67,6 +67,9 @@
 %% Translators for {translate_type, {{map,_,_},...}} test
 -export([is_dict/1]).
 
+%% Translators for {translate_field, {<Oneof>,...}} tests
+-export([e_ipv4or6/1, d_ipv4or6/1, v_ipv4or6/1]).
+
 
 -ifndef(NO_HAVE_STACKTRACE_SYNTAX).
 -compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
@@ -1566,6 +1569,54 @@ is_dict(D) ->
     try dict:to_list(D), ok
     catch _:_ -> error({not_a_dict,D})
     end.
+
+%% -
+translate_oneof_test() ->
+    %% For this test, we'll have an oneof which is either an ipv4 or ipv6
+    %% (with some non-obvious types, just to test different)
+    %% and translations of the ip field itself (the oneo) is what we want
+    %% to test.
+    %% The internal format is either a 4-tuple or an 8-tuple.
+    M = compile_iolist(
+          ["message m {",
+           "  oneof ip {",
+           "    fixed32 ipv4 = 1;",
+           "    bytes ipv6 = 2;",
+           "  }",
+           "}"],
+          [{translate_field,
+            {[m,ip], [{encode, {?MODULE, e_ipv4or6, ['$1']}},
+                      {decode, {?MODULE, d_ipv4or6, ['$1']}},
+                      {verify, {?MODULE, v_ipv4or6, ['$1']}}]}}]),
+    M1 = {m, {127,0,0,1}},
+    M2 = {m, {0,0,0,0, 0,0,0,1}},
+    ok = M:verify_msg(M1),
+    ok = M:verify_msg(M2),
+    <<13, _/bits>>    = B1 = M:encode_msg(M1), % check field tag+wiretype
+    <<18,16, _/bits>> = B2 = M:encode_msg(M2), % check field tag+wiretype, len
+    M1 = M:decode_msg(B1, m),
+    M2 = M:decode_msg(B2, m),
+    ?assertError({gpb_type_error, _},
+                 M:verify_msg({m,{1,2,3,4,5,6}})), % wrong tuple size
+    unload_code(M).
+
+e_ipv4or6({A,B,C,D}) ->
+    <<Ipv4AsInt:32>> = <<A,B,C,D>>,
+    {ipv4, Ipv4AsInt};
+e_ipv4or6({A,B,C,D, E,F,G,H}) ->
+    Bytes = << <<N:16>> || N <- [A,B,C,D, E,F,G,H] >>,
+    {ipv6, Bytes}.
+
+d_ipv4or6({ipv4, Ipv4AsInt}) when is_integer(Ipv4AsInt) ->
+    <<A,B,C,D>> = <<Ipv4AsInt:32>>,
+    {A,B,C,D};
+d_ipv4or6({ipv6, Bytes}) when bit_size(Bytes) =:= 128 ->
+    [A,B,C,D, E,F,G,H] = [N || <<N:16>> <= Bytes],
+    {A,B,C,D, E,F,G,H}.
+
+v_ipv4or6({_,_,_,_}) -> ok;
+v_ipv4or6({_,_,_,_, _,_,_,_}) -> ok;
+v_ipv4or6(X) -> error({invalid_ipv4_or_ipv6, X}).
 
 %% --- misc ----------
 

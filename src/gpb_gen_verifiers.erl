@@ -366,27 +366,49 @@ field_verifier(MsgName,
     end;
 field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
                FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
-    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        records ->
-            field_oneof_present_undefined_verifier(
-              MsgName, FName, OFields,
-              FVar, MsgVar, TrUserDataVar,
-              AnRes);
-        #maps{unset_optional=present_undefined} ->
-            field_oneof_present_undefined_verifier(
-              MsgName, FName, OFields,
-              FVar, MsgVar, TrUserDataVar,
-              AnRes);
-        #maps{unset_optional=omitted, oneof=tuples} ->
-            field_oneof_omitted_tuples_verifier(
-              MsgName, FName, OFields,
-              FVar, MsgVar, TrUserDataVar,
-              AnRes);
-        #maps{unset_optional=omitted, oneof=flat} ->
-            field_oneof_omitted_flat_verifier(
-              MsgName, FName, OFields,
-              FVar, MsgVar, TrUserDataVar,
-              AnRes)
+    CfElemPath = [MsgName,FName],
+    case gpb_gen_translators:has_translation(CfElemPath, verify, AnRes) of
+        {true, Transl} ->
+            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                records ->
+                    tr_field_oneof_present_undefined_verifier(
+                      FName, FVar, Transl, TrUserDataVar);
+                #maps{unset_optional=present_undefined} ->
+                    tr_field_oneof_present_undefined_verifier(
+                      FName, FVar, Transl, TrUserDataVar);
+                #maps{unset_optional=omitted, oneof=tuples} ->
+                    tr_field_oneof_omitted_tuples_verifier(
+                      MsgVar, FName, FVar, Transl, TrUserDataVar);
+                #maps{unset_optional=omitted, oneof=flat} ->
+                    %% translate on individual oneof fields instead
+                    field_oneof_omitted_flat_verifier(
+                      MsgName, FName, OFields,
+                      FVar, MsgVar, TrUserDataVar,
+                      AnRes)
+            end;
+        false ->
+            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                records ->
+                    field_oneof_present_undefined_verifier(
+                      MsgName, FName, OFields,
+                      FVar, MsgVar, TrUserDataVar,
+                      AnRes);
+                #maps{unset_optional=present_undefined} ->
+                    field_oneof_present_undefined_verifier(
+                      MsgName, FName, OFields,
+                      FVar, MsgVar, TrUserDataVar,
+                      AnRes);
+                #maps{unset_optional=omitted, oneof=tuples} ->
+                    field_oneof_omitted_tuples_verifier(
+                      MsgName, FName, OFields,
+                      FVar, MsgVar, TrUserDataVar,
+                      AnRes);
+                #maps{unset_optional=omitted, oneof=flat} ->
+                    field_oneof_omitted_flat_verifier(
+                      MsgName, FName, OFields,
+                      FVar, MsgVar, TrUserDataVar,
+                      AnRes)
+            end
     end.
 
 field_oneof_present_undefined_verifier(MsgName, FName, OFields,
@@ -432,6 +454,18 @@ field_oneof_present_undefined_verifier(MsgName, FName, OFields,
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
 
+tr_field_oneof_present_undefined_verifier(FName, FVar, Transl, TrUserDataVar) ->
+    ?expr(if '<F>' =:= undefined ->
+                  ok;
+             true ->
+                  'Tr'('<F>', ['fname' | Path], 'TrUserData')
+          end,
+          [replace_tree('<F>', FVar),
+           replace_term('Tr', Transl),
+           replace_term('fname', FName),
+           replace_tree('TrUserData', TrUserDataVar)]).
+
+
 field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
                                     FVar, MsgVar, TrUserDataVar,
                                     AnRes) ->
@@ -475,6 +509,21 @@ field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
                 | Trs1]
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
+
+tr_field_oneof_omitted_tuples_verifier(MsgVar, FName, FVar,
+                                       Transl, TrUserDataVar) ->
+    ?expr(case 'M' of
+              '#{fname := F}' ->
+                  'Tr'('F', ['fname' | Path], 'TrUserData');
+              _ ->
+                  ok
+          end,
+          [replace_tree('M', MsgVar),
+           replace_tree('#{fname := F}', gpb_lib:map_match([{FName, FVar}])),
+           replace_term('Tr', Transl),
+           replace_tree('F', FVar),
+           replace_term('fname', FName),
+           replace_tree('TrUserData', TrUserDataVar)]).
 
 field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
                                   FVar, MsgVar, TrUserDataVar,

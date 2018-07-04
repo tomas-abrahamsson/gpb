@@ -390,7 +390,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                               true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
                            end
                        end,
-                   Transforms);
+                       Transforms);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(
                        begin
@@ -399,7 +399,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                               true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
                            end
                        end,
-                   Transforms);
+                       Transforms);
                 #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
@@ -427,61 +427,107 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
     end;
 field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                   FVar, PrevBVar, TrUserDataVar, Defs, Tr, AnRes, Opts) ->
-    OFVar = gpb_lib:prefix_var("O", FVar),
-    OneofClauseTransforms =
-        [begin
-             OFVal = ?expr({'<oneof-name>', '<OF>'},
-                           [replace_term('<oneof-name>', Name),
-                            replace_tree('<OF>', OFVar)]),
-             MatchPattern =
-                 case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                     records ->
-                         OFVal;
-                     #maps{unset_optional=present_undefined} ->
-                         OFVal;
-                     #maps{unset_optional=omitted, oneof=tuples} ->
-                         gpb_lib:map_match([{FName, OFVal}]);
-                     #maps{unset_optional=omitted, oneof=flat} ->
-                         gpb_lib:map_match([{Name, OFVar}])
-                 end,
-             %% undefined is already handled, we have a match,
-             %% the field occurs, as if it had been required
-             OField2 = OField#?gpb_field{occurrence=required},
-             Tr2 = Tr({update_elem_path,Name}),
-             EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
-                                         PrevBVar, TrUserDataVar,
-                                         Defs, Tr2, AnRes, Opts),
-             [replace_tree('<oneof...>', MatchPattern),
-              replace_tree('<expr>', EncExpr)]
-         end
-         || #?gpb_field{name=Name}=OField <- OFields],
+    ElemPath = [MsgName, FName],
+    Transl = gpb_gen_translators:find_translation(ElemPath, encode, AnRes),
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         records ->
-            ?expr(case '<F>' of
-                      undefined    -> '<Bin>';
-                      '<oneof...>' -> '<expr>'
+            ?expr(if 'F' =:= undefined -> 'Bin';
+                     true -> '<expr>'
                   end,
-                  [replace_tree('<F>', FVar),
-                   replace_tree('<Bin>', PrevBVar),
-                   repeat_clauses('<oneof...>', OneofClauseTransforms)]);
+                  [replace_tree('F', FVar),
+                   replace_tree('Bin', PrevBVar),
+                   replace_tree('<expr>',
+                                field_encode_oneof(
+                                  MsgName, MsgVar, FVar, OFields,
+                                  Transl, TrUserDataVar, PrevBVar,
+                                  Defs, Tr, AnRes, Opts))]);
         #maps{unset_optional=present_undefined} ->
-            ?expr(case '<F>' of
-                      undefined    -> '<Bin>';
-                      '<oneof...>' -> '<expr>'
+            ?expr(if 'F' =:= undefined -> 'Bin';
+                     true -> '<expr>'
                   end,
-                  [replace_tree('<F>', FVar),
-                   replace_tree('<Bin>', PrevBVar),
-                   repeat_clauses('<oneof...>', OneofClauseTransforms)]);
-        #maps{unset_optional=omitted} ->
+                  [replace_tree('F', FVar),
+                   replace_tree('Bin', PrevBVar),
+                   replace_tree('<expr>',
+                                field_encode_oneof(
+                                  MsgName, MsgVar, FVar, OFields,
+                                  Transl, TrUserDataVar, PrevBVar,
+                                  Defs, Tr, AnRes, Opts))]);
+        #maps{unset_optional=omitted, oneof=tuples} ->
             ?expr(case 'M' of
-                      '<oneof...>' -> '<expr>';
-                      _ -> '<Bin>'
+                      '#{fname:=F}' -> '<expr>';
+                      _ -> 'Bin'
                   end,
-                  [replace_term('fieldname', FName),
+                  [replace_tree('#{fname:=F}',
+                                gpb_lib:map_match([{FName, FVar}])),
                    replace_tree('M', MsgVar),
-                   replace_tree('<Bin>', PrevBVar),
-                   repeat_clauses('<oneof...>', OneofClauseTransforms)])
+                   replace_tree('Bin', PrevBVar),
+                   replace_tree('<expr>',
+                                field_encode_oneof(
+                                  MsgName, MsgVar, FVar, OFields,
+                                  Transl, TrUserDataVar, PrevBVar,
+                                  Defs, Tr, AnRes, Opts))]);
+        #maps{unset_optional=omitted, oneof=flat} ->
+            ?expr(case 'M' of
+                      '#{tag:=Val}' -> '<expr>';
+                      _ -> 'Bin'
+                  end,
+                  [replace_tree('M', MsgVar),
+                   replace_tree('Bin', PrevBVar),
+                   repeat_clauses(
+                     '#{tag:=Val}',
+                     field_encode_oneof_flat(
+                       '#{tag:=Val}', MsgName, MsgVar, FVar, OFields,
+                       Transl, TrUserDataVar, PrevBVar,
+                       Defs, Tr, AnRes, Opts))])
     end.
+
+field_encode_oneof(MsgName, MsgVar, FVar, OFields,
+                   Transl, TrUserDataVar, PrevBVar, Defs, Tr, AnRes, Opts) ->
+    TVar = gpb_lib:prefix_var("T", FVar),
+    ?expr(case 'Tr'('F', 'TrUserData') of
+              '{tag,TVar}' -> '<expr>'
+          end,
+          [replace_term('Tr', Transl),
+           replace_tree('TrUserData', TrUserDataVar),
+           replace_tree('F', FVar),
+           repeat_clauses(
+             '{tag,TVar}',
+             [begin
+                  TagTuple = ?expr({tag,'TVar'}, [replace_term(tag,Name),
+                                                  replace_tree('TVar', TVar)]),
+                  %% undefined is already handled, we have a match,
+                  %% the field occurs, as if it had been required
+                  OField2 = OField#?gpb_field{occurrence=required},
+                  Tr2 = Tr({update_elem_path,Name}),
+                  EncExpr = field_encode_expr(MsgName, MsgVar, OField2, TVar,
+                                              PrevBVar, TrUserDataVar,
+                                              Defs, Tr2, AnRes, Opts),
+                  [replace_tree('{tag,TVar}', TagTuple),
+                   replace_tree('<expr>', EncExpr)]
+              end
+              || #?gpb_field{name=Name}=OField <- OFields])]).
+
+field_encode_oneof_flat(ClauseMarker, MsgName, MsgVar, FVar, OFields,
+                        Transl, TrUserDataVar, PrevBVar, Defs, Tr, AnRes, Opts) ->
+    OFVar = gpb_lib:prefix_var("O", FVar),
+    [begin
+         MatchPattern = gpb_lib:map_match([{Name, OFVar}]),
+         %% undefined is already handled, we have a match,
+         %% the field occurs, as if it had been required
+         OField2 = OField#?gpb_field{occurrence=required},
+         Tr2 = Tr({update_elem_path,Name}),
+         EncExpr = field_encode_expr(MsgName, MsgVar, OField2, OFVar,
+                                     PrevBVar, TrUserDataVar,
+                                     Defs, Tr2, AnRes, Opts),
+         TrEncExpr = ?expr('Tr'('EncExpr', 'TrUserData'),
+                           [replace_term('Tr', Transl),
+                            replace_tree('EncExpr', EncExpr),
+                            replace_tree('TrUserData', TrUserDataVar)]),
+             [replace_tree(ClauseMarker, MatchPattern),
+              replace_tree('<expr>', TrEncExpr)]
+         end
+         || #?gpb_field{name=Name}=OField <- OFields].
+
 
 mk_field_encode_fn_name(MsgName, #?gpb_field{occurrence=repeated, name=FName})->
     gpb_lib:mk_fn(e_field_, MsgName, FName);

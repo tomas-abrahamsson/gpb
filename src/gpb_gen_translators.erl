@@ -36,6 +36,7 @@
 -export([mk_find_tr_fn_elem_or_default/4]).
 -export([mk_elempath_elem/3]).
 -export([find_translation/3, find_translation/4]).
+-export([has_translation/3]).
 -export([default_fn_by_op/2]).
 -export([default_merge_translator/0]).
 -export([default_verify_translator/0]).
@@ -594,18 +595,27 @@ mk_elempath_elem(MsgName, #?gpb_field{name=FName}, {true, CFName}) ->
 
 find_translation(ElemPath, Op, AnRes) ->
     find_translation(ElemPath, Op, AnRes, undefined).
-find_translation(ElemPath, Op, #anres{translations=Ts}, Default) ->
+find_translation(ElemPath, Op, AnRes, Default) ->
+    case has_translation(ElemPath, Op, AnRes) of
+        {true, Transl} ->
+            Transl;
+        false ->
+            default_fn_by_op(Op, Default)
+    end.
+
+has_translation(ElemPath, Op, #anres{translations=Ts}) ->
     case dict:find(ElemPath, Ts) of
         {ok, OpTransls} ->
             case lists:keyfind(Op, 1, OpTransls) of
                 {Op, _Calls} ->
-                    mk_tr_fn_name(ElemPath, Op);
+                    {true, mk_tr_fn_name(ElemPath, Op)};
                 false ->
-                    default_fn_by_op(Op, Default)
+                    false
             end;
         error ->
-            default_fn_by_op(Op, Default)
+            false
     end.
+
 
 mk_tr_fn_name([MsgName,FieldName,[]], Op) ->
     list_to_atom(?ff("tr_~s_~s.~s[x]", [Op, MsgName,FieldName]));

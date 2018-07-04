@@ -328,7 +328,8 @@ compute_translations(Defs, Opts) ->
           end,
           dict:new(),
           [{map_translations, compute_map_translations(Defs, Opts)},
-           {type_translations, compute_type_translations(Defs, Opts)}]))).
+           {type_translations, compute_type_translations(Defs, Opts)},
+           {field_translations, compute_field_translations(Defs, Opts)}]))).
 
 dict_from_translation_list(PTransls) ->
     lists:foldl(
@@ -527,6 +528,91 @@ map_translations_to_internal(Translations) ->
          _      -> {Op, Tr}
      end
      || {Op, Tr} <- Translations].
+
+compute_field_translations(Defs, Opts) ->
+    dict_from_translation_list(
+      [{Path, augment_field_translations(Field, Path, Translations, Opts)}
+       || {translate_field, {Path, Translations}} <- Opts,
+          Field <- find_field_by_path(Defs, Path)]).
+
+find_field_by_path(Defs, [MsgName,FieldName|RestPath]) ->
+    case find_2_msg(Defs, MsgName) of
+        {ok, {{_,MsgName}, Fields}} ->
+            case find_3_field(Fields, FieldName) of
+                {ok, #gpb_oneof{fields=OFields}} when RestPath =/= [] ->
+                    case find_3_field(OFields, hd(RestPath)) of
+                        {ok, OField} ->
+                            [OField];
+                        error ->
+                            []
+                    end;
+                {ok, Field} ->
+                    [Field];
+                error ->
+                    []
+            end;
+        error ->
+            []
+    end.
+
+find_2_msg([{{msg, Name},_}=M | _], Name)   -> {ok, M};
+find_2_msg([{{group, Name},_}=M | _], Name) -> {ok, M};
+find_2_msg([_ | Rest], Name)                -> find_2_msg(Rest, Name);
+find_2_msg([], _Name)                       -> error.
+
+find_3_field([#?gpb_field{name=Name}=F | _], Name) -> {ok, F};
+find_3_field([#gpb_oneof{name=Name}=F | _], Name)  -> {ok, F};
+find_3_field([_ | Rest], Name)                     -> find_3_field(Rest, Name);
+find_3_field([], _Name)                            -> error.
+
+augment_field_translations(#?gpb_field{type=Type, occurrence=Occ},
+                           Path, Translations, Opts) ->
+    IsRepeated =  Occ == repeated,
+    IsElem = IsRepeated andalso lists:last(Path) == [],
+    IsScalar = is_scalar_type(Type),
+    DoNif = proplists:get_bool(nif, Opts),
+    %% Operations for which we can or sometimes must have translations:
+    Ops = if DoNif ->
+                  [merge, verify];
+             IsElem ->
+                  [encode,decode,merge,verify];
+             IsRepeated ->
+                  [encode,
+                   decode_init_default,
+                   decode_repeated_add_elem,
+                   decode_repeated_finalize,
+                   merge,
+                   verify];
+             true ->
+                  [encode,decode,merge,verify]
+          end -- [merge || IsScalar],
+    augment_2_fetch_transl(Translations, Ops, IsRepeated, IsElem);
+augment_field_translations(#gpb_oneof{}, [_,_]=_Path, Translations, Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    %% Operations for which we can or sometimes must have translations:
+    Ops = if DoNif ->
+                  [verify];
+             true ->
+                  [encode,decode,verify]
+          end,
+    augment_2_fetch_transl(Translations, Ops, false, false).
+
+augment_2_fetch_transl(Translations, Ops, IsRepeated, IsElem) ->
+    [case lists:keyfind(Op, 1, Translations) of
+         {Op, Transl} ->
+             {Op, Transl};
+         false ->
+             %% FIXME: is this right??
+             if Op == merge, IsRepeated, not IsElem ->
+                     {Op, {'erlang_++',3}};
+                true ->
+                     FnName = gpb_gen_translators:default_fn_by_op(
+                                Op, undefined),
+                     Arity = length(gpb_gen_translators:args_by_op2(Op)) + 1,
+                     {Op, {FnName, Arity}}
+             end
+     end
+     || Op <- Ops].
 
 fetch_encode_tr(Type, Translations) ->
     fetch_op_translation(encode, Translations, Type).

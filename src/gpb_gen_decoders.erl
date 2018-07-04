@@ -1202,8 +1202,10 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue,
                    replace_tree('New', NewValue),
                    replace_tree('TrUserData', TrUserDataVar)])
     end;
-merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue,
-                 _MsgName, Tr, TrUserDataVar, _AnRes)->
+merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
+                 MsgName, Tr, TrUserDataVar, AnRes)->
+    CfElemPath = [MsgName, CFName],
+    CfTransl = gpb_gen_translators:find_translation(CfElemPath, decode, AnRes),
     #?gpb_field{name=FName, type=Type} = FieldDef,
     if ?is_msg_or_group(Type) ->
             {_, FMsgName} = Type,
@@ -1211,24 +1213,28 @@ merge_field_expr({FieldDef, {true, _CFName}}, PrevValue, NewValue,
             MVPrev = gpb_lib:prefix_var("MV", PrevValue),
             ?expr(case 'Prev' of
                       undefined ->
-                          {'tag', 'New'};
+                          'Tr'({'tag', 'New'}, 'TrUserData');
                       {'tag', 'MVPrev'} ->
-                          {'tag', 'merge_msg_X'('MVPrev', 'New',
-                                                'TrUserData')};
+                          'Tr'({'tag', 'merge_msg_X'('MVPrev', 'New',
+                                                'TrUserData')},
+                               'TrUserData');
                       _ ->
-                          {'tag', 'New'}
+                          'Tr'({'tag', 'New'}, 'TrUserData')
                   end,
                   [replace_tree('Prev', PrevValue),
                    replace_term('tag', FName),
                    replace_tree('New', NewValue),
                    replace_term('merge_msg_X', Tr(merge, MergeFn)),
                    replace_tree('MVPrev', MVPrev),
+                   replace_term('Tr', CfTransl),
                    replace_tree('TrUserData', TrUserDataVar)]);
        true ->
             %% Replace
-            ?expr({'fieldname', '<expr>'},
-                  [replace_term('fieldname', FName),
-                   replace_tree('<expr>', NewValue)])
+            ?expr('Tr'({'tag', '<expr>'}, 'TrUserData'),
+                  [replace_term('tag', FName),
+                   replace_tree('<expr>', NewValue),
+                   replace_term('Tr', CfTransl),
+                   replace_tree('TrUserData', TrUserDataVar)])
     end.
 
 decoder_in_param(MsgVar, MsgName, {FieldDef, false}) ->
