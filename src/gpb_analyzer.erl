@@ -316,27 +316,49 @@ count_group_fields(MsgDef) ->
       0,
       MsgDef).
 
+%% Returns: [{Path, [{Op, [Calls]}]}]
 compute_translations(Defs, Opts) ->
     remove_empty_translations(
       remove_merge_translations_for_repeated_elements(
         lists:foldl(
-          fun({Name, Dict}, D) ->
-                  %% For now it is an (internal) error if translations overlap,
-                  %% (don't expect that to happen with current translations)
-                  %% but in the future (eg with user-specified translations)
-                  %% they might stack instead: ie Ts1 ++ Ts2 instead of error.
+          fun({_Name, Dict}, Acc) ->
                   dict:merge(
-                    fun(Key, Ts1, Ts2) ->
-                            error({error,{duplicate_translation,
-                                          {when_adding_transls_for,Name},
-                                          {key,Key},
-                                          {translations,Ts1,Ts2}}})
-                    end,
-                    Dict, D)
+                    fun(_Key, Ts1, Ts2) -> merge_transls(Ts1, Ts2) end,
+                    Acc, Dict)
           end,
           dict:new(),
           [{map_translations, compute_map_translations(Defs, Opts)},
            {type_translations, compute_type_translations(Defs, Opts)}]))).
+
+dict_from_translation_list(PTransls) ->
+    lists:foldl(
+      fun({Path, Transls1}, D) ->
+              case dict:find(Path, D) of
+                  {ok, Transls2} ->
+                      dict:store(Path, merge_transls(Transls1, Transls2), D);
+                  error ->
+                      dict:store(Path, merge_transls(Transls1, []), D)
+              end
+      end,
+      dict:new(),
+      PTransls).
+
+merge_transls(Transls1, Transls2) ->
+    dict:to_list(
+      dict:merge(
+        fun(encode, L1, L2)                   -> L2 ++ L1;
+           (decode, L1, L2)                   -> L1 ++ L2;
+           (decode_init_default, L1, L2)      -> L1 ++ L2;
+           (decode_repeated_add_elem, L1, L2) -> L1 ++ L2;
+           (decode_repeated_finalize, L1, L2) -> L1 ++ L2;
+           (merge, L1, L2)                    -> L1 ++ L2;
+           (verify, _L1, L2)                  -> [hd(L2)]
+        end,
+        dict:from_list([{Op,ensure_list(Call)} || {Op,Call} <- Transls1]),
+        dict:from_list([{Op,ensure_list(Call)} || {Op,Call} <- Transls2]))).
+
+ensure_list(L) when is_list(L) -> L;
+ensure_list(Elem) -> [Elem].
 
 remove_merge_translations_for_repeated_elements(D) ->
     dict:map(fun(Key, Ops) ->
@@ -364,7 +386,7 @@ compute_map_translations(Defs, Opts) ->
           [],
           Defs),
     MapFieldFmt = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
-    dict:from_list(
+    dict_from_translation_list(
       lists:append(
         [mk_map_transls(MsgName, FName, KeyType, ValueType, MapFieldFmt)
          || {{MsgName, FName}, {KeyType, ValueType}} <- MapInfos])).
@@ -413,7 +435,7 @@ compute_type_translations(Defs, Opts) ->
 
 compute_type_translations_2(Defs, TypeTranslations) ->
     Infos = compute_type_translation_infos(Defs, TypeTranslations),
-    dict:from_list(
+    dict_from_translation_list(
       [begin
            Trs = [{encode, fetch_encode_tr(Type, Translations)},
                   {decode, fetch_decode_tr(Type, Translations)},

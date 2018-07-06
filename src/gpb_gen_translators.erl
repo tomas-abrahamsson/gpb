@@ -50,21 +50,129 @@
 -import(gpb_lib, [replace_term/2, replace_tree/2, splice_trees/2]).
 
 format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, CallTemplate, Opts)
-       || {Op, CallTemplate} <- OpTransls]
+    [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
+       || {Op, CallTemplates} <- OpTransls]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_translators(AnRes, Opts)].
 
 format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, CallTemplate, Opts)
-       || {Op, CallTemplate} <- OpTransls,
+    [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
+       || {Op, CallTemplates} <- OpTransls,
           Op == merge]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_merge_translators(AnRes, Opts)].
 
-format_field_op_translator(ElemPath, Op, CallTemplate, Opts) ->
-    ArgTemplate = last_tuple_element(CallTemplate),
+format_field_op_translator(ElemPath, Op, CallTemplates, Opts) ->
     FnName = mk_tr_fn_name(ElemPath, Op),
+    {InPatterns, Body} =
+        stack_transl_calls(
+          Op, lists:unzip(
+                [format_field_op_translator(Op, CallTemplate)
+                 || CallTemplate <- CallTemplates])),
+    [inline_attr(FnName,length(InPatterns)),
+     if Op == verify ->
+             %% Dialyzer might complain that "The created fun has no
+             %% local return", for a $errorf, which is true, but also
+             %% not surprising, so shut this warning down.
+             gpb_lib:nowarn_dialyzer_attr(FnName,length(InPatterns),Opts);
+        true ->
+             ""
+     end,
+     gpb_codegen:format_fn(
+       FnName,
+       fun('$$InPatterns') ->
+               '$$Body'
+       end,
+       [splice_trees('$$InPatterns', InPatterns),
+        splice_trees('$$Body', Body)])].
+
+%% When there are several translation calls, stack them like this:
+%% Params:
+%%   Ins = list of function param patterns
+%%         for example: [(X, _, _), (X, Y, _), (X, _, _)]
+%%   Bodyies: list of calls,
+%%            for example [call1(X), call2(X, Y), call3(X, hello_world)]
+%%
+%% Assumption: Function param patterns are either single variable or underscore
+%%             Function param pattenrs that are variables all have the same
+%%             variable at each position, ie never like [(X, _), (Y, _)]
+%%
+%% Results:
+%%   Function param pattern: (X, Y, _) in the example, ie a variable
+%%     (the variable) at each position unless all Ins have underscore
+%%     at that position.
+%%   Body: In the example, the stacked body will be these three
+%%     expressions:
+%%       Res1 = call1(X),
+%%       Res2 = call2(Res1, Y),
+%%       call3(Res2, hello_world)
+%%     The decision to replace X and not say Y, with the variable of the
+%%     intermediate result is given by the out_to_in_by_op function.
+stack_transl_calls(Op, {[Ins1 | RestInPatterns], [Body1 | RestBodies]}) ->
+    MergedBody =
+        gpb_lib:do_exprs(
+          fun({I, {InPatterns, Body}}, Var) ->
+                  Pos = out_to_in_by_op(Op),
+                  Body2 = replace_inpattern(lists:nth(Pos, Ins1), Body, Var),
+                  %% New vars in body
+                  VarsToKeep = extract_vars(InPatterns ++ [Var]),
+                  unquify_free_vars(Body2, VarsToKeep, I)
+          end,
+          Body1,
+          gpb_lib:index_seq(lists:zip(RestInPatterns, RestBodies))),
+    MergedInPatterns =
+        lists:foldl(
+          fun(InPatterns, Acc) ->
+                  [case {is_underscore(InPattern), is_underscore(AccPattern)} of
+                       {true, true}   -> AccPattern;
+                       {false, true}  -> InPattern;
+                       {true, false}  -> AccPattern;
+                       {false, false} -> AccPattern  % assume same var
+                   end
+                   || {InPattern, AccPattern} <- lists:zip(InPatterns, Acc)]
+          end,
+          Ins1,
+          RestInPatterns),
+    {MergedInPatterns, MergedBody}.
+
+replace_inpattern(InPattern, Body, Var) ->
+    erl_syntax_lib:map(
+      fun(Node) ->
+              if Node == InPattern -> Var;
+                 true -> Node
+              end
+      end,
+      Body).
+
+extract_vars(Patterns) ->
+    [erl_syntax:variable_name(Pat) || Pat <- Patterns,
+                                      erl_syntax:type(Pat) == variable].
+
+unquify_free_vars(Body, VarsToKeep, I) ->
+    erl_syntax_lib:map(
+      fun(Node) ->
+              case erl_syntax:type(Node) of
+                  variable ->
+                      VarName = erl_syntax:variable_name(Node),
+                      case lists:member(VarName, VarsToKeep) of
+                          true ->
+                              Node;
+                          false ->
+                              VarName1 = lists:concat([VarName, I]),
+                              Node1 = erl_syntax:variable(VarName1),
+                              erl_syntax:copy_pos(Node, Node1)
+                      end;
+                  _ ->
+                      Node
+              end
+      end,
+      Body).
+
+is_underscore(Pattern) ->
+    erl_syntax:type(Pattern) =:= underscore.
+
+format_field_op_translator(Op, CallTemplate) ->
+    ArgTemplate = last_tuple_element(CallTemplate),
     {InArgs, OutArgs0, Relations0} =
         if Op /= verify ->
                 Ins = Outs = tr_in_args_by_op(Op),
@@ -112,23 +220,7 @@ format_field_op_translator(ElemPath, Op, CallTemplate, Opts) ->
               true ->
                    Call
            end,
-    [inline_attr(FnName,length(InArgs)),
-     if Op == verify ->
-             %% Dialyzer might complain that "The created fun has no
-             %% local return", for a $errorf, which is true, but also
-             %% not surprising, so shut this warning down.
-             gpb_lib:nowarn_dialyzer_attr(FnName,length(InArgs),Opts);
-        true ->
-             ""
-     end,
-     gpb_codegen:format_fn(
-       FnName,
-       fun('$$InPatterns') ->
-               '$$Body'
-       end,
-       [splice_trees('$$InPatterns', InPatterns),
-        replace_tree('$$Body', Body)])].
-
+    {InPatterns, Body}.
 
 last_tuple_element(Tuple) ->
     element(tuple_size(Tuple), Tuple).
@@ -440,11 +532,16 @@ compute_needed_default_translations(Translations, Defaults) ->
     dict:fold(
       fun(_ElemPath, Ops, Acc) ->
               lists:foldl(
-                fun({Op, Call}, Acc2) ->
-                        case lists:member({Op, Call}, Defaults) of
-                            true  -> sets:add_element(Op, Acc2);
-                            false -> Acc2
-                        end
+                fun({Op, Calls}, Acc2) ->
+                        lists:foldl(
+                          fun(Call, Acc3) ->
+                                  case lists:member({Op, Call}, Defaults) of
+                                      true  -> sets:add_element(Op, Acc3);
+                                      false -> Acc3
+                                  end
+                          end,
+                          Acc2,
+                          Calls)
                 end,
                 Acc,
                 Ops)
@@ -493,7 +590,7 @@ find_translation(ElemPath, Op, #anres{translations=Ts}, Default) ->
     case dict:find(ElemPath, Ts) of
         {ok, OpTransls} ->
             case lists:keyfind(Op, 1, OpTransls) of
-                {Op, _Fn} ->
+                {Op, _Calls} ->
                     mk_tr_fn_name(ElemPath, Op);
                 false ->
                     default_fn_by_op(Op, Default)
@@ -517,6 +614,9 @@ default_fn_by_op(_, undefined) ->
     id;
 default_fn_by_op(_, Fn) ->
     Fn.
+
+out_to_in_by_op(merge) -> 2;
+out_to_in_by_op(_) -> 1.
 
 default_merge_translator() -> {msg_m_overwrite,['$2','$user_data']}.
 
