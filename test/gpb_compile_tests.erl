@@ -70,6 +70,9 @@
 %% Translators for {translate_field, {<Oneof>,...}} tests
 -export([e_ipv4or6/1, d_ipv4or6/1, v_ipv4or6/1]).
 
+%% Translators for {translate_field, {<Repeated>,...} tests
+-export([id/1, v_is_set/1]).
+
 
 -ifndef(NO_HAVE_STACKTRACE_SYNTAX).
 -compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
@@ -1617,6 +1620,46 @@ d_ipv4or6({ipv6, Bytes}) when bit_size(Bytes) =:= 128 ->
 v_ipv4or6({_,_,_,_}) -> ok;
 v_ipv4or6({_,_,_,_, _,_,_,_}) -> ok;
 v_ipv4or6(X) -> error({invalid_ipv4_or_ipv6, X}).
+
+%%-
+translate_repeated_test() ->
+    %% For this test, the internal format of a repeated field is a set
+    M = compile_iolist(
+          ["message m {",
+           "  repeated uint32 f = 1;",
+           "}"],
+          [{translate_field,
+            {[m,f], [{encode, {sets,to_list, ['$1']}},
+                     {decode_init_default, {sets, new, []}},
+                     {decode_repeated_add_elem, {sets, add_element,
+                                                 ['$1', '$2']}},
+                     {decode_repeated_finalize, {?MODULE, id, ['$1']}},
+                     {merge, {sets, union, ['$1', '$2']}},
+                     {verify, {?MODULE, v_is_set, ['$1']}}]}}]),
+    S0 = sets:from_list([1,2,3,4,5]),
+    S2 = sets:from_list([4,5,6,7,8]),
+    M1 = {m,S0},
+    ok = M:verify_msg(M1),
+    B1 = M:encode_msg(M1),
+    {m,S1} = M:decode_msg(B1, m),
+    ?assertEqual(lists:sort(sets:to_list(S0)),
+                 lists:sort(sets:to_list(S1))),
+    ?assertError({gpb_type_error, _}, M:verify_msg({m, not_a_set})),
+    M2 = {m,S2},
+    B2 = M:encode_msg(M2),
+    {m,S22a} = M:decode_msg(<<B1/binary, B2/binary>>, m),
+    ?assertEqual(lists:sort(sets:to_list(sets:union(S0,S2))),
+                 lists:sort(sets:to_list(S22a))),
+    {m,S22b} = M:merge_msgs(M1, M2),
+    ?assertEqual(lists:sort(sets:to_list(sets:union(S0,S2))),
+                 lists:sort(sets:to_list(S22b))),
+    unload_code(M).
+
+v_is_set(X) ->
+    case sets:is_set(X) of
+        true  -> ok;
+        false -> error({not_a_set, X})
+    end.
 
 %% --- misc ----------
 

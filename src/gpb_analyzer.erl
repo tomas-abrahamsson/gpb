@@ -585,8 +585,8 @@ augment_field_translations(#?gpb_field{type=Type, occurrence=Occ},
                    verify];
              true ->
                   [encode,decode,merge,verify]
-          end -- [merge || IsScalar],
-    augment_2_fetch_transl(Translations, Ops, IsRepeated, IsElem);
+          end -- [merge || IsScalar, not IsRepeated],
+    augment_2_fetch_transl(Translations, Ops);
 augment_field_translations(#gpb_oneof{}, [_,_]=_Path, Translations, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     %% Operations for which we can or sometimes must have translations:
@@ -595,22 +595,14 @@ augment_field_translations(#gpb_oneof{}, [_,_]=_Path, Translations, Opts) ->
              true ->
                   [encode,decode,verify]
           end,
-    augment_2_fetch_transl(Translations, Ops, false, false).
+    augment_2_fetch_transl(Translations, Ops).
 
-augment_2_fetch_transl(Translations, Ops, IsRepeated, IsElem) ->
+augment_2_fetch_transl(Translations, Ops) ->
     [case lists:keyfind(Op, 1, Translations) of
          {Op, Transl} ->
              {Op, Transl};
          false ->
-             %% FIXME: is this right??
-             if Op == merge, IsRepeated, not IsElem ->
-                     {Op, {'erlang_++',3}};
-                true ->
-                     FnName = gpb_gen_translators:default_fn_by_op(
-                                Op, undefined),
-                     Arity = length(gpb_gen_translators:args_by_op2(Op)) + 1,
-                     {Op, {FnName, Arity}}
-             end
+             error({missing_translation_for_op,Op})
      end
      || Op <- Ops].
 

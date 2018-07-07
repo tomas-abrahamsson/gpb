@@ -243,6 +243,12 @@ field_verifier(MsgName,
                      {map,_,_} -> true;
                      _ -> false
                  end,
+    MElemPath = [MsgName, FName],
+    MTransl = gpb_gen_translators:has_translation(MElemPath, verify, AnRes),
+    HasTranslation = case MTransl of
+                         {true, _} -> true;
+                         false -> false
+                     end,
     case Occurrence of
         required ->
             %% FIXME: check especially for `undefined'
@@ -250,6 +256,31 @@ field_verifier(MsgName,
             %% specifying expected type
             ?expr('<verify-fn>'('<F>', ['<FName>' | Path], 'TrUserData'),
                   Replacements);
+        repeated when not IsMapField, HasTranslation ->
+            {true, RFVerifierFn} = MTransl,
+            RReplacements = [replace_term('<verify-fn>', RFVerifierFn)
+                             | BReplacements],
+            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                records ->
+                    ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
+                                        'TrUserData'),
+                          RReplacements);
+                #maps{unset_optional=present_undefined} ->
+                    ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
+                                        'TrUserData'),
+                          RReplacements);
+                #maps{unset_optional=omitted} ->
+                    ?expr(case 'M' of
+                              '#{<FName> := <F>}' ->
+                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                'TrUserData');
+                              _ ->
+                                  ok
+                          end,
+                          [replace_tree('#{<FName> := <F>}',
+                                        gpb_lib:map_match([{FName, FVar}])),
+                           replace_tree('M', MsgVar) | RReplacements])
+            end;
         repeated when not IsMapField ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                 records ->
@@ -311,7 +342,6 @@ field_verifier(MsgName,
                            replace_tree('M', MsgVar) | Replacements])
             end;
         repeated when IsMapField ->
-            MElemPath = [MsgName, FName],
             MFVerifierFn = gpb_gen_translators:find_translation(
                              MElemPath, verify, AnRes, FVerifierFn),
             MReplacements = [replace_term('<verify-fn>', MFVerifierFn)
