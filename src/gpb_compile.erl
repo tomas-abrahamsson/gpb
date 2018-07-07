@@ -83,6 +83,7 @@
                {module_name_suffix, string() | atom()} |
                {module_name, string() | atom()} |
                {translate_type, {gpb_field_type(), [translation()]}} |
+               {translate_field, {field_path(), [translation()]}} |
                {any_translate, [translation()]} |
                boolean_opt(epb_compatibility) |
                boolean_opt(epb_functions) |
@@ -114,8 +115,12 @@
 -type prefix_by_proto() :: [{ProtoName::atom(), Prefix::string() | atom()}].
 
 
+-type field_path() :: [atom() | []].
 -type translation() :: {encode, mod_fn_argtemplate()} |
                        {decode, mod_fn_argtemplate()} |
+                       {decode_init_default, mod_fn_argtemplate()} |
+                       {decode_repeated_add_elem, mod_fn_argtemplate()} |
+                       {decode_repeated_finalize, mod_fn_argtemplate()} |
                        {merge,  mod_fn_argtemplate()} |
                        {verify, mod_fn_argtemplate()}.
 -type fn_name() :: atom().
@@ -442,11 +447,12 @@ file(File) ->
 %%     `verify_msg' functions. If that option is not specified, the
 %%     value `undefined' is used substituted for `$user_data'.</dd>
 %%   <dt>`$op'</dt>
-%%   <dd>This will be replaced by `encode', `decode', `merge' or
-%%   `verify', depending on from which context it is actually
-%%   called. This can be useful because if the message is to be
-%%   verified on encoding (see the `verify' option), then the same
-%%   options, and thus the same user-data, are used for both
+%%   <dd>This will be replaced by `encode', `decode', `merge',
+%%   `verify', `decode_init_default', `decode_repeated_add_elem' or
+%%   `decode_repeated_finalize', depending on from which context it
+%%   is actually called. This can be useful because if the message is
+%%   to be verified on encoding (see the `verify' option), then the
+%%   same options, and thus the same user-data, are used for both
 %%   `encode_msg' and for `verify_msg'. The `$op' marker makes it
 %%   possible to tell these two call sites apart, if needed.</dd>
 %% </dl>
@@ -454,6 +460,21 @@ file(File) ->
 %% The option `{any_translate,Translations}' is retained for backwards
 %% compatibility, and expands to
 %% <code>{translate_type,{'google.protobuf.Any',Translations}}</code>.
+%%
+%% The `translate_field' option can be used to translate individual fields.
+%% The option format is `{translate_field,{FieldPath,Translations}}' where
+%% each `Translation' consists of `{Op,{Mod,Fn,ArgTemplate}}' elements,
+%% just as for `translate_type'. The `FieldPath' is a list on the
+%% following format:
+%% <ul>
+%%   <li>`[MsgName,FieldName]' for fields, generally</li>
+%%   <li>`[MsgName,FieldName,[]]' for elements of repeated fields</li>
+%%   <li>`[MsgName,OnoefFieldName,FieldName]' for elements of oneof
+%%     fields.</li>
+%% </ul>
+%% For repeated fields, the additional operations `decode_init_default',
+%% `decode_repeated_add_elem' and `decode_repeated_finalize' also exist
+%% and must all be specified.
 %%
 %% The `epb_compatibility' option is an umbrella-option for
 %% compatibility with the Erlang protobuffs library. It will expand to
@@ -663,11 +684,12 @@ while_ok(Funs) ->
                 Funs).
 
 verify_opts_translation_and_nif(Opts) ->
-    case {proplists:get_value(translate_type, Opts),
-          proplists:get_bool(nif, Opts)} of
-        {Translations, true} when Translations /= undefined ->
+    TranslType = lists:keymember(translate_type, 1, Opts),
+    TranslField = lists:keymember(translate_field, 1, Opts),
+    DoNif = proplists:get_bool(nif, Opts),
+    if (TranslType or TranslField) and DoNif ->
             {error, {invalid_options, translation, nif}};
-        _ ->
+       true ->
             ok
     end.
 
