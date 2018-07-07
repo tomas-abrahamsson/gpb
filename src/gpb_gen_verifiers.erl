@@ -48,7 +48,16 @@ format_verifiers_top_no_msgs_r() ->
      ?f("-spec verify_msg(_,_) -> no_return().~n", []),
      gpb_codegen:format_fn(
        verify_msg,
-       fun(Msg,_Opts) -> mk_type_error(not_a_known_message, Msg, []) end),
+       fun(Msg,_OptsOrMsgName) ->
+               mk_type_error(not_a_known_message, Msg, [])
+       end),
+     "\n",
+     ?f("-spec verify_msg(_,_,_) -> no_return().~n", []),
+     gpb_codegen:format_fn(
+       verify_msg,
+       fun(Msg,_MsgName,_Opts) ->
+               mk_type_error(not_a_known_message, Msg, [])
+       end),
      "\n"].
 
 format_verifiers_top_no_msgs_m() ->
@@ -66,39 +75,43 @@ format_verifiers_top_no_msgs_m() ->
 
 format_verifiers_top_with_msgs(Defs, Opts) ->
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
-    MsgNameVars = case Mapping of
-                      records -> [];
-                      maps    -> [?expr(MsgName)]
-                  end,
-    [gpb_codegen:format_fn(
-       verify_msg,
-       fun(Msg, '<MsgName>') -> call_self(Msg, '<MsgName>', []) end,
-       [splice_trees('<MsgName>', MsgNameVars)]),
+    [[gpb_codegen:format_fn(
+        verify_msg,
+        fun(Msg) when tuple_size(Msg) >= 1 ->
+                verify_msg(Msg, element(1, Msg), []);
+           (X) ->
+                mk_type_error(not_a_known_message, X, [])
+        end) || Mapping == records],
      gpb_codegen:format_fn(
        verify_msg,
-       fun(Msg, '<MsgName>', Opts) ->
+       fun(Msg, MsgName) when is_atom(MsgName) ->
+               call_self(Msg, MsgName, []);
+          ('Msg', Opts) when tuple_size('Msg') >= 1 ->
+               call_self('Msg', element(1,'Msg'), Opts);
+          ('X', _Opts) ->
+               mk_type_error(not_a_known_message, 'X', [])
+       end,
+       [repeat_clauses('Msg', [[replace_tree('Msg', ?expr(Msg))]
+                               || Mapping == records]),
+        repeat_clauses('X', [[replace_tree('X', ?expr(X))]
+                             || Mapping == records])]),
+     gpb_codegen:format_fn(
+       verify_msg,
+       fun(Msg, MsgName, Opts) ->
                TrUserData = proplists:get_value(user_data, Opts),
-               case '<MsgOrMsgName>' of
-                   '<msg-match>' -> '<verify-msg>'(Msg, ['<MsgName>'],
-                                                   TrUserData);
-                   _ -> mk_type_error(not_a_known_message, Msg, [])
+               case MsgName of
+                   '<msg-name-match>' ->
+                       '<verify-msg>'(Msg, [MsgName], TrUserData);
+                   _ ->
+                       mk_type_error(not_a_known_message, Msg, [])
                end
        end,
        [repeat_clauses(
-          '<msg-match>',
-          [[replace_tree('<msg-match>',
-                         case Mapping of
-                             records -> gpb_lib:record_match(MsgName, []);
-                             maps    -> erl_syntax:atom(MsgName)
-                         end),
+          '<msg-name-match>',
+          [[replace_term('<msg-name-match>', MsgName),
             replace_term('<verify-msg>', gpb_lib:mk_fn(v_msg_, MsgName)),
             replace_term('<MsgName>', MsgName)]
-           || {{msg, MsgName}, _MsgDef} <- Defs]),
-        replace_tree('<MsgOrMsgName>', case Mapping of
-                                           records -> ?expr(Msg);
-                                           maps    -> ?expr(MsgName)
-                                       end),
-        splice_trees('<MsgName>', MsgNameVars)])].
+           || {{msg, MsgName}, _MsgDef} <- Defs])])].
 
 format_verifiers(Defs, AnRes, Opts) ->
     [format_msg_verifiers(Defs, AnRes, Opts),
@@ -158,10 +171,6 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                         replace_tree('M', MsgVar)])]
         end,
 
-    NeedsMatchOther = case gpb_lib:get_records_or_maps_by_opts(Opts) of
-                          records -> can_occur_as_sub_msg(MsgName, AnRes);
-                          maps    -> true
-                      end,
     FnName = gpb_lib:mk_fn(v_msg_, MsgName),
     TrUserDataVar = ?expr(TrUserData),
     [gpb_lib:nowarn_unused_function(FnName, 3),
@@ -176,7 +185,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                mk_type_error(
                  {missing_fields, 'NonOptKeys'--maps:keys('<M>'), '<MsgName>'},
                  '<M>', Path);
-          ('<X>', Path, _TrUserData) ->
+          (X, Path, _TrUserData) ->
                mk_type_error({expected_msg,'<MsgName>'}, X, Path)
        end,
        [replace_tree('<msg-match>', FieldMatching),
@@ -194,10 +203,6 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                      AnRes, Opts)),
         splice_trees('<maybe-verify-no-extraneous-fields>',
                      ExtraneousFieldsChecks),
-        repeat_clauses('<X>', case NeedsMatchOther of
-                                  true  -> [[replace_tree('<X>', ?expr(X))]];
-                                  false -> [] %% omit the else clause
-                              end),
         repeat_clauses('<M>',
                        case gpb_lib:get_records_or_maps_by_opts(Opts) of
                            records ->
@@ -602,10 +607,6 @@ field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
                 | Trs1]
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
-
-can_occur_as_sub_msg(MsgName, #anres{used_types=UsedTypes}) ->
-    sets:is_element({msg,MsgName}, UsedTypes)
-        orelse sets:is_element({group,MsgName}, UsedTypes).
 
 format_enum_verifiers(Defs, #anres{used_types=UsedTypes}, Opts) ->
     [format_enum_verifier(EnumName, Def, Opts)

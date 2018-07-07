@@ -1942,8 +1942,10 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        end,
        "\n",
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-export([encode_msg/1, encode_msg/2]).~n");
-           maps    -> ?f("-export([encode_msg/2, encode_msg/3]).~n")
+           records ->
+               ?f("-export([encode_msg/1, encode_msg/2, encode_msg/3]).~n");
+           maps ->
+               ?f("-export([encode_msg/2, encode_msg/3]).~n")
        end,
        [[?f("-export([encode/1]). %% epb compatibility~n"),
          [?f("-export([~p/1]).~n", [gpb_lib:mk_fn(encode_, MsgName)])
@@ -1952,8 +1954,10 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
         || gpb_lib:get_epb_functions_by_opts(Opts)],
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-export([merge_msgs/2, merge_msgs/3]).~n");
-           maps    -> ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
+           records ->
+               ?f("-export([merge_msgs/2, merge_msgs/3, merge_msgs/4]).~n");
+           maps ->
+               ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
        end,
        [[?f("-export([decode/2]). %% epb compatibility~n"),
          [?f("-export([~p/1]).~n", [gpb_lib:mk_fn(decode_, MsgName)])
@@ -1961,8 +1965,10 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
          "\n"]
         || gpb_lib:get_epb_functions_by_opts(Opts)],
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-export([verify_msg/1, verify_msg/2]).~n");
-           maps    -> ?f("-export([verify_msg/2, verify_msg/3]).~n")
+           records ->
+               ?f("-export([verify_msg/1, verify_msg/2, verify_msg/3]).~n");
+           maps ->
+               ?f("-export([verify_msg/2, verify_msg/3]).~n")
        end,
        ?f("-export([get_msg_defs/0]).~n"),
        ?f("-export([get_msg_names/0]).~n"),

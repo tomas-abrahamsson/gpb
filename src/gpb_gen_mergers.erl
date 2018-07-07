@@ -55,7 +55,12 @@ format_msg_merge_code_no_msgs(Opts) ->
              "-spec merge_msgs(_, _, _) -> no_return().\n",
              gpb_codegen:format_fn(
                merge_msgs,
-               fun(_Prev, _New, _Opts) ->
+               fun(_Prev, _New, _MsgNameOrOpts) ->
+                       erlang:error({gpb_error, no_messages})
+               end),
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(_Prev, _New, _MsgName, _Opts) ->
                        erlang:error({gpb_error, no_messages})
                end)];
         maps ->
@@ -96,49 +101,35 @@ is_repeated_group(GroupName, #anres{group_occurrences=D}) ->
     dict:fetch(GroupName, D) == repeated.
 
 format_merge_msgs_top_level(MsgNames, Opts) ->
-    case gpb_lib:get_records_or_maps_by_opts(Opts) of
-        records ->
-            [gpb_codegen:format_fn(
-               merge_msgs,
-               fun(Prev, New) ->
-                       merge_msgs(Prev, New, [])
-               end),
-             gpb_codegen:format_fn(
-               merge_msgs,
-               fun(Prev, New, Opts) when element(1, Prev) =:= element(1, New) ->
-                       TrUserData = proplists:get_value(user_data, Opts),
-                       case Prev of
-                           '<msg-type>' -> '<merge-msg>'(Prev, New, TrUserData)
-                       end
-               end,
-               [repeat_clauses(
-                  '<msg-type>',
-                  [[replace_tree('<msg-type>',
-                                 gpb_lib:record_match(MsgName, [])),
-                    replace_term('<merge-msg>',
-                                 gpb_lib:mk_fn(merge_msg_, MsgName))]
-                   || MsgName <- MsgNames])])];
-        maps ->
-            [gpb_codegen:format_fn(
-               merge_msgs,
-               fun(Prev, New, MsgName) ->
-                       merge_msgs(Prev, New, MsgName, [])
-               end),
-             gpb_codegen:format_fn(
-               merge_msgs,
-               fun(Prev, New, MsgName, Opts) ->
-                       TrUserData = proplists:get_value(user_data, Opts),
-                       case MsgName of
-                           '<msg-type>' -> '<merge-msg>'(Prev, New, TrUserData)
-                       end
-               end,
-               [repeat_clauses(
-                  '<msg-type>',
-                  [[replace_tree('<msg-type>', erl_syntax:atom(MsgName)),
-                    replace_term('<merge-msg>',
-                                 gpb_lib:mk_fn(merge_msg_, MsgName))]
-                   || MsgName <- MsgNames])])]
-    end.
+    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    [[gpb_codegen:format_fn(
+       merge_msgs,
+       fun(Prev, New) when element(1,Prev) =:= element(1,New) ->
+               merge_msgs(Prev, New, element(1,Prev), [])
+       end) || Mapping == records],
+     gpb_codegen:format_fn(
+       merge_msgs,
+       fun(Prev, New, MsgName) when is_atom(MsgName) ->
+               merge_msgs(Prev, New, MsgName, []);
+          ('Prev', New, Opts) when element(1,'Prev') =:= element(1,New),
+                                   is_list(Opts) ->
+               merge_msgs(Prev, New, element(1,'Prev'), Opts)
+       end,
+       [repeat_clauses('Prev', [[replace_tree('Prev', ?expr(Prev))]
+                                || Mapping == records])]),
+     gpb_codegen:format_fn(
+       merge_msgs,
+       fun(Prev, New, MsgName, Opts) ->
+               TrUserData = proplists:get_value(user_data, Opts),
+               case MsgName of
+                   '<msg-name>' -> '<merge-msg>'(Prev, New, TrUserData)
+               end
+       end,
+       [repeat_clauses(
+          '<msg-name>',
+          [[replace_term('<msg-name>', MsgName),
+            replace_term('<merge-msg>', gpb_lib:mk_fn(merge_msg_, MsgName))]
+           || MsgName <- MsgNames])])].
 
 format_msg_merger(MsgName, [], _AnRes, _Opts) ->
     gpb_codegen:format_fn(

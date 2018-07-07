@@ -44,28 +44,28 @@ format_encoders_top_function(Defs, Opts) ->
 
 format_encoders_top_function_no_msgs(Opts) ->
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
-    MsgNameVars = case Mapping of
-                      records -> [];
-                      maps    -> [?expr(_MsgName)]
-                  end,
-    SpecExtraArgs = case Mapping of
-                        records -> "";
-                        maps    -> ",_"
-                    end,
-    [?f("-spec encode_msg(_~s) -> no_return().~n", [SpecExtraArgs]),
+    [[[?f("-spec encode_msg(_) -> no_return().~n", []),
+       gpb_codegen:format_fn(
+         encode_msg,
+         fun(Msg) ->
+                 encode_msg(Msg, dummy_name, [])
+         end)] || Mapping == records],
+     ?f("-spec encode_msg(_,_) -> no_return().~n", []),
      gpb_codegen:format_fn(
        encode_msg,
-       fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
-       [splice_trees('<MsgName>', MsgNameVars)]),
-     "\n",
-     ?f("-spec encode_msg(_,_~s) -> no_return().~n", [SpecExtraArgs]),
-     gpb_codegen:format_fn(
-       encode_msg,
-       fun(_Msg, '<MsgName>', _Opts) ->
-               erlang:error({gpb_error, no_messages})
+       fun(Msg, MsgName) when is_atom(MsgName) ->
+               encode_msg(Msg, MsgName, []);
+          ('Msg', Opts) when tuple_size('Msg') >= 1, is_list(Opts) ->
+               encode_msg('Msg', element(1,'Msg'), [])
        end,
-       [splice_trees('<MsgName>', MsgNameVars)]),
-     "\n",
+       [repeat_clauses('Msg', [[replace_tree('Msg', ?expr(Msg))]
+                               || Mapping == records])]),
+     ?f("-spec encode_msg(_,_,_) -> no_return().~n", []),
+     gpb_codegen:format_fn(
+       encode_msg,
+       fun(_Msg, _MsgName, _Opts) ->
+               erlang:error({gpb_error, no_messages})
+       end),
      [[?f("%% epb compatibility\n"),
        ?f("-spec encode(_) -> no_return().\n"),
        gpb_codegen:format_fn(
@@ -77,42 +77,47 @@ format_encoders_top_function_msgs(Defs, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
     MsgNames = gpb_lib:msg_names(Defs),
-    {MsgNameVars, MsgType, SpecExtraArgs} =
+    MsgType =
         case Mapping of
             records ->
-                {[],
-                 gpb_lib:or_join([?f("#~p{}", [M]) || M <- MsgNames]),
-                 ""};
+                gpb_lib:or_join([?f("#~p{}", [M]) || M <- MsgNames]);
             maps ->
-                MsgNameType = gpb_lib:or_join(
-                                [?f("~p", [M]) || M <- MsgNames]),
-                MsgMapType =
-                    case gpb_lib:get_type_specs_by_opts(Opts) of
-                        false ->
-                            "map()";
-                        true ->
-                            gpb_lib:or_join([?f("~p()", [M]) || M <- MsgNames])
-                    end,
-                {[?expr(MsgName)],
-                 MsgMapType,
-                 "," ++ MsgNameType}
-    end,
+                case gpb_lib:get_type_specs_by_opts(Opts) of
+                    false ->
+                        "map()";
+                    true ->
+                        gpb_lib:or_join([?f("~p()", [M]) || M <- MsgNames])
+                end
+        end,
+    OrList = case Mapping of
+                 records -> " | list()";
+                 maps -> ""
+             end,
     DoNif    = proplists:get_bool(nif, Opts),
-    [?f("-spec encode_msg(~s~s) -> binary().~n", [MsgType, SpecExtraArgs]),
+    [[[?f("-spec encode_msg(~s) -> binary().~n", [MsgType]),
+       gpb_codegen:format_fn(
+         encode_msg,
+         fun(Msg) when tuple_size(Msg) >= 1 ->
+                 encode_msg(Msg, element(1, Msg), [])
+         end)] || Mapping == records],
+     ?f("-spec encode_msg(~s, atom()~s) -> binary().~n", [MsgType, OrList]),
      gpb_codegen:format_fn(
        encode_msg,
-       fun(Msg, '<MsgName>') -> encode_msg(Msg, '<MsgName>', []) end,
-       [splice_trees('<MsgName>', MsgNameVars)]),
-     "\n",
-     ?f("-spec encode_msg(~s~s, list()) -> binary().~n",
-        [MsgType, SpecExtraArgs]),
+       fun(Msg, MsgName) when is_atom(MsgName) ->
+               encode_msg(Msg, MsgName, []);
+          ('Msg', Opts) when tuple_size('Msg') >= 1, is_list(Opts) ->
+               encode_msg('Msg', element(1,'Msg'), Opts)
+       end,
+       [repeat_clauses('Msg', [[replace_tree('Msg', ?expr(Msg))]
+                               || Mapping == records])]),
+     ?f("-spec encode_msg(~s, atom(), list()) -> binary().~n", [MsgType]),
      gpb_codegen:format_fn(
        encode_msg,
-       fun(Msg, '<MsgName>', '<Opts>') ->
+       fun(Msg, MsgName, '<Opts>') ->
                '<possibly-verify-msg>',
                'TrUserData = proplists:get_value(user_data, Opts)',
-               case '<MsgOrMsgName>' of
-                   '<msg-match>' -> 'encode'(Msg, 'TrUserData')
+               case MsgName of
+                   '<msg-name-match>' -> 'encode'(Msg, 'TrUserData')
                end
        end,
        [replace_tree('<Opts>', case {DoNif, Verify} of
@@ -125,12 +130,11 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                      case Verify of
                          optionally ->
                              [?expr(case proplists:get_bool(verify, Opts) of
-                                        true  -> verify_msg(Msg, '<MsgName>',
-                                                            Opts);
+                                        true  -> verify_msg(Msg, MsgName, Opts);
                                         false -> ok
                                     end)];
                          always ->
-                             [?expr(verify_msg(Msg, '<MsgName>', Opts))];
+                             [?expr(verify_msg(Msg, MsgName, Opts))];
                          never ->
                              []
                      end),
@@ -139,24 +143,13 @@ format_encoders_top_function_msgs(Defs, Opts) ->
           if DoNif -> [];
              true  -> [?expr(TrUserData = proplists:get_value(user_data, Opts))]
           end),
-        repeat_clauses('<msg-match>',
-                       [[replace_tree(
-                           '<msg-match>',
-                           case Mapping of
-                               records -> gpb_lib:record_match(MsgName, []);
-                               maps    -> erl_syntax:atom(MsgName)
-                           end),
+        repeat_clauses('<msg-name-match>',
+                       [[replace_term('<msg-name-match>', MsgName),
                          replace_term('encode', gpb_lib:mk_fn(e_msg_, MsgName))]
                         || {{msg,MsgName}, _Fields} <- Defs]),
-        replace_tree('<MsgOrMsgName>', case Mapping of
-                                           records -> ?expr(Msg);
-                                           maps    -> ?expr(MsgName)
-                                       end),
-        splice_trees('<MsgName>', MsgNameVars),
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]
                                    end)]),
-     "\n",
      [[?f("%% epb compatibility\n"),
        ?f("-spec encode(_) -> binary().~n"),
        gpb_codegen:format_fn(
