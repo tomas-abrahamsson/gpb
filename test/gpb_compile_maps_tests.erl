@@ -32,6 +32,8 @@ no_maps_tests__test() ->
 
 -else. %% NO_HAVE_MAPS
 
+-export([dict_to_map/1, map_to_dict/1]).
+
 -import(gpb_compile_tests, [compile_iolist/2]).
 -import(gpb_compile_tests, [compile_to_string_get_hrl/2]).
 -import(gpb_compile_tests, [compile_erl_iolist/1]).
@@ -495,6 +497,33 @@ defaults_for_proto3_fields_test() ->
               "new_m_msg() -> #m{}.\n"]),
     {m, #{}} = P3M:new_m_msg(),
     unload_code(P3M).
+
+%% -- translations
+%%-
+translate_maptype_test() ->
+    %% For this tests, the internal format of the map<_,_> is a dict()
+    M = compile_iolist(
+          ["message m {",
+           "  map<int32,string> m = 1;"
+           "}"],
+          [maps,
+           {translate_type,
+            {{map,int32,string},
+             [{encode,{?MODULE, dict_to_map, ['$1']}},
+              {decode,{?MODULE, map_to_dict, ['$1']}},
+              {verify,{gpb_compile_tests, is_dict, ['$1']}}]}}]),
+    D0 = dict:from_list([{1,"one"},{2,"two"}]),
+    M1 = #{m => D0},
+    ok = M:verify_msg(M1, m),
+    B1 = M:encode_msg(M1, m),
+    #{m := D1} = M:decode_msg(B1, m),
+    ?assertEqual(lists:sort(dict:to_list(D0)),
+                 lists:sort(dict:to_list(D1))),
+    ?assertError({gpb_type_error, _}, M:verify_msg(#{m => not_a_dict}, m)),
+    unload_code(M).
+
+dict_to_map(D) -> maps:from_list(dict:to_list(D)).
+map_to_dict(M) -> dict:from_list(maps:to_list(M)).
 
 %% --- target versions ----------------------------------
 

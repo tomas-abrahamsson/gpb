@@ -233,11 +233,12 @@ field_verifier(MsgName,
     ElemPath = gpb_gen_translators:mk_elempath_elem(MsgName, Field, false),
     FVerifierFn2 = gpb_gen_translators:find_translation(ElemPath, verify,
                                                         AnRes, FVerifierFn),
-    Replacements = [replace_term('<verify-fn>', FVerifierFn2),
-                    replace_tree('<F>', FVar),
-                    replace_term('<FName>', FName),
-                    replace_term('<Type>', Type),
-                    replace_tree('TrUserData', TrUserDataVar)],
+    BReplacements = [replace_tree('<F>', FVar),
+                     replace_term('<FName>', FName),
+                     replace_term('<Type>', Type),
+                     replace_tree('TrUserData', TrUserDataVar)],
+    Replacements = [replace_term('<verify-fn>', FVerifierFn2)
+                    | BReplacements],
     IsMapField = case Type of
                      {map,_,_} -> true;
                      _ -> false
@@ -310,15 +311,20 @@ field_verifier(MsgName,
                            replace_tree('M', MsgVar) | Replacements])
             end;
         repeated when IsMapField ->
+            MElemPath = [MsgName, FName],
+            MFVerifierFn = gpb_gen_translators:find_translation(
+                             MElemPath, verify, AnRes, FVerifierFn),
+            MReplacements = [replace_term('<verify-fn>', MFVerifierFn)
+                             | BReplacements],
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                 records ->
                     ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
                                         'TrUserData'),
-                          Replacements);
+                          MReplacements);
                 #maps{unset_optional=present_undefined} ->
                     ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
                                         'TrUserData'),
-                          Replacements);
+                          MReplacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
                               '#{<FName> := <F>}' ->
@@ -329,7 +335,7 @@ field_verifier(MsgName,
                           end,
                           [replace_tree('#{<FName> := <F>}',
                                         gpb_lib:map_match([{FName, FVar}])),
-                           replace_tree('M', MsgVar) | Replacements])
+                           replace_tree('M', MsgVar) | MReplacements])
             end;
         optional ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of

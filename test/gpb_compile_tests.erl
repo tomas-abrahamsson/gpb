@@ -64,6 +64,9 @@
 %% Translators for {translate_type, {<Scalar>,...}} tests
 -export([e_astt/1, d_astt/1, v_astt/1]).
 
+%% Translators for {translate_type, {{map,_,_},...}} test
+-export([is_dict/1]).
+
 
 -ifndef(NO_HAVE_STACKTRACE_SYNTAX).
 -compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
@@ -1536,6 +1539,33 @@ string_to_value(S) ->
 
 value_to_string(V) ->
     lists:flatten(io_lib:format("~p", [V])).
+
+%%-
+translate_maptype_test() ->
+    %% For this tests, the internal format of the map<_,_> is a dict()
+    M = compile_iolist(
+          ["message m {",
+           "  map<int32,string> m = 1;"
+           "}"],
+          [{translate_type,
+            {{map,int32,string},
+             [{encode,{dict,to_list, ['$1']}},
+              {decode,{dict,from_list, ['$1']}},
+              {verify,{?MODULE,is_dict, ['$1']}}]}}]),
+    D0 = dict:from_list([{1,"one"},{2,"two"}]),
+    M1 = {m,D0},
+    ok = M:verify_msg(M1),
+    B1 = M:encode_msg(M1),
+    {m,D1} = M:decode_msg(B1, m),
+    ?assertEqual(lists:sort(dict:to_list(D0)),
+                 lists:sort(dict:to_list(D1))),
+    ?assertError({gpb_type_error, _}, M:verify_msg({m, not_a_dict})),
+    unload_code(M).
+
+is_dict(D) ->
+    try dict:to_list(D), ok
+    catch _:_ -> error({not_a_dict,D})
+    end.
 
 %% --- misc ----------
 

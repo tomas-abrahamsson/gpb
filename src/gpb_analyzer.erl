@@ -437,8 +437,15 @@ compute_type_translations_2(Defs, TypeTranslations) ->
     Infos = compute_type_translation_infos(Defs, TypeTranslations),
     dict_from_translation_list(
       [begin
+           {Decode, Fetch_Decode_Tr} =
+               case Type of
+                   {map,_,_} ->
+                       {decode_repeated_finalize, fun fetch_decode_r_f_tr/2};
+                   _ ->
+                       {decode, fun fetch_decode_tr/2}
+               end,
            Trs = [{encode, fetch_encode_tr(Type, Translations)},
-                  {decode, fetch_decode_tr(Type, Translations)},
+                  {Decode, Fetch_Decode_Tr(Type, Translations)},
                   {verify, fetch_verify_tr(Type, Translations)}
                   | [{merge, fetch_merge_tr(Type, Translations)}
                      || not is_repeated_elem_path(Path),
@@ -484,24 +491,51 @@ compute_type_translation_infos(Defs, TypeTranslations) ->
                       Acc
               end;
          (_MsgOrGroup,
-          _MsgName, #?gpb_field{type={map,KeyType,ValueType}},
+          MsgName, #?gpb_field{name=FName, type={map,KeyType,ValueType}=FType},
           _Oneof,
           Acc) ->
+              %% check for translation of the map<_,_> itself
+              Path = [MsgName,FName],
+              MapTransl = case lists:keyfind(FType, 1, TypeTranslations) of
+                              {FType, Translations} ->
+                                  Ts2 = map_translations_to_internal(
+                                          Translations),
+                                  [{FType, Path, Ts2}];
+                              false ->
+                                  []
+                          end,
               MsgName2 = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
               Fields2 = gpb:map_item_pseudo_fields(KeyType, ValueType),
               Defs2 = [{{msg, MsgName2}, Fields2}],
-              compute_type_translation_infos(Defs2, TypeTranslations) ++ Acc;
+              MapTransl
+                  ++ compute_type_translation_infos(Defs2, TypeTranslations)
+                  ++ Acc;
          (_Type, _MsgName, _Field, _Oneof, Acc) ->
               Acc
       end,
       [],
       Defs).
 
+map_translations_to_internal(Translations) ->
+    %% Under the hood, a map<_,_> is a repeated, and it is implemented
+    %% using translations, so adapt type translations accordingly
+    [case Op of
+         encode -> {encode, Tr};
+         decode -> {decode_repeated_finalize, Tr};
+         merge  -> {merge, Tr};
+         verify -> {verify, Tr};
+         _      -> {Op, Tr}
+     end
+     || {Op, Tr} <- Translations].
+
 fetch_encode_tr(Type, Translations) ->
     fetch_op_translation(encode, Translations, Type).
 
 fetch_decode_tr(Type, Translations) ->
     fetch_op_translation(decode, Translations, Type).
+
+fetch_decode_r_f_tr(Type, Translations) ->
+    fetch_op_translation(decode_repeated_finalize, Translations, Type).
 
 fetch_merge_tr(Type, Translations) ->
     Default = gpb_gen_translators:default_merge_translator(),
