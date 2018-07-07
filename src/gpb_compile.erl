@@ -398,8 +398,7 @@ file(File) ->
 %% the `module_name_prefix' and `module_name_suffix' options.
 %%
 %% The `translate_type' option can be used to provide packer and unpacker
-%% functions for message fields of a certain type. For now message types,
-%% such as `{msg,MsgName}', can only be translated as submessages.
+%% functions for message fields of a certain type.
 %% For messages, the `MsgName' refers to a name <em>after</em>
 %% renaming has taken place.
 %% The merge translator is optional, and is called either via the `merge_msgs'
@@ -467,6 +466,7 @@ file(File) ->
 %% just as for `translate_type'. The `FieldPath' is a list on the
 %% following format:
 %% <ul>
+%%   <li>`[MsgName]' for the message itself on the top-level</li>
 %%   <li>`[MsgName,FieldName]' for fields, generally</li>
 %%   <li>`[MsgName,FieldName,[]]' for elements of repeated fields</li>
 %%   <li>`[MsgName,OnoefFieldName,FieldName]' for elements of oneof
@@ -1071,8 +1071,10 @@ c() ->
 %%       items. Additionally for this `-translate_field' option, these exist:
 %%       <dl>
 %%         <dt>`field=Path'</dt>
-%%         <dd>This indicates the element to translate as follows:
+%%         <dd>The `Path' indicates the element to translate as follows:
 %%           <ul>
+%%             <li>`MsgName' for the message itself. (This is actually
+%%                  equivalent to `-translate_type type=msg:MsgName,...')</li>
 %%             <li>`MsgName.FieldName' for fields generally</li>
 %%             <li>`MsgName.OneofName.FieldName' for oneof fields</li>
 %%             <li>`MsgName.FieldName.[]' for elements of repeated fields</li>
@@ -1375,7 +1377,8 @@ opt_specs() ->
      {"translate_field", fun opt_translate_field/2, translate_field,
       " field=Field,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
       "       For the specified field, call Mod:Fn. Specify Field as:\n"
-      "       - MsgName.FieldName for fields generally,\n"
+      "       - MsgName for the message itself\n"
+      "       - MsgName.FieldName for fields generally\n"
       "       - MsgName.OneofName.FieldName for oneof fields\n"
       "       - MsgName.FieldName.[] for elements of repeated fields.\n"
       "       For repeated fields, ie for the field itself, not its elements,\n"
@@ -1571,6 +1574,7 @@ opt_to_comma_with_tag(S, Tag) ->
 opt_translate_elempath(S) ->
     {S2, Rest} = read_s(S, $,, ""),
     case gpb_lib:string_lexemes(S2, ".") of
+        [Msg]              -> {[s2a(Msg)], Rest};
         [Msg,Field]        -> {[s2a(Msg),s2a(Field)], Rest};
         [Msg,Field,"[]"]   -> {[s2a(Msg),s2a(Field),[]], Rest};
         [Msg,Field,OFName] -> {[s2a(Msg),s2a(Field),s2a(OFName)], Rest};
@@ -2035,7 +2039,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        %% to about 10000 msgs/s for a set of mixed message samples.
        %% f("-compile(inline).~n"),
        %%
-       gpb_gen_encoders:format_encoders_top_function(Defs, Opts),
+       gpb_gen_encoders:format_encoders_top_function(Defs, AnRes, Opts),
        "\n",
        if DoNif ->
                ?f("~s~n", [gpb_gen_nif:format_nif_encoder_error_wrappers(
@@ -2048,7 +2052,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
                 gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts)]
        end,
        "\n",
-       gpb_gen_decoders:format_decoders_top_function(Defs, Opts),
+       gpb_gen_decoders:format_decoders_top_function(Defs, AnRes, Opts),
        "\n\n",
        if DoNif ->
                [gpb_gen_nif:format_nif_decoder_error_wrappers(Defs,
@@ -2061,7 +2065,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        "\n",
        gpb_gen_mergers:format_msg_merge_code(Defs, AnRes, Opts),
        "\n",
-       gpb_gen_verifiers:format_verifiers_top_function(Defs, Opts),
+       gpb_gen_verifiers:format_verifiers_top_function(Defs, AnRes, Opts),
        "\n",
        gpb_gen_verifiers:format_verifiers(Defs, AnRes, Opts),
        "\n",

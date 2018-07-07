@@ -428,6 +428,7 @@ compute_type_translations(Defs, Opts) ->
                     end,
                     [],
                     Opts),
+    %% Traverse all message definitions only when there are translations
     if TypeTranslations == [] ->
             dict:new();
        true ->
@@ -436,6 +437,7 @@ compute_type_translations(Defs, Opts) ->
 
 compute_type_translations_2(Defs, TypeTranslations) ->
     Infos = compute_type_translation_infos(Defs, TypeTranslations),
+    Infos2 = add_type_translation_infos_for_msgs(TypeTranslations, Infos),
     dict_from_translation_list(
       [begin
            Decode = case Type of
@@ -451,7 +453,7 @@ compute_type_translations_2(Defs, TypeTranslations) ->
                         not is_scalar_type(Type)]],
            {Path, Trs}
        end
-       || {Type, Path, Translations} <- Infos]).
+       || {Type, Path, Translations} <- Infos2]).
 
 is_scalar_type(int32)    -> true;
 is_scalar_type(int64)    -> true;
@@ -527,11 +529,26 @@ map_translations_to_internal(Translations) ->
      end
      || {Op, Tr} <- Translations].
 
+add_type_translation_infos_for_msgs(TypeTranslations, Infos) ->
+    lists:foldl(
+      fun({{msg,MsgName}=Type, Translations}, Acc) ->
+              Path = [MsgName],
+              [{Type, Path, Translations} | Acc];
+         (_OtherTransl, Acc) ->
+              Acc
+      end,
+      Infos,
+      TypeTranslations).
+
 compute_field_translations(Defs, Opts) ->
     dict_from_translation_list(
-      [{Path, augment_field_translations(Field, Path, Translations, Opts)}
-       || {translate_field, {Path, Translations}} <- Opts,
-          Field <- find_field_by_path(Defs, Path)]).
+      lists:append(
+        [[{Path, augment_field_translations(Field, Path, Translations, Opts)}
+          || {translate_field, {[_,_|_]=Path, Translations}} <- Opts,
+             Field <- find_field_by_path(Defs, Path)],
+         [{Path, augment_msg_translations(MsgName, Translations)}
+          || {translate_field, {[MsgName]=Path, Translations}} <- Opts,
+             lists:keymember({msg,MsgName}, 1, Defs)]])).
 
 find_field_by_path(Defs, [MsgName,FieldName|RestPath]) ->
     case find_2_msg(Defs, MsgName) of
@@ -597,6 +614,10 @@ augment_field_translations(#gpb_oneof{}, [_,_]=Path, Translations, Opts) ->
 
 augment_2_fetch_transl(Ops, Translations, Ctxt) ->
     [{Op, fetch_op_transl(Op, Translations, Ctxt)} || Op <- Ops].
+
+augment_msg_translations(MagName, Translations) ->
+    Ops = [encode,decode,merge,verify],
+    augment_2_fetch_transl(Ops, Translations, {msg,[MagName]}).
 
 fetch_op_transl(Op, Translations, Ctxt) ->
     Default = fetch_default_transl(Op),

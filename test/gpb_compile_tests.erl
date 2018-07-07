@@ -73,6 +73,9 @@
 %% Translators for {translate_field, {<Repeated>,...} tests
 -export([id/1, v_is_set/1]).
 
+%% Translators for top-level message tests
+-export([e_value_to_msg/2, d_msg_to_value/2, v_value/2]).
+
 
 -ifndef(NO_HAVE_STACKTRACE_SYNTAX).
 -compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
@@ -1660,6 +1663,61 @@ v_is_set(X) ->
         true  -> ok;
         false -> error({not_a_set, X})
     end.
+
+%%-
+translate_messages_on_toplevel_test() ->
+    %% For this test, the internal format of a message, m1, is an integer.
+    %% and a string for f2.
+    M = compile_iolist(
+          ["message m1 {",
+           "  required uint32 f = 1;",
+           "}",
+           "message m2 {",
+           "  required string f = 1;",
+           "}"],
+          [{translate_type,
+            {{msg,m1}, [{encode, {?MODULE, e_value_to_msg, ['$1', m1]}},
+                        {decode, {?MODULE, d_msg_to_value, ['$1', m1]}},
+                        {verify, {?MODULE, v_value, ['$1', integer]}},
+                        {merge,  {erlang, '+', ['$1', '$2']}}]}},
+           {translate_field,
+            {[m2], [{encode, {?MODULE, e_value_to_msg, ['$1', m2]}},
+                    {decode, {?MODULE, d_msg_to_value, ['$1', m2]}},
+                    {verify, {?MODULE, v_value, ['$1', string]}},
+                    {merge,  {erlang, '++', ['$1', '$2']}}]}}]),
+    I1 = 28746,
+    ok = M:verify_msg(I1, m1),
+    B1 = M:encode_msg(I1, m1),
+    I1 = M:decode_msg(B1, m1),
+    ?assertEqual(I1 * 2, M:merge_msgs(I1, I1, m1)),
+    ?assertError({gpb_type_error, _}, M:verify_msg(xyz, m1)),
+    S2 = "abc",
+    B2 = M:encode_msg(S2, m2),
+    S2 = M:decode_msg(B2, m2),
+    ?assertEqual(S2 ++ "def", M:merge_msgs(S2, "def", m2)),
+    ?assertError({gpb_type_error, _}, M:verify_msg(xyzw, m2)),
+    unload_code(M).
+
+e_value_to_msg(Value, MsgName) -> {MsgName, Value}.
+
+d_msg_to_value({MsgName, Value}, MsgName) -> Value.
+
+v_value(Value, integer) when is_integer(Value) -> ok;
+v_value(Value, string) when is_list(Value) -> ok;
+v_value(X, Expected) -> error({bad_value, Expected, X}).
+
+verify_is_optional_for_translate_toplevel_messages_test() ->
+    M = compile_iolist(
+          ["message m1 {",
+           "  required uint32 f = 1;",
+           "}"],
+          [{translate_field,
+            {[m1], [{encode, {?MODULE, e_value_to_msg, ['$1', m2]}},
+                    {decode, {?MODULE, d_msg_to_value, ['$1', m2]}},
+                    {merge,  {erlang, '++', ['$1', '$2']}}]}}]),
+    ok = M:verify_msg(9348, m1),
+    ok = M:verify_msg(bad_int_ok_since_no_verify_specified, m1),
+    unload_code(M).
 
 %% --- misc ----------
 
@@ -3631,6 +3689,11 @@ field_translation_options_test() ->
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-translate_field", "field=m.c.a,e=me:fe,d=md:fd,m=mm:fm,V=mv:fv",
+           "x.proto"]),
+    {ok, {[{translate_field, {[m], [{encode, {me,fe,['$1']}} | _]}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-translate_field", "field=m,e=me:fe,d=md:fd,m=mm:fm,V=mv:fv",
            "x.proto"]).
 
 no_type_specs_test() ->

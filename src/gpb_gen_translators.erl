@@ -617,6 +617,8 @@ has_translation(ElemPath, Op, #anres{translations=Ts}) ->
     end.
 
 
+mk_tr_fn_name([MsgName], Op) ->
+    list_to_atom(?ff("tr_~s_~s", [Op, MsgName]));
 mk_tr_fn_name([MsgName,FieldName,[]], Op) ->
     list_to_atom(?ff("tr_~s_~s.~s[x]", [Op, MsgName,FieldName]));
 mk_tr_fn_name([MsgName,FName,OneofName], Op) ->

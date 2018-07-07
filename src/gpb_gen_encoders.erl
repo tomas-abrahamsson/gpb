@@ -22,7 +22,7 @@
 
 -module(gpb_gen_encoders).
 
--export([format_encoders_top_function/2]).
+-export([format_encoders_top_function/3]).
 -export([format_msg_encoders/4]).
 -export([format_map_encoders/4]).
 -export([format_aux_encoders/3]).
@@ -36,9 +36,9 @@
 
 %% -- encoders -----------------------------------------------------
 
-format_encoders_top_function(Defs, Opts) ->
+format_encoders_top_function(Defs, AnRes, Opts) ->
     case gpb_lib:contains_messages(Defs) of
-        true  -> format_encoders_top_function_msgs(Defs, Opts);
+        true  -> format_encoders_top_function_msgs(Defs, AnRes, Opts);
         false -> format_encoders_top_function_no_msgs(Opts)
     end.
 
@@ -73,7 +73,7 @@ format_encoders_top_function_no_msgs(Opts) ->
          fun(_Msg) -> erlang:error({gpb_error, no_messages}) end)]
       || gpb_lib:get_epb_functions_by_opts(Opts)]].
 
-format_encoders_top_function_msgs(Defs, Opts) ->
+format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
     MsgNames = gpb_lib:msg_names(Defs),
@@ -93,7 +93,7 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                  records -> " | list()";
                  maps -> ""
              end,
-    DoNif    = proplists:get_bool(nif, Opts),
+    DoNif = proplists:get_bool(nif, Opts),
     [[[?f("-spec encode_msg(~s) -> binary().~n", [MsgType]),
        gpb_codegen:format_fn(
          encode_msg,
@@ -113,20 +113,15 @@ format_encoders_top_function_msgs(Defs, Opts) ->
      ?f("-spec encode_msg(~s, atom(), list()) -> binary().~n", [MsgType]),
      gpb_codegen:format_fn(
        encode_msg,
-       fun(Msg, MsgName, '<Opts>') ->
+       fun(Msg, MsgName, Opts) ->
                '<possibly-verify-msg>',
-               'TrUserData = proplists:get_value(user_data, Opts)',
+               TrUserData = proplists:get_value(user_data, Opts),
                case MsgName of
-                   '<msg-name-match>' -> 'encode'(Msg, 'TrUserData')
+                   '<msg-name-match>' ->
+                       'encode'('Tr'(Msg, TrUserData), 'TrUserData')
                end
        end,
-       [replace_tree('<Opts>', case {DoNif, Verify} of
-                                   {true,optionally} -> ?expr(Opts);
-                                   {true,always}     -> ?expr(Opts);
-                                   {true,never}      -> ?expr(_Opts);
-                                   {false,_}         -> ?expr(Opts)
-                               end),
-        splice_trees('<possibly-verify-msg>',
+       [splice_trees('<possibly-verify-msg>',
                      case Verify of
                          optionally ->
                              [?expr(case proplists:get_bool(verify, Opts) of
@@ -138,15 +133,17 @@ format_encoders_top_function_msgs(Defs, Opts) ->
                          never ->
                              []
                      end),
-        splice_trees(
-          'TrUserData = proplists:get_value(user_data, Opts)',
-          if DoNif -> [];
-             true  -> [?expr(TrUserData = proplists:get_value(user_data, Opts))]
-          end),
-        repeat_clauses('<msg-name-match>',
-                       [[replace_term('<msg-name-match>', MsgName),
-                         replace_term('encode', gpb_lib:mk_fn(e_msg_, MsgName))]
-                        || {{msg,MsgName}, _Fields} <- Defs]),
+        repeat_clauses(
+          '<msg-name-match>',
+          [begin
+               ElemPath = [MsgName],
+               Transl = gpb_gen_translators:find_translation(
+                          ElemPath, encode, AnRes),
+               [replace_term('<msg-name-match>', MsgName),
+                replace_term('encode', gpb_lib:mk_fn(e_msg_, MsgName)),
+                replace_term('Tr', Transl)]
+           end
+           || {{msg,MsgName}, _Fields} <- Defs]),
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]
                                    end)]),

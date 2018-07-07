@@ -28,7 +28,7 @@
 
 -module(gpb_gen_decoders).
 
--export([format_decoders_top_function/2]).
+-export([format_decoders_top_function/3]).
 -export([format_msg_decoders/3]).
 -export([format_map_decoders/3]).
 -export([format_aux_decoders/3]).
@@ -59,9 +59,9 @@
           tree   % the syntax tree
          }).
 
-format_decoders_top_function(Defs, Opts) ->
+format_decoders_top_function(Defs, AnRes, Opts) ->
     case gpb_lib:contains_messages(Defs) of
-        true  -> format_decoders_top_function_msgs(Defs, Opts);
+        true  -> format_decoders_top_function_msgs(Defs, AnRes, Opts);
         false -> format_decoders_top_function_no_msgs(Opts)
     end.
 
@@ -88,53 +88,34 @@ format_decoders_top_function_no_msgs(Opts) ->
          end)]
       || gpb_lib:get_epb_functions_by_opts(Opts)]].
 
-format_decoders_top_function_msgs(Defs, Opts) ->
+format_decoders_top_function_msgs(Defs, AnRes, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
-    MaybeTrUserDataArg = if DoNif -> "";
-                            true  -> ", TrUserData"
-                         end,
     Error = ("error({gpb_error," ++
              ""     "{decoding_failure," ++
              ""     " {Bin, MsgName, {Class, Reason, StackTrace}}}})"),
     DecodeMsg1Catch_GetStackTraceAsPattern =
-        ?f("decode_msg_1_catch(Bin, MsgName~s) ->~n"
-           "    try decode_msg_2_doit(MsgName, Bin~s)~n"
+        ?f("decode_msg_1_catch(Bin, MsgName, TrUserData) ->~n"
+           "    try decode_msg_2_doit(MsgName, Bin, TrUserData)~n"
            "    catch Class:Reason:StackTrace -> ~s~n"
-           "    end.~n", [MaybeTrUserDataArg, MaybeTrUserDataArg, Error]),
+           "    end.~n", [Error]),
     DecodeMsg1Catch_GetStackTraceAsCall =
-        ?f("decode_msg_1_catch(Bin, MsgName~s) ->~n"
-           "    try decode_msg_2_doit(MsgName, Bin~s)~n"
+        ?f("decode_msg_1_catch(Bin, MsgName, TrUserData) ->~n"
+           "    try decode_msg_2_doit(MsgName, Bin, TrUserData)~n"
            "    catch Class:Reason ->~n"
            "        StackTrace = erlang:get_stacktrace(),~n"
            "        ~s~n"
-           "    end.~n", [MaybeTrUserDataArg, MaybeTrUserDataArg, Error]),
-    [if DoNif -> "";
-        true ->
-             gpb_codegen:format_fn(
-               decode_msg,
-               fun(Bin, MsgName) when is_binary(Bin) ->
-                       call_self(Bin, MsgName, [])
-               end,
-               [])
-     end,
+           "    end.~n", [Error]),
+    [gpb_codegen:format_fn(
+       decode_msg,
+       fun(Bin, MsgName) when is_binary(Bin) ->
+               call_self(Bin, MsgName, [])
+       end),
      gpb_codegen:format_fn(
        decode_msg,
-       fun(Bin, MsgName, 'Opts') when is_binary(Bin) ->
-               'TrUserData = proplists:get_value(user_data, Opts)',
-               decode_msg_1_catch(Bin, MsgName, 'TrUserData')
-       end,
-       [splice_trees('Opts', if DoNif -> [];
-                                true  -> [?expr(Opts)]
-                             end),
-        splice_trees(
-          'TrUserData = proplists:get_value(user_data, Opts)',
-          if DoNif -> [];
-             true  -> [?expr(TrUserData =
-                                 proplists:get_value(user_data, Opts))]
-          end),
-        splice_trees('TrUserData', if DoNif -> [];
-                                      true  -> [?expr(TrUserData)]
-                                   end)]),
+       fun(Bin, MsgName, Opts) when is_binary(Bin) ->
+               TrUserData = proplists:get_value(user_data, Opts),
+               decode_msg_1_catch(Bin, MsgName, TrUserData)
+       end),
      ["-ifdef('OTP_RELEASE').\n", % This macro appeared in Erlang 21
       DecodeMsg1Catch_GetStackTraceAsPattern,
       "-else.\n",
@@ -165,13 +146,19 @@ format_decoders_top_function_msgs(Defs, Opts) ->
       "-endif.\n\n"],
      gpb_codegen:format_fn(
        decode_msg_2_doit,
-       fun('MsgName', Bin, 'TrUserData') ->
-               'decode-fn'(Bin, 'TrUserData')
+       fun('MsgName', Bin, TrUserData) ->
+               'Tr'('decode-fn'(Bin, 'TrUserData'), TrUserData)
        end,
        [repeat_clauses(
           'MsgName',
-          [[replace_term('MsgName', MsgName),
-            replace_term('decode-fn', gpb_lib:mk_fn(d_msg_, MsgName))]
+          [begin
+               ElemPath = [MsgName],
+               Transl = gpb_gen_translators:find_translation(
+                          ElemPath, decode, AnRes),
+               [replace_term('MsgName', MsgName),
+                replace_term('Tr', Transl),
+                replace_term('decode-fn', gpb_lib:mk_fn(d_msg_, MsgName))]
+           end
            || {{msg, MsgName}, _Fields} <- Defs]),
         splice_trees('TrUserData', if DoNif -> [];
                                       true  -> [?expr(TrUserData)]

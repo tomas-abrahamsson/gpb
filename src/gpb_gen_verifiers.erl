@@ -22,7 +22,7 @@
 
 -module(gpb_gen_verifiers).
 
--export([format_verifiers_top_function/2]).
+-export([format_verifiers_top_function/3]).
 -export([format_verifiers/3]).
 
 -include("../include/gpb.hrl").
@@ -32,12 +32,12 @@
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
 
-format_verifiers_top_function(Defs, Opts) ->
+format_verifiers_top_function(Defs, AnRes, Opts) ->
     case {gpb_lib:contains_messages(Defs),
           gpb_lib:get_records_or_maps_by_opts(Opts)} of
         {false, records} -> format_verifiers_top_no_msgs_r();
         {false, maps}    -> format_verifiers_top_no_msgs_m();
-        {true,  _}       -> format_verifiers_top_with_msgs(Defs, Opts)
+        {true,  _}       -> format_verifiers_top_with_msgs(Defs, AnRes, Opts)
     end.
 
 format_verifiers_top_no_msgs_r() ->
@@ -73,7 +73,7 @@ format_verifiers_top_no_msgs_m() ->
        end),
      "\n"].
 
-format_verifiers_top_with_msgs(Defs, Opts) ->
+format_verifiers_top_with_msgs(Defs, AnRes, Opts) ->
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
     [[gpb_codegen:format_fn(
         verify_msg,
@@ -101,16 +101,25 @@ format_verifiers_top_with_msgs(Defs, Opts) ->
                TrUserData = proplists:get_value(user_data, Opts),
                case MsgName of
                    '<msg-name-match>' ->
-                       '<verify-msg>'(Msg, [MsgName], TrUserData);
+                       '<verify-fn>'(Msg, [MsgName], TrUserData);
                    _ ->
                        mk_type_error(not_a_known_message, Msg, [])
                end
        end,
        [repeat_clauses(
           '<msg-name-match>',
-          [[replace_term('<msg-name-match>', MsgName),
-            replace_term('<verify-msg>', gpb_lib:mk_fn(v_msg_, MsgName)),
-            replace_term('<MsgName>', MsgName)]
+          [begin
+               DefaultVerifierFn = gpb_lib:mk_fn(v_msg_, MsgName),
+               ElemPath = [MsgName],
+               MVerifierFn = case gpb_gen_translators:has_translation(
+                                    ElemPath, verify, AnRes) of
+                                 {true, Transl} -> Transl;
+                                 false -> DefaultVerifierFn
+                             end,
+               [replace_term('<msg-name-match>', MsgName),
+                replace_term('<verify-fn>', MVerifierFn),
+                replace_term('<MsgName>', MsgName)]
+           end
            || {{msg, MsgName}, _MsgDef} <- Defs])])].
 
 format_verifiers(Defs, AnRes, Opts) ->
