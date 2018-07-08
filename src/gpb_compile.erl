@@ -1061,6 +1061,34 @@ c() ->
 %%             is deprecated.</dd>.
 %%       </dl>
 %%   </dd>
+%%   <dt>`-translate_field FMsFs'</dt>
+%%   <dd>Call functions in FMsFs to pack, unpack, merge, and verify.
+%%       This is similar to the `-translate_type' option, except that
+%%       a message field is specified instead of a type. The `FMsFs'
+%%       is a string on the following format:
+%%       `field=Path,e=...,d=...,m=...,V=...[,i=Mod:Fn][,a=Mod:Fn][,f=Mod:Fn]'
+%%       See the `-translate_type' option for info on `e=', `d=', `m=' and `V='
+%%       items. Additionally for this `-translate_field' option, these exist:
+%%       <dl>
+%%         <dt>`field=Path'</dt>
+%%         <dd>This indicates the element to translate as follows:
+%%           <ul>
+%%             <li>`MsgName.FieldName' for fields generally</li>
+%%             <li>`MsgName.OneofName.FieldName' for oneof fields</li>
+%%             <li>`MsgName.FieldName.[]' for elements of repeated fields</li>
+%%           </ul>
+%%         </dd>
+%%         <dt>`i:Mod:Fn'</dt>
+%%         <dd>For repeated fields, call `Mod:Fn()' on decoding to initialize
+%%             the field to some value</dd>
+%%         <dt>`a:Mod:Fn'</dt>
+%%         <dd>For repeated fields, call `Mod:Fn(Elem,S)' on decoding
+%%             to add an item)</dd>
+%%         <dt>`f:Mod:Fn'</dt>
+%%         <dd>For repeated fields, call `Mod:Fn(S)' on decoding
+%%             to finalize the field</dd>
+%%       </dl>
+%%   </dd>
 %%   <dt>`-any_translate MsFs'</dt>
 %%   <dd>Call functions in `MsFs' to pack, unpack, merge and verify
 %%       `google.protobuf.Any' messages. The `MsFs' is a string on the
@@ -1344,6 +1372,18 @@ opt_specs() ->
       "       fixed32, fixed64, sfixed32, sfixed64, bool, double, string,\n"
       "       bytes, map<KeyType,ValueType>. The last may need quoting in\n"
       "       the shell. No merge function is called for scalar fields.\n"},
+     {"translate_field", fun opt_translate_field/2, translate_field,
+      " field=Field,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
+      "       For the specified field, call Mod:Fn. Specify Field as:\n"
+      "       - MsgName.FieldName for fields generally,\n"
+      "       - MsgName.OneofName.FieldName for oneof fields\n"
+      "       - MsgName.FieldName.[] for elements of repeated fields.\n"
+      "       For repeated fields, ie for the field itself, not its elements,\n"
+      "       the following extra translations are to be specified:\n"
+      "       - i:Mod:Fn (calls Mod:Fn() on decoding to initialize the field)\n"
+      "       - a:Mod:Fn (calls Mod:Fn(Elem,S) on decoding to add an item)\n"
+      "       - f:Mod:Fn (calls Mod:Fn(S) on decoding to finalize the field)\n"
+      ""},
      {"any_translate", fun opt_any_translate/2, any_translate,
       " e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
       "       For a google.protobuf.Any message, call Mod:Fn to:\n"
@@ -1474,6 +1514,19 @@ opt_translate_type(OptTag, [S | Rest]) ->
             {error, ErrText}
     end.
 
+opt_translate_field(OptTag, [S | Rest]) ->
+    try S of
+        "field="++S2 ->
+            {Path,Rest2} = opt_translate_elempath(S2),
+            Ts = gpb_lib:string_lexemes(Rest2, ","),
+            Opt = {OptTag, {Path, [opt_translate_mfa(T) || T <- Ts]}},
+            {ok, {Opt, Rest}};
+        _ ->
+            {error, "Translation is expected to begin with field="}
+    catch throw:{badopt,ErrText} ->
+            {error, ErrText}
+    end.
+
 opt_any_translate(OptTag, [S | Rest]) ->
     try
         Ts = gpb_lib:string_lexemes(S, ","),
@@ -1488,7 +1541,7 @@ opt_translate_type("enum:"++Rest) -> opt_to_comma_with_tag(Rest, enum);
 opt_translate_type("map<"++Rest)  -> opt_translate_map_type(Rest);
 opt_translate_type(Other) ->
     {S, Rest} = read_s(Other, $,, ""),
-    Type = list_to_atom(S),
+    Type = s2a(S),
     Allowed = [int32, int64, uint32, uint64, sint32, sint64, fixed32, fixed64,
                sfixed32, sfixed64, bool, float, double, string, bytes],
     case lists:member(Type, Allowed) of
@@ -1513,7 +1566,18 @@ opt_translate_map_type(S) ->
 
 opt_to_comma_with_tag(S, Tag) ->
     {S2, Rest} = read_s(S, $,, ""),
-    {{Tag, list_to_atom(S2)}, Rest}.
+    {{Tag, s2a(S2)}, Rest}.
+
+opt_translate_elempath(S) ->
+    {S2, Rest} = read_s(S, $,, ""),
+    case gpb_lib:string_lexemes(S2, ".") of
+        [Msg,Field]        -> {[s2a(Msg),s2a(Field)], Rest};
+        [Msg,Field,"[]"]   -> {[s2a(Msg),s2a(Field),[]], Rest};
+        [Msg,Field,OFName] -> {[s2a(Msg),s2a(Field),s2a(OFName)], Rest};
+        _ -> throw({badopt, "Invalid element path"})
+    end.
+
+s2a(S) -> list_to_atom(S).
 
 read_s([Delim|Rest], Delim, Acc) -> {lists:reverse(Acc), Rest};
 read_s([C|Rest], Delim, Acc)     -> read_s(Rest, Delim, [C | Acc]);
@@ -1524,6 +1588,9 @@ opt_translate_mfa("d="++MF) -> {decode,opt_mf_str(MF, 1)};
 opt_translate_mfa("m="++MF) -> {merge, opt_mf_str(MF, 2)};
 opt_translate_mfa("V="++MF) -> {verify,opt_mf_str(MF, 1)};
 opt_translate_mfa("v="++MF) -> {verify,opt_mf_str_verify(MF)};
+opt_translate_mfa("i="++MF) -> {decode_init_default,opt_mf_str(MF, 0)};
+opt_translate_mfa("a="++MF) -> {decode_repeated_add_elem, opt_mf_str(MF, 2)};
+opt_translate_mfa("f="++MF) -> {decode_repeated_finalize, opt_mf_str(MF, 1)};
 opt_translate_mfa(X) -> throw({badopt,"Invalid translation spec: "++X}).
 
 opt_mf_str(S, Arity) ->

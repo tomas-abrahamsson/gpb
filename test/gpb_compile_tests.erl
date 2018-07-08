@@ -3607,6 +3607,32 @@ type_translation_options_test() ->
           ["-translate_type", "type=map<int32,msg:m>,e=me:fe,d=md:fd,V=mv:fv",
            "x.proto"]).
 
+field_translation_options_test() ->
+    {ok, {[{translate_field,
+            {[m,f],
+             [{encode, {me,fe,['$1']}},
+              {decode, {md,fd,['$1']}},
+              {merge,  {mm,fm,['$1','$2']}},
+              {verify, {mv,fv,['$1']}},
+              {decode_init_default, {mi,fi,[]}},
+              {decode_repeated_add_elem, {ma,fa,['$1','$2']}},
+              {decode_repeated_finalize, {mf,ff,['$1']}}]}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-translate_field",
+           "field=m.f,e=me:fe,d=md:fd,m=mm:fm,V=mv:fv,i=mi:fi,a=ma:fa,f=mf:ff",
+           "x.proto"]),
+    {ok, {[{translate_field, {[m,f,[]], [{encode, {me,fe,['$1']}} | _]}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-translate_field", "field=m.f.[],e=me:fe,d=md:fd,m=mm:fm,V=mv:fv",
+           "x.proto"]),
+    {ok, {[{translate_field, {[m,c,a], [{encode, {me,fe,['$1']}} | _]}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-translate_field", "field=m.c.a,e=me:fe,d=md:fd,m=mm:fm,V=mv:fv",
+           "x.proto"]).
+
 no_type_specs_test() ->
     {ok, {[{type_specs, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-no_type", "x.proto"]).
