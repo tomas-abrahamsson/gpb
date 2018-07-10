@@ -23,6 +23,7 @@
         %% ,is_within_percent/3
         ]).
 
+-define(f(Fmt, Args), io_lib:format(Fmt, Args)).
 
 %% Eunit integration
 props_test_() ->
@@ -94,8 +95,10 @@ message_fields(MsgNames, EnumNames, Enum0Names, Opts) ->
             list({elements([{required, msg_field_type(MsgNames, EnumNames)}
                            ,{optional, msg_field_type(MsgNames, EnumNames)}
                            ,{repeated, msg_field_type(MsgNames, EnumNames)}
-                           ] ++ [{oneof, oneof_fields(MsgNames, Enum0Names)} || WithOneofFields]
-                           ++ [{repeated, map_field(MsgNames, Enum0Names)} || WithMapFields])
+                           ] ++ [{oneof, oneof_fields(MsgNames, Enum0Names)}
+                                 || WithOneofFields]
+                           ++ [{repeated, map_field(MsgNames, Enum0Names)}
+                               || WithMapFields])
                  ,field_name()
                  }))
          ,uint(10)
@@ -114,7 +117,8 @@ oneof_fields(MsgNames, EnumNames) ->
          mk_fields(FieldDefs, FNumBase0+1)).
 
 map_field(MsgNames, EnumNames) ->
-    ?LET({KeyType,ValueType}, {elements(map_key_types()), msg_field_type(MsgNames,EnumNames)},
+    ?LET({KeyType,ValueType},
+         {elements(map_key_types()), msg_field_type(MsgNames,EnumNames)},
          {map, KeyType, ValueType}
         ).
 
@@ -985,7 +989,7 @@ submsg_from_map2(optional, V, MsgName, MsgDefs, COpts) ->
     end.
 
 get_create_tmpdir() ->
-    D = filename:join("/tmp", io_lib:format("~s-~s", [?MODULE, os:getpid()])),
+    D = filename:join("/tmp", ?f("~s-~s", [?MODULE, os:getpid()])),
     filelib:ensure_dir(filename:join(D, "dummy-file-name")),
     [file:delete(X) || X <- filelib:wildcard(filename:join(D,"*"))],
     D.
@@ -1022,49 +1026,50 @@ contains_mapfield([]) ->
     false.
 
 msg_def_to_proto({{enum, Name}, EnumValues}) ->
-    Values = lists:map(fun({N,V}) -> io_lib:format("  ~s = ~w;~n", [N, V]) end, EnumValues),
-    io_lib:format("enum ~s {~n"
-                  "~s"
-                  "}~n~n",
-                  [Name, Values]);
+    Values = lists:map(fun({N,V}) -> ?f("  ~s = ~w;~n", [N, V]) end,
+                       EnumValues),
+    ?f("enum ~s {~n"
+       "~s"
+       "}~n~n",
+       [Name, Values]);
 msg_def_to_proto({{msg, Name}, Fields}) ->
     Values = lists:map(fun(#?gpb_field{}=F) -> field_to_proto(F, unless_map);
                           (#gpb_oneof{}=F) ->  oneof_to_proto(F)
                        end,
                        Fields),
-    io_lib:format("message ~s {~n"
-                  "~s"
-                  "}~n~n",
-                  [Name, Values]).
+    ?f("message ~s {~n"
+       "~s"
+       "}~n~n",
+       [Name, Values]).
 
 field_to_proto(#?gpb_field{name=FName, fnum=FNum, type=Type, opts=Opts,
                            occurrence=Occurrence}, ShowOccurrence) ->
     Packed = lists:member(packed, Opts),
-    io_lib:format("  ~s ~s ~s = ~w~s;~n",
-                  [case {ShowOccurrence,Type} of
-                       {unless_map,{map,_,_}} -> "  ";
-                       {unless_map,_}         -> Occurrence;
-                       {false,_}              -> "  "
-                   end,
-                   fmt_type(Type),
-                   FName,
-                   FNum,
-                   case Packed of
-                       true -> " [packed=true]";
-                       false -> ""
-                   end]).
+    ?f("  ~s ~s ~s = ~w~s;~n",
+       [case {ShowOccurrence,Type} of
+            {unless_map,{map,_,_}} -> "  ";
+            {unless_map,_}         -> Occurrence;
+            {false,_}              -> "  "
+        end,
+        fmt_type(Type),
+        FName,
+        FNum,
+        case Packed of
+            true -> " [packed=true]";
+            false -> ""
+        end]).
 
 fmt_type({msg,Name2})  -> Name2;
 fmt_type({enum,Name2}) -> Name2;
-fmt_type({map,KT,VT})  -> io_lib:format("map<~s,~s>", [fmt_type(KT),fmt_type(VT)]);
+fmt_type({map,KT,VT})  -> ?f("map<~s,~s>", [fmt_type(KT),fmt_type(VT)]);
 fmt_type(Type)         -> Type.
 
 oneof_to_proto(#gpb_oneof{name=FName, fields=OFields}) ->
     Values = [field_to_proto(OField, false) || OField <- OFields],
-    io_lib:format("  oneof ~s {~n"
-                  "~s"
-                  "  };~n",
-                  [FName, Values]).
+    ?f("  oneof ~s {~n"
+       "~s"
+       "  };~n",
+       [FName, Values]).
 
 decode_then_reencode_via_protoc(GpbBin, Msg, TmpDir) ->
     ProtoFile = filename:join(TmpDir, "x.proto"),
@@ -1073,24 +1078,27 @@ decode_then_reencode_via_protoc(GpbBin, Msg, TmpDir) ->
     PMsgFile = filename:join(TmpDir, "x.pmsg"),
     TxtFile = filename:join(TmpDir, "x.txt"),
     MsgName = element(1, Msg),
-    ok = file:write_file(ETxtFile, iolist_to_binary(io_lib:format("~p~n", [Msg]))),
+    ok = file:write_file(ETxtFile, iolist_to_binary(?f("~p~n", [Msg]))),
     ok = file:write_file(EMsgFile, GpbBin),
     Protoc = find_protoc(),
-    DRStr = os:cmd(io_lib:format("'~s' --proto_path '~s'"
-                                 " --decode=~s '~s'"
-                                 " < '~s' > '~s'; echo $?~n",
-                                 [Protoc, TmpDir, MsgName, ProtoFile, EMsgFile, TxtFile])),
+    DRStr = os:cmd(?f("'~s' --proto_path '~s'"
+                      " --decode=~s '~s'"
+                      " < '~s' > '~s'; echo $?~n",
+                      [Protoc, TmpDir, MsgName, ProtoFile, EMsgFile,
+                       TxtFile])),
     try 0 = list_to_integer(nonl(DRStr))
     catch error:T when T =:= badarg; T =:= badmatch ->
             {ok,Proto0} = file:read_file(ProtoFile),
             Proto = string:trim(Proto0, trailing),
-            io:format(user, ">>> Decoding ~p\n >  ~s\n>>  ~s\n", [ProtoFile,Proto,DRStr]),
+            io:format(user, ">>> Decoding ~p\n >  ~s\n>>  ~s\n",
+                      [ProtoFile,Proto,DRStr]),
             error({Proto,DRStr})
     end,
-    ERStr = os:cmd(io_lib:format("'~s' --proto_path '~s'"
-                                 " --encode=~s '~s'"
-                                 " < '~s' > '~s'; echo $?~n",
-                                 [Protoc, TmpDir, MsgName, ProtoFile, TxtFile, PMsgFile])),
+    ERStr = os:cmd(?f("'~s' --proto_path '~s'"
+                      " --encode=~s '~s'"
+                      " < '~s' > '~s'; echo $?~n",
+                      [Protoc, TmpDir, MsgName, ProtoFile, TxtFile,
+                       PMsgFile])),
     0 = list_to_integer(nonl(ERStr)),
     {ok, ProtoBin} = file:read_file(PMsgFile),
     ProtoBin.
