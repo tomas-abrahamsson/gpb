@@ -18,7 +18,7 @@
         ,any_tr_unpack_m/1
         ,any_tr_unpack_r/1
         ,any_tr_verify/2
-        %% ,install_msg_defs/2
+        ,install_msg_defs/2 % for debugging purposes
         ]).
 
 -define(f(Fmt, Args), io_lib:format(Fmt, Args)).
