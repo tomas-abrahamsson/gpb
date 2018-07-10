@@ -18,9 +18,7 @@
         ,any_tr_unpack_m/1
         ,any_tr_unpack_r/1
         ,any_tr_verify/2
-        %% ,contains_mapfield/1
         %% ,install_msg_defs/2
-        %% ,is_within_percent/3
         ]).
 
 -define(f(Fmt, Args), io_lib:format(Fmt, Args)).
@@ -858,10 +856,6 @@ is_float_equivalent(F1,F2) ->
     (abs(F1) < abs(F2)) -> abs( (F1-F2)/F2 ) < ?REL_ERROR
 end.
 
-is_within_percent(F1, F2, PercentsAllowedDeviation) ->
-    AllowedDeviation = PercentsAllowedDeviation / 100,
-    abs(F1 - F2) < (AllowedDeviation * F1).
-
 % Recursively translate a record to a map
 msg_to_map(Msg, MsgDefs, COpts) ->
     MsgName = element(1, Msg),
@@ -1011,19 +1005,6 @@ msg_defs_to_proto(MsgDefs) ->
     iolist_to_binary(
       ["syntax=\"proto2\";\n",
        lists:map(fun msg_def_to_proto/1, MsgDefs)]).
-
-contains_mapfield([{{msg,_},Fields} | Rest]) ->
-    HasMapField = lists:any(fun(#?gpb_field{type={map,_,_}}) -> true;
-                               (_) -> false
-                            end,
-                            Fields),
-    if HasMapField -> true;
-       not HasMapField -> contains_mapfield(Rest)
-    end;
-contains_mapfield([_ | Rest]) ->
-    contains_mapfield(Rest);
-contains_mapfield([]) ->
-    false.
 
 msg_def_to_proto({{enum, Name}, EnumValues}) ->
     Values = lists:map(fun({N,V}) -> ?f("  ~s = ~w;~n", [N, V]) end,
