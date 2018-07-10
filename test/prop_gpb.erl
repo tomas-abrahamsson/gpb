@@ -8,7 +8,7 @@
 %% -define(PROPER_NO_TRANS, true).
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include("gpb.hrl").
+-include("../include/gpb.hrl").
 
 -define(MOD1, gpb_prop_mod1).
 -define(MOD2, gpb_prop_mod2).
