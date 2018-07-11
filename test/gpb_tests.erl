@@ -967,6 +967,16 @@ proto3_type_default_values_never_serialized_test() ->
     <<>> = encode_msg(Msg, Defs),
     Msg = decode_msg(<<>>, m, Defs).
 
+proto3_type_default_values_never_serialized_for_enums_test() ->
+    Defs = [{syntax,"proto3"},
+            {proto3_msgs,[m]},
+            {{enum,e},[{e0,0},{e1,1}]},
+            {{msg,m},[#?gpb_field{name=a, fnum=1, rnum=2, type={enum,e},
+                                  occurrence=optional, opts=[]}]}],
+    <<>> = encode_msg({m, e0}, Defs),
+    <<>> = encode_msg({m, 0}, Defs), % when given as integer
+    {m, e0} = decode_msg(<<>>, m, Defs).
+
 encode_decode_required_group_test() ->
     %% message m1 {
     %%   required group g = 30 {

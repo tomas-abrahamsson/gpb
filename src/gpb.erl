@@ -1229,6 +1229,8 @@ is_proto3_type_default(string, _MsgDefs, Value) ->
     unicode:characters_to_binary(Value) =:= <<>>;
 is_proto3_type_default(bytes, _MsgDefs, Value) ->
     iolist_size(Value) == 0;
+is_proto3_type_default({enum, _}, _MsgDefs, 0) ->
+    true;
 is_proto3_type_default(Type, MsgDefs, Value) ->
     proto3_type_default(Type, MsgDefs) =:= Value.
 

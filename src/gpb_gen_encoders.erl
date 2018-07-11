@@ -299,6 +299,10 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                   replace_term('<enc>', FEncoder),
                   replace_tree('<Bin>', PrevBVar),
                   splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
+    IsEnum = case Type of
+                 {enum,_} -> true;
+                 _ -> false
+             end,
     case Occurrence of
         optional ->
             EncodeExpr =
@@ -336,6 +340,22 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                   end
                               end,
                               Transforms);
+                    true when IsEnum ->
+                        TypeDefault = gpb:proto3_type_default(Type, Defs),
+                        ?expr(
+                           begin
+                               'TrF' = 'Tr'('<F>', 'TrUserData'),
+                               if 'TrF' =:= '<TypeDefault>';
+                                  'TrF' =:= 0 ->
+                                       '<Bin>';
+                                  true ->
+                                       '<enc>'('TrF',
+                                               <<'<Bin>'/binary, '<Key>'>>,
+                                               'MaybeTrUserData')
+                               end
+                           end,
+                           [replace_term('<TypeDefault>', TypeDefault)
+                            | Transforms]);
                     true ->
                         TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
