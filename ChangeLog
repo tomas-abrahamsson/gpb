@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.2.1
+2018-Jul-13
+
+        * Fix proto3 bug in encoding of default values for enums when
+        given as 0 instead of as atom. Thansk to Jean-Alexandre Barszcz
+        for reporting.
+
 Version 4.2.0
 2018-Jun-27
 
