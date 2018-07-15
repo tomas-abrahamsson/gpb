@@ -122,7 +122,8 @@
                        {decode_repeated_add_elem, mod_fn_argtemplate()} |
                        {decode_repeated_finalize, mod_fn_argtemplate()} |
                        {merge,  mod_fn_argtemplate()} |
-                       {verify, mod_fn_argtemplate()}.
+                       {verify, mod_fn_argtemplate()} |
+                       {type_spec, string()}.
 -type fn_name() :: atom().
 -type mod_fn_argtemplate() :: {module(), fn_name(), arg_template()}.
 -type arg_template() :: [arg()].
@@ -766,12 +767,12 @@ do_proto_defs_aux2(Defs, Mod, AnRes, Opts) ->
             {ok, Defs};
         binary ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
-            HrlTxt = possibly_format_hrl(Mod, Defs, Opts),
+            HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             compile_to_binary(Mod, HrlTxt, ErlTxt, NifTxt, Opts);
         file ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
-            HrlTxt = possibly_format_hrl(Mod, Defs, Opts),
+            HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             ErlOutDir = get_erl_outdir(Opts),
             HrlOutDir = get_hrl_outdir(Opts),
@@ -2017,7 +2018,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
                ""
        end,
        "\n",
-       gpb_gen_types:format_export_types(Defs, Opts),
+       gpb_gen_types:format_export_types(Defs, AnRes, Opts),
        "\n",
        if not DoNif ->
                case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts)
@@ -2144,13 +2145,13 @@ possibly_format_descriptor(Defs, Opts) ->
 
 %% -- hrl -----------------------------------------------------
 
-possibly_format_hrl(Mod, Defs, Opts) ->
+possibly_format_hrl(Mod, Defs, AnRes, Opts) ->
     case gpb_lib:get_records_or_maps_by_opts(Opts) of
-        records -> format_hrl(Mod, Defs, Opts);
+        records -> format_hrl(Mod, Defs, AnRes, Opts);
         maps    -> '$not_generated'
     end.
 
-format_hrl(Mod, Defs, Opts1) ->
+format_hrl(Mod, Defs, AnRes, Opts1) ->
     Opts = [{module, Mod}|Opts1],
     ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
@@ -2164,7 +2165,7 @@ format_hrl(Mod, Defs, Opts1) ->
        ?f("-define(~p, \"~s\").~n", [ModVsn, gpb:version_as_string()]),
        "\n",
        gpb_lib:nl_join(
-         [gpb_gen_types:format_msg_record(Msg, Fields, Opts, Defs)
+         [gpb_gen_types:format_msg_record(Msg, Fields, AnRes, Opts, Defs)
           || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)]),
        "\n",
        ?f("-endif.~n")],

@@ -37,6 +37,7 @@
 -export([mk_elempath_elem/3]).
 -export([find_translation/3, find_translation/4]).
 -export([has_translation/3]).
+-export([has_type_spec_translation/2]).
 -export([default_fn_by_op/2]).
 -export([default_merge_translator/0]).
 -export([default_verify_translator/0]).
@@ -52,7 +53,8 @@
 
 format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
     [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
-       || {Op, CallTemplates} <- OpTransls]
+       || {Op, CallTemplates} <- OpTransls,
+          Op /= type_spec]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_translators(AnRes, Opts)].
 
@@ -541,7 +543,9 @@ compute_needed_default_translations(Translations, Defaults) ->
     dict:fold(
       fun(_ElemPath, Ops, Acc) ->
               lists:foldl(
-                fun({Op, Calls}, Acc2) ->
+                fun({type_spec, _}, Acc2) ->
+                        Acc2;
+                   ({Op, Calls}, Acc2) ->
                         lists:foldl(
                           fun(Call, Acc3) ->
                                   case lists:member({Op, Call}, Defaults) of
@@ -616,6 +620,20 @@ has_translation(ElemPath, Op, #anres{translations=Ts}) ->
             false
     end.
 
+has_type_spec_translation(ElemPath, #anres{translations=Ts}) ->
+    case dict:find(ElemPath, Ts) of
+        {ok, OpTransls} ->
+            case lists:keyfind(type_spec, 1, OpTransls) of
+                {type_spec, TypeSpec} when is_list(TypeSpec) ->
+                    {true, TypeSpec};
+                {type_spec, '$default'} ->
+                    false;
+                false ->
+                    false
+            end;
+        error ->
+            false
+    end.
 
 mk_tr_fn_name([MsgName], Op) ->
     list_to_atom(?ff("tr_~s_~s", [Op, MsgName]));

@@ -353,13 +353,15 @@ merge_transls(Transls1, Transls2) ->
            (decode_repeated_add_elem, L1, L2) -> L1 ++ L2;
            (decode_repeated_finalize, L1, L2) -> L1 ++ L2;
            (merge, L1, L2)                    -> L1 ++ L2;
-           (verify, _L1, L2)                  -> [hd(L2)]
+           (verify, _L1, L2)                  -> [hd(L2)];
+           (type_spec, _V1, V2)               -> V2
         end,
-        dict:from_list([{Op,ensure_list(Call)} || {Op,Call} <- Transls1]),
-        dict:from_list([{Op,ensure_list(Call)} || {Op,Call} <- Transls2]))).
+        dict:from_list([{Op,ensure_list(Op,Call)} || {Op,Call} <- Transls1]),
+        dict:from_list([{Op,ensure_list(Op,Call)} || {Op,Call} <- Transls2]))).
 
-ensure_list(L) when is_list(L) -> L;
-ensure_list(Elem) -> [Elem].
+ensure_list(_Op, L) when is_list(L) -> L;
+ensure_list(type_spec, Elem)        -> Elem;
+ensure_list(_Op, Elem)              -> [Elem].
 
 remove_merge_translations_for_repeated_elements(D) ->
     dict:map(fun(Key, Ops) ->
@@ -450,7 +452,8 @@ compute_type_translations_2(Defs, TypeTranslations) ->
                   {verify, fetch_op_transl(verify, Translations, Ctxt)}
                   | [{merge, fetch_op_transl(merge, Translations, Ctxt)}
                      || not is_repeated_elem_path(Path),
-                        not is_scalar_type(Type)]],
+                        not is_scalar_type(Type)]]
+               ++ type_spec_tr(Translations),
            {Path, Trs}
        end
        || {Type, Path, Translations} <- Infos2]).
@@ -601,7 +604,8 @@ augment_field_translations(#?gpb_field{type=Type, occurrence=Occ},
              true ->
                   [encode,decode,merge,verify]
           end -- [merge || IsScalar, not IsRepeated],
-    augment_2_fetch_transl(Ops, Translations, {field, Path});
+    augment_2_fetch_transl(Ops, Translations, {field, Path})
+        ++ type_spec_tr(Translations);
 augment_field_translations(#gpb_oneof{}, [_,_]=Path, Translations, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     %% Operations for which we can or sometimes must have translations:
@@ -610,14 +614,24 @@ augment_field_translations(#gpb_oneof{}, [_,_]=Path, Translations, Opts) ->
              true ->
                   [encode,decode,verify]
           end,
-    augment_2_fetch_transl(Ops, Translations, {field, Path}).
+    augment_2_fetch_transl(Ops, Translations, {field, Path})
+        ++ type_spec_tr(Translations).
 
 augment_2_fetch_transl(Ops, Translations, Ctxt) ->
     [{Op, fetch_op_transl(Op, Translations, Ctxt)} || Op <- Ops].
 
 augment_msg_translations(MagName, Translations) ->
     Ops = [encode,decode,merge,verify],
-    augment_2_fetch_transl(Ops, Translations, {msg,[MagName]}).
+    augment_2_fetch_transl(Ops, Translations, {msg,[MagName]})
+        ++ type_spec_tr(Translations).
+
+type_spec_tr(Translations) ->
+    case lists:keyfind(type_spec, 1, Translations) of
+        {type_spec, TypeStr} ->
+            [{type_spec, TypeStr}];
+        false ->
+            [{type_spec, '$default'}]
+    end.
 
 fetch_op_transl(Op, Translations, Ctxt) ->
     Default = fetch_default_transl(Op),
