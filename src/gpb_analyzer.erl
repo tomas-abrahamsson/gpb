@@ -438,17 +438,15 @@ compute_type_translations_2(Defs, TypeTranslations) ->
     Infos = compute_type_translation_infos(Defs, TypeTranslations),
     dict_from_translation_list(
       [begin
-           {Decode, Fetch_Decode_Tr} =
-               case Type of
-                   {map,_,_} ->
-                       {decode_repeated_finalize, fun fetch_decode_r_f_tr/2};
-                   _ ->
-                       {decode, fun fetch_decode_tr/2}
-               end,
-           Trs = [{encode, fetch_encode_tr(Type, Translations)},
-                  {Decode, Fetch_Decode_Tr(Type, Translations)},
-                  {verify, fetch_verify_tr(Type, Translations)}
-                  | [{merge, fetch_merge_tr(Type, Translations)}
+           Decode = case Type of
+                        {map,_,_} -> decode_repeated_finalize;
+                        _ -> decode
+                    end,
+           Ctxt = {type, Type},
+           Trs = [{encode, fetch_op_transl(encode, Translations, Ctxt)},
+                  {Decode, fetch_op_transl(Decode, Translations, Ctxt)},
+                  {verify, fetch_op_transl(verify, Translations, Ctxt)}
+                  | [{merge, fetch_op_transl(merge, Translations, Ctxt)}
                      || not is_repeated_elem_path(Path),
                         not is_scalar_type(Type)]],
            {Path, Trs}
@@ -586,8 +584,8 @@ augment_field_translations(#?gpb_field{type=Type, occurrence=Occ},
              true ->
                   [encode,decode,merge,verify]
           end -- [merge || IsScalar, not IsRepeated],
-    augment_2_fetch_transl(Translations, Ops);
-augment_field_translations(#gpb_oneof{}, [_,_]=_Path, Translations, Opts) ->
+    augment_2_fetch_transl(Ops, Translations, {field, Path});
+augment_field_translations(#gpb_oneof{}, [_,_]=Path, Translations, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     %% Operations for which we can or sometimes must have translations:
     Ops = if DoNif ->
@@ -595,46 +593,33 @@ augment_field_translations(#gpb_oneof{}, [_,_]=_Path, Translations, Opts) ->
              true ->
                   [encode,decode,verify]
           end,
-    augment_2_fetch_transl(Translations, Ops).
+    augment_2_fetch_transl(Ops, Translations, {field, Path}).
 
-augment_2_fetch_transl(Translations, Ops) ->
-    [case lists:keyfind(Op, 1, Translations) of
-         {Op, Transl} ->
-             {Op, Transl};
-         false ->
-             error({missing_translation_for_op,Op})
-     end
-     || Op <- Ops].
+augment_2_fetch_transl(Ops, Translations, Ctxt) ->
+    [{Op, fetch_op_transl(Op, Translations, Ctxt)} || Op <- Ops].
 
-fetch_encode_tr(Type, Translations) ->
-    fetch_op_translation(encode, Translations, Type).
+fetch_op_transl(Op, Translations, Ctxt) ->
+    Default = fetch_default_transl(Op),
+    fetch_op_translation(Op, Translations, Default, Ctxt).
 
-fetch_decode_tr(Type, Translations) ->
-    fetch_op_translation(decode, Translations, Type).
+fetch_default_transl(Op) ->
+    case Op of
+        merge  -> gpb_gen_translators:default_merge_translator();
+        verify -> gpb_gen_translators:default_verify_translator();
+        _      -> '$no_default'
+    end.
 
-fetch_decode_r_f_tr(Type, Translations) ->
-    fetch_op_translation(decode_repeated_finalize, Translations, Type).
-
-fetch_merge_tr(Type, Translations) ->
-    Default = gpb_gen_translators:default_merge_translator(),
-    fetch_op_translation(merge,  Translations, Default, Type).
-
-fetch_verify_tr(Type, Translations) ->
-    Default = gpb_gen_translators:default_verify_translator(),
-    fetch_op_translation(verify, Translations, Default, Type).
-
-fetch_op_translation(Op, Translations, Type) ->
-    fetch_op_translation(Op, Translations, undefined, Type).
-
-fetch_op_translation(Op, Translations, Default, Type) ->
-    case proplists:get_value(Op, Translations, Default) of
-        undefined ->
+fetch_op_translation(Op, Translations, Default, Ctxt) ->
+    case lists:keyfind(Op, 1, Translations) of
+        false when Default /= '$no_default' ->
+            Default;
+        false when Default == '$no_default' ->
             error({error, {missing_translation,
-                           {op,Op}, {type,Type},
+                           {op,Op}, Ctxt,
                            Translations}});
-        {M,F,ArgTempl} ->
+        {Op, {M,F,ArgTempl}} ->
             {M,F,ArgTempl};
-        {F,ArgTempl} ->
+        {Op, {F,ArgTempl}} ->
             {F,ArgTempl}
     end.
 
