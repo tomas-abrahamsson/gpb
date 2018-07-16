@@ -247,6 +247,15 @@ enums([Ename|Enames],Conss) ->
 
 %% generator for messages that respect message definitions
 
+msg_name(MsgDefs, ChoiceOpts) ->
+    IsOk = case proplists:get_bool(no_any, ChoiceOpts) of
+               true  -> fun(MsgName) -> MsgName /= 'google.protobuf.Any' end;
+               false -> fun(_) -> true end
+
+           end,
+    oneof([M || {{msg,M},_} <- MsgDefs,
+                IsOk(M)]).
+
 message(MessageDefs,Opts) ->
     MsgDefs = [MD || {{msg,_MsgName},_}=MD <- MessageDefs], % filter out enums
     CandidateMsgDefs = case proplists:get_value(any_translate, Opts) of
@@ -462,7 +471,7 @@ prop_merge() ->
     ?FORALL(
        MsgDefs, message_defs(),
        ?FORALL(
-          MsgName, oneof([M || {{msg,M},_} <- MsgDefs]),
+          MsgName, msg_name(MsgDefs, [no_any]),
           ?FORALL(
              {Encoder, Decoder, COpts}, encoder_decoder(?MOD1),
              ?FORALL(
