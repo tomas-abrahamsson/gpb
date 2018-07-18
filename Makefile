@@ -71,8 +71,12 @@ ifndef EDOC_OPTS
 EDOC_OPTS={preprocess,true},{pretty_printer,erl_pp}
 endif
 
-ifndef PROPER_VERSION
-PROPER_VERSION=1.2
+ifndef PROPER_TAG
+PROPER_TAG=v1.2
+endif
+
+ifndef PROPER_REPO
+PROPER_REPO=git://github.com/proper-testing/proper.git
 endif
 
 ## Check verbosity
@@ -316,8 +320,8 @@ proper: .deps/proper/.stamp
 
 .deps/proper/.stamp:
 	mkdir -p .deps && cd .deps && \
-	git clone git://github.com/proper-testing/proper.git && \
-	cd proper && git checkout -q v$(PROPER_VERSION) && make && touch .stamp
+	git clone $(PROPER_REPO) && \
+	cd proper && git checkout -q $(PROPER_TAG) && make && touch .stamp
 
 ##
 ## General default rules for how to compile some files
