@@ -25,3 +25,5 @@ _build
 /.gpb-*.plt
 # proper-test target download dir in the Makefile
 /.deps
+# when proper is fetched as a rebar dependency
+/rebar.lock
