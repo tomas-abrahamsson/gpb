@@ -55,7 +55,12 @@ format_msg_merge_code_no_msgs(Opts) ->
              "-spec merge_msgs(_, _, _) -> no_return().\n",
              gpb_codegen:format_fn(
                merge_msgs,
-               fun(_Prev, _New, _Opts) ->
+               fun(_Prev, _New, _MsgNameOrOpts) ->
+                       erlang:error({gpb_error, no_messages})
+               end),
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(_Prev, _New, _MsgName, _Opts) ->
                        erlang:error({gpb_error, no_messages})
                end)];
         maps ->
@@ -75,7 +80,7 @@ format_msg_merge_code_no_msgs(Opts) ->
 
 format_msg_merge_code_msgs(Defs, AnRes, Opts) ->
     MsgNames = [MsgName || {{msg, MsgName}, _MsgDef} <- Defs],
-    [format_merge_msgs_top_level(MsgNames, Opts),
+    [format_merge_msgs_top_level(MsgNames, AnRes, Opts),
      [case Type of
           msg ->
               format_msg_merger(Name, MsgDef, AnRes, Opts);
@@ -95,87 +100,85 @@ format_msg_merge_code_msgs(Defs, AnRes, Opts) ->
 is_repeated_group(GroupName, #anres{group_occurrences=D}) ->
     dict:fetch(GroupName, D) == repeated.
 
-format_merge_msgs_top_level(MsgNames, Opts) ->
-    case gpb_lib:get_records_or_maps_by_opts(Opts) of
-        records ->
-            [gpb_codegen:format_fn(
-               merge_msgs,
-               fun(Prev, New) ->
-                       merge_msgs(Prev, New, [])
-               end),
-             gpb_codegen:format_fn(
-               merge_msgs,
-               fun(Prev, New, Opts) when element(1, Prev) =:= element(1, New) ->
-                       TrUserData = proplists:get_value(user_data, Opts),
-                       case Prev of
-                           '<msg-type>' -> '<merge-msg>'(Prev, New, TrUserData)
-                       end
-               end,
-               [repeat_clauses(
-                  '<msg-type>',
-                  [[replace_tree('<msg-type>',
-                                 gpb_lib:record_match(MsgName, [])),
-                    replace_term('<merge-msg>',
-                                 gpb_lib:mk_fn(merge_msg_, MsgName))]
-                   || MsgName <- MsgNames])])];
-        maps ->
-            [gpb_codegen:format_fn(
-               merge_msgs,
-               fun(Prev, New, MsgName) ->
-                       merge_msgs(Prev, New, MsgName, [])
-               end),
-             gpb_codegen:format_fn(
-               merge_msgs,
-               fun(Prev, New, MsgName, Opts) ->
-                       TrUserData = proplists:get_value(user_data, Opts),
-                       case MsgName of
-                           '<msg-type>' -> '<merge-msg>'(Prev, New, TrUserData)
-                       end
-               end,
-               [repeat_clauses(
-                  '<msg-type>',
-                  [[replace_tree('<msg-type>', erl_syntax:atom(MsgName)),
-                    replace_term('<merge-msg>',
-                                 gpb_lib:mk_fn(merge_msg_, MsgName))]
-                   || MsgName <- MsgNames])])]
-    end.
+format_merge_msgs_top_level(MsgNames, AnRes, Opts) ->
+    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    [[gpb_codegen:format_fn(
+       merge_msgs,
+       fun(Prev, New) when element(1,Prev) =:= element(1,New) ->
+               merge_msgs(Prev, New, element(1,Prev), [])
+       end) || Mapping == records],
+     gpb_codegen:format_fn(
+       merge_msgs,
+       fun(Prev, New, MsgName) when is_atom(MsgName) ->
+               merge_msgs(Prev, New, MsgName, []);
+          ('Prev', New, Opts) when element(1,'Prev') =:= element(1,New),
+                                   is_list(Opts) ->
+               merge_msgs(Prev, New, element(1,'Prev'), Opts)
+       end,
+       [repeat_clauses('Prev', [[replace_tree('Prev', ?expr(Prev))]
+                                || Mapping == records])]),
+     gpb_codegen:format_fn(
+       merge_msgs,
+       fun(Prev, New, MsgName, Opts) ->
+               TrUserData = proplists:get_value(user_data, Opts),
+               case MsgName of
+                   '<msg-name>' -> '<merge-msg>'(Prev, New, TrUserData)
+               end
+       end,
+       [repeat_clauses(
+          '<msg-name>',
+          [begin
+               DefaultMergeFn = gpb_lib:mk_fn(merge_msg_, MsgName),
+               ElemPath = [MsgName],
+               MMergeFn = case gpb_gen_translators:has_translation(
+                                 ElemPath, merge, AnRes) of
+                              {true, Transl} -> Transl;
+                              false -> DefaultMergeFn
+                          end,
+               [replace_term('<msg-name>', MsgName),
+                replace_term('<merge-msg>', MMergeFn)]
+           end
+           || MsgName <- MsgNames])])].
 
 format_msg_merger(MsgName, [], _AnRes, _Opts) ->
-    gpb_codegen:format_fn(
-      gpb_lib:mk_fn(merge_msg_, MsgName),
-      fun(_Prev, New, _TrUserData) -> New end);
+    FnName = gpb_lib:mk_fn(merge_msg_, MsgName),
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_codegen:format_fn(
+       FnName,
+       fun(_Prev, New, _TrUserData) -> New end)];
 format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(merge_msg_, MsgName),
     TrUserDataVar = ?expr(TrUserData),
     {PrevMatch, NewMatch, ExtraInfo} =
         format_msg_merger_fnclause_match(MsgName, MsgDef, Opts),
     {MandatoryMergings, OptMergings} = compute_msg_field_mergers(
                                          ExtraInfo, MsgName, AnRes, Opts),
-    gpb_codegen:format_fn(
-      gpb_lib:mk_fn(merge_msg_, MsgName),
-      fun('Prev', 'New', 'MaybeTrUserData') ->
-              '<merge-it>'
-      end,
-      [replace_tree('Prev',  PrevMatch),
-       replace_tree('New',   NewMatch),
-       splice_trees(
-         '<merge-it>',
-         gpb_lib:do_exprs(
-           fun(Elem, Var) ->
-                   render_omissible_merger(Elem, Var, TrUserDataVar)
-           end,
-           render_field_mergers(MsgName, MandatoryMergings,
-                                TrUserDataVar, Opts),
-                          OptMergings)),
-       replace_tree('TrUserData', TrUserDataVar), % needed by some field mergers
-       replace_tree('MaybeTrUserData',
-                    case gpb_lib:any_field_is_sub_msg(MsgDef)
-                        orelse gpb_lib:any_field_is_repeated(MsgDef)
-                        orelse gpb_gen_translators:exists_tr_for_msg(MsgName,
-                                                                     merge,
-                                                                     AnRes) of
-                        true  -> TrUserDataVar;
-                        false -> ?expr(_)
-                    end)]).
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     gpb_codegen:format_fn(
+       FnName,
+       fun('Prev', 'New', 'MaybeTrUserData') ->
+               '<merge-it>'
+       end,
+       [replace_tree('Prev',  PrevMatch),
+        replace_tree('New',   NewMatch),
+        splice_trees(
+          '<merge-it>',
+          gpb_lib:do_exprs(
+            fun(Elem, Var) ->
+                    render_omissible_merger(Elem, Var, TrUserDataVar)
+            end,
+            render_field_mergers(MsgName, MandatoryMergings,
+                                 TrUserDataVar, Opts),
+            OptMergings)),
+        replace_tree('TrUserData', TrUserDataVar), % needed by some field mergers
+        replace_tree('MaybeTrUserData',
+                     case gpb_lib:any_field_is_sub_msg(MsgDef)
+                         orelse gpb_lib:any_field_is_repeated(MsgDef)
+                         orelse gpb_gen_translators:exists_tr_for_msg(
+                                  MsgName, merge, AnRes) of
+                         true  -> TrUserDataVar;
+                         false -> ?expr(_)
+                     end)])].
 
 format_msg_merger_fnclause_match(_MsgName, [], _Opts) ->
     {?expr(PF), ?expr(_), no_fields};
