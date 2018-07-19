@@ -320,7 +320,7 @@ proper: .deps/proper/.stamp
 
 .deps/proper/.stamp:
 	mkdir -p .deps && cd .deps && \
-	git clone $(PROPER_REPO) && \
+	git clone $(PROPER_REPO) proper && \
 	cd proper && git checkout -q $(PROPER_TAG) && make && touch .stamp
 
 ##
