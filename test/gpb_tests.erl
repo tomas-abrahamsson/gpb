@@ -1435,7 +1435,7 @@ verify_path_when_failure_test() ->
                                        occurrence=required}]}],
     ?assertError({gpb_type_error, {_, [_, {path, top_level}]}},
                  verify_msg(bad_msg, MsgDefs)),
-    ?assertError({gpb_type_error, {_, [_, {path, top_level}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, _}]}},
                  verify_msg({m1}, MsgDefs)),
     ?assertError({gpb_type_error, {_, [_, {path, 'm1.a'}]}},
                  verify_msg(#m1{a = bad_msg}, MsgDefs)),

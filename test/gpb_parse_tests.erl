@@ -40,8 +40,10 @@ parses_simple_oneof_test() ->
     {ok, [{{msg,'Msg'},
            [#gpb_oneof{
                name=x,
-               fields=[#field{name=a1, fnum=1, type=uint32, occurrence=optional},
-                       #field{name=a2, fnum=2, type=string, occurrence=optional}
+               fields=[#?gpb_field{name=a1, fnum=1, type=uint32,
+                                   occurrence=optional},
+                       #?gpb_field{name=a2, fnum=2, type=string,
+                                   occurrence=optional}
                       ]}]}]=Defs} =
         parse_lines(
           ["message Msg {",
@@ -55,8 +57,8 @@ parses_simple_oneof_test() ->
     [{{msg,'Msg'}, [#gpb_oneof{
                        name=x,
                        rnum=2,
-                       fields=[#field{name=a1, rnum=2},
-                               #field{name=a2, rnum=2}]}]},
+                       fields=[#?gpb_field{name=a1, rnum=2},
+                               #?gpb_field{name=a2, rnum=2}]}]},
      {{msg_containment, _}, _}] =
         do_process_sort_defs(Defs).
 

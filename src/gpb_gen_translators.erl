@@ -27,7 +27,7 @@
 -module(gpb_gen_translators).
 
 -export([format_translators/3]).
--export([format_aux_transl_helpers/1]).
+-export([format_aux_transl_helpers/0]).
 -export([format_merge_translators/3]).
 
 -export([mk_find_tr_fn/3]).
@@ -36,6 +36,8 @@
 -export([mk_find_tr_fn_elem_or_default/4]).
 -export([mk_elempath_elem/3]).
 -export([find_translation/3, find_translation/4]).
+-export([has_translation/3]).
+-export([has_type_spec_translation/2]).
 -export([default_fn_by_op/2]).
 -export([default_merge_translator/0]).
 -export([default_verify_translator/0]).
@@ -50,21 +52,130 @@
 -import(gpb_lib, [replace_term/2, replace_tree/2, splice_trees/2]).
 
 format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, CallTemplate, Opts)
-       || {Op, CallTemplate} <- OpTransls]
+    [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
+       || {Op, CallTemplates} <- OpTransls,
+          Op /= type_spec]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_translators(AnRes, Opts)].
 
 format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, CallTemplate, Opts)
-       || {Op, CallTemplate} <- OpTransls,
+    [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
+       || {Op, CallTemplates} <- OpTransls,
           Op == merge]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_merge_translators(AnRes, Opts)].
 
-format_field_op_translator(ElemPath, Op, CallTemplate, Opts) ->
-    ArgTemplate = last_tuple_element(CallTemplate),
+format_field_op_translator(ElemPath, Op, CallTemplates, Opts) ->
     FnName = mk_tr_fn_name(ElemPath, Op),
+    {InPatterns, Body} =
+        stack_transl_calls(
+          Op, lists:unzip(
+                [format_field_op_translator(Op, CallTemplate)
+                 || CallTemplate <- CallTemplates])),
+    [inline_attr(FnName,length(InPatterns)),
+     if Op == verify ->
+             %% Dialyzer might complain that "The created fun has no
+             %% local return", for a $errorf, which is true, but also
+             %% not surprising, so shut this warning down.
+             gpb_lib:nowarn_dialyzer_attr(FnName,length(InPatterns),Opts);
+        true ->
+             ""
+     end,
+     gpb_codegen:format_fn(
+       FnName,
+       fun('$$InPatterns') ->
+               '$$Body'
+       end,
+       [splice_trees('$$InPatterns', InPatterns),
+        splice_trees('$$Body', Body)])].
+
+%% When there are several translation calls, stack them like this:
+%% Params:
+%%   Ins = list of function param patterns
+%%         for example: [(X, _, _), (X, Y, _), (X, _, _)]
+%%   Bodyies: list of calls,
+%%            for example [call1(X), call2(X, Y), call3(X, hello_world)]
+%%
+%% Assumption: Function param patterns are either single variable or underscore
+%%             Function param pattenrs that are variables all have the same
+%%             variable at each position, ie never like [(X, _), (Y, _)]
+%%
+%% Results:
+%%   Function param pattern: (X, Y, _) in the example, ie a variable
+%%     (the variable) at each position unless all Ins have underscore
+%%     at that position.
+%%   Body: In the example, the stacked body will be these three
+%%     expressions:
+%%       Res1 = call1(X),
+%%       Res2 = call2(Res1, Y),
+%%       call3(Res2, hello_world)
+%%     The decision to replace X and not say Y, with the variable of the
+%%     intermediate result is given by the out_to_in_by_op function.
+stack_transl_calls(Op, {[Ins1 | RestInPatterns], [Body1 | RestBodies]}) ->
+    MergedBody =
+        gpb_lib:do_exprs(
+          fun({I, {InPatterns, Body}}, Var) ->
+                  Pos = out_to_in_by_op(Op),
+                  Body2 = replace_inpattern(lists:nth(Pos, Ins1), Body, Var),
+                  %% New vars in body
+                  VarsToKeep = extract_vars(InPatterns ++ [Var]),
+                  unquify_free_vars(Body2, VarsToKeep, I)
+          end,
+          Body1,
+          gpb_lib:index_seq(lists:zip(RestInPatterns, RestBodies))),
+    MergedInPatterns =
+        lists:foldl(
+          fun(InPatterns, Acc) ->
+                  [case {is_underscore(InPattern), is_underscore(AccPattern)} of
+                       {true, true}   -> AccPattern;
+                       {false, true}  -> InPattern;
+                       {true, false}  -> AccPattern;
+                       {false, false} -> AccPattern  % assume same var
+                   end
+                   || {InPattern, AccPattern} <- lists:zip(InPatterns, Acc)]
+          end,
+          Ins1,
+          RestInPatterns),
+    {MergedInPatterns, MergedBody}.
+
+replace_inpattern(InPattern, Body, Var) ->
+    erl_syntax_lib:map(
+      fun(Node) ->
+              if Node == InPattern -> Var;
+                 true -> Node
+              end
+      end,
+      Body).
+
+extract_vars(Patterns) ->
+    [erl_syntax:variable_name(Pat) || Pat <- Patterns,
+                                      erl_syntax:type(Pat) == variable].
+
+unquify_free_vars(Body, VarsToKeep, I) ->
+    erl_syntax_lib:map(
+      fun(Node) ->
+              case erl_syntax:type(Node) of
+                  variable ->
+                      VarName = erl_syntax:variable_name(Node),
+                      case lists:member(VarName, VarsToKeep) of
+                          true ->
+                              Node;
+                          false ->
+                              VarName1 = lists:concat([VarName, I]),
+                              Node1 = erl_syntax:variable(VarName1),
+                              erl_syntax:copy_pos(Node, Node1)
+                      end;
+                  _ ->
+                      Node
+              end
+      end,
+      Body).
+
+is_underscore(Pattern) ->
+    erl_syntax:type(Pattern) =:= underscore.
+
+format_field_op_translator(Op, CallTemplate) ->
+    ArgTemplate = last_tuple_element(CallTemplate),
     {InArgs, OutArgs0, Relations0} =
         if Op /= verify ->
                 Ins = Outs = tr_in_args_by_op(Op),
@@ -112,23 +223,7 @@ format_field_op_translator(ElemPath, Op, CallTemplate, Opts) ->
               true ->
                    Call
            end,
-    [inline_attr(FnName,length(InArgs)),
-     if Op == verify ->
-             %% Dialyzer might complain that "The created fun has no
-             %% local return", for a $errorf, which is true, but also
-             %% not surprising, so shut this warning down.
-             gpb_lib:nowarn_dialyzer_attr(FnName,length(InArgs),Opts);
-        true ->
-             ""
-     end,
-     gpb_codegen:format_fn(
-       FnName,
-       fun('$$InPatterns') ->
-               '$$Body'
-       end,
-       [splice_trees('$$InPatterns', InPatterns),
-        replace_tree('$$Body', Body)])].
-
+    {InPatterns, Body}.
 
 last_tuple_element(Tuple) ->
     element(tuple_size(Tuple), Tuple).
@@ -255,24 +350,35 @@ args_by_op2(decode_repeated_finalize) -> [?expr(L)];
 args_by_op2(merge)                    -> [?expr(X1), ?expr(X2)];
 args_by_op2(verify)                   -> [?expr(V), ?expr(Path)].
 
-format_aux_transl_helpers(#anres{default_transls=UsedDefaultTransls}) ->
-    IsNeeded = fun(F,A) -> sets:is_element({F,A}, UsedDefaultTransls) end,
-    [[[inline_attr(id,2),
-       "id(X, _TrUserData) -> X.\n",
-       "\n"] || IsNeeded(id,2)],
-     [[inline_attr(cons,3),
-       "cons(Elem, Acc, _TrUserData) -> [Elem | Acc].\n",
-       "\n"] || IsNeeded(cons,3)],
-     [[inline_attr('lists_reverse',2),
-       "'lists_reverse'(L, _TrUserData) -> lists:reverse(L)."
-       "\n"] || IsNeeded(lists_reverse,2)],
-     [[inline_attr('erlang_++',3),
-       "'erlang_++'(A, B, _TrUserData) -> A ++ B."
-       "\n"] || IsNeeded('erlang_++',3)]].
+format_aux_transl_helpers() ->
+    [gpb_lib:nowarn_unused_function(id,2),
+     inline_attr(id,2),
+     "id(X, _TrUserData) -> X.\n",
+     "\n",
+     gpb_lib:nowarn_unused_function(v_ok,3),
+     inline_attr(v_ok,3),
+     "v_ok(_Value, _Path, _TrUserData) -> ok.\n",
+     "\n",
+     gpb_lib:nowarn_unused_function(m_overwrite,3),
+     inline_attr(m_overwrite,3),
+     "m_overwrite(_Prev, New, _TrUserData) -> New.\n",
+     "\n",
+     gpb_lib:nowarn_unused_function(cons,3),
+     inline_attr(cons,3),
+     "cons(Elem, Acc, _TrUserData) -> [Elem | Acc].\n",
+     "\n",
+     gpb_lib:nowarn_unused_function('lists_reverse',2),
+     inline_attr('lists_reverse',2),
+     "'lists_reverse'(L, _TrUserData) -> lists:reverse(L)."
+     "\n",
+     gpb_lib:nowarn_unused_function('erlang_++',3),
+     inline_attr('erlang_++',3),
+     "'erlang_++'(A, B, _TrUserData) -> A ++ B."
+     "\n"].
 
 format_default_translators(AnRes, Opts) ->
     [format_default_map_translators(AnRes, Opts),
-     format_default_any_translators(AnRes, Opts)].
+     format_default_msg_translators(AnRes, Opts)].
 
 format_default_map_translators(#anres{map_types=MapTypes,
                                       map_value_types=MVT}=AnRes, Opts) ->
@@ -419,17 +525,17 @@ format_default_merge_translators(#anres{map_types=MapTypes}, Opts) ->
      end
      || HaveMaps].
 
-format_default_any_translators(#anres{translations=Translations}, _Opts) ->
+format_default_msg_translators(#anres{translations=Translations}, _Opts) ->
     Defaults = [{merge, default_merge_translator()},
                 {verify, default_verify_translator()}],
     Needs = compute_needed_default_translations(Translations, Defaults),
-    [[[inline_attr(any_m_overwrite,2),
+    [[[inline_attr(msg_m_overwrite,2),
        gpb_codegen:format_fn(
-         any_m_overwrite,
-         fun(Any2,_) -> Any2 end),
+         msg_m_overwrite,
+         fun(Msg2,_) -> Msg2 end),
        "\n"] || sets:is_element(merge, Needs)],
      [[gpb_codegen:format_fn(
-         any_v_no_check,
+         msg_v_no_check,
          fun(_,_) -> ok end),
        "\n"] || sets:is_element(verify, Needs)]].
 
@@ -437,11 +543,18 @@ compute_needed_default_translations(Translations, Defaults) ->
     dict:fold(
       fun(_ElemPath, Ops, Acc) ->
               lists:foldl(
-                fun({Op, Call}, Acc2) ->
-                        case lists:member({Op, Call}, Defaults) of
-                            true  -> sets:add_element(Op, Acc2);
-                            false -> Acc2
-                        end
+                fun({type_spec, _}, Acc2) ->
+                        Acc2;
+                   ({Op, Calls}, Acc2) ->
+                        lists:foldl(
+                          fun(Call, Acc3) ->
+                                  case lists:member({Op, Call}, Defaults) of
+                                      true  -> sets:add_element(Op, Acc3);
+                                      false -> Acc3
+                                  end
+                          end,
+                          Acc2,
+                          Calls)
                 end,
                 Acc,
                 Ops)
@@ -486,19 +599,44 @@ mk_elempath_elem(MsgName, #?gpb_field{name=FName}, {true, CFName}) ->
 
 find_translation(ElemPath, Op, AnRes) ->
     find_translation(ElemPath, Op, AnRes, undefined).
-find_translation(ElemPath, Op, #anres{translations=Ts}, Default) ->
-    case dict:find(ElemPath, Ts) of
-        {ok, OpTransls} ->
-            case lists:keyfind(Op, 1, OpTransls) of
-                {Op, _Fn} ->
-                    mk_tr_fn_name(ElemPath, Op);
-                false ->
-                    default_fn_by_op(Op, Default)
-            end;
-        error ->
+find_translation(ElemPath, Op, AnRes, Default) ->
+    case has_translation(ElemPath, Op, AnRes) of
+        {true, Transl} ->
+            Transl;
+        false ->
             default_fn_by_op(Op, Default)
     end.
 
+has_translation(ElemPath, Op, #anres{translations=Ts}) ->
+    case dict:find(ElemPath, Ts) of
+        {ok, OpTransls} ->
+            case lists:keyfind(Op, 1, OpTransls) of
+                {Op, _Calls} ->
+                    {true, mk_tr_fn_name(ElemPath, Op)};
+                false ->
+                    false
+            end;
+        error ->
+            false
+    end.
+
+has_type_spec_translation(ElemPath, #anres{translations=Ts}) ->
+    case dict:find(ElemPath, Ts) of
+        {ok, OpTransls} ->
+            case lists:keyfind(type_spec, 1, OpTransls) of
+                {type_spec, TypeSpec} when is_list(TypeSpec) ->
+                    {true, TypeSpec};
+                {type_spec, '$default'} ->
+                    false;
+                false ->
+                    false
+            end;
+        error ->
+            false
+    end.
+
+mk_tr_fn_name([MsgName], Op) ->
+    list_to_atom(?ff("tr_~s_~s", [Op, MsgName]));
 mk_tr_fn_name([MsgName,FieldName,[]], Op) ->
     list_to_atom(?ff("tr_~s_~s.~s[x]", [Op, MsgName,FieldName]));
 mk_tr_fn_name([MsgName,FName,OneofName], Op) ->
@@ -510,14 +648,21 @@ default_fn_by_op(decode_repeated_add_elem, undefined) ->
     cons;
 default_fn_by_op(decode_repeated_finalize, undefined) ->
     lists_reverse;
+default_fn_by_op(merge, undefined) ->
+    m_overwrite;
+default_fn_by_op(verify, undefined) ->
+    v_ok;
 default_fn_by_op(_, undefined) ->
     id;
 default_fn_by_op(_, Fn) ->
     Fn.
 
-default_merge_translator() -> {any_m_overwrite,['$2','$user_data']}.
+out_to_in_by_op(merge) -> 2;
+out_to_in_by_op(_) -> 1.
 
-default_verify_translator() -> {any_v_no_check,['$1', '$user_data']}.
+default_merge_translator() -> {msg_m_overwrite,['$2','$user_data']}.
+
+default_verify_translator() -> {msg_v_no_check,['$1', '$user_data']}.
 
 exists_tr_for_msg(MsgName, Op, #anres{translations=Translations}) ->
     dict:fold(fun(_Key, _OpCalls, true) ->
