@@ -297,7 +297,7 @@ $(ebin)/%.beam: $(src)/%.erl | $(ebin)
 	$(ERLC) $(ERLC_FLAGS) -pa $(ebin) -o $(ebin) $<
 
 $(ebin)/%.beam: $(descr_src)/%.erl | $(ebin)
-	$(ERLC) $(ERLC_FLAGS) -pa $(ebin) -o $(ebin) $<
+	$(ERLC) $(ERLC_FLAGS) -Iinclude -pa $(ebin) -o $(ebin) $<
 
 $(test)/%.beam: $(test)/%.erl | $(ebin)
 	$(ERLC) $(ERLC_FLAGS) $(EUNIT_ERLC_FLAGS) -pa $(ebin) -o $(test) $<
