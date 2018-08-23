@@ -311,7 +311,7 @@ type_to_typestr(_, #gpb_oneof{fields=OFields}, Defs, Opts) ->
                           []
                   end,
     gpb_lib:or_join(
-      [?f("{~s, ~s}", [Name, type_to_typestr_2(Type, Defs, Opts)])
+      [?f("{~p, ~s}", [Name, type_to_typestr_2(Type, Defs, Opts)])
        || #?gpb_field{name=Name, type=Type} <- OFields]
       ++ OrUndefined).
 

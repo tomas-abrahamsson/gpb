@@ -1425,6 +1425,17 @@ uuid_m(Uuid1, Uuid2) when is_integer(Uuid1), is_integer(Uuid2) ->
 
 %% --- misc ----------
 
+typespecs_and_uppercase_oneof_fields_test() ->
+    M = compile_iolist(["message M {",
+                        "  oneof x {",
+                        "    uint32 Abc = 1;",
+                        "  }",
+                        "}"],
+                       [type_specs]),
+    E = M:encode_msg({'M', {'Abc', 17}}),
+    ?assert(is_binary(E)),
+    unload_code(M).
+
 only_enums_no_msgs_test() ->
     M = compile_iolist(["enum e {"
                         "  a = 1;",
@@ -2023,7 +2034,8 @@ nif_code_test_() ->
          {"Nif encode decode", fun nif_encode_decode/0},
          increase_timeouts(
            nif_oneof_tests_check_prerequisites(
-             [{"encode decode", fun nif_encode_decode_oneof/0}])),
+             [{"encode decode", fun nif_encode_decode_oneof/0},
+              {"Nif with C++ keywords", fun nif_with_cxx_keywords/0}])),
          increase_timeouts(
            nif_mapfield_tests_check_prerequisites(
              [{"encode decode", fun nif_encode_decode_mapfields/0}])),
@@ -2442,6 +2454,39 @@ nif_with_booleans() ->
                         ?assertEqual(OrigMsgAtom, MMDecoded),
                         ?assertEqual(OrigMsgAtom, GMDecoded),
                         ?assertEqual(OrigMsgAtom, MGDecoded)
+                end)
+      end).
+
+nif_with_cxx_keywords() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_with_cxx_keywords,
+              DefsTxt = lf_lines(["enum E {",
+                                  "  new = 0;",
+                                  "  Delete = 1;",
+                                  "}",
+                                  "message ntestc {",
+                                  "  optional E f1 = 1;"
+                                  "  optional uint32 Private = 2;",
+                                  "  oneof Union {",
+                                  "    uint32 protected = 3;",
+                                  "    uint32 Public = 4;",
+                                  "  }",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir, []),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {ntestc,'Delete',2,{'Public',3}},
+                        MEncoded  = M:encode_msg(OrigMsg),
+                        GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                        MMDecoded = M:decode_msg(MEncoded, ntestc),
+                        GMDecoded = gpb:decode_msg(MEncoded, ntestc, Defs),
+                        MGDecoded = M:decode_msg(GEncoded, ntestc),
+                        ?assertEqual(OrigMsg, MMDecoded),
+                        ?assertEqual(OrigMsg, GMDecoded),
+                        ?assertEqual(OrigMsg, MGDecoded)
                 end)
       end).
 
