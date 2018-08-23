@@ -852,15 +852,15 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar,
       Defs, Opts, Setter);
 format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
     #?gpb_field{name=FName, type=FType} = Field,
-    LCFName = to_lower(FName),
+    CxxFName = 'field_name_to_c++'(FName),
     SetFn = fun(Exprs) ->
                     case Setter of
                         set ->
                             ?f("~s->set_~s(~s);",
-                               [MsgVar, LCFName, gpb_lib:comma_join(Exprs)]);
+                               [MsgVar, CxxFName, gpb_lib:comma_join(Exprs)]);
                         add ->
                             ?f("~s->add_~s(~s);",
-                               [MsgVar, LCFName, gpb_lib:comma_join(Exprs)]);
+                               [MsgVar, CxxFName, gpb_lib:comma_join(Exprs)]);
                         {set_var, V} ->
                             case Exprs of
                                 [Val] -> ?f("~s = ~s;", [V, Val]);
@@ -960,7 +960,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                      I >  1 -> "else "
                   end,
                   SrcVar, mk_c_var(gpb_aa_, Sym),
-                  SetFn([?f("~s::~s~s", [CPkg, EPrefix, Sym])])])
+                  SetFn([?f("~s::~s~s", [CPkg, EPrefix, 'sym_to_c++'(Sym)])])])
               || {I, {Sym, _Val}} <- gpb_lib:index_seq(Enumerations)],
              "    else\n"
              "        return 0;\n"
@@ -1013,8 +1013,8 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
             CMsg2Type = mk_cctype_name(FType, Defs),
             PackFnName = mk_c_fn(p_msg_, Msg2Name),
             NewMsg2 = case Setter of
-                          set -> ?f("~s->mutable_~s()", [MsgVar, LCFName]);
-                          add -> ?f("~s->add_~s()", [MsgVar, LCFName]);
+                          set -> ?f("~s->mutable_~s()", [MsgVar, CxxFName]);
+                          add -> ?f("~s->add_~s()", [MsgVar, CxxFName]);
                           {set_var, V} ->
                               ?f("~s = new ~s()", [V, CMsg2Type])
                       end,
@@ -1047,7 +1047,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                 "    ~s\n"  % decl of m2k
                 "    ~s\n"  % decl of m2v
                 "\n",
-                [CMapType, MsgVar, LCFName,
+                [CMapType, MsgVar, CxxFName,
                  KeyDecl, ValueDecl]),
              %% Set values for m2k and m2v
              SetKey,
@@ -1275,9 +1275,8 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
     #gpb_oneof{name=OFName, fields=OFields} = Field,
     CPkg = get_cc_pkg(Defs),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
-    LCOFName = to_lower(OFName),
     UCOFName = to_upper(OFName),
-    [?f("switch (~s->~s_case())\n", [MsgVar, LCOFName]),
+    [?f("switch (~s->~s_case())\n", [MsgVar, OFName]),
      ?f("{\n"),
      [begin
           CamelCaseFOFName = camel_case(FOFName),
@@ -1320,20 +1319,20 @@ format_nif_cc_field_unpacker_single_p3(DestVar, MsgVar, Field, Defs) ->
 
 format_nif_cc_field_unpacker_single_p2(DestVar, MsgVar, Field, Defs) ->
     #?gpb_field{name=FName} = Field,
-    LCFName = to_lower(FName),
+    CxxFName = 'field_name_to_c++'(FName),
     ?f("if (!~s->has_~s())\n"
        "    ~s = gpb_x_no_value;\n"
        "else\n"
        "~s\n"
-       "\n", [MsgVar, LCFName, DestVar,
+       "\n", [MsgVar, CxxFName, DestVar,
               split_indent_iolist_unless_curly_block(
                 4, format_nif_cc_field_unpacker_by_field(
                      DestVar, MsgVar, Field, Defs))]).
 
 format_nif_cc_field_unpacker_by_field(DestVar, MsgVar, Field, Defs) ->
     #?gpb_field{name=FName, type=FType} = Field,
-    LCFName = to_lower(FName),
-    SrcExpr = ?f("~s->~s()", [MsgVar, LCFName]),
+    CxxFName = 'field_name_to_c++'(FName),
+    SrcExpr = ?f("~s->~s()", [MsgVar, CxxFName]),
     format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs).
 
 format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs) ->
@@ -1396,7 +1395,8 @@ format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs) ->
             [] ++
                 [?f("switch (~s) {\n", [SrcExpr])] ++
                 [?f("    case ~s::~s~s: ~s = ~s; break;\n",
-                    [CPkg, EPrefix, Sym, DestVar, mk_c_var(gpb_aa_, Sym)])
+                    [CPkg, EPrefix, 'sym_to_c++'(Sym),
+                     DestVar, mk_c_var(gpb_aa_, Sym)])
                  || {Sym, _Value} <- Enumerations] ++
                 [?f("    default: ~s = gpb_aa_undefined;\n", [DestVar])] ++
                 [?f("}\n")];
@@ -1429,9 +1429,9 @@ format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType, Defs) ->
 
 format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
     #?gpb_field{name=FName, type=FType} = Field,
-    LCFName = to_lower(FName),
+    CxxFName = 'field_name_to_c++'(FName),
     [?f("{\n"),
-     ?f("    unsigned int numElems = ~s->~s_size();\n", [MsgVar, LCFName]),
+     ?f("    unsigned int numElems = ~s->~s_size();\n", [MsgVar, CxxFName]),
      ?f("    ERL_NIF_TERM relem[numElems];\n"),
      ?f("    unsigned int i;\n"),
      "\n",
@@ -1439,7 +1439,7 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
      gpb_lib:split_indent_iolist(
        4, split_indent_iolist_unless_curly_block(
             4, format_nif_cc_field_unpacker_by_type(
-                 "relem[i]", ?f("~s->~s(i)", [MsgVar, LCFName]),
+                 "relem[i]", ?f("~s->~s(i)", [MsgVar, CxxFName]),
                  FType, Defs))),
      ?f("    ~s = enif_make_list_from_array(env, relem, numElems);\n",
         [DestVar]),
@@ -1448,7 +1448,7 @@ format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field, Defs) ->
 
 format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field, Defs, Opts) ->
     #?gpb_field{name=FName, type={map, KeyType, ValueType}=Type} = Field,
-    LCFName = to_lower(FName),
+    CxxFName = 'field_name_to_c++'(FName),
     ItType = mk_cctype_name(Type, Defs) ++ "::const_iterator",
     MapsOrTuples = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
     ["{\n",
@@ -1465,7 +1465,7 @@ format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field, Defs, Opts) ->
      ?f("    for (~s it = ~s->~s().begin();\n"
         "         it != ~s->~s().end();\n"
         "         ++it)\n",
-        [ItType, MsgVar, LCFName, MsgVar, LCFName]),
+        [ItType, MsgVar, CxxFName, MsgVar, CxxFName]),
      "    {\n",
      "        ERL_NIF_TERM ek, ev;\n",
      %% FIXME
@@ -1586,3 +1586,101 @@ d_r("", _New)       -> "".
 
 is_dotted(S) when is_list(S) -> gpb_lib:is_substr(".", S);
 is_dotted(S) when is_atom(S) -> is_dotted(atom_to_list(S)).
+
+'field_name_to_c++'(FName) ->
+    'sym_to_c++'(to_lower(FName)).
+
+'sym_to_c++'(Sym) ->
+    case 'is_c++_keyword'(Sym) of
+        false ->
+            Sym;
+        true ->
+            underscore_suffix(Sym)
+    end.
+
+underscore_suffix(A) when is_atom(A) ->
+    list_to_atom(atom_to_list(A) ++ "_").
+
+'is_c++_keyword'(alignas) -> true;
+'is_c++_keyword'(alignof) -> true;
+'is_c++_keyword'('and') -> true;
+'is_c++_keyword'(and_eq) -> true;
+'is_c++_keyword'(asm) -> true;
+'is_c++_keyword'(auto) -> true;
+'is_c++_keyword'(bitand) -> true;
+'is_c++_keyword'(bitor) -> true;
+'is_c++_keyword'(bool) -> true;
+'is_c++_keyword'(break) -> true;
+'is_c++_keyword'('case') -> true;
+'is_c++_keyword'('catch') -> true;
+'is_c++_keyword'(char) -> true;
+'is_c++_keyword'(class) -> true;
+'is_c++_keyword'(compl) -> true;
+'is_c++_keyword'(const) -> true;
+'is_c++_keyword'(constexpr) -> true;
+'is_c++_keyword'(const_cast) -> true;
+'is_c++_keyword'(continue) -> true;
+'is_c++_keyword'(decltype) -> true;
+'is_c++_keyword'(default) -> true;
+'is_c++_keyword'(delete) -> true;
+'is_c++_keyword'(do) -> true;
+'is_c++_keyword'(double) -> true;
+'is_c++_keyword'(dynamic_cast) -> true;
+'is_c++_keyword'(else) -> true;
+'is_c++_keyword'(enum) -> true;
+'is_c++_keyword'(explicit) -> true;
+'is_c++_keyword'(export) -> true;
+'is_c++_keyword'(extern) -> true;
+'is_c++_keyword'(false) -> true;
+'is_c++_keyword'(float) -> true;
+'is_c++_keyword'(for) -> true;
+'is_c++_keyword'(friend) -> true;
+'is_c++_keyword'(goto) -> true;
+'is_c++_keyword'('if') -> true;
+'is_c++_keyword'(inline) -> true;
+'is_c++_keyword'(int) -> true;
+'is_c++_keyword'(long) -> true;
+'is_c++_keyword'(mutable) -> true;
+'is_c++_keyword'(namespace) -> true;
+'is_c++_keyword'(new) -> true;
+'is_c++_keyword'(noexcept) -> true;
+'is_c++_keyword'('not') -> true;
+'is_c++_keyword'(not_eq) -> true;
+'is_c++_keyword'(nullptr) -> true;
+'is_c++_keyword'(operator) -> true;
+'is_c++_keyword'('or') -> true;
+'is_c++_keyword'(or_eq) -> true;
+'is_c++_keyword'(private) -> true;
+'is_c++_keyword'(protected) -> true;
+'is_c++_keyword'(public) -> true;
+'is_c++_keyword'(register) -> true;
+'is_c++_keyword'(reinterpret_cast) -> true;
+'is_c++_keyword'(return) -> true;
+'is_c++_keyword'(short) -> true;
+'is_c++_keyword'(signed) -> true;
+'is_c++_keyword'(sizeof) -> true;
+'is_c++_keyword'(static) -> true;
+'is_c++_keyword'(static_assert) -> true;
+'is_c++_keyword'(static_cast) -> true;
+'is_c++_keyword'(struct) -> true;
+'is_c++_keyword'(switch) -> true;
+'is_c++_keyword'(template) -> true;
+'is_c++_keyword'(this) -> true;
+'is_c++_keyword'(thread_local) -> true;
+'is_c++_keyword'(throw) -> true;
+'is_c++_keyword'(true) -> true;
+'is_c++_keyword'('try') -> true;
+'is_c++_keyword'(typedef) -> true;
+'is_c++_keyword'(typeid) -> true;
+'is_c++_keyword'(typename) -> true;
+'is_c++_keyword'(union) -> true;
+'is_c++_keyword'(unsigned) -> true;
+'is_c++_keyword'(using) -> true;
+'is_c++_keyword'(virtual) -> true;
+'is_c++_keyword'(void) -> true;
+'is_c++_keyword'(volatile) -> true;
+'is_c++_keyword'(wchar_t) -> true;
+'is_c++_keyword'(while) -> true;
+'is_c++_keyword'('xor') -> true;
+'is_c++_keyword'(xor_eq) -> true;
+'is_c++_keyword'(_) -> false.
