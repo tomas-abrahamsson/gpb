@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 4.2.2
+2018-Aug-23
+
+        * For NIFs, also accept enums as integers. Thanks to
+        Jean-Alexandre Barszcz. (#147, #148)
+        * Fix NIF generation when fields are C++ reserved words, Thanks to
+        Jean-Alexandre Barszcz for reporting. (#146)
+        * Fix type specs for oneof fields beginning in uppercase.
+
 Version 4.2.1
 2018-Jul-13
 
