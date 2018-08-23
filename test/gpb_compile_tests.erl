@@ -1425,6 +1425,17 @@ uuid_m(Uuid1, Uuid2) when is_integer(Uuid1), is_integer(Uuid2) ->
 
 %% --- misc ----------
 
+typespecs_and_uppercase_oneof_fields_test() ->
+    M = compile_iolist(["message M {",
+                        "  oneof x {",
+                        "    uint32 Abc = 1;",
+                        "  }",
+                        "}"],
+                       [type_specs]),
+    E = M:encode_msg({'M', {'Abc', 17}}),
+    ?assert(is_binary(E)),
+    unload_code(M).
+
 only_enums_no_msgs_test() ->
     M = compile_iolist(["enum e {"
                         "  a = 1;",
