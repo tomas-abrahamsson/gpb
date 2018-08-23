@@ -2032,6 +2032,7 @@ nif_code_test_() ->
              [{"encode decode", fun nif_encode_decode_proto3/0}])),
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
+         {"Nif enums from integers", fun nif_enum_from_integers/0},
          {"Nif with groups", fun nif_with_groups/0},
          {"Nif with strbin", fun nif_with_strbin/0},
          {"Nif with booleans", fun nif_with_booleans/0},
@@ -2330,6 +2331,31 @@ nif_enum_with_pkgs() ->
                         ?assertEqual(OrigMsg, MMDecoded),
                         ?assertEqual(OrigMsg, GMDecoded),
                         ?assertEqual(OrigMsg, MGDecoded)
+                end)
+      end).
+
+nif_enum_from_integers() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_enum_from_integers,
+              DefsTxt = lf_lines(["enum e {",
+                                  "    e0 = 0;",
+                                  "    e1 = 1;",
+                                  "};",
+                                  "message ntest3 {",
+                                  "    optional e f1 = 1;",
+                                  "}"]),
+              Defs = parse_to_proto_defs(DefsTxt),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {ntest3,1},
+                        ExpectedEncoded = <<8,1>>,
+                        MEncoded  = M:encode_msg(OrigMsg),
+                        GEncoded  = gpb:encode_msg(OrigMsg, Defs),
+                        ?assertEqual(ExpectedEncoded, MEncoded),
+                        ?assertEqual(ExpectedEncoded, GEncoded)
                 end)
       end).
 

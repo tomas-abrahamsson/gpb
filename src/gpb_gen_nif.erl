@@ -951,17 +951,19 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, Opts, Setter) ->
                           true  -> dot_replace_s(EnumName, "_") ++ "_"
                       end,
             CPkg = get_cc_pkg(Defs),
+            EType = mk_cctype_name({enum, EnumName}, Defs),
             {value, {{enum,EnumName}, Enumerations}} =
                 lists:keysearch({enum,EnumName}, 1, Defs),
             ["{\n",
-             [?f("    ~sif (enif_is_identical(~s, ~s))\n"
+             ?f("    int v;\n"
+                "    if (enif_get_int(env, ~s, &v))\n"
+                "        ~s\n",
+                [SrcVar, SetFn([?f("(~s)v", [EType])])]),
+             [?f("    else if (enif_is_identical(~s, ~s))\n"
                  "        ~s\n",
-                 [if I == 1 -> "";
-                     I >  1 -> "else "
-                  end,
-                  SrcVar, mk_c_var(gpb_aa_, Sym),
+                 [SrcVar, mk_c_var(gpb_aa_, Sym),
                   SetFn([?f("~s::~s~s", [CPkg, EPrefix, Sym])])])
-              || {I, {Sym, _Val}} <- gpb_lib:index_seq(Enumerations)],
+              || {Sym, _Val} <- Enumerations],
              "    else\n"
              "        return 0;\n"
              "}\n"];
