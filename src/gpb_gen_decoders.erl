@@ -248,11 +248,12 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     FieldPass = gpb_lib:get_field_pass(MsgName, AnRes),
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     FNames = [FName || {FName, _InitExpr} <- InitExprs],
+    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
     FieldInfos = case MappingUnset of
                      #maps{unset_optional=omitted, oneof=flat} ->
-                         field_infos_for_flat_oneof(MsgDef);
+                         field_infos(MsgDef, true, IsProto3);
                      _ ->
-                         field_infos(MsgDef)
+                         field_infos(MsgDef, false, IsProto3)
                  end,
     %% Compute extra post-generation operations needed for maps
     %% and pass_as_params
@@ -376,16 +377,26 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
             end
     end.
 
-field_infos(MsgDef) ->
-    [{gpb_lib:get_field_name(Field), gpb_lib:get_field_occurrence(Field)}
-     || Field <- MsgDef].
-
-field_infos_for_flat_oneof(MsgDef) ->
+field_infos(MsgDef, FlattenOnoef, IsProto3) ->
     [case Field of
+         #?gpb_field{name=FName, type={msg,_}} ->
+             {FName, optional};
          #?gpb_field{name=FName} ->
-             {FName, gpb_lib:get_field_occurrence(Field)};
+             if not IsProto3 ->
+                     {FName, gpb_lib:get_field_occurrence(Field)};
+                IsProto3 ->
+                     %% On finalization, treat proto3 (scalar) fields as
+                     %% requried, to avoid redundant if F == '$undef' -> ...
+                     %% checks;  it can never be '$undef' since it has a
+                     %% type-default. (except for sub messages and onoef)
+                     {FName, required}
+             end;
          #gpb_oneof{name=FName} ->
-             {FName, flatten_oneof}
+             if not FlattenOnoef ->
+                     {FName, optional};
+                FlattenOnoef ->
+                     {FName, flatten_oneof}
+             end
      end
      || Field <- MsgDef].
 
