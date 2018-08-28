@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.2.3
+2018-Aug-28
+
+        * Fix a dialyzer issue (a redundant check for undefined) in
+        decoding for proto3. Thanks to Tristan Sloughter for reporting.
+
 Version 4.2.2
 2018-Aug-23
 
