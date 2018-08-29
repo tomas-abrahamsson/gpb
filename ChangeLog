@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 4.3.0
+2018-Aug-29
+
+        * Add options to translate all fields and types: {translate_type,T}
+        {translate_field,T} (-translate_type, -translate_field)
+
+        * Add option to have map keys as binaries, for interop with
+        other libraries: {maps_key_type,binary} (-maps_key_type binary)
+
 Version 4.2.3
 2018-Aug-28
 
