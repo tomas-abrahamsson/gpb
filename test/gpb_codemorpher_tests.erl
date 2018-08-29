@@ -198,7 +198,8 @@ implode_to_map_exprs_test() ->
                       [{a, optional},
                        {b, optional},
                        {c, required}],
-                      '$novalue')))
+                      '$novalue')),
+                  [])
         end,
     {module,M} = ls(?dummy_mod,
                     [{F, ["fn_f(<<>>, A, B, C) ->
@@ -234,7 +235,8 @@ implode_to_map_exprs_with_flat_oneof_aux() ->
                       [{a, optional},
                        {b, flatten_oneof},
                        {c, required}],
-                      '$novalue')))
+                      '$novalue')),
+                  [])
         end,
     {module,M} = ls(?dummy_mod,
                     [{F, ["fn_f(<<>>, A, B, C) ->
@@ -291,7 +293,7 @@ rework_clauses_for_records_to_maps_for_submsg_test() ->
     [Pat, If] = parse_exprs([PatS, IfS]),
     {_MapPat, Reworked1} = gpb_codemorpher:rework_clauses_for_records_to_maps(
                              Pat, If, undefined),
-    Reworked2 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked1),
+    Reworked2 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked1, []),
     Binds = fun(#{a := Val}=Msg) -> [{'Msg',Msg}, {'Prev', Val}];
                (#{}=Msg)         -> [{'Msg',Msg}, {'Prev', undefined}]
             end,
@@ -314,14 +316,14 @@ rework_clauses_for_records_to_maps_for_oneof_submsg_test() ->
     [Pat,Case, Case2] = [parse_expr(S) || S <- [PatS, CaseS, Cas2S]],
     {MsgVar, Reworked1} = gpb_codemorpher:rework_clauses_for_records_to_maps(
                             Pat, Case, undefined),
-    Reworked2 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked1),
+    Reworked2 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked1, []),
     Msg = erl_syntax:variable_name(MsgVar),
     {tag,'New'} = eval_expr(Reworked2, [{Msg, #{}}]),
     {tag,'merge(',x,',New)'} = eval_expr(Reworked2, [{Msg, #{a => {tag,x}}}]),
     {tag,'New'} = eval_expr(Reworked2, [{Msg, #{a => {other,zz}}}]),
     {MsgVar, Reworked3} = gpb_codemorpher:rework_clauses_for_records_to_maps(
                             Pat, Case2, undefined),
-    Reworked4 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked3),
+    Reworked4 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked3, []),
     {tag,'New'} = eval_expr(Reworked4, [{Msg, #{}}]),
     {tag,'merge(',x,',New)'} = eval_expr(Reworked4, [{Msg, #{a => {tag,x}}}]),
     {tag,'New'} = eval_expr(Reworked4, [{Msg, #{a => {other,zz}}}]).
@@ -334,7 +336,8 @@ rework_records_to_maps_unset_optionals_present_undefined_test() ->
                 gpb_codemorpher:marked_map_expr_to_map_expr(
                   gpb_codemorpher:rework_records_to_maps(
                     FnSTree, 2, FieldInfos,
-                    undefined))
+                    undefined),
+                  [])
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",
@@ -394,7 +397,8 @@ rework_records_to_maps_unset_optionals_omitted_test() ->
                   gpb_codemorpher:rework_records_to_maps(
                     gpb_codemorpher:change_undef_marker_in_clauses(
                       FnSTree, '$undef'),
-                    2, FieldInfos, '$undef'))
+                    2, FieldInfos, '$undef'),
+                  [])
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",
@@ -464,7 +468,8 @@ rework_records_to_maps_with_flat_oneof_aux() -> % implies omitted
                   gpb_codemorpher:rework_records_to_maps(
                     gpb_codemorpher:change_undef_marker_in_clauses(
                       FnSTree, '$undef'),
-                    2, FieldInfos, '$undef'))
+                    2, FieldInfos, '$undef'),
+                 [])
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",

@@ -57,6 +57,7 @@
                boolean_opt(defs_as_maps) |
                {maps_unset_optional, omitted | present_undefined} |
                {maps_oneof, tuples | flat} |
+               {maps_key_type, atom | binary} |
                boolean_opt(nif) |
                {load_nif, string()} |
                {i, directory()} |
@@ -285,6 +286,9 @@ file(File) ->
 %%   <dt>`{maps_oneof,flat}'</dt>
 %%   <dd>`#{a1 => Value}}' or `#{a2 => Value}}'</dd>
 %% </dl>
+%%
+%% For messages as maps, the `maps_key_type' option makes it possible
+%% to control whether keys should be atoms (default) or binaries.
 %%
 %% The `nif' option will cause the compiler to generate nif C++ code
 %% for encoding and decoding. The generated nif C++ code can be linked
@@ -1099,6 +1103,8 @@ c() ->
 %%   <dd>Specifies the internal format for optional fields that are unset.</dd>
 %%   <dt>`-maps_oneof tuples | flat'</dt>
 %%   <dd>Specifies the internal format for oneof fields in maps.</dd>
+%%   <dt>`-maps_key_type atom | binary'</dt>
+%%   <dd>Specifies the key type for maps.</dd>
 %%   <dt>`-msgs-as-maps'</dt>
 %%   <dd>Specifies that messages should be maps. No `.hrl' file will
 %%       be generated.
@@ -1375,6 +1381,9 @@ opt_specs() ->
       "       Specifies the representation for oneof fields in maps:\n"
       "       as tuples, #{..., OneofField => {Tag, Value}, ...}   (default)\n"
       "       or flat,   #{..., Tag => Value, ...}\n"},
+     {"maps_key_type", {atom, binary}, maps_key_type,
+      "atom | binary\n"
+      "       Specifies the key type for maps.\n"},
      {"msgs-as-maps", undefined, msgs_as_maps, "\n"
       "        Specifies that messages should be maps.\n"
       "        Otherwise, they will be records.\n"},

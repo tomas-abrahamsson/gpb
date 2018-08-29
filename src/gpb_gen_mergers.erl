@@ -161,7 +161,7 @@ format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
          '<merge-it>',
          gpb_lib:do_exprs(
            fun(Elem, Var) ->
-                   render_omissible_merger(Elem, Var, TrUserDataVar)
+                   render_omissible_merger(Elem, Var, TrUserDataVar, Opts)
            end,
            render_field_mergers(MsgName, MandatoryMergings,
                                 TrUserDataVar, Opts),
@@ -210,9 +210,11 @@ format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
             NMsg = ?expr(NMsg),
             P = gpb_lib:map_match(
                   [{FName, PFVar} || {FName,PFVar,_,_} <- MandInfos,
-                                     PFVar /= none]),
+                                     PFVar /= none],
+                  Opts),
             N = gpb_lib:map_match(
-                  [{FName, NFVar} || {FName,_,NFVar,_} <- MandInfos]),
+                  [{FName, NFVar} || {FName,_,NFVar,_} <- MandInfos],
+                  Opts),
             PB = gpb_lib:match_bind_var(P, PMsg),
             NB = gpb_lib:match_bind_var(N, NMsg),
             XInfo = {om, {MandInfos, OptInfos, PMsg, NMsg}},
@@ -366,17 +368,19 @@ render_field_merger({oneof, {{PF, NF}, OFMerges}}, TrUserDataVar) ->
            | Transforms]).
 
 render_omissible_merger({FName, {overwrite, {PMsg, NMsg}}}, Var,
-                        TrUserDataVar) ->
+                        TrUserDataVar, Opts) ->
     ?expr(case {'PMsg', 'NMsg'} of
               {_, '#{fname := NF}'} -> 'Var#{fname=>NF}';
               {'#{fname := PF}', _} -> 'Var#{fname=>PF}';
               _                     -> 'Var'
           end,
-          std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar));
+          std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar,
+                                        Opts));
 render_omissible_merger({_CFName, {overwrite_drop, {{PMsg, NMsg}, FNames}}},
                         Var,
-                        TrUserDataVar) ->
-    Trs = std_omitable_merge_transforms(PMsg, NMsg, x, Var, TrUserDataVar),
+                        TrUserDataVar, Opts) ->
+    Trs = std_omitable_merge_transforms(PMsg, NMsg, x, Var, TrUserDataVar,
+                                        Opts),
     ?expr(case {'PMsg', 'NMsg'} of
               '{_, #{fname := NF}}' -> 'Var#{fname=>NF}';
               '{#{fname := PF}, _}' -> 'Var#{fname=>PF}';
@@ -387,10 +391,10 @@ render_omissible_merger({_CFName, {overwrite_drop, {{PMsg, NMsg}, FNames}}},
              [begin
                   StdXforms = std_omitable_merge_transforms(
                                 PMsg, NMsg, FName,
-                                Var, TrUserDataVar),
+                                Var, TrUserDataVar, Opts),
                   Match = ?expr({_, '#{fname := NF}'}, StdXforms),
                   NF = gpb_lib:var("NF~s", [FName]),
-                  OverwriteExpr = gpb_lib:map_set(Var, [{FName, NF}]),
+                  OverwriteExpr = gpb_lib:map_set(Var, [{FName, NF}], Opts),
                   [replace_tree('{_, #{fname := NF}}', Match),
                    replace_tree('Var#{fname=>NF}', OverwriteExpr)]
               end
@@ -400,18 +404,19 @@ render_omissible_merger({_CFName, {overwrite_drop, {{PMsg, NMsg}, FNames}}},
              [begin
                   StdXforms = std_omitable_merge_transforms(
                                 PMsg, NMsg, FName,
-                                Var, TrUserDataVar),
+                                Var, TrUserDataVar, Opts),
                   Match = ?expr({'#{fname := PF}', _}, StdXforms),
                   PF = gpb_lib:var("PF~s", [FName]),
-                  OverwriteExpr = gpb_lib:map_set(Var, [{FName, PF}]),
+                  OverwriteExpr = gpb_lib:map_set(Var, [{FName, PF}], Opts),
                   [replace_tree('{#{fname := PF}, _}', Match),
                    replace_tree('Var#{fname=>PF}', OverwriteExpr)]
               end
               || FName <- FNames])
           | Trs]);
 render_omissible_merger({FName, {cond_merge, {{PMsg, NMsg}, Tr, MergeFn}}}, Var,
-                        TrUserDataVar) ->
-    Trs = std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar),
+                        TrUserDataVar, Opts) ->
+    Trs = std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar,
+                                        Opts),
     MergeCallTmpl = ?expr('merge'('PF','NF', 'TrUserData'), Trs),
     ?expr(case {'PMsg', 'NMsg'} of
               {'#{fname := PF}', '#{fname := NF}'} ->
@@ -424,11 +429,11 @@ render_omissible_merger({FName, {cond_merge, {{PMsg, NMsg}, Tr, MergeFn}}}, Var,
                   'Var'
           end,
           [replace_tree('Var#{fname=>merge(PF,NF)}',
-                        gpb_lib:map_set(Var, [{FName,MergeCallTmpl}]))]
+                        gpb_lib:map_set(Var, [{FName,MergeCallTmpl}], Opts))]
           ++ Trs
           ++ [replace_term('merge', Tr(merge, MergeFn))]);
 render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var,
-                       TrUserDataVar) ->
+                       TrUserDataVar, Opts) ->
     OPF = gpb_lib:var("OPF~s", [FName]),
     ONF = gpb_lib:var("ONF~s", [FName]),
     OneofTransforms = [replace_tree('OPF', OPF),
@@ -450,9 +455,11 @@ render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var,
                           replace_term('merge', Tr(merge, OFMergeFn))]
                       ++ OneofTransforms,
                   MmO = gpb_lib:map_match(
-                          [{FName, ?expr({'tag', 'OPF'}, Trs2)}]),
+                          [{FName, ?expr({'tag', 'OPF'}, Trs2)}],
+                          Opts),
                   MmN = gpb_lib:map_match(
-                          [{FName, ?expr({'tag', 'ONF'}, Trs2)}]),
+                          [{FName, ?expr({'tag', 'ONF'}, Trs2)}],
+                          Opts),
                   MergeCall = ?expr({'tag','merge'('OPF','ONF', 'TrUserData')},
                                     Trs2),
                   [replace_tree(
@@ -461,16 +468,16 @@ render_omissible_merger({FName, {oneof, {{PMsg, NMsg}, OFMerges}}}, Var,
                            [replace_tree('#{fname := {tag,OPF}}', MmO),
                             replace_tree('#{fname := {tag,ONF}}', MmN)])),
                    replace_tree('Var#{fname=>{tag,merge(OPF,ONF)}}',
-                                gpb_lib:map_set(Var, [{FName,MergeCall}]))
+                                gpb_lib:map_set(Var, [{FName,MergeCall}], Opts))
                    | Trs2]
               end
               || {OFName, Tr, OFMergeFn} <- OFMerges])
            | std_omitable_merge_transforms(PMsg, NMsg, FName, Var,
-                                           TrUserDataVar)]);
+                                           TrUserDataVar, Opts)]);
 render_omissible_merger({_FName,
                          {oneof_drop, {{PMsg, NMsg}, OFMerges, FNames}}},
                         Var,
-                        TrUserDataVar) ->
+                        TrUserDataVar, Opts) ->
     ?expr(case {'PMsg', 'NMsg'} of
               '{#{fname := PF}, #{fname := NF}}' ->
                   'Var#{fname=>merge(PF,NF)}';
@@ -486,10 +493,11 @@ render_omissible_merger({_FName,
                   PF = gpb_lib:var("PF~s", [OFName]),
                   NF = gpb_lib:var("NF~s", [OFName]),
                   Trs = std_omitable_merge_transforms(PMsg, NMsg, OFName,
-                                                      Var, TrUserDataVar),
+                                                      Var, TrUserDataVar,
+                                                      Opts),
                   Trs2 = Trs ++ [replace_term('merge', Tr(merge, OFMergeFn))],
-                  MmO = gpb_lib:map_match([{OFName, PF}]),
-                  MmN = gpb_lib:map_match([{OFName, NF}]),
+                  MmO = gpb_lib:map_match([{OFName, PF}], Opts),
+                  MmN = gpb_lib:map_match([{OFName, NF}], Opts),
                   MergeCall = ?expr('merge'('PF','NF', 'TrUserData'),
                                     Trs2),
                   [replace_tree(
@@ -498,7 +506,8 @@ render_omissible_merger({_FName,
                            [replace_tree('#{fname := PF}', MmO),
                             replace_tree('#{fname := NF}', MmN)])),
                    replace_tree('Var#{fname=>merge(PF,NF)}',
-                                gpb_lib:map_set(Var, [{OFName,MergeCall}]))
+                                gpb_lib:map_set(Var, [{OFName,MergeCall}],
+                                                Opts))
                    | Trs2]
               end
               || {OFName, Tr, OFMergeFn} <- OFMerges]),
@@ -506,13 +515,15 @@ render_omissible_merger({_FName,
              '{_, #{fname := NF}}',
              [begin
                   Trs = std_omitable_merge_transforms(PMsg, NMsg, FName,
-                                                      Var, TrUserDataVar),
+                                                      Var, TrUserDataVar,
+                                                      Opts),
                   StdXforms = std_omitable_merge_transforms(
                                 PMsg, NMsg, FName,
-                                Var, TrUserDataVar),
+                                Var, TrUserDataVar, Opts),
                   Match = ?expr({_, '#{fname := NF}'}, StdXforms),
                   NF = gpb_lib:var("NF~s", [FName]),
-                  OverwriteExpr = gpb_lib:map_set(Var, [{FName, NF}]),
+                  OverwriteExpr = gpb_lib:map_set(Var, [{FName, NF}],
+                                                  Opts),
                   [replace_tree('{_, #{fname := NF}}', Match),
                    replace_tree('Var#{fname=>NF}', OverwriteExpr)
                    | Trs]
@@ -522,22 +533,24 @@ render_omissible_merger({_FName,
              '{#{fname := PF}, _}',
              [begin
                   Trs = std_omitable_merge_transforms(PMsg, NMsg, FName,
-                                                      Var, TrUserDataVar),
+                                                      Var, TrUserDataVar,
+                                                      Opts),
                   StdXforms = std_omitable_merge_transforms(
                                 PMsg, NMsg, FName,
-                                Var, TrUserDataVar),
+                                Var, TrUserDataVar, Opts),
                   Match = ?expr({'#{fname := PF}', _}, StdXforms),
                   PF = gpb_lib:var("PF~s", [FName]),
-                  OverwriteExpr = gpb_lib:map_set(Var, [{FName, PF}]),
+                  OverwriteExpr = gpb_lib:map_set(Var, [{FName, PF}],
+                                                 Opts),
                   [replace_tree('{#{fname := PF}, _}', Match),
                    replace_tree('Var#{fname=>PF}', OverwriteExpr)
                   | Trs]
               end
               || FName <- FNames])
            | std_omitable_merge_transforms(PMsg, NMsg, dummy_fname, Var,
-                                           TrUserDataVar)]).
+                                           TrUserDataVar, Opts)]).
 
-std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar) ->
+std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar, Opts) ->
     PF = gpb_lib:var("PF~s", [FName]),
     NF = gpb_lib:var("NF~s", [FName]),
     [replace_term('fname', FName),
@@ -546,11 +559,14 @@ std_omitable_merge_transforms(PMsg, NMsg, FName, Var, TrUserDataVar) ->
      replace_tree('PF', PF),
      replace_tree('NF', NF),
      replace_tree('Var', Var),
-     replace_tree('Var#{fname=>NF}', gpb_lib:map_set(Var, [{FName, NF}])),
-     replace_tree('Var#{fname=>PF}', gpb_lib:map_set(Var, [{FName, PF}])),
-     replace_tree('#{fname := NF}', gpb_lib:map_match([{FName, NF}])),
-     replace_tree('#{fname := PF}', gpb_lib:map_match([{FName, PF}])),
-     replace_tree('#{fname := _}', gpb_lib:map_match([{FName, ?expr(_)}])),
+     replace_tree('Var#{fname=>NF}', gpb_lib:map_set(Var, [{FName, NF}],
+                                                     Opts)),
+     replace_tree('Var#{fname=>PF}', gpb_lib:map_set(Var, [{FName, PF}],
+                                                     Opts)),
+     replace_tree('#{fname := NF}', gpb_lib:map_match([{FName, NF}], Opts)),
+     replace_tree('#{fname := PF}', gpb_lib:map_match([{FName, PF}], Opts)),
+     replace_tree('#{fname := _}', gpb_lib:map_match([{FName, ?expr(_)}],
+                                                     Opts)),
      replace_tree('TrUserData', TrUserDataVar)].
 
 zip4([A|T1], [B|T2], [C|T3], [D|T4]) -> [{A,B,C,D} | zip4(T1, T2, T3, T4)];

@@ -3354,6 +3354,11 @@ opt_test() ->
         gpb_compile:parse_opts_and_args(
           ["-maps", "-maps_oneof", "flat",
            "x.proto"]),
+    {ok, {[maps, {maps_key_type, binary}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-maps", "-maps-key-type", "binary",
+           "x.proto"]),
     {ok, {[{erlc_compile_options, "debug_info, inline_list_funcs"}],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(

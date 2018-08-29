@@ -267,25 +267,25 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
               {#maps{unset_optional=present_undefined},pass_as_record} ->
                   [rework_records_to_maps(4, FieldInfos, undefined),
                    underscore_unused_vars(),
-                   finalize_marked_map_exprs()];
+                   finalize_marked_map_exprs(Opts)];
               {#maps{unset_optional=present_undefined},pass_as_params} ->
                   [explode_param_init(MsgName, InitExprs, 4),
                    explode_param_pass(MsgName, FNames, 4),
                    implode_to_map_exprs_all_mandatory(),
                    underscore_unused_vars(),
-                   finalize_marked_map_exprs()];
+                   finalize_marked_map_exprs(Opts)];
               {#maps{unset_optional=omitted}, pass_as_record} ->
                   [change_undef_marker_in_clauses('$undef'),
                    rework_records_to_maps(4, FieldInfos, '$undef'),
                    underscore_unused_vars(),
-                   finalize_marked_map_exprs()];
+                   finalize_marked_map_exprs(Opts)];
               {#maps{unset_optional=omitted}, pass_as_params} ->
                   [change_undef_marker_in_clauses('$undef'),
                    explode_param_init(MsgName, InitExprs, 4),
                    explode_param_pass(MsgName, FNames, 4),
                    implode_to_map_exprs(4, FieldInfos, '$undef'),
                    underscore_unused_vars(),
-                   finalize_marked_map_exprs()]
+                   finalize_marked_map_exprs(Opts)]
           end,
     run_morph_ops(Ops, Fns).
 
@@ -499,11 +499,12 @@ rework_records_to_maps(RecordParamPos, FieldInfos, Undef) ->
               Fns)
     end.
 
-finalize_marked_map_exprs() ->
+finalize_marked_map_exprs(Opts) ->
+    F = fun(MarkedExpr) ->
+                gpb_codemorpher:marked_map_expr_to_map_expr(MarkedExpr, Opts)
+        end,
     fun(Fns) ->
-            loop_fns(fun gpb_codemorpher:marked_map_expr_to_map_expr/1,
-                     process_initializers_finalizers_and_msg_passers(),
-                     Fns)
+            loop_fns(F, process_initializers_finalizers_and_msg_passers(), Fns)
     end.
 
 format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes) ->

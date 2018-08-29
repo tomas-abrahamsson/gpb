@@ -31,7 +31,7 @@
 -export([change_undef_marker_in_clauses/2]).
 -export([locate_record_param/1]).
 -export([rework_records_to_maps/4]).
--export([marked_map_expr_to_map_expr/1]).
+-export([marked_map_expr_to_map_expr/2]).
 
 -export([rework_clauses_for_records_to_maps/3]). % intended for testing
 -export([analyze_case_clauses/2]). % intended for testing
@@ -1099,27 +1099,33 @@ mk_marker(Op) ->
                       end
                       || X <- [?MODULE, map_op, Op]]).
 
--spec marked_map_expr_to_map_expr(syntax_tree()) -> syntax_tree().
-marked_map_expr_to_map_expr(STree) ->
+-spec marked_map_expr_to_map_expr(syntax_tree(), gpb_compile:opts()) ->
+                                         syntax_tree().
+marked_map_expr_to_map_expr(STree, Opts) ->
     erl_syntax:revert(
       erl_syntax_lib:map(
         fun(Node) ->
                 case test_marked_map_expr(Node) of
                     {true, {Op, Info}} ->
-                        marked_to_map_expr(Op, Info);
+                        marked_to_map_expr(Op, Info, Opts);
                     false ->
                         Node
                 end
         end,
         STree)).
 
-marked_to_map_expr(create, {_,   Fields}) -> gpb_lib:map_create(Fields);
-marked_to_map_expr(match,  {_,   Fields}) -> gpb_lib:map_match(Fields);
-marked_to_map_expr(set,    {Var, Fields}) -> gpb_lib:map_set(Var, Fields);
-marked_to_map_expr({set, NewKs}, {Var, Fields}) ->
+marked_to_map_expr(create, {_,   Fields}, Opts) ->
+    gpb_lib:map_create(Fields, Opts);
+marked_to_map_expr(set, {Var, Fields}, Opts) ->
+    gpb_lib:map_set(Var, Fields, Opts);
+marked_to_map_expr(match,  {_, Fields}, Opts) ->
+    gpb_lib:map_match(Fields, Opts);
+marked_to_map_expr({set, NewKs}, {Var, Fields}, Opts) ->
     Fields1 = [{NewK, Value}
                || {NewK, {_OldK, Value}} <- lists:zip(NewKs, Fields)],
-    gpb_lib:map_set(Var, Fields1).
+    gpb_lib:map_set(Var, Fields1, Opts).
+
+
 
 test_marked_map_expr(Node) ->
     case test_is_tuple_of_size(Node, 2) of

@@ -261,11 +261,11 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
             #maps{unset_optional=omitted} ->
                 FMap = gpb_lib:zip_for_non_opt_fields(MsgDef, FVars),
                 if length(FMap) == length(FNames) ->
-                        gpb_lib:map_match(FMap);
+                        gpb_lib:map_match(FMap, Opts);
                    length(FMap) < length(FNames) ->
                         ?expr('mapmatch' = 'M',
                               [replace_tree('mapmatch',
-                                            gpb_lib:map_match(FMap)),
+                                            gpb_lib:map_match(FMap, Opts)),
                                replace_tree('M', MsgVar)])
                 end
         end,
@@ -399,7 +399,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                        end,
                        [replace_tree('M', MsgVar),
                         replace_tree('#{fieldname := <F>}',
-                                     gpb_lib:map_match([{FName,FVar}])),
+                                     gpb_lib:map_match([{FName,FVar}], Opts)),
                         replace_tree('<encodeit>', EncodeExpr)
                         | Transforms])
             end;
@@ -436,7 +436,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                        end,
                        [replace_tree('M', MsgVar),
                         replace_tree('#{fieldname := <F>}',
-                                     gpb_lib:map_match([{FName,FVar}]))
+                                     gpb_lib:map_match([{FName,FVar}], Opts))
                         | Transforms])
             end;
         required ->
@@ -463,9 +463,9 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                      #maps{unset_optional=present_undefined} ->
                          OFVal;
                      #maps{unset_optional=omitted, oneof=tuples} ->
-                         gpb_lib:map_match([{FName, OFVal}]);
+                         gpb_lib:map_match([{FName, OFVal}], Opts);
                      #maps{unset_optional=omitted, oneof=flat} ->
-                         gpb_lib:map_match([{Name, OFVar}])
+                         gpb_lib:map_match([{Name, OFVar}], Opts)
                  end,
              %% undefined is already handled, we have a match,
              %% the field occurs, as if it had been required

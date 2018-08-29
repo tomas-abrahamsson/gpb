@@ -83,13 +83,45 @@ format_enum_typespec(Enum, Enumeration) ->
 format_record_typespec(Msg, Fields, Defs, Opts) ->
     case gpb_lib:get_records_or_maps_by_opts(Opts) of
         records ->
-            ?f("-type ~p() :: #~p{}.", [Msg, Msg]);
+            ?f("-type ~p() :: #~p{}.~n", [Msg, Msg]);
         maps ->
-            ?f("-type ~p() ::~n"
-               "      #{~s~n"
-               "       }.",
-               [Msg, gpb_lib:outdent_first(format_hfields(Msg, 7 + 1,
-                                                          Fields, Opts, Defs))])
+            HFields = format_hfields(Msg, 7 + 1, Fields, Opts, Defs),
+            BType = calc_keytype_override(Fields, Opts),
+            if BType == no_override ->
+                    ?f("-type ~p() ::~n"
+                       "      #{~s~n"
+                       "       }.~n",
+                       [Msg, gpb_lib:outdent_first(HFields)]);
+               true ->
+                    ?f("-type ~p() ::~n"
+                       "      #{~s~n" % all fields gets rendered as comments
+                       "        ~s~n"
+                       "       }.~n",
+                       [Msg, gpb_lib:outdent_first(HFields), BType])
+            end
+    end.
+
+calc_keytype_override([], _Opts) ->
+    no_override;
+calc_keytype_override(Fields, Opts) ->
+    case gpb_lib:get_maps_key_type_by_opts(Opts) of
+        atom ->
+            no_override;
+        binary ->
+            TypespecsCanIndicateMapItemPresence =
+                gpb_lib:target_can_specify_map_item_presence_in_typespecs(Opts),
+            HaveMandatoryFields =
+                lists:any(fun(F) ->
+                                  gpb_lib:get_field_occurrence(F) /= optional
+                          end,
+                          Fields),
+            if TypespecsCanIndicateMapItemPresence, HaveMandatoryFields ->
+                    "binary() := _";
+               TypespecsCanIndicateMapItemPresence, not HaveMandatoryFields ->
+                    "binary() => _";
+               true ->
+                    "binary() => _"
+            end
     end.
 
 format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
@@ -119,6 +151,7 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                 end,
     MapTypeFieldsRepr = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(
                           Opts),
+    KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
     gpb_lib:nl_join(
       lists:map(
         fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
@@ -129,7 +162,12 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                                      Occur == optional,
                                      not TypespecsCanIndicateMapItemPresence ->
                                    "%% ";
-                              _ ->
+                               #maps{} ->
+                                   case KeyType of
+                                       atom   -> "";
+                                       binary -> "%% "
+                                   end;
+                               _ ->
                                    ""
                            end,
                 DefaultStr =
@@ -195,6 +233,11 @@ format_hfields(MsgName, Indent, Fields, Opts, Defs) ->
                                #maps{unset_optional=omitted} when
                                      not TypespecsCanIndicateMapItemPresence->
                                    "%% ";
+                               #maps{} ->
+                                   case KeyType of
+                                       atom   -> "";
+                                       binary -> "%% "
+                                   end;
                                _ ->
                                    ""
                            end,
