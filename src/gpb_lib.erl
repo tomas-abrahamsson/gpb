@@ -109,6 +109,7 @@
 -export([split_indent_butfirst_iolist/2]).
 -export([cond_split_indent_iolist/3]).
 -export([iolist_to_utf8_or_escaped_binary/2]).
+-export([nowarn_unused_function/2]).
 -export([nowarn_dialyzer_attr/3]).
 
 -export([comma_join/1]).
@@ -863,6 +864,9 @@ nowarn_dialyzer_attr(FnName,Arity,Opts) ->
 
 can_do_dialyzer_attr(Opts) ->
     is_target_major_version_at_least(18, Opts).
+
+nowarn_unused_function(FnName, Arity) ->
+    ?f("-compile({nowarn_unused_function,~p/~w}).~n", [FnName,Arity]).
 
 -ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
 

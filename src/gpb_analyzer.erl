@@ -49,8 +49,6 @@ analyze_defs(Defs, Opts) ->
                                    MapsAsMsgs ++ Defs, Opts),
            maps_as_msgs        = MapsAsMsgs ++ MapMsgEnums,
            translations        = Translations,
-           default_transls     = compute_used_default_translators(
-                                   Defs, Translations, KnownMsgSize, Opts),
            map_types           = MapTypes,
            map_value_types     = compute_map_value_types(MapTypes),
            group_occurrences   = find_group_occurrences(Defs),
@@ -318,27 +316,52 @@ count_group_fields(MsgDef) ->
       0,
       MsgDef).
 
+%% Returns: [{Path, [{Op, [Calls]}]}]
 compute_translations(Defs, Opts) ->
     remove_empty_translations(
       remove_merge_translations_for_repeated_elements(
         lists:foldl(
-          fun({Name, Dict}, D) ->
-                  %% For now it is an (internal) error if translations overlap,
-                  %% (don't expect that to happen with current translations)
-                  %% but in the future (eg with user-specified translations)
-                  %% they might stack instead: ie Ts1 ++ Ts2 instead of error.
+          fun({_Name, Dict}, Acc) ->
                   dict:merge(
-                    fun(Key, Ts1, Ts2) ->
-                            error({error,{duplicate_translation,
-                                          {when_adding_transls_for,Name},
-                                          {key,Key},
-                                          {translations,Ts1,Ts2}}})
-                    end,
-                    Dict, D)
+                    fun(_Key, Ts1, Ts2) -> merge_transls(Ts1, Ts2) end,
+                    Acc, Dict)
           end,
           dict:new(),
           [{map_translations, compute_map_translations(Defs, Opts)},
-           {type_translations, compute_type_translations(Defs, Opts)}]))).
+           {type_translations, compute_type_translations(Defs, Opts)},
+           {field_translations, compute_field_translations(Defs, Opts)}]))).
+
+dict_from_translation_list(PTransls) ->
+    lists:foldl(
+      fun({Path, Transls1}, D) ->
+              case dict:find(Path, D) of
+                  {ok, Transls2} ->
+                      dict:store(Path, merge_transls(Transls1, Transls2), D);
+                  error ->
+                      dict:store(Path, merge_transls(Transls1, []), D)
+              end
+      end,
+      dict:new(),
+      PTransls).
+
+merge_transls(Transls1, Transls2) ->
+    dict:to_list(
+      dict:merge(
+        fun(encode, L1, L2)                   -> L2 ++ L1;
+           (decode, L1, L2)                   -> L1 ++ L2;
+           (decode_init_default, L1, L2)      -> L1 ++ L2;
+           (decode_repeated_add_elem, L1, L2) -> L1 ++ L2;
+           (decode_repeated_finalize, L1, L2) -> L1 ++ L2;
+           (merge, L1, L2)                    -> L1 ++ L2;
+           (verify, _L1, L2)                  -> [hd(L2)];
+           (type_spec, _V1, V2)               -> V2
+        end,
+        dict:from_list([{Op,ensure_list(Op,Call)} || {Op,Call} <- Transls1]),
+        dict:from_list([{Op,ensure_list(Op,Call)} || {Op,Call} <- Transls2]))).
+
+ensure_list(_Op, L) when is_list(L) -> L;
+ensure_list(type_spec, Elem)        -> Elem;
+ensure_list(_Op, Elem)              -> [Elem].
 
 remove_merge_translations_for_repeated_elements(D) ->
     dict:map(fun(Key, Ops) ->
@@ -366,7 +389,7 @@ compute_map_translations(Defs, Opts) ->
           [],
           Defs),
     MapFieldFmt = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
-    dict:from_list(
+    dict_from_translation_list(
       lists:append(
         [mk_map_transls(MsgName, FName, KeyType, ValueType, MapFieldFmt)
          || {{MsgName, FName}, {KeyType, ValueType}} <- MapInfos])).
@@ -407,6 +430,7 @@ compute_type_translations(Defs, Opts) ->
                     end,
                     [],
                     Opts),
+    %% Traverse all message definitions only when there are translations
     if TypeTranslations == [] ->
             dict:new();
        true ->
@@ -415,16 +439,42 @@ compute_type_translations(Defs, Opts) ->
 
 compute_type_translations_2(Defs, TypeTranslations) ->
     Infos = compute_type_translation_infos(Defs, TypeTranslations),
-    dict:from_list(
+    Infos2 = add_type_translation_infos_for_msgs(TypeTranslations, Infos),
+    dict_from_translation_list(
       [begin
-           Trs = [{encode, fetch_encode_tr(Type, Translations)},
-                  {decode, fetch_decode_tr(Type, Translations)},
-                  {verify, fetch_verify_tr(Type, Translations)}
-                  | [{merge, fetch_merge_tr(Type, Translations)}
-                     || not is_repeated_elem_path(Path)]],
+           Decode = case Type of
+                        {map,_,_} -> decode_repeated_finalize;
+                        _ -> decode
+                    end,
+           Ctxt = {type, Type},
+           Trs = [{encode, fetch_op_transl(encode, Translations, Ctxt)},
+                  {Decode, fetch_op_transl(Decode, Translations, Ctxt)},
+                  {verify, fetch_op_transl(verify, Translations, Ctxt)}
+                  | [{merge, fetch_op_transl(merge, Translations, Ctxt)}
+                     || not is_repeated_elem_path(Path),
+                        not is_scalar_type(Type)]]
+               ++ type_spec_tr(Translations),
            {Path, Trs}
        end
-       || {Type, Path, Translations} <- Infos]).
+       || {Type, Path, Translations} <- Infos2]).
+
+is_scalar_type(int32)    -> true;
+is_scalar_type(int64)    -> true;
+is_scalar_type(uint32)   -> true;
+is_scalar_type(uint64)   -> true;
+is_scalar_type(sint32)   -> true;
+is_scalar_type(sint64)   -> true;
+is_scalar_type(fixed32)  -> true;
+is_scalar_type(fixed64)  -> true;
+is_scalar_type(sfixed32) -> true;
+is_scalar_type(sfixed64) -> true;
+is_scalar_type(bool)     -> true;
+is_scalar_type(float)    -> true;
+is_scalar_type(double)   -> true;
+is_scalar_type({enum,_}) -> true;
+is_scalar_type(string)   -> true;
+is_scalar_type(bytes)    -> true;
+is_scalar_type(_)        -> false. % not: msg | map | group
 
 compute_type_translation_infos(Defs, TypeTranslations) ->
     gpb_lib:fold_msg_or_group_fields_o(
@@ -445,94 +495,106 @@ compute_type_translation_infos(Defs, TypeTranslations) ->
                       Acc
               end;
          (_MsgOrGroup,
-          _MsgName, #?gpb_field{type={map,KeyType,ValueType}},
+          MsgName, #?gpb_field{name=FName, type={map,KeyType,ValueType}=FType},
           _Oneof,
           Acc) ->
+              %% check for translation of the map<_,_> itself
+              Path = [MsgName,FName],
+              MapTransl = case lists:keyfind(FType, 1, TypeTranslations) of
+                              {FType, Translations} ->
+                                  Ts2 = map_translations_to_internal(
+                                          Translations),
+                                  [{FType, Path, Ts2}];
+                              false ->
+                                  []
+                          end,
               MsgName2 = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
               Fields2 = gpb:map_item_pseudo_fields(KeyType, ValueType),
               Defs2 = [{{msg, MsgName2}, Fields2}],
-              compute_type_translation_infos(Defs2, TypeTranslations) ++ Acc;
+              MapTransl
+                  ++ compute_type_translation_infos(Defs2, TypeTranslations)
+                  ++ Acc;
          (_Type, _MsgName, _Field, _Oneof, Acc) ->
               Acc
       end,
       [],
       Defs).
 
-fetch_encode_tr(Type, Translations) ->
-    fetch_op_translation(encode, Translations, Type).
+map_translations_to_internal(Translations) ->
+    %% Under the hood, a map<_,_> is a repeated, and it is implemented
+    %% using translations, so adapt type translations accordingly
+    [case Op of
+         encode -> {encode, Tr};
+         decode -> {decode_repeated_finalize, Tr};
+         merge  -> {merge, Tr};
+         verify -> {verify, Tr};
+         _      -> {Op, Tr}
+     end
+     || {Op, Tr} <- Translations].
 
-fetch_decode_tr(Type, Translations) ->
-    fetch_op_translation(decode, Translations, Type).
+add_type_translation_infos_for_msgs(TypeTranslations, Infos) ->
+    lists:foldl(
+      fun({{msg,MsgName}=Type, Translations}, Acc) ->
+              Path = [MsgName],
+              [{Type, Path, Translations} | Acc];
+         (_OtherTransl, Acc) ->
+              Acc
+      end,
+      Infos,
+      TypeTranslations).
 
-fetch_merge_tr(Type, Translations) ->
-    Default = gpb_gen_translators:default_merge_translator(),
-    fetch_op_translation(merge,  Translations, Default, Type).
+compute_field_translations(Defs, Opts) ->
+    dict_from_translation_list(
+      lists:append(
+        [[{Path, augment_field_translations(Field, Path, Translations, Opts)}
+          || {translate_field, {[_,_|_]=Path, Translations}} <- Opts,
+             Field <- find_field_by_path(Defs, Path)],
+         [{Path, augment_msg_translations(MsgName, Translations)}
+          || {translate_field, {[MsgName]=Path, Translations}} <- Opts,
+             lists:keymember({msg,MsgName}, 1, Defs)]])).
 
-fetch_verify_tr(Type, Translations) ->
-    Default = gpb_gen_translators:default_verify_translator(),
-    fetch_op_translation(verify, Translations, Default, Type).
-
-fetch_op_translation(Op, Translations, Type) ->
-    fetch_op_translation(Op, Translations, undefined, Type).
-
-fetch_op_translation(Op, Translations, Default, Type) ->
-    case proplists:get_value(Op, Translations, Default) of
-        undefined ->
-            error({error, {missing_translation,
-                           {op,Op}, {type,Type},
-                           Translations}});
-        {M,F,ArgTempl} ->
-            {M,F,ArgTempl};
-        {F,ArgTempl} ->
-            {F,ArgTempl}
+find_field_by_path(Defs, [MsgName,FieldName|RestPath]) ->
+    case find_2_msg(Defs, MsgName) of
+        {ok, {{_,MsgName}, Fields}} ->
+            case find_3_field(Fields, FieldName) of
+                {ok, #gpb_oneof{fields=OFields}} when RestPath =/= [] ->
+                    case find_3_field(OFields, hd(RestPath)) of
+                        {ok, OField} ->
+                            [OField];
+                        error ->
+                            []
+                    end;
+                {ok, Field} ->
+                    [Field];
+                error ->
+                    []
+            end;
+        error ->
+            []
     end.
 
-is_repeated_elem_path([_MsgName,_FName,[]]) -> true;
-is_repeated_elem_path(_) -> false.
+find_2_msg([{{msg, Name},_}=M | _], Name)   -> {ok, M};
+find_2_msg([{{group, Name},_}=M | _], Name) -> {ok, M};
+find_2_msg([_ | Rest], Name)                -> find_2_msg(Rest, Name);
+find_2_msg([], _Name)                       -> error.
 
-compute_used_default_translators(Defs, Translations, KnownMsgSize, Opts) ->
-    fold_fields_and_paths(
-      fun(Field, Path, _IsOneOf, Acc) ->
-              Calls = get_translations(Field,Path, Translations,
-                                       KnownMsgSize, Opts),
-              lists:foldl(
-                fun({FnName,ArgsTmpl}, A) when is_list(ArgsTmpl) ->
-                        Arity = length(ArgsTmpl),
-                        sets:add_element({FnName, Arity}, A);
-                   ({FnName,Arity}, A) when is_integer(Arity) ->
-                        sets:add_element({FnName, Arity}, A);
-                   (_, A) -> % remote call (ie: to other module)
-                        A
-                end,
-                Acc,
-                Calls)
-      end,
-      sets:new(),
-      Defs).
+find_3_field([#?gpb_field{name=Name}=F | _], Name) -> {ok, F};
+find_3_field([#gpb_oneof{name=Name}=F | _], Name)  -> {ok, F};
+find_3_field([_ | Rest], Name)                     -> find_3_field(Rest, Name);
+find_3_field([], _Name)                            -> error.
 
-get_translations(#gpb_oneof{}, _Path, _Translations, _KnownMsgSize, _Opts) ->
-    [];
-get_translations(#?gpb_field{type=Type, occurrence=Occ},
-                 Path, Translations, KnownMsgSize, Opts) ->
-    {IsRepeated, IsKnownSizeElem} =
-        if Occ == repeated ->
-                {true, is_known_size_element(Type, KnownMsgSize)};
-           true ->
-                {false, false}
-        end,
+augment_field_translations(#?gpb_field{type=Type, occurrence=Occ},
+                           Path, Translations, Opts) ->
+    IsRepeated =  Occ == repeated,
     IsElem = IsRepeated andalso lists:last(Path) == [],
+    IsScalar = is_scalar_type(Type),
     DoNif = proplists:get_bool(nif, Opts),
+    %% Operations for which we can or sometimes must have translations:
     Ops = if DoNif ->
                   [merge, verify];
              IsElem ->
                   [encode,decode,merge,verify];
-             IsRepeated, IsKnownSizeElem ->
-                  [encode,
-                   decode_repeated_add_elem,
-                   decode_repeated_finalize,
-                   merge,
-                   verify];
-             IsRepeated, not IsKnownSizeElem ->
+             IsRepeated ->
                   [encode,
                    decode_init_default,
                    decode_repeated_add_elem,
@@ -541,71 +603,63 @@ get_translations(#?gpb_field{type=Type, occurrence=Occ},
                    verify];
              true ->
                   [encode,decode,merge,verify]
+          end -- [merge || IsScalar, not IsRepeated],
+    augment_2_fetch_transl(Ops, Translations, {field, Path})
+        ++ type_spec_tr(Translations);
+augment_field_translations(#gpb_oneof{}, [_,_]=Path, Translations, Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    %% Operations for which we can or sometimes must have translations:
+    Ops = if DoNif ->
+                  [verify];
+             true ->
+                  [encode,decode,verify]
           end,
-    PathTransls = case dict:find(Path, Translations) of
-                      {ok, Ts} -> Ts;
-                      error    -> []
-                  end,
-    [case lists:keyfind(Op, 1, PathTransls) of
-         {Op, Transl} ->
-             Transl;
-         false ->
-             if Op == merge, IsRepeated, not IsElem ->
-                     {'erlang_++',3};
-                true ->
-                     FnName = gpb_gen_translators:default_fn_by_op(
-                                Op, undefined),
-                     Arity = length(gpb_gen_translators:args_by_op2(Op)) + 1,
-                     {FnName, Arity}
-             end
-     end
-     || Op <- Ops].
+    augment_2_fetch_transl(Ops, Translations, {field, Path})
+        ++ type_spec_tr(Translations).
 
-is_known_size_element(fixed32, _) -> true;
-is_known_size_element(fixed64, _) -> true;
-is_known_size_element(sfixed32, _) -> true;
-is_known_size_element(sfixed64, _) -> true;
-is_known_size_element(float, _) -> true;
-is_known_size_element(double, _) -> true;
-is_known_size_element({msg,MsgName}, KnownMsgSize) ->
-    dict:find(MsgName, KnownMsgSize) /= error;
-is_known_size_element({group,Name}, KnownMsgSize) ->
-    dict:find(Name, KnownMsgSize) /= error;
-is_known_size_element({map,KeyType,ValueType}, KnownMsgSize) ->
-    MapAsMsgName = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
-    dict:find(MapAsMsgName, KnownMsgSize) /= error;
-is_known_size_element(_Type, _) ->
-    false.
+augment_2_fetch_transl(Ops, Translations, Ctxt) ->
+    [{Op, fetch_op_transl(Op, Translations, Ctxt)} || Op <- Ops].
 
-fold_fields_and_paths(F, InitAcc, Defs) ->
-    lists:foldl(
-      fun({{msg, MsgName}, Fields}, Acc) ->
-              fold_field_and_path(F, [MsgName], false, Acc, Fields);
-         ({{group, GroupName}, Fields}, Acc) ->
-              fold_field_and_path(F, [GroupName], false, Acc, Fields);
-         (_Def, Acc) ->
-              Acc
-      end,
-      InitAcc,
-      Defs).
+augment_msg_translations(MagName, Translations) ->
+    Ops = [encode,decode,merge,verify],
+    augment_2_fetch_transl(Ops, Translations, {msg,[MagName]})
+        ++ type_spec_tr(Translations).
 
-fold_field_and_path(F, Root, IsOneOf, InitAcc, Fields) ->
-    lists:foldl(
-      fun(#?gpb_field{name=FName, occurrence=repeated}=Field, Acc) ->
-              Path = Root ++ [FName],
-              EPath = Root ++ [FName, []],
-              F(Field, EPath, IsOneOf, F(Field, Path, IsOneOf, Acc));
-         (#?gpb_field{name=FName}=Field, Acc) ->
-              Path = Root ++ [FName],
-              F(Field, Path, IsOneOf, Acc);
-         (#gpb_oneof{name=CFName, fields=OFields}=Field, Acc) ->
-              Path = Root ++ [CFName],
-              fold_field_and_path(F, Path, {true, CFName},
-                                  F(Field, Path, IsOneOf, Acc),
-                                  OFields)
-      end,
-      InitAcc,
-      Fields).
+type_spec_tr(Translations) ->
+    case lists:keyfind(type_spec, 1, Translations) of
+        {type_spec, TypeStr} ->
+            [{type_spec, TypeStr}];
+        false ->
+            [{type_spec, '$default'}]
+    end.
+
+fetch_op_transl(Op, Translations, Ctxt) ->
+    Default = fetch_default_transl(Op),
+    fetch_op_translation(Op, Translations, Default, Ctxt).
+
+fetch_default_transl(Op) ->
+    case Op of
+        merge  -> gpb_gen_translators:default_merge_translator();
+        verify -> gpb_gen_translators:default_verify_translator();
+        _      -> '$no_default'
+    end.
+
+fetch_op_translation(Op, Translations, Default, Ctxt) ->
+    case lists:keyfind(Op, 1, Translations) of
+        false when Default /= '$no_default' ->
+            Default;
+        false when Default == '$no_default' ->
+            error({error, {missing_translation,
+                           {op,Op}, Ctxt,
+                           Translations}});
+        {Op, {M,F,ArgTempl}} ->
+            {M,F,ArgTempl};
+        {Op, {F,ArgTempl}} ->
+            {F,ArgTempl}
+    end.
+
+is_repeated_elem_path([_MsgName,_FName,[]]) -> true;
+is_repeated_elem_path(_) -> false.
 
 find_group_occurrences(Defs) ->
     gpb_lib:fold_msg_or_group_fields_o(

@@ -32,6 +32,12 @@ no_maps_tests__test() ->
 
 -else. %% NO_HAVE_MAPS
 
+-export([dict_to_map/1, map_to_dict/1]).
+
+%% Translators for {translate_field, {<Oneof>,...}} tests
+-export([e_ipv4/1, d_ipv4/1, v_ipv4/1]).
+-export([e_ipv6/1, d_ipv6/1, v_ipv6/1]).
+
 -import(gpb_compile_tests, [compile_iolist/2]).
 -import(gpb_compile_tests, [compile_to_string_get_hrl/2]).
 -import(gpb_compile_tests, [compile_erl_iolist/1]).
@@ -495,6 +501,114 @@ defaults_for_proto3_fields_test() ->
               "new_m_msg() -> #m{}.\n"]),
     {m, #{}} = P3M:new_m_msg(),
     unload_code(P3M).
+
+%% -- translations
+%%-
+translate_maptype_test() ->
+    %% For this tests, the internal format of the map<_,_> is a dict()
+    M = compile_iolist(
+          ["message m {",
+           "  map<int32,string> m = 1;"
+           "}"],
+          [maps,
+           {translate_type,
+            {{map,int32,string},
+             [{encode,{?MODULE, dict_to_map, ['$1']}},
+              {decode,{?MODULE, map_to_dict, ['$1']}},
+              {verify,{gpb_compile_tests, is_dict, ['$1']}}]}}]),
+    D0 = dict:from_list([{1,"one"},{2,"two"}]),
+    M1 = #{m => D0},
+    ok = M:verify_msg(M1, m),
+    B1 = M:encode_msg(M1, m),
+    #{m := D1} = M:decode_msg(B1, m),
+    ?assertEqual(lists:sort(dict:to_list(D0)),
+                 lists:sort(dict:to_list(D1))),
+    ?assertError({gpb_type_error, _}, M:verify_msg(#{m => not_a_dict}, m)),
+    unload_code(M).
+
+dict_to_map(D) -> maps:from_list(dict:to_list(D)).
+map_to_dict(M) -> dict:from_list(maps:to_list(M)).
+
+translate_oneof_test() ->
+    %% For this test, we'll have an oneof which is either an ipv4 or ipv6
+    %% (with some non-obvious types, just to test different)
+    %% and translations of the ip field itself (the oneo) is what we want
+    %% to test.
+    %% The internal format is either a 4-tuple or an 8-tuple.
+    M = compile_iolist(
+          ["message m {",
+           "  oneof ip {",
+           "    fixed32 ipv4 = 1;",
+           "    bytes ipv6 = 2;",
+           "  }",
+           "}"],
+          [maps,
+           {translate_field,
+            {[m,ip], [{encode, {gpb_compile_tests, e_ipv4or6, ['$1']}},
+                      {decode, {gpb_compile_tests, d_ipv4or6, ['$1']}},
+                      {verify, {gpb_compile_tests, v_ipv4or6, ['$1']}}]}}]),
+    M1 = #{ip => {127,0,0,1}},
+    M2 = #{ip => {0,0,0,0, 0,0,0,1}},
+    ok = M:verify_msg(M1, m),
+    ok = M:verify_msg(M2, m),
+    <<13, _/bits>>    = B1 = M:encode_msg(M1, m), % check field tag+wiretype
+    <<18,16, _/bits>> = B2 = M:encode_msg(M2, m), % check field tag+wiretype+len
+    M1 = M:decode_msg(B1, m),
+    M2 = M:decode_msg(B2, m),
+    ?assertError({gpb_type_error, _},
+                 M:verify_msg(#{ip => {1,2,3,4,5,6}}, m)), % wrong tuple size
+    unload_code(M).
+
+translate_flat_oneof_maps_test_() ->
+    flat_map_prerequisites(
+      [{"translate flat oneof", fun translate_flat_oneof_test_aux/0}]).
+
+translate_flat_oneof_test_aux() ->
+    %% For this test, we'll have an oneof which is either an ipv4 or ipv6
+    %% (with some non-obvious types, just to test different)
+    %% and translations of the ip field itself (the oneo) is what we want
+    %% to test.
+    %% The internal format is either a 4-tuple or an 8-tuple.
+    M = compile_iolist(
+          ["message m {",
+           "  oneof ip {",
+           "    fixed32 ipv4 = 1;",
+           "    bytes ipv6 = 2;",
+           "  }",
+           "}"],
+          [maps,
+           {maps_oneof, flat},
+           {translate_field,
+            {[m,ip,ipv4],
+             [{encode, {?MODULE, e_ipv4, ['$1']}},
+              {decode, {?MODULE, d_ipv4, ['$1']}},
+              {verify, {?MODULE, v_ipv4, ['$1']}}]}},
+           {translate_field,
+            {[m,ip,ipv6],
+             [{encode, {?MODULE, e_ipv6, ['$1']}},
+              {decode, {?MODULE, d_ipv6, ['$1']}},
+              {verify, {?MODULE, v_ipv6, ['$1']}}]}}]),
+    M1 = #{ipv4 => {127,0,0,1}},
+    M2 = #{ipv6 => {0,0,0,0, 0,0,0,1}},
+    ok = M:verify_msg(M1, m),
+    ok = M:verify_msg(M2, m),
+    <<13, _/bits>>    = B1 = M:encode_msg(M1, m), % check field tag+wiretype
+    <<18,16, _/bits>> = B2 = M:encode_msg(M2, m), % check field tag+wiretype+len
+    M1 = M:decode_msg(B1, m),
+    M2 = M:decode_msg(B2, m),
+    ?assertError({gpb_type_error, _},
+                 M:verify_msg(#{ipv4 => {1,2,3,4,5,6}}, m)),
+    ?assertError({gpb_type_error, _},
+                 M:verify_msg(#{ipv6 => {1,2,3,4,5,6}}, m)),
+    unload_code(M).
+
+e_ipv4(Ip) -> element(2,gpb_compile_tests:e_ipv4or6(Ip)).
+d_ipv4(Ip) -> gpb_compile_tests:d_ipv4or6({ipv4,Ip}).
+v_ipv4(Ip) -> gpb_compile_tests:v_ipv4or6(Ip).
+
+e_ipv6(Ip) -> element(2,gpb_compile_tests:e_ipv4or6(Ip)).
+d_ipv6(Ip) -> gpb_compile_tests:d_ipv4or6({ipv6,Ip}).
+v_ipv6(Ip) -> gpb_compile_tests:v_ipv4or6(Ip).
 
 %% --- target versions ----------------------------------
 

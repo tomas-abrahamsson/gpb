@@ -84,6 +84,7 @@
                {module_name_suffix, string() | atom()} |
                {module_name, string() | atom()} |
                {translate_type, {gpb_field_type(), [translation()]}} |
+               {translate_field, {field_path(), [translation()]}} |
                {any_translate, [translation()]} |
                boolean_opt(epb_compatibility) |
                boolean_opt(epb_functions) |
@@ -115,10 +116,15 @@
 -type prefix_by_proto() :: [{ProtoName::atom(), Prefix::string() | atom()}].
 
 
+-type field_path() :: [atom() | []].
 -type translation() :: {encode, mod_fn_argtemplate()} |
                        {decode, mod_fn_argtemplate()} |
+                       {decode_init_default, mod_fn_argtemplate()} |
+                       {decode_repeated_add_elem, mod_fn_argtemplate()} |
+                       {decode_repeated_finalize, mod_fn_argtemplate()} |
                        {merge,  mod_fn_argtemplate()} |
-                       {verify, mod_fn_argtemplate()}.
+                       {verify, mod_fn_argtemplate()} |
+                       {type_spec, string()}.
 -type fn_name() :: atom().
 -type mod_fn_argtemplate() :: {module(), fn_name(), arg_template()}.
 -type arg_template() :: [arg()].
@@ -397,9 +403,8 @@ file(File) ->
 %% the `module_name_prefix' and `module_name_suffix' options.
 %%
 %% The `translate_type' option can be used to provide packer and unpacker
-%% functions for message fields of a certain type. For now, the only type
-%% supported is `{msg,MsgName}', and for now only when they occur as
-%% submessages.  For messages, the `MsgName' refers to a name <em>after</em>
+%% functions for message fields of a certain type.
+%% For messages, the `MsgName' refers to a name <em>after</em>
 %% renaming has taken place.
 %% The merge translator is optional, and is called either via the `merge_msgs'
 %% function in the generated code, or when the decoder sees another
@@ -415,11 +420,11 @@ file(File) ->
 %% <dl>
 %%   <dt>Encode (Packing)</dt>
 %%   <dd>Call `Mod:Fn(Term)' to pack the `Term' (`$1') to
-%%       a `google.protobuf.Any' message.</dd>
+%%       a value of the suitable for normal gpb encoding.</dd>
 %%   <dt>Decode (Unpacking)</dt>
 %%   <dd>Call `Mod:Fn(Any)' to unpack the `Any' (`$1') to
-%%       unpack a `google.protobuf.Any' message to a term.</dd>
-%%   <dt>Merge </dt>
+%%       unpack a normal gpb decoded value to a term.</dd>
+%%   <dt>Merge</dt>
 %%   <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
 %%       unpacked terms to a resulting Term3. The `$1' is the
 %%       previously seen term (during decoding, on encountering a
@@ -446,11 +451,12 @@ file(File) ->
 %%     `verify_msg' functions. If that option is not specified, the
 %%     value `undefined' is used substituted for `$user_data'.</dd>
 %%   <dt>`$op'</dt>
-%%   <dd>This will be replaced by `encode', `decode', `merge' or
-%%   `verify', depending on from which context it is actually
-%%   called. This can be useful because if the message is to be
-%%   verified on encoding (see the `verify' option), then the same
-%%   options, and thus the same user-data, are used for both
+%%   <dd>This will be replaced by `encode', `decode', `merge',
+%%   `verify', `decode_init_default', `decode_repeated_add_elem' or
+%%   `decode_repeated_finalize', depending on from which context it
+%%   is actually called. This can be useful because if the message is
+%%   to be verified on encoding (see the `verify' option), then the
+%%   same options, and thus the same user-data, are used for both
 %%   `encode_msg' and for `verify_msg'. The `$op' marker makes it
 %%   possible to tell these two call sites apart, if needed.</dd>
 %% </dl>
@@ -458,6 +464,22 @@ file(File) ->
 %% The option `{any_translate,Translations}' is retained for backwards
 %% compatibility, and expands to
 %% <code>{translate_type,{'google.protobuf.Any',Translations}}</code>.
+%%
+%% The `translate_field' option can be used to translate individual fields.
+%% The option format is `{translate_field,{FieldPath,Translations}}' where
+%% each `Translation' consists of `{Op,{Mod,Fn,ArgTemplate}}' elements,
+%% just as for `translate_type'. The `FieldPath' is a list on the
+%% following format:
+%% <ul>
+%%   <li>`[MsgName]' for the message itself on the top-level</li>
+%%   <li>`[MsgName,FieldName]' for fields, generally</li>
+%%   <li>`[MsgName,FieldName,[]]' for elements of repeated fields</li>
+%%   <li>`[MsgName,OnoefFieldName,FieldName]' for elements of oneof
+%%     fields.</li>
+%% </ul>
+%% For repeated fields, the additional operations `decode_init_default',
+%% `decode_repeated_add_elem' and `decode_repeated_finalize' also exist
+%% and must all be specified.
 %%
 %% The `epb_compatibility' option is an umbrella-option for
 %% compatibility with the Erlang protobuffs library. It will expand to
@@ -657,8 +679,7 @@ do_proto_defs_aux1(Mod, Defs, Opts) ->
 verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_translation_and_nif(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
-              fun() -> verify_opts_flat_oneof(Opts) end,
-              fun() -> verify_translation_opts_only_for_msgs(Opts) end]).
+              fun() -> verify_opts_flat_oneof(Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -668,34 +689,14 @@ while_ok(Funs) ->
                 Funs).
 
 verify_opts_translation_and_nif(Opts) ->
-    case {proplists:get_value(translate_type, Opts),
-          proplists:get_bool(nif, Opts)} of
-        {Translations, true} when Translations /= undefined ->
+    TranslType = lists:keymember(translate_type, 1, Opts),
+    TranslField = lists:keymember(translate_field, 1, Opts),
+    DoNif = proplists:get_bool(nif, Opts),
+    if (TranslType or TranslField) and DoNif ->
             {error, {invalid_options, translation, nif}};
-        _ ->
+       true ->
             ok
     end.
-
-verify_translation_opts_only_for_msgs(Opts) ->
-    TrOpts = lists:filter(fun({translate_type, _}) -> true;
-                                  (_) -> false
-                               end,
-                               Opts),
-    {_Ok,Errs} = lists:partition(
-                  fun({translate_type, {Type, _Translations}}) ->
-                          case Type of
-                              {msg, _} -> true;
-                              _        -> false
-                          end
-                  end,
-                  TrOpts),
-    case Errs of
-        [] ->
-            ok;
-        [{translate_type, {Type, _Tr}} | _] ->
-            {error, {unsupported_translation, Type, non_msg_type}}
-    end.
-
 
 verify_opts_epb_compat(Defs, Opts) ->
     while_ok(
@@ -770,12 +771,12 @@ do_proto_defs_aux2(Defs, Mod, AnRes, Opts) ->
             {ok, Defs};
         binary ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
-            HrlTxt = possibly_format_hrl(Mod, Defs, Opts),
+            HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             compile_to_binary(Mod, HrlTxt, ErlTxt, NifTxt, Opts);
         file ->
             ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
-            HrlTxt = possibly_format_hrl(Mod, Defs, Opts),
+            HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             ErlOutDir = get_erl_outdir(Opts),
             HrlOutDir = get_hrl_outdir(Opts),
@@ -955,7 +956,7 @@ fmt_err(X) ->
 format_warning({ignored_field_opt_packed_for_unpackable_type,
                 MsgName, FName, Type, _Opts}) ->
     ?f("Warning: ignoring option packed for non-packable field ~s.~s "
-       "of type ~p", [MsgName, FName, Type]);
+       "of type ~w", [MsgName, FName, Type]);
 format_warning(maps_flat_oneof_generated_code_may_fail_to_compile) ->
     "Warning: Generated code for flat oneof for maps may fail to compile "
         "on 18.3.4.6, or later Erlang 18 versions, due to a compiler issue";
@@ -1023,32 +1024,39 @@ c() ->
 %%       If no package is defined, nothing will be prepended.
 %%       Default is to not prepend package names for backwards
 %%       compatibility, but it is needed for some proto files.</dd>
-%%   <dt>`-translate_type WMsFs'</dt>
+%%   <dt>`-translate_type TMsFs'</dt>
 %%   <dd>Call functions in `TMsFs' to pack, unpack, merge and verify
-%%       for specifed submessages. The `TMsFs' is a string on the
+%%       for the specifed type. The `TMsFs' is a string on the
 %%       following format: `type=Type,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
 %%       The Type and specified modules and functions are called and used
 %%       as follows:
 %%       <dl>
-%%         <dt>`type=msg:MsgName'</dt>
-%%         <dd>Specfies that the translations apply to messages with name
-%%             `MsgName' (after any renaming operations).</dd>
+%%         <dt>`type=Type'</dt>
+%%         <dd>Specfies that the translations apply to fields of type.
+%%             The `Type' may be either of:
+%%             `msg:MsgName' (after any renaming operations),
+%%             `enum:EnumName', `int32', `int64', `uint32', `uint64',
+%%             `sint32', `sint64', `fixed32', `fixed64', `sfixed32',
+%%             `sfixed64', `bool', `double', `string', `bytes' or
+%%             `map<KeyType,ValueType>'. The last may need quoting in
+%%             the shell.</dd>
 %%         <dt>`e=Mod:Fn'</dt>
-%%         <dd>Call `Mod:Fn(Term)' to pack the `Term' to
-%%             a `google.protobuf.Any' message.</dd>
+%%         <dd>Call `Mod:Fn(Term)' to pack the `Term' to a value of type
+%%             `Type', ie to a value that gpb knows how to wire-encode.</dd>
 %%         <dt>`d=Mod:Fn'</dt>
-%%         <dd>Call `Mod:Fn(Any)' to unpack the `Any' to
-%%             unpack a `google.protobuf.Any' message to a term.</dd>
+%%         <dd>Call `Mod:Fn(Value)' to unpack the just wire-decoded `Value'
+%%             of type `Type', to something of your choice.</dd>
 %%         <dt>`m=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
-%%             unpacked terms to a resulting Term3.</dd>
+%%             unpacked terms to a resulting Term3. Note that this function
+%%             is never called for scalar types.</dd>
 %%         <dt>`V=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%             If `Term' is valid, the function is expected to just return
 %%             any value, which is ignored and discarded.
 %%             If `Term' is invalid, the function is exptected to not
 %%             return anything, but instead either crash, call
-%%             `erlang:error/1', or `throw/1' or `exit/1'.  with the
+%%             `erlang:error/1', or `throw/1' or `exit/1' with the
 %%             reason for error.
 %%             If you want to use a verifier, this is the new preferred
 %%             approach.</dd>
@@ -1056,6 +1064,36 @@ c() ->
 %%         <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
 %%             This exists for backwards compatibility, and its use
 %%             is deprecated.</dd>.
+%%       </dl>
+%%   </dd>
+%%   <dt>`-translate_field FMsFs'</dt>
+%%   <dd>Call functions in FMsFs to pack, unpack, merge, and verify.
+%%       This is similar to the `-translate_type' option, except that
+%%       a message field is specified instead of a type. The `FMsFs'
+%%       is a string on the following format:
+%%       `field=Path,e=...,d=...,m=...,V=...[,i=Mod:Fn][,a=Mod:Fn][,f=Mod:Fn]'
+%%       See the `-translate_type' option for info on `e=', `d=', `m=' and `V='
+%%       items. Additionally for this `-translate_field' option, these exist:
+%%       <dl>
+%%         <dt>`field=Path'</dt>
+%%         <dd>The `Path' indicates the element to translate as follows:
+%%           <ul>
+%%             <li>`MsgName' for the message itself. (This is actually
+%%                  equivalent to `-translate_type type=msg:MsgName,...')</li>
+%%             <li>`MsgName.FieldName' for fields generally</li>
+%%             <li>`MsgName.OneofName.FieldName' for oneof fields</li>
+%%             <li>`MsgName.FieldName.[]' for elements of repeated fields</li>
+%%           </ul>
+%%         </dd>
+%%         <dt>`i=Mod:Fn'</dt>
+%%         <dd>For repeated fields, call `Mod:Fn()' on decoding to initialize
+%%             the field to some value</dd>
+%%         <dt>`a=Mod:Fn'</dt>
+%%         <dd>For repeated fields, call `Mod:Fn(Elem,S)' on decoding
+%%             to add an item)</dd>
+%%         <dt>`f=Mod:Fn'</dt>
+%%         <dd>For repeated fields, call `Mod:Fn(S)' on decoding
+%%             to finalize the field</dd>
 %%       </dl>
 %%   </dd>
 %%   <dt>`-any_translate MsFs'</dt>
@@ -1332,12 +1370,31 @@ opt_specs() ->
       "       Default is to not prepend package names for backwards\n"
       "       compatibility, but it is needed for some proto files.\n"},
      {"translate_type", fun opt_translate_type/2, translate_type,
-      " type=msg:MsgName,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
-      "       For the specified submessage, call Mod:Fn to:\n"
+      " type=Type,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
+      "       For fields of the specified type, call Mod:Fn to:\n"
       "       - encode (calls Mod:Fn(Term) -> AnyMessage to pack)\n"
       "       - decode (calls Mod:Fn(AnyMessage) -> Term to unpack)\n"
       "       - merge  (calls Mod:Fn(Term,Term2) -> Term3 to merge unpacked)\n"
-      "       - verify (calls Mod:Fn(Term) -> _ to verify unpacked)\n"},
+      "       - verify (calls Mod:Fn(Term) -> _ to verify unpacked)\n"
+      "       Type can be any of msg:MsgName (after any renaming operations)\n"
+      "       enum:EnumName, int32, int64, uint32, uint64, sint32 sint64,\n"
+      "       fixed32, fixed64, sfixed32, sfixed64, bool, double, string,\n"
+      "       bytes, map<KeyType,ValueType>. The last may need quoting in\n"
+      "       the shell. No merge function is called for scalar fields.\n"},
+     {"translate_field", fun opt_translate_field/2, translate_field,
+      " field=Field,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]"
+      "[,i=Mod:Fn][,a=Mod:Fn][,f=Mod:Fn]\n"
+      "       For the specified field, call Mod:Fn. Specify Field as one of:\n"
+      "       - MsgName for the message itself\n"
+      "       - MsgName.FieldName for fields generally\n"
+      "       - MsgName.OneofName.FieldName for oneof fields\n"
+      "       - MsgName.FieldName.[] for elements of repeated fields.\n"
+      "       For repeated fields, ie for the field itself, not its elements,\n"
+      "       the following extra translations are to be specified:\n"
+      "       - i=Mod:Fn (calls Mod:Fn() on decoding to initialize the field)\n"
+      "       - a=Mod:Fn (calls Mod:Fn(Elem,S) on decoding to add an item)\n"
+      "       - f=Mod:Fn (calls Mod:Fn(S) on decoding to finalize the field)\n"
+      ""},
      {"any_translate", fun opt_any_translate/2, any_translate,
       " e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
       "       For a google.protobuf.Any message, call Mod:Fn to:\n"
@@ -1454,17 +1511,32 @@ opt_specs() ->
         end.
 
 
-
 opt_no_type_specs(OptTag, Rest) ->
     Opt = {OptTag, false},
     {ok, {Opt, Rest}}.
 
 opt_translate_type(OptTag, [S | Rest]) ->
-    try
-        [W | Ts] = gpb_lib:string_lexemes(S, ","),
-        Opt = {OptTag, {opt_translate_what(W),
-                        [opt_translate_mfa(T) || T <- Ts]}},
-        {ok, {Opt, Rest}}
+    try S of
+        "type="++S2 ->
+            {Type,Rest2} = opt_translate_type(S2),
+            Ts = gpb_lib:string_lexemes(Rest2, ","),
+            Opt = {OptTag, {Type, [opt_translate_mfa(T) || T <- Ts]}},
+            {ok, {Opt, Rest}};
+        _ ->
+            {error, "Translation is expected to begin with type="}
+    catch throw:{badopt,ErrText} ->
+            {error, ErrText}
+    end.
+
+opt_translate_field(OptTag, [S | Rest]) ->
+    try S of
+        "field="++S2 ->
+            {Path,Rest2} = opt_translate_elempath(S2),
+            Ts = gpb_lib:string_lexemes(Rest2, ","),
+            Opt = {OptTag, {Path, [opt_translate_mfa(T) || T <- Ts]}},
+            {ok, {Opt, Rest}};
+        _ ->
+            {error, "Translation is expected to begin with field="}
     catch throw:{badopt,ErrText} ->
             {error, ErrText}
     end.
@@ -1478,14 +1550,62 @@ opt_any_translate(OptTag, [S | Rest]) ->
             {error, ErrText}
     end.
 
-opt_translate_what("type=msg:"++MsgName) -> {msg,list_to_atom(MsgName)};
-opt_translate_what(X) -> throw({badopt,"Invalid translation target: "++X}).
+opt_translate_type("msg:"++Rest)  -> opt_to_comma_with_tag(Rest, msg);
+opt_translate_type("enum:"++Rest) -> opt_to_comma_with_tag(Rest, enum);
+opt_translate_type("map<"++Rest)  -> opt_translate_map_type(Rest);
+opt_translate_type(Other) ->
+    {S, Rest} = read_s(Other, $,, ""),
+    Type = s2a(S),
+    Allowed = [int32, int64, uint32, uint64, sint32, sint64, fixed32, fixed64,
+               sfixed32, sfixed64, bool, float, double, string, bytes],
+    case lists:member(Type, Allowed) of
+        true -> {Type, Rest};
+        false -> throw({badopt,"Invalid translation type: "++S})
+    end.
+
+opt_translate_map_type(S) ->
+    {KeyType, Rest} = opt_translate_type(S),
+    case gpb:is_allowed_as_key_type(KeyType) of
+        true ->
+            {S2, Rest2} = read_s(Rest, $>, ""),
+            case opt_translate_type(S2++",") of
+                {ValueType, ""} ->
+                    {{map,KeyType,ValueType}, Rest2};
+                {_ValueType, _} ->
+                    throw({badopt,"Trailing garbage text"})
+            end;
+        false ->
+            throw({badopt,"Not allowed as map key type"})
+    end.
+
+opt_to_comma_with_tag(S, Tag) ->
+    {S2, Rest} = read_s(S, $,, ""),
+    {{Tag, s2a(S2)}, Rest}.
+
+opt_translate_elempath(S) ->
+    {S2, Rest} = read_s(S, $,, ""),
+    case gpb_lib:string_lexemes(S2, ".") of
+        [Msg]              -> {[s2a(Msg)], Rest};
+        [Msg,Field]        -> {[s2a(Msg),s2a(Field)], Rest};
+        [Msg,Field,"[]"]   -> {[s2a(Msg),s2a(Field),[]], Rest};
+        [Msg,Field,OFName] -> {[s2a(Msg),s2a(Field),s2a(OFName)], Rest};
+        _ -> throw({badopt, "Invalid element path"})
+    end.
+
+s2a(S) -> list_to_atom(S).
+
+read_s([Delim|Rest], Delim, Acc) -> {lists:reverse(Acc), Rest};
+read_s([C|Rest], Delim, Acc)     -> read_s(Rest, Delim, [C | Acc]);
+read_s("", _Delim, _Acc)         -> throw({badopt, "Unexpected end of string"}).
 
 opt_translate_mfa("e="++MF) -> {encode,opt_mf_str(MF, 1)};
 opt_translate_mfa("d="++MF) -> {decode,opt_mf_str(MF, 1)};
 opt_translate_mfa("m="++MF) -> {merge, opt_mf_str(MF, 2)};
 opt_translate_mfa("V="++MF) -> {verify,opt_mf_str(MF, 1)};
 opt_translate_mfa("v="++MF) -> {verify,opt_mf_str_verify(MF)};
+opt_translate_mfa("i="++MF) -> {decode_init_default,opt_mf_str(MF, 0)};
+opt_translate_mfa("a="++MF) -> {decode_repeated_add_elem, opt_mf_str(MF, 2)};
+opt_translate_mfa("f="++MF) -> {decode_repeated_finalize, opt_mf_str(MF, 1)};
 opt_translate_mfa(X) -> throw({badopt,"Invalid translation spec: "++X}).
 
 opt_mf_str(S, Arity) ->
@@ -1837,8 +1957,10 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        end,
        "\n",
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-export([encode_msg/1, encode_msg/2]).~n");
-           maps    -> ?f("-export([encode_msg/2, encode_msg/3]).~n")
+           records ->
+               ?f("-export([encode_msg/1, encode_msg/2, encode_msg/3]).~n");
+           maps ->
+               ?f("-export([encode_msg/2, encode_msg/3]).~n")
        end,
        [[?f("-export([encode/1]). %% epb compatibility~n"),
          [?f("-export([~p/1]).~n", [gpb_lib:mk_fn(encode_, MsgName)])
@@ -1847,8 +1969,10 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
         || gpb_lib:get_epb_functions_by_opts(Opts)],
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-export([merge_msgs/2, merge_msgs/3]).~n");
-           maps    -> ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
+           records ->
+               ?f("-export([merge_msgs/2, merge_msgs/3, merge_msgs/4]).~n");
+           maps ->
+               ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
        end,
        [[?f("-export([decode/2]). %% epb compatibility~n"),
          [?f("-export([~p/1]).~n", [gpb_lib:mk_fn(decode_, MsgName)])
@@ -1856,8 +1980,10 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
          "\n"]
         || gpb_lib:get_epb_functions_by_opts(Opts)],
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-export([verify_msg/1, verify_msg/2]).~n");
-           maps    -> ?f("-export([verify_msg/2, verify_msg/3]).~n")
+           records ->
+               ?f("-export([verify_msg/1, verify_msg/2, verify_msg/3]).~n");
+           maps ->
+               ?f("-export([verify_msg/2, verify_msg/3]).~n")
        end,
        ?f("-export([get_msg_defs/0]).~n"),
        ?f("-export([get_msg_names/0]).~n"),
@@ -1902,7 +2028,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
                ""
        end,
        "\n",
-       gpb_gen_types:format_export_types(Defs, Opts),
+       gpb_gen_types:format_export_types(Defs, AnRes, Opts),
        "\n",
        if not DoNif ->
                case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts)
@@ -1924,7 +2050,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        %% to about 10000 msgs/s for a set of mixed message samples.
        %% f("-compile(inline).~n"),
        %%
-       gpb_gen_encoders:format_encoders_top_function(Defs, Opts),
+       gpb_gen_encoders:format_encoders_top_function(Defs, AnRes, Opts),
        "\n",
        if DoNif ->
                ?f("~s~n", [gpb_gen_nif:format_nif_encoder_error_wrappers(
@@ -1937,7 +2063,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
                 gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts)]
        end,
        "\n",
-       gpb_gen_decoders:format_decoders_top_function(Defs, Opts),
+       gpb_gen_decoders:format_decoders_top_function(Defs, AnRes, Opts),
        "\n\n",
        if DoNif ->
                [gpb_gen_nif:format_nif_decoder_error_wrappers(Defs,
@@ -1950,15 +2076,15 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        "\n",
        gpb_gen_mergers:format_msg_merge_code(Defs, AnRes, Opts),
        "\n",
-       gpb_gen_verifiers:format_verifiers_top_function(Defs, Opts),
+       gpb_gen_verifiers:format_verifiers_top_function(Defs, AnRes, Opts),
        "\n",
        gpb_gen_verifiers:format_verifiers(Defs, AnRes, Opts),
        "\n",
        if not DoNif ->
-               [gpb_gen_translators:format_aux_transl_helpers(AnRes),
+               [gpb_gen_translators:format_aux_transl_helpers(),
                 gpb_gen_translators:format_translators(Defs, AnRes, Opts)];
           DoNif ->
-               [gpb_gen_translators:format_aux_transl_helpers(AnRes),
+               [gpb_gen_translators:format_aux_transl_helpers(),
                 gpb_gen_translators:format_merge_translators(Defs, AnRes,
                                                              Opts)]
        end,
@@ -2029,13 +2155,13 @@ possibly_format_descriptor(Defs, Opts) ->
 
 %% -- hrl -----------------------------------------------------
 
-possibly_format_hrl(Mod, Defs, Opts) ->
+possibly_format_hrl(Mod, Defs, AnRes, Opts) ->
     case gpb_lib:get_records_or_maps_by_opts(Opts) of
-        records -> format_hrl(Mod, Defs, Opts);
+        records -> format_hrl(Mod, Defs, AnRes, Opts);
         maps    -> '$not_generated'
     end.
 
-format_hrl(Mod, Defs, Opts1) ->
+format_hrl(Mod, Defs, AnRes, Opts1) ->
     Opts = [{module, Mod}|Opts1],
     ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
@@ -2049,7 +2175,7 @@ format_hrl(Mod, Defs, Opts1) ->
        ?f("-define(~p, \"~s\").~n", [ModVsn, gpb:version_as_string()]),
        "\n",
        gpb_lib:nl_join(
-         [gpb_gen_types:format_msg_record(Msg, Fields, Opts, Defs)
+         [gpb_gen_types:format_msg_record(Msg, Fields, AnRes, Opts, Defs)
           || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)]),
        "\n",
        ?f("-endif.~n")],
