@@ -1020,7 +1020,7 @@ c() ->
 %%       If no package is defined, nothing will be prepended.
 %%       Default is to not prepend package names for backwards
 %%       compatibility, but it is needed for some proto files.</dd>
-%%   <dt>`-translate_type WMsFs'</dt>
+%%   <dt>`-translate_type TMsFs'</dt>
 %%   <dd>Call functions in `TMsFs' to pack, unpack, merge and verify
 %%       for the specifed type. The `TMsFs' is a string on the
 %%       following format: `type=Type,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
@@ -1037,11 +1037,11 @@ c() ->
 %%             `map<KeyType,ValueType>'. The last may need quoting in
 %%             the shell.</dd>
 %%         <dt>`e=Mod:Fn'</dt>
-%%         <dd>Call `Mod:Fn(Term)' to pack the `Term' to
-%%             a `google.protobuf.Any' message.</dd>
+%%         <dd>Call `Mod:Fn(Term)' to pack the `Term' to a value of type
+%%             `Type', ie to a value that gpb knows how to wire-encode.</dd>
 %%         <dt>`d=Mod:Fn'</dt>
-%%         <dd>Call `Mod:Fn(Any)' to unpack the `Any' to
-%%             unpack a `google.protobuf.Any' message to a term.</dd>
+%%         <dd>Call `Mod:Fn(Value)' to unpack the just wire-decoded `Value'
+%%             of type `Type', to something of your choice.</dd>
 %%         <dt>`m=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term1, Term2) -> Term3' to merge two
 %%             unpacked terms to a resulting Term3. Note that this function
@@ -1052,7 +1052,7 @@ c() ->
 %%             any value, which is ignored and discarded.
 %%             If `Term' is invalid, the function is exptected to not
 %%             return anything, but instead either crash, call
-%%             `erlang:error/1', or `throw/1' or `exit/1'.  with the
+%%             `erlang:error/1', or `throw/1' or `exit/1' with the
 %%             reason for error.
 %%             If you want to use a verifier, this is the new preferred
 %%             approach.</dd>
@@ -1081,13 +1081,13 @@ c() ->
 %%             <li>`MsgName.FieldName.[]' for elements of repeated fields</li>
 %%           </ul>
 %%         </dd>
-%%         <dt>`i:Mod:Fn'</dt>
+%%         <dt>`i=Mod:Fn'</dt>
 %%         <dd>For repeated fields, call `Mod:Fn()' on decoding to initialize
 %%             the field to some value</dd>
-%%         <dt>`a:Mod:Fn'</dt>
+%%         <dt>`a=Mod:Fn'</dt>
 %%         <dd>For repeated fields, call `Mod:Fn(Elem,S)' on decoding
 %%             to add an item)</dd>
-%%         <dt>`f:Mod:Fn'</dt>
+%%         <dt>`f=Mod:Fn'</dt>
 %%         <dd>For repeated fields, call `Mod:Fn(S)' on decoding
 %%             to finalize the field</dd>
 %%       </dl>
@@ -1376,17 +1376,18 @@ opt_specs() ->
       "       bytes, map<KeyType,ValueType>. The last may need quoting in\n"
       "       the shell. No merge function is called for scalar fields.\n"},
      {"translate_field", fun opt_translate_field/2, translate_field,
-      " field=Field,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
-      "       For the specified field, call Mod:Fn. Specify Field as:\n"
+      " field=Field,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]"
+      "[,i=Mod:Fn][,a=Mod:Fn][,f=Mod:Fn]\n"
+      "       For the specified field, call Mod:Fn. Specify Field as one of:\n"
       "       - MsgName for the message itself\n"
       "       - MsgName.FieldName for fields generally\n"
       "       - MsgName.OneofName.FieldName for oneof fields\n"
       "       - MsgName.FieldName.[] for elements of repeated fields.\n"
       "       For repeated fields, ie for the field itself, not its elements,\n"
       "       the following extra translations are to be specified:\n"
-      "       - i:Mod:Fn (calls Mod:Fn() on decoding to initialize the field)\n"
-      "       - a:Mod:Fn (calls Mod:Fn(Elem,S) on decoding to add an item)\n"
-      "       - f:Mod:Fn (calls Mod:Fn(S) on decoding to finalize the field)\n"
+      "       - i=Mod:Fn (calls Mod:Fn() on decoding to initialize the field)\n"
+      "       - a=Mod:Fn (calls Mod:Fn(Elem,S) on decoding to add an item)\n"
+      "       - f=Mod:Fn (calls Mod:Fn(S) on decoding to finalize the field)\n"
       ""},
      {"any_translate", fun opt_any_translate/2, any_translate,
       " e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,v=Mod:Fn]\n"
