@@ -1,6 +1,12 @@
 -*- coding: utf-8 -*-
 
 Version 4.3.0
+2018-Aug-30
+
+        * Fix math.h/cmath and isnan/isinf issue for NIF code.
+        Thanks to François Bernier. #150
+
+Version 4.3.0
 2018-Aug-29
 
         * Add options to translate all fields and types: {translate_type,T}
