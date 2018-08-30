@@ -19,16 +19,18 @@ repo_name=rebar3_gpb_plugin
 upstream_url=git://github.com/lrascao/${repo_name}.git
 default_br=develop
 github_user=$(git config --get github.user)
+branch_point=default
 
 dry_run=false
 moist_run=false
-while getopts "hc:u:U:nm" opt
+while getopts "hc:u:U:B:nm" opt
 do
     case "$opt" in
 	h) show_usage; exit 0;;
 	c) repo_name="$OPTARG";;
 	u) upstream_url="$OPTARG";;
 	U) github_user="$OPTARG";;
+        B) branch_point="$OPTARG";;
 	n) dry_run=true;;
 	m) moist_run=true;;
     esac
@@ -118,7 +120,12 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
     git fetch -q upstream $default_br
     git reset -q --hard upstream/$default_br
 
-    git checkout -b "$pr_br"
+    if [ x"$branch_point" = xdefault ]
+    then
+        git checkout -b "$pr_br"
+    else
+        git checkout -b "$pr_br" "$branch_point"
+    fi
     # Grep for rebar / omit README.md because it contains line number references
     # likely to get wrong if we substitute version numbers in that too:
     # https://github.com/tomas-abrahamsson/gpb/blob/3.19.0/src/gpb_compile.erl#L66-L93
