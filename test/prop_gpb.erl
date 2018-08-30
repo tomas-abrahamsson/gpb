@@ -23,30 +23,6 @@
 
 -define(f(Fmt, Args), io_lib:format(Fmt, Args)).
 
-%% Eunit integration
-props_test_() ->
-    AllProps = [Fn || {Fn,0} <- ?MODULE:module_info(exports),
-                      "prop_"++_ <- [atom_to_list(Fn)]],
-    {Descr, PropsToTest} =
-        case find_protoc() of
-            false ->
-                {"QuickCheck tests"
-                 " (note: 'protoc' not in $PATH and no PROTOC env var defined,"
-                 " so excluding some properties)",
-                 AllProps -- [prop_encode_decode_via_protoc]};
-            P when is_list(P) ->
-                {"QuickCheck tests", AllProps}
-        end,
-    NumTests = length(PropsToTest),
-    PerTcTimeout = 600, %% shrinking can sometimes take a long time
-    {Descr,
-     {timeout, NumTests * PerTcTimeout,  %% timeout for all tests
-      [{timeout, 600, %% timeout for each test
-        [{atom_to_list(Prop),
-          fun() -> true = proper:quickcheck(?MODULE:Prop()) end}]}
-       || Prop <- PropsToTest]}}.
-
-
 message_defs() ->
     message_defs([]).
 
@@ -401,6 +377,17 @@ prop_encode_decode() ->
 %% it can also decode and encode messages on the fly, given a .proto
 %% file, so we can use it as an sort of interop test.
 prop_encode_decode_via_protoc() ->
+    case _HaveProtoc = (find_protoc() /= false) of
+        true ->
+            encode_decode_via_protoc();
+        false ->
+            io:format(
+              "Note: 'protoc' not in $PATH and no PROTOC env var defined,~n"
+              "so not doing this property~n."),
+            proper:numtests(1, true)
+    end.
+
+encode_decode_via_protoc() ->
     MDOpts = base_opts() ++ [no_any],
     ?FORALL(
        MsgDefs,message_defs(MDOpts),

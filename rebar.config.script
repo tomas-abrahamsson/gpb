@@ -62,7 +62,7 @@ ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
  {eunit_compile_opts, [{i,"../include"}]},
  {profiles,
   [{test, [{deps, [proper]}
-          %% ,{plugins, [rebar3_proper]}
+          ,{plugins, [rebar3_proper]}
           ]}
   ]},
 
