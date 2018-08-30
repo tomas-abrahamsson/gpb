@@ -610,7 +610,8 @@ map_opts() ->
                end,
     if HaveMaps ->
             [{maps, oneof([false, true])},
-             {maps_unset_optional, oneof([present_undefined, omitted])}];
+             {maps_unset_optional, oneof([present_undefined, omitted])},
+             {maps_oneof, oneof([tuples, flat])}];
        not HaveMaps ->
             []
     end.
@@ -869,28 +870,41 @@ end.
 msg_to_map(Msg, MsgDefs, COpts) ->
     MsgName = element(1, Msg),
     {{msg,MsgName},Fields} = lists:keyfind({msg,MsgName}, 1, MsgDefs),
-    FVs = [case F of
-               #?gpb_field{name=FName}=Field ->
-                   V2 = field_to_map(V, Field, MsgDefs, COpts),
-                   {FName, V2};
-               #gpb_oneof{name=FName, fields=OFields} ->
-                   V2 = case V of
-                            undefined ->
-                                undefined;
-                            {Tag, TV} ->
-                                Field = lists:keyfind(Tag, #?gpb_field.name,
-                                                      OFields),
-                                {Tag, field_to_map(TV, Field, MsgDefs, COpts)}
-                        end,
-                   {FName, V2}
-           end
-           || {F,V} <- lists:zip(Fields, tl(tuple_to_list(Msg)))],
+    FVTs = [case F of
+                #?gpb_field{name=FName}=Field ->
+                    V2 = field_to_map(V, Field, MsgDefs, COpts),
+                    {FName, V2, Field};
+                #gpb_oneof{name=FName, fields=OFields}=OField ->
+                    V2 = case V of
+                             undefined ->
+                                 undefined;
+                             {Tag, TV} ->
+                                 Field = lists:keyfind(Tag, #?gpb_field.name,
+                                                       OFields),
+                                 {Tag, field_to_map(TV, Field, MsgDefs, COpts)}
+                         end,
+                    {FName, V2, OField}
+            end
+            || {F,V} <- lists:zip(Fields, tl(tuple_to_list(Msg)))],
     case proplists:get_value(maps_unset_optional, COpts) of
         present_undefined ->
-            maps:from_list(FVs);
+            maps:from_list([{Nm,Value} || {Nm,Value,_T} <- FVTs]);
         omitted ->
-            maps:from_list([FV || {_,Value}=FV <- FVs,
-                                  Value /= undefined])
+            case proplists:get_value(maps_oneof, COpts) of
+                tuples ->
+                    maps:from_list([{Nm,Value} || {Nm,Value,_T} <- FVTs,
+                                                  Value /= undefined]);
+                flat ->
+                    maps:from_list(
+                      [case {T, Value} of
+                           {#gpb_oneof{}, {Tag, TagValue}} ->
+                               {Tag, TagValue};
+                           _ ->
+                               {Nm, Value}
+                       end
+                       || {Nm,Value,T} <- FVTs,
+                          Value /= undefined])
+            end
     end.
 
 field_to_map(V, #?gpb_field{type={msg,MsgName},occurrence=Occurrence},
@@ -932,28 +946,56 @@ submsg_to_map2(optional, V, MsgDefs, COpts) ->
 
 map_to_msg(Map, MsgName, MsgDefs, COpts) ->
     {{msg,MsgName},Fields} = lists:keyfind({msg,MsgName}, 1, MsgDefs),
+    FlatOneof = case proplists:get_value(maps_unset_optional, COpts) of
+                    omitted -> proplists:get_value(maps_oneof, COpts) =:= flat;
+                    _       -> false
+                end,
     list_to_tuple(
       [MsgName |
        [case F of
-            #?gpb_field{name=FName}=Field ->
+            #?gpb_field{name=FName} ->
                 case maps:find(FName, Map) of
                     error ->
                         undefined;
                     {ok, V} ->
-                        field_from_map(V, Field, MsgDefs, COpts)
+                        field_from_map(V, F, MsgDefs, COpts)
                 end;
-            #gpb_oneof{name=FName, fields=OFields} ->
-                case maps:find(FName, Map) of
-                    error ->
-                        undefined;
-                    {ok, undefined} ->
-                        undefined;
-                    {ok, {Tag, TV}} ->
-                        Field = lists:keyfind(Tag, #?gpb_field.name, OFields),
-                        {Tag, field_from_map(TV, Field, MsgDefs, COpts)}
+            #gpb_oneof{} ->
+                if FlatOneof ->
+                        flat_oneof_from_map(F, Map, MsgDefs, COpts);
+                   not FlatOneof ->
+                        tuple_oneof_from_map(F, Map, MsgDefs, COpts)
                 end
         end
         || F <- Fields]]).
+
+flat_oneof_from_map(#gpb_oneof{fields=OFields}, Map, MsgDefs, COpts) ->
+    lists:foldl(
+      fun(#?gpb_field{name=Tag}=Field, undefined) ->
+              case maps:find(Tag, Map) of
+                  error ->
+                      undefined;
+                  {ok, Value} ->
+                      {Tag, field_from_map(Value, Field, MsgDefs, COpts)}
+              end;
+         (_, Acc) ->
+              Acc
+      end,
+      undefined,
+      OFields).
+
+tuple_oneof_from_map(#gpb_oneof{name=FName, fields=OFields},
+                     Map, MsgDefs, COpts) ->
+    case maps:find(FName, Map) of
+        error ->
+            undefined;
+        {ok, undefined} ->
+            undefined;
+        {ok, {Tag, TV}} ->
+            Field = lists:keyfind(Tag, #?gpb_field.name, OFields),
+            {Tag, field_from_map(TV, Field, MsgDefs, COpts)}
+    end.
+
 
 field_from_map(V, #?gpb_field{type={msg,SubMsgName}, occurrence=Occurrence},
                MsgDefs, COpts) ->
