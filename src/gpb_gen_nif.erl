@@ -130,13 +130,30 @@ format_nif_cc_includes(Mod, Defs, AnRes, _Opts) ->
     IsLiteRT = is_lite_rt(Defs),
     ["#include <string.h>\n",
      "#include <string>\n",
-     ["#include <math.h>\n" || is_any_field_of_type_float_or_double(AnRes)],
      "\n",
      "#include <erl_nif.h>\n",
      "\n",
      ?f("#include \"~s.pb.h\"\n", [Mod]),
      ["#include <google/protobuf/message_lite.h>\n" || IsLiteRT],
+     format_math_include(AnRes),
      "\n"].
+
+format_math_include(AnRes) ->
+    case is_any_field_of_type_float_or_double(AnRes) of
+        true ->
+            ["#include <math.h>\n",
+             "#include <cmath>\n",
+             "#ifndef isnan\n",
+             "# define isnan std::isnan\n",
+             "#endif\n",
+             "\n",
+             "#ifndef isinf\n",
+             "# define isinf std::isinf\n",
+             "#endif\n",
+            "\n"];
+        false ->
+            ""
+    end.
 
 format_nif_cc_oneof_version_check_if_present(Defs) ->
     case contains_oneof(Defs) of
