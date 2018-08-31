@@ -38,8 +38,22 @@ NoHaveStacktraceSyntax =
                      _       -> []
                  end.
 
+HaveRebar3 = erlang:function_exported(rebar3, main, 1).
+
+NoHaveProper = case HaveRebar3 of
+                   true ->
+                       %% We have proper via the "as test" dependency
+                       [];
+                   false ->
+                       %% Rebar 2.x.  Use rebar3 to test the properties.
+                       %% (There is theoretically still the possibility that
+                       %% proper is available, eg via $ERL_LIBS or similar,
+                       %% but prop_gpb still needs rebar3_proper to run.)
+                       [{d,'NO_HAVE_PROPER'}]
+               end.
+
 ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
-                 NoHaveStacktraceSyntax.
+                 NoHaveStacktraceSyntax ++ NoHaveProper.
 
 [{require_otp_vsn, ".*"},
 

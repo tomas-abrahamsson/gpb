@@ -5,6 +5,8 @@
 %%% Created : 12 May 2010 by Thomas Arts
 -module(prop_gpb).
 
+-ifndef('NO_HAVE_PROPER').
+
 %% -define(PROPER_NO_TRANS, true).
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -1156,3 +1158,5 @@ find_protoc_version_aux([_ | Rest], All) ->
 find_protoc_version_aux([], All) ->
     {error, {no_version_string_found, All}}.
 
+
+-endif. %% 'NO_HAVE_PROPER'
