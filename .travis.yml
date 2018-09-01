@@ -1,6 +1,8 @@
 language: erlang
 addons:
   apt:
+    sources:
+      - sourceline: ppa:maarten-fonville/protobuf
     packages:
       - libprotobuf-dev
       - protobuf-compiler
@@ -16,4 +18,5 @@ env:
   - VERBOSE=1
 script:
   - make
+  - protoc --version
   - make test
