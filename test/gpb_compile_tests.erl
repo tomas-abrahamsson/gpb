@@ -2034,14 +2034,14 @@ nif_code_test_() ->
          {"Nif encode decode", fun nif_encode_decode/0},
          increase_timeouts(
            nif_oneof_tests_check_prerequisites(
-             [{"encode decode", fun nif_encode_decode_oneof/0},
-              {"Nif with C++ keywords", fun nif_with_cxx_keywords/0}])),
+             [{"encode decode", fun nif_encode_decode_oneof/0}])),
          increase_timeouts(
            nif_mapfield_tests_check_prerequisites(
              [{"encode decode", fun nif_encode_decode_mapfields/0}])),
          increase_timeouts(
            nif_proto3_tests_check_prerequisites(
-             [{"encode decode", fun nif_encode_decode_proto3/0}])),
+             [{"encode decode", fun nif_encode_decode_proto3/0},
+              {"Nif with C++ keywords", fun nif_with_cxx_keywords/0}])),
          {"Nif enums in msgs", fun nif_enum_in_msg/0},
          {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
          {"Nif with groups", fun nif_with_groups/0},
