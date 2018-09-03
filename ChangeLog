@@ -1,6 +1,21 @@
 -*- coding: utf-8 -*-
 
-Version 4.3.0
+Version 4.3.2
+2018-Sep-03
+
+        This release brings no new options or fixes, but improves on
+        testing of gpb.
+
+        * Add PropEr tests: Use "rebar3 as test proper" to run them.
+        This is a conversion of the gpb-eqc tests.  Thanks
+        to Pierre Fenoll. (#142, #151)
+
+        * Run with protobuf >= 3.0.0 in Travis. Previously, 2.5.0 was
+        used.  Thanks to Pierre Fenoll for bringing this up. (#144)
+
+        * Bugfix nif unit tests with libprotobuf 2.6
+
+Version 4.3.1
 2018-Aug-30
 
         * Fix math.h/cmath and isnan/isinf issue for NIF code.
