@@ -506,16 +506,6 @@ was utilized.
 The generated C++ core was compiled with -O3.
 
 
-Dependencies
-------------
-
-To compile or use gpb itself, there are no dependencies.
-
-For running the quickcheck tests of gpb, there is a dependency to:
-
-* proper
-* rebar3_proper
-
 Version numbering
 -----------------
 
@@ -588,12 +578,3 @@ or git fetch requests.  Here are some guide lines:
   so that the feature won't get lost in any future refactorization
 * Use a git branch for your feature. This way, the git history will
   look better in case there is need to refetch.
-
-To run quickcheck tests, do either:
-```
-    rebar3 as test proper
-```
-or
-```
-    make proper-test
-```
