@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.3.3
+2018-Sep-11
+
+        * Revert the inclusion of the PropEr tests of 4.3.2,
+        due to licensing issues. (#152)
+
 Version 4.3.2
 2018-Sep-03
 
