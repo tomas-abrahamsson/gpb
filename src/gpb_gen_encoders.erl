@@ -140,7 +140,7 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
                Transl = gpb_gen_translators:find_translation(
                           ElemPath, encode, AnRes),
                [replace_term('<msg-name-match>', MsgName),
-                replace_term('encode', gpb_lib:mk_fn(e_msg_, MsgName)),
+                replace_term('encode', gpb_lib:mk_fn(encode_msg_, MsgName)),
                 replace_term('Tr', Transl)]
            end
            || {{msg,MsgName}, _Fields} <- Defs]),
@@ -203,13 +203,13 @@ format_msg_encoder(MsgName, [], _Defs, _AnRes, _Opts, IncludeStarter) ->
     case IncludeStarter of
         true ->
             gpb_codegen:format_fn(
-              gpb_lib:mk_fn(e_msg_, MsgName),
+              gpb_lib:mk_fn(encode_msg_, MsgName),
               fun(_Msg, _TrUserData) ->
                       <<>>
               end);
         false ->
             gpb_codegen:format_fn(
-              gpb_lib:mk_fn(e_msg_, MsgName),
+              gpb_lib:mk_fn(encode_msg_, MsgName),
               fun(_Msg, Bin, _TrUserData) ->
                       Bin
               end)
@@ -241,7 +241,7 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
           end,
           ?expr(Bin),
           lists:zip3(BVars, MsgDef, FVars)),
-    FnName = gpb_lib:mk_fn(e_msg_, MsgName),
+    FnName = gpb_lib:mk_fn(encode_msg_, MsgName),
     FieldMatching =
         case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
             records ->
@@ -608,7 +608,8 @@ possibly_format_mfield_encoder(MsgName,
                       Bin2 = e_varint(byte_size(SubBin), Bin),
                       <<Bin2/binary, SubBin/binary>>
               end,
-              [replace_term('<encode-msg>', gpb_lib:mk_fn(e_msg_, SubMsg))]);
+              [replace_term('<encode-msg>',
+                            gpb_lib:mk_fn(encode_msg_, SubMsg))]);
         {yes, MsgSize} when MsgSize > 0 ->
             MsgSizeBytes = gpb_lib:varint_to_binary_fields(MsgSize),
             gpb_codegen:format_fn(
@@ -618,10 +619,11 @@ possibly_format_mfield_encoder(MsgName,
                       '<encode-msg>'(Msg, Bin2, TrUserData)
               end,
               [splice_trees('<msg-size>', MsgSizeBytes),
-               replace_term('<encode-msg>', gpb_lib:mk_fn(e_msg_, SubMsg))]);
+               replace_term('<encode-msg>',
+                            gpb_lib:mk_fn(encode_msg_, SubMsg))]);
         {yes, 0} ->
-            %% special case, there will not be any e_msg_<MsgName>/2 function
-            %% generated, so don't call it.
+            %% special case, there will not be any encode_msg_<MsgName>/2
+            %% function generated, so don't call it.
             gpb_codegen:format_fn(
               FnName,
               fun(_Msg, Bin, _TrUserData) -> <<Bin/binary, 0>> end)
@@ -644,7 +646,7 @@ possibly_format_mfield_encoder(MsgName,
               GroupBin = '<encode-msg>'(Msg, <<>>, TrUserData),
               <<Bin/binary, GroupBin/binary, 'EndTagBytes'>>
       end,
-      [replace_term('<encode-msg>', gpb_lib:mk_fn(e_msg_, GroupName)),
+      [replace_term('<encode-msg>', gpb_lib:mk_fn(encode_msg_, GroupName)),
        splice_trees('EndTagBytes', EndTagBytes)]);
 possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].

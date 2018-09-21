@@ -134,7 +134,7 @@ format_decoders_top_function_msgs(Defs, AnRes, Opts) ->
                           ElemPath, decode, AnRes),
                [replace_term('MsgName', MsgName),
                 replace_term('Tr', Transl),
-                replace_term('decode-fn', gpb_lib:mk_fn(d_msg_, MsgName))]
+                replace_term('decode-fn', gpb_lib:mk_fn(decode_msg_, MsgName))]
            end
            || {{msg, MsgName}, _Fields} <- Defs]),
         splice_trees('TrUserData', if DoNif -> [];
@@ -488,7 +488,7 @@ format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes) ->
 
 format_msg_init_decoder(MsgName, InitExprs) ->
     T = gpb_codegen:mk_fn(
-          gpb_lib:mk_fn(d_msg_, MsgName),
+          gpb_lib:mk_fn(decode_msg_, MsgName),
           fun(Bin, TrUserData) ->
                   '<decode-field-fp>'(Bin, 0, 0, '<init>', TrUserData)
           end,
@@ -1052,7 +1052,8 @@ decode_int_value(ExtValueExpr, Rest, TrUserDataVar, FieldDef, Tr, Opts) ->
                   end,
                   [replace_tree('ExtValueExpr', ExtValueExpr),
                    replace_tree('Rest', Rest),
-                   replace_term('d-msg-X', gpb_lib:mk_fn(d_msg_, Msg2Name))
+                   replace_term('d-msg-X',
+                                gpb_lib:mk_fn(decode_msg_, Msg2Name))
                    | TrReplacements]);
         {map, KeyType, ValueType} ->
             MapAsMsgMame = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
@@ -1128,7 +1129,7 @@ format_group_field_decoder(MsgName, XFieldDef, AnRes) ->
            replace_term('Tr', Tr(decode)),
            replace_tree('Res', ResVar),
            replace_tree('FieldNum', erl_syntax:integer(FNum)),
-           replace_term('d_msg_X', gpb_lib:mk_fn(d_msg_, GroupName)),
+           replace_term('d_msg_X', gpb_lib:mk_fn(decode_msg_, GroupName)),
            replace_tree('OutParam', OutParam)]),
     #fn{name = group,
         passes_msg = true,
