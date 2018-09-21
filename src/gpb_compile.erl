@@ -92,6 +92,7 @@
                boolean_opt(type_defaults_for_omitted_optionals) |
                {import_fetcher, import_fetcher_fun()} |
                {target_erlang_version, integer() | current} |
+               boolean_opt(bypass_wrappers) |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -525,6 +526,32 @@ file(File) ->
 %% version of Erlang/OTP to generate code for. The default, `current'
 %% means that the generated code is expected to be compiled and run
 %% on the same major version as gpb runs on.
+%%
+%% The `bypass_wrappers' option exposes the more-or-less internal
+%% top-level encode and decode functions without wrappers. The list
+%% below describe what functionality the wrappers provide. The main
+%% purpose of being able to bypass the wrappers is performance,
+%% especially when combined with the `nif' option. This option causes the following extra functions to be exported:
+%% <ul>
+%%   <li><code>encode_msg_<i>MsgName</i>/1</code></li>
+%%   <li><code>encode_msg_<i>MsgName</i>/2</code> unless `nif'</li>
+%%   <li><code>decode_msg_<i>MsgName</i>/1</code></li>
+%%   <li><code>decode_msg_<i>MsgName</i>/2</code> unless `nif'</li>
+%% </ul>
+%% <dl>
+%%   <dt>For encode, the wrapper takes care of:</dt>
+%%   <dd><ul>
+%%     <li>Any calling of verifiers.</li>
+%%     <li>Reading of options for any translation `user_data'.</li>
+%%   </ul></dd>
+%%   <dt>For decode, the wrapper takes care of:</dt>
+%%   <dd><ul>
+%%     <li>Wrapping the decode in a try catch to provide a uniform error
+%%       format when the binary to be decoded is invalid.</li>
+%%     <li>Reading of options for any translation `user_data'.</li>
+%%   </ul></dd>
+%% </dl>
+
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
     do_file_or_string(File, Opts).
@@ -1178,6 +1205,8 @@ c() ->
 %%       its type-default, instead of to `undefined'.</dd>
 %%   <dt>`-for-version N'</dt>
 %%   <dd>Generate code for Erlang/OTP version N instead of current.</dd>
+%%   <dt>`-bypass-wrappers'</dt>
+%%   <dd>Bypass wrappers.</dd>
 %%   <dt>`-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
@@ -1475,6 +1504,8 @@ opt_specs() ->
       "       to its type-default, instead of to undefined.\n"},
      {"for-version", 'integer()', target_erlang_version, "N\n"
       "       Generate code for Erlang/OTP version N instead of current.\n"},
+     {"bypass-wrappers", undefined, bypass_wrappers, "\n"
+      "       Bypass wrappers.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"

@@ -79,6 +79,7 @@
 -export([mk_get_defs_as_maps_or_records_fn/1]).
 -export([get_defs_as_maps_or_records/1]).
 -export([get_epb_functions_by_opts/1]).
+-export([get_bypass_wrappers_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
 -export([target_has_lists_join/1]).
 -export([target_has_variable_key_map_update/1]).
@@ -609,6 +610,9 @@ get_defs_as_maps_or_records(Opts) ->
 
 get_epb_functions_by_opts(Opts) ->
     proplists:get_bool(epb_functions, Opts).
+
+get_bypass_wrappers_by_opts(Opts) ->
+    proplists:get_bool(bypass_wrappers, Opts).
 
 is_target_major_version_at_least(VsnMin, Opts) ->
     case proplists:get_value(target_erlang_version, Opts, current) of

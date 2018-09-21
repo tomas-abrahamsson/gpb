@@ -3670,6 +3670,11 @@ opt_test() ->
         gpb_compile:parse_opts_and_args(
           ["-for-version", "18",
            "x.proto"]),
+    {ok, {[bypass_wrappers],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-bypass-wrappers",
+           "x.proto"]),
     %% Help and version
     {ok, {[help, help,
            version, version],
