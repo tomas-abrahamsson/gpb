@@ -186,8 +186,16 @@ format_map_decoders(Defs, AnRes, Opts0) ->
     format_msg_decoders(Defs, AnRes, Opts1).
 
 format_msg_decoders(Defs, AnRes, Opts) ->
-    [format_msg_decoder(Name, MsgDef, Defs, AnRes, Opts)
-     || {_Type, Name, MsgDef} <- gpb_lib:msgs_or_groups(Defs)].
+    [[[gpb_codegen:format_fn(
+         gpb_lib:mk_fn(decode_msg_, MsgName),
+         fun(Bin) ->
+                 %% The undefined is the default TrUserData
+                 call_self(Bin, undefined)
+         end)
+       || {{msg,MsgName},_Fields} <- Defs]
+      || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
+     [format_msg_decoder(Name, MsgDef, Defs, AnRes, Opts)
+      || {_Type, Name, MsgDef} <- gpb_lib:msgs_or_groups(Defs)]].
 
 format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     %% The general idea here is:

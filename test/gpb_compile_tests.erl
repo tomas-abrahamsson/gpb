@@ -320,6 +320,30 @@ epb_compatibility_opt_implies_defaults_for_omitted_optionals_test() ->
     {m,3,undefined} = M:decode_msg(<<>>, m),
     unload_code(M).
 
+bypassed_wrappers_records_test() ->
+    DefsM1 = "message m1 { required uint32 a = 1; }\n",
+    DefsNoMsgs = "enum ee { a = 0; }\n",
+
+    Mod1 = compile_iolist(DefsM1, [bypass_wrappers]),
+    M1 = #m1{a=1234},
+    B1 = Mod1:encode_msg_m1(M1),
+    B1 = Mod1:encode_msg_m1(M1, undefined),
+    ?assertMatch(true, is_binary(B1)),
+    M1 = Mod1:decode_msg_m1(B1),
+    M1 = Mod1:decode_msg_m1(B1, undefined),
+    unload_code(Mod1),
+
+    %% verify no compatibility functions generated with no compat options
+    Mod2 = compile_iolist(DefsM1, []),
+    ?assertError(undef, Mod2:encode_msg_m1(M1)),
+    ?assertError(undef, Mod2:decode_msg_m1(B1)),
+    unload_code(Mod2),
+
+    %% verify functions generated ok when no msgs specified
+    Mod3 = compile_iolist(DefsNoMsgs, []),
+    _ = Mod3:module_info(),
+    unload_code(Mod3).
+
 field_pass_as_params_test() ->
     {timeout,10,fun field_pass_as_params_test_aux/0}.
 
@@ -2348,7 +2372,9 @@ nif_code_test_() ->
           fun nif_with_list_indata_for_bytes/0},
          {"Nif and +-Inf/NaN", fun nif_with_non_normal_floats/0},
          {"Error if both Any translations and nif",
-          fun error_if_both_translations_and_nif/0}])).
+          fun error_if_both_translations_and_nif/0},
+         {"bypass_wrappers",
+          fun bypass_wrappers_records_nif/0}])).
 
 increase_timeouts({Descr, Tests}) ->
     %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
@@ -2867,6 +2893,25 @@ error_if_both_translations_and_nif() ->
 
               ok
       end).
+
+bypass_wrappers_records_nif() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_bypass_wrappers_records,
+              DefsTxt = lf_lines(["message bpw1 {",
+                                  "    required uint32 f = 1;",
+                                  "}"]),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir,
+                                                [bypass_wrappers]),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {bpw1,4711},
+                        Encoded = M:encode_msg_bpw1(OrigMsg),
+                        OrigMsg = M:decode_msg_bpw1(Encoded)
+                end)
+      end).
+
 
 compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
     compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, []).

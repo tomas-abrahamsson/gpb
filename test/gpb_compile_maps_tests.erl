@@ -900,6 +900,32 @@ binary_map_keys_not_mixed_with_map_types_test() ->
 
     unload_code(M).
 
+bypassed_wrappers_maps_test() ->
+    DefsM1 = "message m1 { required uint32 a = 1; }\n",
+    DefsNoMsgs = "enum ee { a = 0; }\n",
+
+    Mod1 = compile_iolist(DefsM1, [bypass_wrappers, maps]),
+    M1 = #{a => 1234},
+    B1 = Mod1:encode_msg_m1(M1),
+    B1 = Mod1:encode_msg_m1(M1, undefined),
+    ?assertMatch(true, is_binary(B1)),
+    M1 = Mod1:decode_msg_m1(B1),
+    M1 = Mod1:decode_msg_m1(B1, undefined),
+    unload_code(Mod1),
+
+    %% verify no compatibility functions generated with no compat options
+    Mod2 = compile_iolist(DefsM1, [maps]),
+    ?assertError(undef, Mod2:encode_msg_m1(M1)),
+    ?assertError(undef, Mod2:decode_msg_m1(B1)),
+    unload_code(Mod2),
+
+    %% verify functions generated ok when no msgs specified
+    Mod3 = compile_iolist(DefsNoMsgs, [maps]),
+    _ = Mod3:module_info(),
+    unload_code(Mod3).
+
+
+
 %% nif ------------------------------------------------
 
 nif_test_() ->
@@ -919,7 +945,9 @@ nif_test_() ->
          increase_timeouts(
            nif_mapfield_tests_check_prerequisites(
              [{"Encode decode", fun nif_encode_decode_mapfields/0},
-              {"mapfields_as_maps", fun nif_with_mapfields_as_maps/0}]))])).
+              {"mapfields_as_maps", fun nif_with_mapfields_as_maps/0}])),
+         {"bypass_wrappers",
+          fun bypass_wrappers_maps_nif/0}])).
 
 nif_encode_decode_present_undefined() ->
     ProtocCanOneof = check_protoc_can_do_oneof(),
@@ -1120,5 +1148,24 @@ nif_with_mapfields_as_maps() ->
                         Msg1 = M:decode_msg(Bin1, m1)
                 end)
       end).
+
+bypass_wrappers_maps_nif() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_bypass_wrappers_maps,
+              DefsTxt = ["message bpw1 {\n"
+                         "    required uint32 f = 1;\n"
+                         "}"],
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir,
+                                                [bypass_wrappers, maps]),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = #{f => 4712},
+                        Encoded = M:encode_msg_bpw1(OrigMsg),
+                        OrigMsg = M:decode_msg_bpw1(Encoded)
+                end)
+      end).
+
 
 -endif. %% NO_HAVE_MAPS

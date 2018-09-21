@@ -1998,6 +1998,18 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
           || {{msg,MsgName}, _Fields} <- Defs],
          "\n"]
         || gpb_lib:get_epb_functions_by_opts(Opts)],
+       [[[begin
+              NoWrapperFnName = gpb_lib:mk_fn(encode_msg_, MsgName),
+              if DoNif ->
+                      ?f("-export([~p/1]).~n", [NoWrapperFnName]);
+                 not DoNif ->
+                      ?f("-export([~p/1, ~p/2]).~n",
+                         [NoWrapperFnName, NoWrapperFnName])
+              end
+          end
+          || {{msg,MsgName}, _Fields} <- Defs],
+         "\n"]
+        || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
        ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
            records ->
@@ -2010,6 +2022,18 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
           || {{msg,MsgName}, _Fields} <- Defs],
          "\n"]
         || gpb_lib:get_epb_functions_by_opts(Opts)],
+       [[[begin
+              NoWrapperFnName = gpb_lib:mk_fn(decode_msg_, MsgName),
+              if DoNif ->
+                      ?f("-export([~p/1]).~n", [NoWrapperFnName]);
+                 not DoNif ->
+                      ?f("-export([~p/1, ~p/2]).~n",
+                         [NoWrapperFnName, NoWrapperFnName])
+              end
+          end
+          || {{msg,MsgName}, _Fields} <- Defs],
+         "\n"]
+        || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
            records ->
                ?f("-export([verify_msg/1, verify_msg/2, verify_msg/3]).~n");

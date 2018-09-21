@@ -199,14 +199,21 @@ format_msg_encoders(Defs, AnRes, Opts, IncludeStarter) ->
       || {Type, MsgName, MsgDef} <- gpb_lib:msgs_or_groups(Defs)],
      format_special_field_encoders(Defs, AnRes)].
 
-format_msg_encoder(MsgName, [], _Defs, _AnRes, _Opts, IncludeStarter) ->
+format_msg_encoder(MsgName, [], _Defs, _AnRes, Opts, IncludeStarter) ->
     case IncludeStarter of
         true ->
-            gpb_codegen:format_fn(
-              gpb_lib:mk_fn(encode_msg_, MsgName),
-              fun(_Msg, _TrUserData) ->
-                      <<>>
-              end);
+            [[[gpb_codegen:format_fn(
+                 gpb_lib:mk_fn(encode_msg_, MsgName),
+                 fun(_Msg) ->
+                         <<>>
+                 end),
+               "\n"]
+              || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
+             gpb_codegen:format_fn(
+               gpb_lib:mk_fn(encode_msg_, MsgName),
+               fun(_Msg, _TrUserData) ->
+                       <<>>
+               end)];
         false ->
             gpb_codegen:format_fn(
               gpb_lib:mk_fn(encode_msg_, MsgName),
@@ -259,7 +266,17 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
                                replace_tree('M', MsgVar)])
                 end
         end,
-    [[[gpb_codegen:format_fn(
+    [[[[[gpb_codegen:format_fn(
+           gpb_lib:mk_fn(encode_msg_, MsgName),
+           fun(Msg) ->
+                   %% The undefined is the default TrUserData
+                   'encode_msg_MsgName'(Msg, undefined)
+           end,
+           [replace_term('encode_msg_MsgName',
+                         gpb_lib:mk_fn(encode_msg_, MsgName))]),
+         "\n"]
+        || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
+       gpb_codegen:format_fn(
          FnName,
          fun(Msg, TrUserData) ->
                  call_self(Msg, <<>>, TrUserData)
