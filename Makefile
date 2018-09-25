@@ -417,5 +417,5 @@ $(ebin)/gpb.app: $(src)/gpb.app.src | $(ebin)
 $(incdir)/gpb_version.hrl: $(incdir)/gpb_version.hrl.in
 	@echo Generating $@...
 	$(silencer)$(build)/mk_version_hrl \
-	    < include/gpb_version.hrl.in \
-	    > include/gpb_version.hrl
+	    < $(incdir)/gpb_version.hrl.in \
+	    > $(incdir)/gpb_version.hrl
