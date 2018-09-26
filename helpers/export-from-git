@@ -1,4 +1,4 @@
-#! /bin/bash
+#! /usr/bin/env bash
 
 usage () {
     cat <<EOF
@@ -31,7 +31,7 @@ git archive --format=tar HEAD | (cd "$dest_dir/gpb-$vsn" && tar xfp -)
     > "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in"
 cp  "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in" \
     "$dest_dir/gpb-$vsn/include/gpb_version.hrl"
-( echo "#! /bin/bash";
+( echo "#! /usr/bin/env bash";
   echo
   echo "# This script was turned into a no-op during extraction from"
   echo "# the gpb git repo by $(basename "$0")"

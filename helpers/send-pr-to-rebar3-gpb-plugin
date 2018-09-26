@@ -1,4 +1,4 @@
-#! /bin/bash
+#! /usr/bin/env bash
 
 show_usage() {
     cat <<EOF
