@@ -78,7 +78,7 @@ format_nif_encoder_error_wrappers(Defs, _AnRes, _Opts) ->
 
 format_msg_nif_encode_error_wrapper(MsgName) ->
     gpb_codegen:format_fn(
-      gpb_lib:mk_fn(e_msg_, MsgName),
+      gpb_lib:mk_fn(encode_msg_, MsgName),
       fun(Msg) ->
               erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Msg])
       end,
@@ -90,7 +90,7 @@ format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
 
 format_msg_nif_decode_error_wrapper(MsgName) ->
     gpb_codegen:format_fn(
-      gpb_lib:mk_fn(d_msg_, MsgName),
+      gpb_lib:mk_fn(decode_msg_, MsgName),
       fun(Bin) ->
               erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Bin])
       end,
@@ -693,10 +693,10 @@ format_nif_cc_nif_funcs_list(Defs, Flags) ->
                  true -> ", " ++ Flags
               end,
     [begin
-         EncodeFnName = gpb_lib:mk_fn(e_msg_, MsgName),
-         EncodeCFnName = mk_c_fn(e_msg_, MsgName),
-         DecodeFnName = gpb_lib:mk_fn(d_msg_, MsgName),
-         DecodeCFnName = mk_c_fn(d_msg_, MsgName),
+         EncodeFnName = gpb_lib:mk_fn(encode_msg_, MsgName),
+         EncodeCFnName = mk_c_fn(encode_msg_, MsgName),
+         DecodeFnName = gpb_lib:mk_fn(decode_msg_, MsgName),
+         DecodeCFnName = mk_c_fn(decode_msg_, MsgName),
          IsLast = I == length(MsgNames),
          Comma = ["," || not IsLast],
          [?f("    {\"~s\", 1, ~s~s},\n",
@@ -712,7 +712,7 @@ format_nif_cc_encoders(Mod, Defs, Opts) ->
      || {{msg, MsgName}, Fields} <- Defs].
 
 format_nif_cc_encoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
-    FnName = mk_c_fn(e_msg_, MsgName),
+    FnName = mk_c_fn(encode_msg_, MsgName),
     PackFnName = mk_c_fn(p_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     ["static ERL_NIF_TERM\n",
@@ -1224,7 +1224,7 @@ format_nif_cc_decoders(Mod, Defs, Opts) ->
      || {{msg, MsgName}, Fields} <- Defs].
 
 format_nif_cc_decoder(_Mod, CPkg, MsgName, _Fields, _Opts) ->
-    FnName = mk_c_fn(d_msg_, MsgName),
+    FnName = mk_c_fn(decode_msg_, MsgName),
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     ["static ERL_NIF_TERM\n",
