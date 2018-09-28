@@ -1,5 +1,17 @@
 -*- coding: utf-8 -*-
 
+Version 4.4.0
+2018-Sep-28
+
+        * New option, bypass_wrappers (-bypass-wrappers). (#153)
+
+        * Fix bash paths for FreeBSD, and incdir variable in Makefile.
+        Thanks to Krzysztof Jurewicz. (#155, #156)
+
+        * Drop interim stacktrace macro-overrides GPB_FUNCTION_STACK and
+        GPB_PATTERN_STACK, and rely on the ?OTP_RELEASE macro, for
+        better direct portability across Erlang pre- and post-21. (#154)
+
 Version 4.3.3
 2018-Sep-11
 
