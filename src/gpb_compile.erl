@@ -1153,7 +1153,7 @@ c() ->
 %%         <dt>`v=Mod:Fn'</dt>
 %%         <dd>Call `Mod:Fn(Term, ErrorF) -> _' to verify an unpacked `Term'.
 %%             This exists for backwards compatibility, and its use
-%%             is deprecated.</dd>.
+%%             is deprecated.</dd>
 %%       </dl>
 %%   </dd>
 %%   <dt><a name="cmdline-option-translate_field"/>
