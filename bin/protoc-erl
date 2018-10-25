@@ -21,7 +21,24 @@ setup_code_path() ->
     BinDir = filename:dirname(RawFile),
     EBinDir = filename:join([BinDir, "..", "ebin"]),
     %% add the gpb ebin path to we can have access to gpb_compile
-    true = code:add_pathz(EBinDir).
+    case code:add_pathz(EBinDir) of
+        true ->
+            try gpb_compile:module_info()
+            catch error:undef ->
+                    io:format(
+                      "Found dir ~p, but no usable gpb_compile.beam,~n"
+                      "please verify that gpb has been built properly.~n",
+                      [EBinDir]),
+                    halt(1)
+            end,
+            ok;
+        {error, bad_directory} ->
+            io:format(
+              "Cannot find dir ~p~n"
+              "please verify that gpb has been built properly.~n",
+              [EBinDir]),
+            halt(1)
+    end.
 
 find_raw_file(Name) ->
     find_raw_file(Name, file:read_link(Name)).
