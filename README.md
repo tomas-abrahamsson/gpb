@@ -1,15 +1,8 @@
-The gpb is a compiler for Google protocol buffer definitions files
-for Erlang.
+The gpb is a compiler for
+[Google protocol buffer](https://developers.google.com/protocol-buffers/)
+definitions files for Erlang.
 
-See https://developers.google.com/protocol-buffers/ for further information
-on the Google protocol buffers.
-
-Build Status
-------------
-
-[![Build Status](https://travis-ci.org/tomas-abrahamsson/gpb.svg?branch=master)](https://travis-ci.org/tomas-abrahamsson/gpb)
-
-
+Shortcuts: [API documentation](https://hexdocs.pm/gpb/) ~ [gpb on hex.pm](https://hex.pm/packages/gpb/) ~ [![Build Status](https://travis-ci.org/tomas-abrahamsson/gpb.svg?branch=master)](https://travis-ci.org/tomas-abrahamsson/gpb)
 
 Basic example of using gpb
 --------------------------
