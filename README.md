@@ -9,19 +9,6 @@ Build Status
 
 [![Build Status](https://travis-ci.org/tomas-abrahamsson/gpb.svg?branch=master)](https://travis-ci.org/tomas-abrahamsson/gpb)
 
-New in version 4.0.0
---------------------
-
-The default value for the `maps_unset_optional` option has changed
-to `omitted`, from `present_undefined` This concerns only code generated
-with the maps (-maps) options. Projects that already set this option
-explicitly are not impacted. Projects that relied on the default to be
-`present_undefined` will need to set the option explicitly in order to
-upgrade to 4.0.0.
-
-For type specs, the default has changed to generate them when possible. The
-option `{type_specs,false}` (-no_type) can be used to avoid generating type
-specs.
 
 
 Basic example of using gpb
@@ -578,3 +565,19 @@ or git fetch requests.  Here are some guide lines:
   so that the feature won't get lost in any future refactorization
 * Use a git branch for your feature. This way, the git history will
   look better in case there is need to refetch.
+
+Version history
+---------------
+
+New in version 4.0.0:
+
+The default value for the `maps_unset_optional` option has changed
+to `omitted`, from `present_undefined` This concerns only code generated
+with the maps (-maps) options. Projects that already set this option
+explicitly are not impacted. Projects that relied on the default to be
+`present_undefined` will need to set the option explicitly in order to
+upgrade to 4.0.0.
+
+For type specs, the default has changed to generate them when possible. The
+option `{type_specs,false}` (-no_type) can be used to avoid generating type
+specs.
