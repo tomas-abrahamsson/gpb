@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.4.1
+2018-Dec-03
+
+        * Bugfix decoding: with maps and proto3 unset sub-messages decoded to
+        undefined instead of getting omitted. (#158)
+
 Version 4.4.0
 2018-Sep-28
 
