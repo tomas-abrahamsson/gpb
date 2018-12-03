@@ -502,6 +502,25 @@ defaults_for_proto3_fields_test() ->
     {m, #{}} = P3M:new_m_msg(),
     unload_code(P3M).
 
+defaults_for_unset_proto3_submessages_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";\n",
+           "\n",
+           "message Cfg {",
+           "  XList l = 1;",
+           "  message XList {",
+           "    repeated Item elem = 1;",
+           "  }",
+           "}",
+           "message Item {",
+           "  uint32 f1 = 1;",
+           "}"],
+          [maps %%  {maps_unset_optional, omitted} is default
+          ]),
+    Cfg = M:decode_msg(<<>>, 'Cfg'),
+    {0,_} = {maps:size(Cfg),Cfg},
+    unload_code(M).
+
 %% -- translations
 %%-
 translate_maptype_test() ->
