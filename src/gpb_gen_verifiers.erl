@@ -22,6 +22,7 @@
 
 -module(gpb_gen_verifiers).
 
+-export([format_exports/2]).
 -export([format_verifiers_top_function/3]).
 -export([format_verifiers/3]).
 
@@ -31,6 +32,14 @@
 
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
+
+format_exports(_Defs, Opts) ->
+    case gpb_lib:get_records_or_maps_by_opts(Opts) of
+        records ->
+            ?f("-export([verify_msg/1, verify_msg/2, verify_msg/3]).~n");
+        maps ->
+            ?f("-export([verify_msg/2, verify_msg/3]).~n")
+    end.
 
 format_verifiers_top_function(Defs, AnRes, Opts) ->
     case {gpb_lib:contains_messages(Defs),

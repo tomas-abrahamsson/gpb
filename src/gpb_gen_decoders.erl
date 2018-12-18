@@ -28,6 +28,7 @@
 
 -module(gpb_gen_decoders).
 
+-export([format_exports/2]).
 -export([format_decoders_top_function/3]).
 -export([format_msg_decoders/3]).
 -export([format_map_decoders/3]).
@@ -39,6 +40,32 @@
 
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
+
+%% -- exports -----------------------------------------------------
+
+format_exports(Defs, Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    NoNif = not DoNif,
+    [?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
+     [[?f("-export([decode/2]). %% epb compatibility~n"),
+       [?f("-export([~p/1]).~n", [gpb_lib:mk_fn(decode_, MsgName)])
+        || {{msg,MsgName}, _Fields} <- Defs],
+       "\n"]
+      || gpb_lib:get_epb_functions_by_opts(Opts)],
+     [[[begin
+            NoWrapperFnName = gpb_lib:mk_fn(decode_msg_, MsgName),
+            if DoNif ->
+                    ?f("-export([~p/1]).~n", [NoWrapperFnName]);
+               not DoNif ->
+                    ?f("-export([~p/1, ~p/2]).~n",
+                       [NoWrapperFnName, NoWrapperFnName])
+            end
+        end
+        || {{msg,MsgName}, _Fields} <- Defs],
+       "\n"]
+      || gpb_lib:get_bypass_wrappers_by_opts(Opts)]].
+
+%% -- decoders -----------------------------------------------------
 
 %% Varints are processed 7 bits at a time.
 %% We can expect that we have processed this number of bits before

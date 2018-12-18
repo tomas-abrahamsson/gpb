@@ -22,7 +22,7 @@
 
 -module(gpb_gen_introspect).
 
--export([format_enum_value_symbol_converter_exports/1]).
+-export([format_exports/2]).
 -export([format_introspection/2]).
 
 -include("../include/gpb.hrl").
@@ -30,6 +30,21 @@
 -include("gpb_compile.hrl").
 
 -import(gpb_lib, [replace_term/2, replace_tree/2, repeat_clauses/2]).
+
+format_exports(Defs, _Opts) ->
+    [?f("-export([get_msg_defs/0]).~n"),
+     ?f("-export([get_msg_names/0]).~n"),
+     ?f("-export([get_group_names/0]).~n"),
+     ?f("-export([get_msg_or_group_names/0]).~n"),
+     ?f("-export([get_enum_names/0]).~n"),
+     ?f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
+     ?f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
+     format_enum_value_symbol_converter_exports(Defs),
+     ?f("-export([get_service_names/0]).~n"),
+     ?f("-export([get_service_def/1]).~n"),
+     ?f("-export([get_rpc_names/1]).~n"),
+     ?f("-export([find_rpc_def/2, fetch_rpc_def/2]).~n"),
+     ?f("-export([get_package_name/0]).~n")].
 
 format_introspection(Defs, Opts) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],

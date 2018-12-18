@@ -22,6 +22,7 @@
 
 -module(gpb_gen_encoders).
 
+-export([format_exports/2]).
 -export([format_encoders_top_function/3]).
 -export([format_msg_encoders/4]).
 -export([format_map_encoders/4]).
@@ -33,6 +34,34 @@
 
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
+
+%% -- exports -----------------------------------------------------
+
+format_exports(Defs, Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    [case gpb_lib:get_records_or_maps_by_opts(Opts) of
+         records ->
+             ?f("-export([encode_msg/1, encode_msg/2, encode_msg/3]).~n");
+         maps ->
+             ?f("-export([encode_msg/2, encode_msg/3]).~n")
+     end,
+     [[?f("-export([encode/1]). %% epb compatibility~n"),
+       [?f("-export([~p/1]).~n", [gpb_lib:mk_fn(encode_, MsgName)])
+        || {{msg,MsgName}, _Fields} <- Defs],
+       "\n"]
+      || gpb_lib:get_epb_functions_by_opts(Opts)],
+     [[[begin
+            NoWrapperFnName = gpb_lib:mk_fn(encode_msg_, MsgName),
+            if DoNif ->
+                    ?f("-export([~p/1]).~n", [NoWrapperFnName]);
+               not DoNif ->
+                    ?f("-export([~p/1, ~p/2]).~n",
+                       [NoWrapperFnName, NoWrapperFnName])
+            end
+        end
+        || {{msg,MsgName}, _Fields} <- Defs],
+       "\n"]
+      || gpb_lib:get_bypass_wrappers_by_opts(Opts)]].
 
 %% -- encoders -----------------------------------------------------
 

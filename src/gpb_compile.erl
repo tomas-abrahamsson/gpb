@@ -2067,7 +2067,6 @@ check_unpackables_marked_as_packed(Defs) ->
 
 format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
-    NoNif = not DoNif,
     AsLib = proplists:get_bool(include_as_lib, Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
@@ -2080,72 +2079,11 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
            [_|_] -> ?f("-compile([~ts]).~n", [CompileOptsStr])
        end,
        "\n",
-       case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records ->
-               ?f("-export([encode_msg/1, encode_msg/2, encode_msg/3]).~n");
-           maps ->
-               ?f("-export([encode_msg/2, encode_msg/3]).~n")
-       end,
-       [[?f("-export([encode/1]). %% epb compatibility~n"),
-         [?f("-export([~p/1]).~n", [gpb_lib:mk_fn(encode_, MsgName)])
-          || {{msg,MsgName}, _Fields} <- Defs],
-         "\n"]
-        || gpb_lib:get_epb_functions_by_opts(Opts)],
-       [[[begin
-              NoWrapperFnName = gpb_lib:mk_fn(encode_msg_, MsgName),
-              if DoNif ->
-                      ?f("-export([~p/1]).~n", [NoWrapperFnName]);
-                 not DoNif ->
-                      ?f("-export([~p/1, ~p/2]).~n",
-                         [NoWrapperFnName, NoWrapperFnName])
-              end
-          end
-          || {{msg,MsgName}, _Fields} <- Defs],
-         "\n"]
-        || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
-       ?f("-export([decode_msg/2"),[", decode_msg/3" || NoNif], ?f("]).~n"),
-       case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records ->
-               ?f("-export([merge_msgs/2, merge_msgs/3, merge_msgs/4]).~n");
-           maps ->
-               ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
-       end,
-       [[?f("-export([decode/2]). %% epb compatibility~n"),
-         [?f("-export([~p/1]).~n", [gpb_lib:mk_fn(decode_, MsgName)])
-          || {{msg,MsgName}, _Fields} <- Defs],
-         "\n"]
-        || gpb_lib:get_epb_functions_by_opts(Opts)],
-       [[[begin
-              NoWrapperFnName = gpb_lib:mk_fn(decode_msg_, MsgName),
-              if DoNif ->
-                      ?f("-export([~p/1]).~n", [NoWrapperFnName]);
-                 not DoNif ->
-                      ?f("-export([~p/1, ~p/2]).~n",
-                         [NoWrapperFnName, NoWrapperFnName])
-              end
-          end
-          || {{msg,MsgName}, _Fields} <- Defs],
-         "\n"]
-        || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
-       case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records ->
-               ?f("-export([verify_msg/1, verify_msg/2, verify_msg/3]).~n");
-           maps ->
-               ?f("-export([verify_msg/2, verify_msg/3]).~n")
-       end,
-       ?f("-export([get_msg_defs/0]).~n"),
-       ?f("-export([get_msg_names/0]).~n"),
-       ?f("-export([get_group_names/0]).~n"),
-       ?f("-export([get_msg_or_group_names/0]).~n"),
-       ?f("-export([get_enum_names/0]).~n"),
-       ?f("-export([find_msg_def/1, fetch_msg_def/1]).~n"),
-       ?f("-export([find_enum_def/1, fetch_enum_def/1]).~n"),
-       gpb_gen_introspect:format_enum_value_symbol_converter_exports(Defs),
-       ?f("-export([get_service_names/0]).~n"),
-       ?f("-export([get_service_def/1]).~n"),
-       ?f("-export([get_rpc_names/1]).~n"),
-       ?f("-export([find_rpc_def/2, fetch_rpc_def/2]).~n"),
-       ?f("-export([get_package_name/0]).~n"),
+       gpb_gen_encoders:format_exports(Defs, Opts),
+       gpb_gen_decoders:format_exports(Defs, Opts),
+       gpb_gen_mergers:format_exports(Defs, Opts),
+       gpb_gen_verifiers:format_exports(Defs, Opts),
+       gpb_gen_introspect:format_exports(Defs, Opts),
        [?f("-export([descriptor/0]).~n")
         || gpb_lib:get_gen_descriptor_by_opts(Opts)],
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
