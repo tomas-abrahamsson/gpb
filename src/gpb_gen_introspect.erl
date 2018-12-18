@@ -75,7 +75,8 @@ format_introspection(Defs, Opts) ->
      ?f("~n"),
      format_find_rpc_defs(ServiceDefs),
      ?f("~n"),
-     [format_find_service_rpc_defs(ServiceName, Rpcs, Opts) || {{service, ServiceName}, Rpcs} <- ServiceDefs],
+     [format_find_service_rpc_defs(ServiceName, Rpcs, Opts)
+      || {{service, ServiceName}, Rpcs} <- ServiceDefs],
      ?f("~n"),
      format_fetch_rpc_defs(ServiceDefs, Opts),
      ?f("~n"),
