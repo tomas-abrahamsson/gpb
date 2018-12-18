@@ -520,6 +520,16 @@ introspection_package_name_test() ->
     undefined = M:get_package_name(),
     unload_code(M).
 
+introspection_uses_packages_test() ->
+    M = compile_iolist(["package foo.bar;",
+                        "message M { required uint32 f1=1; }"],
+                       [use_packages]),
+    true = M:uses_packages(),
+    unload_code(M),
+    M = compile_iolist(["message M { required uint32 f1=1; }"]),
+    false = M:uses_packages(),
+    unload_code(M).
+
 introspection_msgs_test() ->
     M = compile_iolist(["message msg1 { required uint32 f1=1; }"]),
     [msg1] = M:get_msg_names(),

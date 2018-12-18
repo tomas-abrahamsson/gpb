@@ -44,7 +44,8 @@ format_exports(Defs, _Opts) ->
      ?f("-export([get_service_def/1]).~n"),
      ?f("-export([get_rpc_names/1]).~n"),
      ?f("-export([find_rpc_def/2, fetch_rpc_def/2]).~n"),
-     ?f("-export([get_package_name/0]).~n")].
+     ?f("-export([get_package_name/0]).~n"),
+     ?f("-export([uses_packages/0]).~n")].
 
 format_introspection(Defs, Opts) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
@@ -95,7 +96,9 @@ format_introspection(Defs, Opts) ->
      ?f("~n"),
      format_fetch_rpc_defs(ServiceDefs, Opts),
      ?f("~n"),
-     format_get_package_name(Defs)
+     format_get_package_name(Defs),
+     ?f("~n"),
+     format_uses_packages(Opts)
     ].
 
 msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
@@ -269,6 +272,13 @@ format_get_package_name(Defs) ->
               get_package_name, fun() -> '<Package>' end,
               [replace_term('<Package>', Package)])
     end.
+
+format_uses_packages(Opts) ->
+    ["%% Whether or not the message names\n"
+     "%% are prepended with package name or not.\n",
+     gpb_codegen:format_fn(
+       uses_packages, fun() -> '<bool>' end,
+       [replace_term('<bool>', proplists:get_bool(use_packages, Opts))])].
 
 % --- service introspection methods
 
