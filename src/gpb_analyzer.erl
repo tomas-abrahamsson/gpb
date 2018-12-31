@@ -23,7 +23,7 @@
 
 -module(gpb_analyzer).
 
--export([analyze_defs/2]).
+-export([analyze_defs/3]).
 
 -include("../include/gpb.hrl").
 -include("gpb_compile.hrl").
@@ -34,7 +34,7 @@
 
 %% -- analysis -----------------------------------------------------
 
-analyze_defs(Defs, Opts) ->
+analyze_defs(Defs, Renamings, Opts) ->
     MapTypes = find_map_types(Defs),
     MapsAsMsgs = map_types_to_msgs(MapTypes),
     MapMsgEnums = enums_for_maps_as_msgs(MapTypes, Defs),
@@ -52,7 +52,8 @@ analyze_defs(Defs, Opts) ->
            map_types           = MapTypes,
            map_value_types     = compute_map_value_types(MapTypes),
            group_occurrences   = find_group_occurrences(Defs),
-           has_p3_opt_strings  = has_p3_opt_strings(Defs)}.
+           has_p3_opt_strings  = has_p3_opt_strings(Defs),
+           renamings           = Renamings}.
 
 find_map_types(Defs) ->
     gpb_lib:fold_msg_or_group_fields(

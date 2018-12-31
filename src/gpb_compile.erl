@@ -622,12 +622,13 @@ do_file_or_string(In, Opts0) ->
     Opts1 = normalize_opts(Opts0),
     case parse_file_or_string(In, Opts1) of
         {ok, Defs} ->
-            case gpb_names:rename_defs(Defs, Opts1) of
-                {ok, Defs1} ->
+            case gpb_names:compute_renamings(Defs, Opts1) of
+                {ok, Renamings} ->
+                    Defs1 = gpb_names:apply_renamings(Defs, Renamings),
                     Mod = find_out_mod(In, Opts1),
                     DefaultOutDir = find_default_out_dir(In),
                     Opts2 = Opts1 ++ [{o,DefaultOutDir}],
-                    do_proto_defs_aux1(Mod, Defs1, Opts2);
+                    do_proto_defs_aux1(Mod, Defs1, Renamings, Opts2);
                 {error, Reason} = Error ->
                     possibly_report_error(Error, Opts1),
                     case proplists:get_bool(return_warnings, Opts1) of
@@ -735,14 +736,14 @@ proto_defs(Mod, Defs) ->
 %% See {@link file/2} for information on options and return values.
 -spec proto_defs(module(), gpb_parse:defs(), opts()) -> comp_ret().
 proto_defs(Mod, Defs, Opts) ->
-    do_proto_defs_aux1(Mod, Defs, normalize_opts(Opts)).
+    do_proto_defs_aux1(Mod, Defs, no_renamings, normalize_opts(Opts)).
 
-do_proto_defs_aux1(Mod, Defs, Opts) ->
+do_proto_defs_aux1(Mod, Defs, Renamings, Opts) ->
     possibly_probe_defs(Defs, Opts),
     Warns0 = check_unpackables_marked_as_packed(Defs),
     Warns1 = check_maps_flat_oneof_may_fail_on_compilation(Opts),
     Warns = Warns0 ++ Warns1,
-    AnRes = gpb_analyzer:analyze_defs(Defs, Opts),
+    AnRes = gpb_analyzer:analyze_defs(Defs, Renamings, Opts),
     case verify_opts(Defs, Opts) of
         ok ->
             Res1 = do_proto_defs_aux2(Defs, clean_module_name(Mod), AnRes, Opts),

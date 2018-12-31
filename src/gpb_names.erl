@@ -25,10 +25,23 @@
 -export([file_name_to_module_name/2]).
 -export([rename_module/2]).
 -export([rename_defs/2]).
+-export([compute_renamings/2]).
+-export([apply_renamings/2]).
 
 -export([format_error/1]).
 
+-export_type([renamings/0]).
+
 -include("../include/gpb.hrl").
+
+-type renamings() :: no_renamings |
+                     [{item_type(), dictionary()}].
+-type dictionary() :: term(). %% dict:dict().
+-type item_type() :: pkgs | % not present if use_packages option is not set
+                     msgs |
+                     groups |
+                     services |
+                     rpcs.
 
 -define(f(Fmt, Args), io_lib:format(Fmt, Args)).
 
@@ -74,22 +87,46 @@ possibly_suffix_mod(BaseNameNoExt, Opts) ->
 
 %% @doc Rename definitions according to options, for example
 %% lowercasing message names.
+%%
+%% This effectively invokes {@link apply_renamings/2} with the
+%% result from {@link compute_renamings/2}.
 -spec rename_defs(gpb_parse:defs(), gpb_compile:opts()) ->
                          {ok, gpb_parse:defs()} |
                          {error, Reason::term()}.
 rename_defs(Defs, Opts) ->
+    case compute_renamings(Defs, Opts) of
+        {ok, Renamings} ->
+            {ok, apply_renamings(Defs, Renamings)};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @doc Compute any renamings to be applied.
+-spec compute_renamings(gpb_parse:defs(), gpb_compile:opts()) ->
+                               {ok, renamings()} |
+                               {error, Reason::term()}.
+compute_renamings(Defs, Opts) ->
     Opts1 = convert_legacy_opts(Opts),
     case mk_rename_operations(Opts1) of
         [] ->
-            {ok, Defs};
+            {ok, no_renamings};
         RenameOpFs ->
-            case mk_renamer(RenameOpFs, Defs, Opts1) of
-                {ok, RF} ->
-                    {ok, do_rename(RF, Defs)};
+            case mk_renamings(RenameOpFs, Defs, Opts1) of
+                {ok, Renamings} ->
+                    {ok, Renamings};
                 {error, Reason} ->
                     {error, {rename_defs, Reason}}
             end
     end.
+
+%% @doc Apply any renamings.
+-spec apply_renamings(Defs, renamings()) -> Defs when
+      Defs :: gpb_parse:defs().
+apply_renamings(Defs, no_renamings) ->
+    Defs;
+apply_renamings(Defs, Renamings) ->
+    RF = mk_renamer(Renamings),
+    do_rename(RF, Defs).
 
 format_error({error, {rename_defs, Reason}}) -> fmt_err(Reason);
 format_error({rename_defs, Reason}) -> fmt_err(Reason);
@@ -229,7 +266,7 @@ do_dot_uscore("")         -> "".
 %% for the message name, again for each field of that type.)
 %%
 
-mk_renamer(RenameOps, Defs, Opts) ->
+mk_renamings(RenameOps, Defs, Opts) ->
     PkgByProto = calc_package_by_proto(Defs),
     PkgRenamings = pkg_renamings(PkgByProto, RenameOps),
     MsgRenamings = msg_renamings(PkgByProto, PkgRenamings, Defs, RenameOps),
@@ -243,27 +280,44 @@ mk_renamer(RenameOps, Defs, Opts) ->
     UsePackages = proplists:get_bool(use_packages, Opts),
     case check_no_dups(MostRenamings, RpcRenamings) of
         ok ->
-            RF = fun(package, Name) ->
-                         if UsePackages ->
-                                 dict_fetch(Name, PkgRenamings);
-                            not UsePackages ->
-                                 %% No pkg_containment items present in Defs
-                                 %% when the use_packages option is not set.
-                                 Name
-                         end;
-                    (msg, Name) ->
-                         dict_fetch(Name, MsgRenamings);
-                    (group, Name) ->
-                         dict_fetch(Name, GroupRenamings);
-                    (service, Name) ->
-                         dict_fetch(Name, ServiceRenamings);
-                    ({rpc, ServiceName}, RpcName) ->
-                         dict_fetch({ServiceName, RpcName}, RpcRenamings)
-                 end,
-            {ok, RF};
+            Renamings = lists:append(
+                          [[%% No pkg_containment items present in Defs
+                            %% when the use_packages option is not set.
+                            {pkgs, PkgRenamings} || UsePackages],
+                           [{msgs, MsgRenamings},
+                            {groups, GroupRenamings},
+                            {services, ServiceRenamings},
+                            {rpcs, RpcRenamings}]]),
+            {ok, Renamings};
         {error, Reason}  ->
             {error, Reason}
     end.
+
+mk_renamer(Renamings) ->
+    PkgRenamings = proplists:get_value(pkgs, Renamings),
+    MsgRenamings = key1fetch(msgs, Renamings),
+    GroupRenamings = key1fetch(groups, Renamings),
+    ServiceRenamings = key1fetch(services, Renamings),
+    RpcRenamings = key1fetch(rpcs, Renamings),
+    fun(package, Name) ->
+            if PkgRenamings /= undefined ->
+                    dict_fetch(Name, PkgRenamings);
+               PkgRenamings == undefined ->
+                    %% No pkg_containment items present in Defs
+                    %% when the use_packages option is not set.
+                    Name
+            end;
+       (msg, Name) ->
+            dict_fetch(Name, MsgRenamings);
+       (group, Name) ->
+            dict_fetch(Name, GroupRenamings);
+       (service, Name) ->
+            dict_fetch(Name, ServiceRenamings);
+       ({rpc, ServiceName}, RpcName) ->
+            dict_fetch({ServiceName, RpcName}, RpcRenamings)
+    end.
+
+
 
 calc_package_by_proto(Defs) ->
     dict:from_list(
@@ -386,6 +440,14 @@ dict_fetch(Key, Dict) ->
             Value;
         error ->
             error({not_found_in_dict, Key, dict:to_list(Dict)})
+    end.
+
+key1fetch(Key, KVs) ->
+    case lists:keyfind(Key, 1, KVs) of
+        {Key, Value} ->
+            Value;
+        false ->
+            error({not_found_among_kvs, Key, KVs})
     end.
 
 check_no_dups(Renamings, RpcRenamings) ->
