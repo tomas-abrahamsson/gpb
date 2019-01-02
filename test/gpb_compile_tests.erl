@@ -699,6 +699,77 @@ introspection_multiple_rpcs_test() ->
     ?assertError(_, M:fetch_rpc_def(s1, req_aa)),
     unload_code(M).
 
+service_name_to_from_binary_binary_test() ->
+    Proto = ["package foo.bar;",
+             "message M { required uint32 f1=1; }",
+             "service S {",
+             "  rpc R1(M) returns (M);",
+             "}"],
+    %% Without the use_package option
+    M1 = compile_iolist(Proto, []),
+    'S' = M1:fqbin_to_service_name(<<"foo.bar.S">>),
+    <<"foo.bar.S">> = M1:service_name_to_fqbin('S'),
+    {'S', 'R1'} =
+        M1:fqbins_to_service_and_rpc_name(<<"foo.bar.S">>, <<"R1">>),
+    {<<"foo.bar.S">>, <<"R1">>} =
+        M1:service_and_rpc_name_to_fqbins('S', 'R1'),
+    unload_code(M1),
+    %% _With_ the use_package option
+    M2 = compile_iolist(Proto, [use_packages]),
+    'foo.bar.S' = M2:fqbin_to_service_name(<<"foo.bar.S">>),
+    <<"foo.bar.S">> = M2:service_name_to_fqbin('foo.bar.S'),
+    {'foo.bar.S', 'R1'} =
+        M2:fqbins_to_service_and_rpc_name(<<"foo.bar.S">>, <<"R1">>),
+    {<<"foo.bar.S">>, <<"R1">>} =
+        M2:service_and_rpc_name_to_fqbins('foo.bar.S', 'R1'),
+    %% Unknowns
+    ?assertError({gpb_error, {badservice,<<"something-else">>}},
+                 M2:fqbin_to_service_name(<<"something-else">>)),
+    ?assertError({gpb_error, {badservice,'something-else'}},
+                 M2:service_name_to_fqbin('something-else')),
+    ?assertError({gpb_error,
+                  {badservice_or_rpc, {<<"something-else">>, <<"x">>}}},
+                 M2:fqbins_to_service_and_rpc_name(<<"something-else">>,
+                                                   <<"x">>)),
+    ?assertError({gpb_error,
+                  {badservice_or_rpc, {'something-else', x}}},
+                 M2:service_and_rpc_name_to_fqbins('something-else',
+                                                   x)),
+    unload_code(M2).
+
+service_name_to_from_binary_with_renamings_test() ->
+    Proto = ["package foo.bar;",
+             "message MsgXyz { required uint32 f1=1; }",
+             "service MyService {",
+             "  rpc GetAbc(MsgXyz) returns (MsgXyz);",
+             "  rpc SetAbc(MsgXyz) returns (MsgXyz);",
+             "}"],
+    Renamings = [{rename,{pkg_name, dots_to_underscores}},
+                 {rename,{pkg_name, lowercase}},
+                 {rename,{msg_name, snake_case}},
+                 {rename,{service_name, snake_case}},
+                 {rename,{rpc_name, lowercase}}],
+    %% Without the use_package option
+    M1 = compile_iolist(Proto, Renamings),
+    'my_service' = M1:fqbin_to_service_name(<<"foo.bar.MyService">>),
+    <<"foo.bar.MyService">> = M1:service_name_to_fqbin('my_service'),
+    {'my_service', getabc} =
+        M1:fqbins_to_service_and_rpc_name(<<"foo.bar.MyService">>,
+                                          <<"GetAbc">>),
+    {<<"foo.bar.MyService">>, <<"GetAbc">>} =
+        M1:service_and_rpc_name_to_fqbins('my_service', getabc),
+    unload_code(M1),
+    %% _With_ the use_package option
+    M2 = compile_iolist(Proto, [use_packages | Renamings]),
+    'foo_bar.my_service' = M2:fqbin_to_service_name(<<"foo.bar.MyService">>),
+    <<"foo.bar.MyService">> = M2:service_name_to_fqbin('foo_bar.my_service'),
+    {'foo_bar.my_service', getabc} =
+        M2:fqbins_to_service_and_rpc_name(<<"foo.bar.MyService">>,
+                                          <<"GetAbc">>),
+    {<<"foo.bar.MyService">>, <<"GetAbc">>} =
+         M2:service_and_rpc_name_to_fqbins('foo_bar.my_service', getabc),
+    unload_code(M2).
+
 %% --- decoder tests ---------------
 
 decodes_overly_long_varints_test() ->

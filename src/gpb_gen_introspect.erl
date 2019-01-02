@@ -22,8 +22,8 @@
 
 -module(gpb_gen_introspect).
 
--export([format_exports/2]).
--export([format_introspection/2]).
+-export([format_exports/3]).
+-export([format_introspection/3]).
 
 -include("../include/gpb.hrl").
 -include("gpb_codegen.hrl").
@@ -31,7 +31,7 @@
 
 -import(gpb_lib, [replace_term/2, replace_tree/2, repeat_clauses/2]).
 
-format_exports(Defs, _Opts) ->
+format_exports(Defs, _AnRes, _Opts) ->
     [?f("-export([get_msg_defs/0]).~n"),
      ?f("-export([get_msg_names/0]).~n"),
      ?f("-export([get_group_names/0]).~n"),
@@ -44,14 +44,21 @@ format_exports(Defs, _Opts) ->
      ?f("-export([get_service_def/1]).~n"),
      ?f("-export([get_rpc_names/1]).~n"),
      ?f("-export([find_rpc_def/2, fetch_rpc_def/2]).~n"),
+     ?f("-export([fqbin_to_service_name/1]).~n"),
+     ?f("-export([service_name_to_fqbin/1]).~n"),
+     ?f("-export([fqbins_to_service_and_rpc_name/2]).~n"),
+     ?f("-export([service_and_rpc_name_to_fqbins/2]).~n"),
      ?f("-export([get_package_name/0]).~n"),
      ?f("-export([uses_packages/0]).~n")].
 
-format_introspection(Defs, Opts) ->
+format_introspection(Defs, AnRes, Opts) ->
+    Package = proplists:get_value(package, Defs, ''),
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
     GroupDefs = [Item || {{group, _}, _}=Item <- Defs],
     ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
+    ServiceInfos = compute_service_renaming_infos(ServiceDefs, Package,
+                                                  AnRes, Opts),
     [gpb_codegen:format_fn(
        get_msg_defs, fun() -> '<Defs>' end,
        [replace_tree('<Defs>', msg_def_trees(EnumDefs, MsgDefs, GroupDefs,
@@ -95,6 +102,14 @@ format_introspection(Defs, Opts) ->
       || {{service, ServiceName}, Rpcs} <- ServiceDefs],
      ?f("~n"),
      format_fetch_rpc_defs(ServiceDefs, Opts),
+     ?f("~n"),
+     format_fqbin_to_service_name(ServiceInfos),
+     ?f("~n"),
+     format_service_name_to_fqbin(ServiceInfos),
+     ?f("~n"),
+     format_fqbins_to_service_and_rpc_name(ServiceInfos),
+     ?f("~n"),
+     format_service_and_rpc_name_to_fqbins(ServiceInfos),
      ?f("~n"),
      format_get_package_name(Defs),
      ?f("~n"),
@@ -404,3 +419,129 @@ rpc_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
             erl_parse:abstract(gpb:rpc_record_to_proplist(Rpc))
     end.
 
+compute_service_renaming_infos(ServiceDefs,
+                               Package,
+                               #anres{renamings = Renamings},
+                               Opts) ->
+    SvcRenamings = renamings_as_list(services, Renamings),
+    RpcRenamings = renamings_as_list(rpcs, Renamings),
+    UsesPackages = proplists:get_bool(use_packages, Opts),
+    [begin
+         {OrigSvc,SvcName} = find_orig_from_renamed(SvcName, SvcRenamings),
+         FqOrigSvc =
+             if UsesPackages ->
+                     OrigSvc;
+                not UsesPackages, Package /= '' ->
+                     list_to_atom(lists:concat([Package, ".", OrigSvc]));
+                not UsesPackages, Package == '' ->
+                     OrigSvc
+             end,
+         RpcMapping = [find_orig_rpc_from_renamed(RpcName, RpcRenamings)
+                       || #?gpb_rpc{name=RpcName} <- Rpcs],
+         {{FqOrigSvc, SvcName}, RpcMapping}
+     end
+     || {{service,SvcName}, Rpcs} <- ServiceDefs].
+
+renamings_as_list(_Key, no_renamings) ->
+    no_renamings;
+renamings_as_list(Key, Renamings) ->
+    case proplists:get_value(Key, Renamings) of
+        D when D /= undefined ->
+            dict:to_list(D);
+        undefined ->
+            error({internal_error, no_key, Key, [K || {K, _} <- Renamings]})
+    end.
+
+find_orig_from_renamed(Name, no_renamings) ->
+    {Name, Name};
+find_orig_from_renamed(Renamed, Renamings) ->
+    lists:keyfind(Renamed, 2, Renamings).
+
+find_orig_rpc_from_renamed(Name, no_renamings) ->
+    {Name, Name};
+find_orig_rpc_from_renamed(Renamed, Renamings) ->
+    {{_Svc, OrigRpc}, RenamedRpc} = lists:keyfind(Renamed, 2, Renamings),
+    {OrigRpc, RenamedRpc}.
+
+format_fqbin_to_service_name(ServiceInfos) ->
+    ["%% Convert a a fully qualified (ie with package name) service name\n"
+     "%% as a binary to a service name as an atom.\n",
+     gpb_codegen:format_fn(
+       fqbin_to_service_name,
+       fun('<<"maybe.package.ServiceName">>') -> 'ServiceName';
+          (X) -> error({gpb_error, {badservice, X}})
+       end,
+       [repeat_clauses(
+          '<<"maybe.package.ServiceName">>',
+          [[replace_tree('<<"maybe.package.ServiceName">>',
+                         atom_to_binstr_stree(FqOrigServiceName)),
+            replace_term('ServiceName', ServiceName)]
+           || {{FqOrigServiceName, ServiceName}, _Rpcs} <- ServiceInfos])])].
+
+format_service_name_to_fqbin(ServiceInfos) ->
+    ["%% Convert a service name as an atom to a fully qualified\n\n"
+     "%% (ie with package name) name as a binary.\n",
+     gpb_codegen:format_fn(
+       service_name_to_fqbin,
+       fun('ServiceName') -> '<<"maybe.package.ServiceName">>';
+          (X) -> error({gpb_error, {badservice, X}})
+       end,
+       [repeat_clauses(
+          'ServiceName',
+          [[replace_term('ServiceName', ServiceName),
+            replace_tree('<<"maybe.package.ServiceName">>',
+                         atom_to_binstr_stree(FqOrigServiceName))]
+           || {{FqOrigServiceName, ServiceName}, _Rpcs} <- ServiceInfos])])].
+
+format_fqbins_to_service_and_rpc_name(ServiceInfos) ->
+    ["%% Convert a a fully qualified (ie with package name) service name\n"
+     "%% and an rpc name, both as binaries to a service name and an rpc\n"
+     "%% name, as atoms.\n",
+     gpb_codegen:format_fn(
+       fqbins_to_service_and_rpc_name,
+       fun('<<"maybe.package.ServiceName">>', '<<"RpcName">>') ->
+               {'ServiceName', 'RpcName'};
+          (S, R) ->
+               error({gpb_error, {badservice_or_rpc, {S, R}}})
+       end,
+       [repeat_clauses(
+          '<<"maybe.package.ServiceName">>',
+          [[replace_tree('<<"maybe.package.ServiceName">>',
+                         atom_to_binstr_stree(FqOrigServiceName)),
+            replace_tree('<<"RpcName">>',
+                         atom_to_binstr_stree(OrigRpcName)),
+            replace_term('ServiceName', ServiceName),
+            replace_term('RpcName', RpcName)]
+           || {{FqOrigServiceName, ServiceName}, Rpcs} <- ServiceInfos,
+              {OrigRpcName, RpcName} <- Rpcs])])].
+
+format_service_and_rpc_name_to_fqbins(ServiceInfos) ->
+    ["%% Convert a service name and an rpc name, both as atoms,\n"
+     "%% to a fully qualified (ie with package name) service name and\n"
+     "%% an rpc name as binaries.\n",
+     gpb_codegen:format_fn(
+       service_and_rpc_name_to_fqbins,
+       fun('ServiceName', 'RpcName') ->
+               {'<<"maybe.package.ServiceName">>', '<<"RpcName">>'};
+          (S, R) ->
+               error({gpb_error, {badservice_or_rpc, {S, R}}})
+       end,
+       [repeat_clauses(
+          'ServiceName',
+          [[replace_term('ServiceName', ServiceName),
+            replace_term('RpcName', RpcName),
+            replace_tree('<<"maybe.package.ServiceName">>',
+                         atom_to_binstr_stree(FqOrigServiceName)),
+            replace_tree('<<"RpcName">>',
+                         atom_to_binstr_stree(OrigRpcName))]
+           || {{FqOrigServiceName, ServiceName}, Rpcs} <- ServiceInfos,
+              {OrigRpcName, RpcName} <- Rpcs])])].
+
+%% ---
+atom_to_binstr_stree(A) ->
+    %% When just using replace_term('a', <<"text">>)
+    %% the result becomes <<116,101,120,116>>
+    %% when the desired result is <<"text">>)
+    %% so construct a textual tree node to get the desired format
+    S = list_to_binary(atom_to_list(A)),
+    erl_syntax:text(?f("<<\"~s\">>", [S])).

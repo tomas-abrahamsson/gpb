@@ -2084,7 +2084,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        gpb_gen_decoders:format_exports(Defs, Opts),
        gpb_gen_mergers:format_exports(Defs, Opts),
        gpb_gen_verifiers:format_exports(Defs, Opts),
-       gpb_gen_introspect:format_exports(Defs, Opts),
+       gpb_gen_introspect:format_exports(Defs, AnRes, Opts),
        [?f("-export([descriptor/0]).~n")
         || gpb_lib:get_gen_descriptor_by_opts(Opts)],
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
@@ -2176,7 +2176,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
                                                              Opts)]
        end,
        "\n",
-       gpb_gen_introspect:format_introspection(Defs, Opts),
+       gpb_gen_introspect:format_introspection(Defs, AnRes, Opts),
        "\n",
        possibly_format_descriptor(Defs, Opts),
        "\n",
