@@ -479,7 +479,7 @@ format_fqbin_to_service_name(ServiceInfos) ->
            || {{FqOrigServiceName, ServiceName}, _Rpcs} <- ServiceInfos])])].
 
 format_service_name_to_fqbin(ServiceInfos) ->
-    ["%% Convert a service name as an atom to a fully qualified\n\n"
+    ["%% Convert a service name as an atom to a fully qualified\n"
      "%% (ie with package name) name as a binary.\n",
      gpb_codegen:format_fn(
        service_name_to_fqbin,
