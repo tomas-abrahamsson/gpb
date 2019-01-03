@@ -1,5 +1,22 @@
 -*- coding: utf-8 -*-
 
+Version 4.5.0
+2018-Jan-03
+
+        * Don't edoc generated files by marking them as @private. Thanks to
+        Tristan Sloughter. (#159)
+
+        * Generate the functions below. These can convert between fully
+        qualified service names (ie with package) and rpc name as binaries, to
+        internal names, as atoms, and back. These functions do take into
+        consideration options use_packages as well as any renaming options.
+        The intended use case is from grpc server or client code.
+        - uses_packages()
+        - fqbin_to_service_name/1
+        - service_name_to_fqbin/1
+        - fqbins_to_service_and_rpc_name/2
+        - service_and_rpc_name_to_fqbins/2
+
 Version 4.4.1
 2018-Dec-03
 
