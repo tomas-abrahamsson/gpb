@@ -521,6 +521,22 @@ defaults_for_unset_proto3_submessages_test() ->
     {0,_} = {maps:size(Cfg),Cfg},
     unload_code(M).
 
+defaults_for_unset_proto3_oneof_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto3\";\n",
+           "\n",
+           "message Msg {",
+           "  oneof c {",
+           "    uint32 a = 1;",
+           "    uint32 b = 2;",
+           "  }",
+           "}"],
+          [maps %%  {maps_unset_optional, omitted} is default
+          ]),
+    Msg = M:decode_msg(<<>>, 'Msg'),
+    {0,_} = {maps:size(Msg),Msg},
+    unload_code(M).
+
 %% -- translations
 %%-
 translate_maptype_test() ->
