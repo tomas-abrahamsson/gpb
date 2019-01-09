@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.5.1
+2018-Jan-09
+
+        * Fix dialyzer error in generate code when there were no services.
+        Thanks to Guilherme Andrade. (#161)
+
 Version 4.5.0
 2018-Jan-03
 
