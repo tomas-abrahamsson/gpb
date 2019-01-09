@@ -463,6 +463,14 @@ find_orig_rpc_from_renamed(Renamed, Renamings) ->
     {{_Svc, OrigRpc}, RenamedRpc} = lists:keyfind(Renamed, 2, Renamings),
     {OrigRpc, RenamedRpc}.
 
+format_fqbin_to_service_name([]) ->
+    ["%% Convert a a fully qualified (ie with package name) service name\n"
+     "%% as a binary to a service name as an atom.\n",
+     "-spec fqbin_to_service_name(_) -> no_return().\n",
+     gpb_codegen:format_fn(
+       fqbin_to_service_name,
+       fun(X) -> error({gpb_error, {badservice,X}}) end
+      )];
 format_fqbin_to_service_name(ServiceInfos) ->
     ["%% Convert a a fully qualified (ie with package name) service name\n"
      "%% as a binary to a service name as an atom.\n",
@@ -478,6 +486,14 @@ format_fqbin_to_service_name(ServiceInfos) ->
             replace_term('ServiceName', ServiceName)]
            || {{FqOrigServiceName, ServiceName}, _Rpcs} <- ServiceInfos])])].
 
+format_service_name_to_fqbin([]) ->
+    ["%% Convert a service name as an atom to a fully qualified\n\n"
+     "%% (ie with package name) name as a binary.\n",
+     "-spec service_name_to_fqbin(_) -> no_return().\n",
+     gpb_codegen:format_fn(
+       service_name_to_fqbin,
+       fun(X) -> error({gpb_error, {badservice, X}}) end
+      )];
 format_service_name_to_fqbin(ServiceInfos) ->
     ["%% Convert a service name as an atom to a fully qualified\n\n"
      "%% (ie with package name) name as a binary.\n",
@@ -493,6 +509,15 @@ format_service_name_to_fqbin(ServiceInfos) ->
                          atom_to_binstr_stree(FqOrigServiceName))]
            || {{FqOrigServiceName, ServiceName}, _Rpcs} <- ServiceInfos])])].
 
+format_fqbins_to_service_and_rpc_name([]) ->
+    ["%% Convert a a fully qualified (ie with package name) service name\n"
+     "%% and an rpc name, both as binaries to a service name and an rpc\n"
+     "%% name, as atoms.\n",
+     "-spec fqbins_to_service_and_rpc_name(_, _) -> no_return().\n",
+     gpb_codegen:format_fn(
+       fqbins_to_service_and_rpc_name,
+       fun (S, R) -> error({gpb_error, {badservice_or_rpc, {S, R}}}) end
+      )];
 format_fqbins_to_service_and_rpc_name(ServiceInfos) ->
     ["%% Convert a a fully qualified (ie with package name) service name\n"
      "%% and an rpc name, both as binaries to a service name and an rpc\n"
@@ -515,6 +540,15 @@ format_fqbins_to_service_and_rpc_name(ServiceInfos) ->
            || {{FqOrigServiceName, ServiceName}, Rpcs} <- ServiceInfos,
               {OrigRpcName, RpcName} <- Rpcs])])].
 
+format_service_and_rpc_name_to_fqbins([]) ->
+    ["%% Convert a service name and an rpc name, both as atoms,\n"
+     "%% to a fully qualified (ie with package name) service name and\n"
+     "%% an rpc name as binaries.\n",
+     "-spec service_and_rpc_name_to_fqbins(_, _) -> no_return().\n",
+     gpb_codegen:format_fn(
+       service_and_rpc_name_to_fqbins,
+       fun(S, R) -> error({gpb_error, {badservice_or_rpc, {S, R}}}) end
+      )];
 format_service_and_rpc_name_to_fqbins(ServiceInfos) ->
     ["%% Convert a service name and an rpc name, both as atoms,\n"
      "%% to a fully qualified (ie with package name) service name and\n"
