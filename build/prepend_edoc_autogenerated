@@ -3,6 +3,11 @@
 f="$1"
 orig="${2:-$f}"
 
+if (head -n 1 "$f" | grep -q '@doc automatically generated scanner')
+then
+    # already prepended
+    exit 0
+fi
 
 cleanup () {
     rm -f "$f".tmp
