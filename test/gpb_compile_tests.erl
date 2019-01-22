@@ -770,6 +770,16 @@ service_name_to_from_binary_with_renamings_test() ->
          M2:service_and_rpc_name_to_fqbins('foo_bar.my_service', getabc),
     unload_code(M2).
 
+source_basename_test() ->
+    AProto = "message A { required uint32 g = 2; }",
+    M = compile_iolist(["import \"a.proto\";",
+                        "message M { required uint32 f = 1; }\n"],
+                       [{import_fetcher, fun(_F) -> {ok, AProto} end}]),
+    Expected = atom_to_list(M) ++ ".proto",
+    ?assert(Expected /= "a.proto"),
+    Expected = M:source_basename(),
+    unload_code(M).
+
 %% --- decoder tests ---------------
 
 decodes_overly_long_varints_test() ->

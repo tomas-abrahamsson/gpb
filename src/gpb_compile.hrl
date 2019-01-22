@@ -4,6 +4,7 @@
 -record(ft, {type, occurrence, is_packed}).
 -record(anres, %% result of analysis
         {
+          source_filenames,   % :: [string()]
           used_types,         % :: sets:set(gpb_field_type()),
           known_msg_size,     % :: dict:dict(), %% MsgName -> Size | undefined
           fixlen_types,       % :: sets:set(#ft{}),

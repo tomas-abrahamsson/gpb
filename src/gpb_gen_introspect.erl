@@ -49,7 +49,8 @@ format_exports(Defs, _AnRes, _Opts) ->
      ?f("-export([fqbins_to_service_and_rpc_name/2]).~n"),
      ?f("-export([service_and_rpc_name_to_fqbins/2]).~n"),
      ?f("-export([get_package_name/0]).~n"),
-     ?f("-export([uses_packages/0]).~n")].
+     ?f("-export([uses_packages/0]).~n"),
+     ?f("-export([source_basename/0]).~n")].
 
 format_introspection(Defs, AnRes, Opts) ->
     Package = proplists:get_value(package, Defs, ''),
@@ -113,7 +114,9 @@ format_introspection(Defs, AnRes, Opts) ->
      ?f("~n"),
      format_get_package_name(Defs),
      ?f("~n"),
-     format_uses_packages(Opts)
+     format_uses_packages(Opts),
+     ?f("~n"),
+     format_source_basename(AnRes)
     ].
 
 msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
@@ -294,6 +297,13 @@ format_uses_packages(Opts) ->
      gpb_codegen:format_fn(
        uses_packages, fun() -> '<bool>' end,
        [replace_term('<bool>', proplists:get_bool(use_packages, Opts))])].
+
+
+format_source_basename(#anres{source_filenames=[S1 | _]}) ->
+    Source = filename:basename(S1),
+    gpb_codegen:format_fn(
+      source_basename, fun() -> '"source.proto"' end,
+      [replace_term('"source.proto"', Source)]).
 
 % --- service introspection methods
 

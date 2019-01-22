@@ -23,7 +23,7 @@
 
 -module(gpb_analyzer).
 
--export([analyze_defs/3]).
+-export([analyze_defs/4]).
 
 -include("../include/gpb.hrl").
 -include("gpb_compile.hrl").
@@ -34,13 +34,14 @@
 
 %% -- analysis -----------------------------------------------------
 
-analyze_defs(Defs, Renamings, Opts) ->
+analyze_defs(Defs, Sources, Renamings, Opts) ->
     MapTypes = find_map_types(Defs),
     MapsAsMsgs = map_types_to_msgs(MapTypes),
     MapMsgEnums = enums_for_maps_as_msgs(MapTypes, Defs),
     Translations = compute_translations(Defs, Opts),
     KnownMsgSize = find_msgsizes_known_at_compile_time(MapsAsMsgs ++ Defs),
-    #anres{used_types          = find_used_types(Defs),
+    #anres{source_filenames    = Sources,
+           used_types          = find_used_types(Defs),
            known_msg_size      = KnownMsgSize,
            fixlen_types        = find_fixlen_types(MapsAsMsgs ++ Defs),
            num_packed_fields   = find_num_packed_fields(MapsAsMsgs ++ Defs),
