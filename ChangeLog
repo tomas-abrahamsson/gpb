@@ -1,5 +1,19 @@
 -*- coding: utf-8 -*-
 
+Version 4.6.0
+2018-Jan-23
+
+        * Fix error when generating descriptors for protos importing other
+        protos, each having package definitions. Thanks to Tristan Sloughter
+        for reporting. (#162)
+
+        * Generate a new function, source_basename/0 for retrieving the basename
+        of the (main) input source file. Thanks to Tristan Sloughter for the
+        idea. (#162)
+
+        * Fix error when running edoc after having compiled more than once. The
+        gpb_scan.erl got prepended multiple times with a @doc chunk.
+
 Version 4.5.1
 2018-Jan-09
 
@@ -28,6 +42,9 @@ Version 4.4.1
 
         * Bugfix decoding: with maps and proto3 unset sub-messages decoded to
         undefined instead of getting omitted. (#158)
+
+        This introduces a POTENTIAL INCOMPATIBILITY, for code that relied on
+        finding the value undefined, which was arguably somewhat unexpected.
 
 Version 4.4.0
 2018-Sep-28
