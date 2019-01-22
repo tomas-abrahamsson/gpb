@@ -1824,7 +1824,7 @@ parse_file_and_imports(In, AlreadyImported, Opts) ->
             %% case we get an error we don't want to try to reprocess it later
             %% (in case it is multiply imported) and get the error again.
             FName = file_name_from_input(In),
-            AlreadyImported2 = [FName | AlreadyImported],
+            AlreadyImported2 = append_unique(AlreadyImported, [FName]),
             case scan_and_parse_string(Contents, FName, Opts) of
                 {ok, Defs} ->
                     Imports = gpb_parse:fetch_imports(Defs),
@@ -1878,11 +1878,23 @@ import_it(Import, AlreadyImported, Defs, Opts) ->
     case parse_file_and_imports(Import, AlreadyImported, Opts) of
         {ok, {MoreDefs, MoreImported}} ->
             Defs2 = Defs++MoreDefs,
-            Imported2 = lists:usort(AlreadyImported++MoreImported),
+            Imported2 = append_unique(AlreadyImported, MoreImported),
             {ok, {Defs2, Imported2}};
         {error, Reason} ->
             {error, Reason}
     end.
+
+append_unique(Items, MoreItemsToAppend) ->
+    lists:foldl(
+      fun(NewItem, Acc) ->
+              case lists:member(NewItem, Acc) of
+                  true -> Acc;
+                  false -> Acc ++ [NewItem]
+              end
+      end,
+      Items,
+      MoreItemsToAppend).
+
 
 locate_read_import_int({_Mod, Str}, _Opts) ->
     {ok, Str};
