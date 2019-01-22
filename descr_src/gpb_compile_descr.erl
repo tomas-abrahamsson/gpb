@@ -60,11 +60,14 @@ get_all_oneofs(Defs) ->
                    || {{msg,_}, Fields} <- Defs]).
 
 defs_to_package(Defs) ->
-    %% There can be at most 1 package definition
-    %% The parser will reject any multiple package definitions
-    case [P || {package, P} <- Defs] of
-        [Pkg] -> atom_to_ustring(Pkg);
-        []    -> undefined
+    %% If other proto fiels are imported, and they too contain package
+    %% declarations, there can be more than one package definition. Search for
+    %% the first one, it would be the primary one.
+    case lists:keyfind(package, 1, Defs) of
+        {package, Pkg} ->
+            atom_to_ustring(Pkg);
+        false ->
+            undefined
     end.
 
 defs_to_msgtype(Defs, MapTypesToPseudoMsgNames, MapPseudoMsgs) ->
