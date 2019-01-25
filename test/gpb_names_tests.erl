@@ -27,6 +27,7 @@ renames_just_msg_test() ->
     %% msg_name => don't touch Package part, just the msg name path.
     %% Over grpc, Package, Service and Rpc is exposed.
     [{package,'TopPkg.SubPkg'},
+     {{enum_containment, _}, _},
      {{msg,'TopPkg.SubPkg.msg_name_1'},
       [#?gpb_field{type={msg,'TopPkg.SubPkg.msg_name_1.msg_name_2'}},
        #?gpb_field{}]},
@@ -51,6 +52,7 @@ renames_msg_full_path_test() ->
     %% (the package names in other parts won't match, but if one wants to
     %% do this, then one presumably has no services)
     [{package,'TopPkg.SubPkg'},
+     {{enum_containment, _}, _},
      {{msg,'top_pkg.sub_pkg.msg_name_1'},
       [#?gpb_field{type={msg,'top_pkg.sub_pkg.msg_name_1.msg_name_2'}},
        #?gpb_field{}]},
@@ -72,6 +74,7 @@ renames_msg_full_path_test() ->
 rename_package_affects_all_occurrences_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
     [{package,'top_pkg.sub_pkg'},
+     {{enum_containment, _}, _},
      {{msg,'top_pkg.sub_pkg.MsgName1'},
       [#?gpb_field{type={msg,'top_pkg.sub_pkg.MsgName1.MsgName2'}},
        #?gpb_field{}]},
@@ -96,6 +99,7 @@ dots_to_underscores_for_nested_msgs_test() ->
     %% msg_name => don't touch Package part, just the msg name path.
     %% Over grpc, Package, Service and Rpc is exposed.
     [{package,'TopPkg.SubPkg'},
+     {{enum_containment, _}, _},
      {{msg,'TopPkg.SubPkg.msg_name_1'},
       [#?gpb_field{type={msg,'TopPkg.SubPkg.msg_name_1_msg_name_2'}},
        #?gpb_field{}]},
@@ -118,6 +122,7 @@ dots_to_underscores_for_nested_msgs_test() ->
 base_name_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
     [{package,'TopPkg.SubPkg'},
+     {{enum_containment, _}, _},
      {{msg,msg_name_1}, [#?gpb_field{type={msg, msg_name_2}},
                          #?gpb_field{}]},
      {{msg,msg_name_2}, [#?gpb_field{}]},
@@ -158,6 +163,7 @@ renames_groups_test() ->
                 "};"]}],
              [use_packages]),
     [{package,'TopPkg.SubPkg'},
+     {{enum_containment, _}, _},
      {{group,'TopPkg.SubPkg.msgname1.group_name'},
       [#?gpb_field{type={msg,'TopPkg.SubPkg.MsgName1.MsgName2'}}]},
      {{msg,'TopPkg.SubPkg.MsgName1'},
@@ -183,6 +189,9 @@ rename_msg_by_proto_with_legacy_opts_test() ->
               {"proto3.proto", ["message m3 {map<string, m1> m=1;}"]}],
              []),
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+     {{enum_containment, _}, _},
+     {{enum_containment, _}, _},
+     {{enum_containment, _}, _},
      {{msg,m3},   [#?gpb_field{name=m, type={map,string,{msg,p1_m1}}}]},
      {{msg,p1_m1}, [#?gpb_field{name=f1, type={enum,e1}},
                     #?gpb_field{name=fm2}]},
@@ -216,6 +225,7 @@ prefix_record_names_with_legacy_opts_test() ->
                 "extend m1 { optional uint32 fm2=2; }"]}],
             []),
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+     {{enum_containment, _}, _},
      {{msg,p_m1}, [#?gpb_field{name=f1, type={enum,e1}},
                    #?gpb_field{name=fm2}]},
      %% type is a msg: to be prefixed
@@ -243,6 +253,7 @@ can_suffix_record_names_with_legacy_opts_test() ->
                 "extend m1 { optional uint32 fm2=2; }"]}],
              []),
     [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+     {{enum_containment, _}, _},
      {{msg,m1_s}, [#?gpb_field{name=f1, type={enum,e1}},
                    #?gpb_field{name=fm2}]},
      %% type is a msg: to be suffixed
@@ -268,7 +279,8 @@ can_tolower_record_names_with_legacy_opts_test() ->
                 "}",
                 "extend Msg1 { optional uint32 fm2=2; }"]}],
             []),
-    [{{msg,msg1}, [#?gpb_field{name=f1, type={msg,msg2}},
+    [{{enum_containment, _}, _},
+     {{msg,msg1}, [#?gpb_field{name=f1, type={msg,msg2}},
                    #?gpb_field{name=fm2}]},
      {{msg,msg2}, [#?gpb_field{name=g1}]},
      {{msg_containment,_}, [msg1, msg2]},
@@ -290,7 +302,8 @@ can_tolower_record_names_with_oneof_with_legacy_opts_test() ->
                 "  }",
                 "}"]}],
              []),
-    [{{msg,msg1}, [#gpb_oneof{fields=[#?gpb_field{name=a,type={msg,msg1}},
+    [{{enum_containment, _}, _},
+     {{msg,msg1}, [#gpb_oneof{fields=[#?gpb_field{name=a,type={msg,msg1}},
                                       #?gpb_field{name=b}]}]},
      {{msg_containment,_}, [msg1]}] =
         lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
@@ -305,7 +318,8 @@ can_tolower_record_names_with_map_with_legacy_opts_test() ->
                 "  map<string,Msg1> m = 1;",
                 "}"]}],
              []),
-    [{{msg,msg1}, [#?gpb_field{}]},
+    [{{enum_containment, _}, _},
+     {{msg,msg1}, [#?gpb_field{}]},
      {{msg,msg2}, [#?gpb_field{type={map,string,{msg,msg1}}}]},
      {{msg_containment,_}, [msg1, msg2]}] =
         lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
@@ -320,7 +334,8 @@ can_to_snake_record_names_with_legacy_opts_test() ->
                 "}",
                 "extend MsgName1 { optional uint32 fm2=2; }"]}],
              []),
-    [{{msg,msg_name_1}, [#?gpb_field{name=f1, type={msg,msg_name_2}},
+    [{{enum_containment, _}, _},
+     {{msg,msg_name_1}, [#?gpb_field{name=f1, type={msg,msg_name_2}},
                          #?gpb_field{name=fm2}]},
      {{msg,msg_name_2}, [#?gpb_field{name=g1}]},
      {{msg_containment,_}, [msg_name_1, msg_name_2]},
@@ -344,6 +359,7 @@ to_snake_case_with_packages_with_legacy_opts_test() ->
                 "extend MsgName1 { optional uint32 fm2=2; }"]}],
              [use_packages]),
     [{package, 'top_pkg.sub_pkg'},
+     {{enum_containment, _}, _},
      {{msg,'top_pkg.sub_pkg.msg_name_1'},
       [#?gpb_field{name=f1, type={msg,'top_pkg.sub_pkg.msg_name_2'}},
        #?gpb_field{name=fm2}]},
@@ -372,6 +388,7 @@ can_tolower_record_names_with_packages_with_legacy_opts_test() ->
                 "extend Msg1 { optional uint32 fm2=2; }"]}],
              [use_packages]),
     [{package, 'pkg1'},
+     {{enum_containment, _}, _},
      {{msg,'pkg1.msg1'}, [#?gpb_field{name=f1, type={msg,'pkg1.msg2'}},
                           #?gpb_field{name=fm2}]},
      {{msg,'pkg1.msg2'}, [#?gpb_field{name=g1}]},
@@ -394,6 +411,7 @@ can_tolower_with_package_def_but_without_use_package_opt_test() ->
              [%% Not: use_packages even though there's package pkg1; line
              ]),
     [{package, 'pkg1'},
+     {{enum_containment, _}, _},
      {{msg,msg1}, [#?gpb_field{}]},
      {{msg_containment,_}, [msg1]}] =
         lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
@@ -432,7 +450,8 @@ no_error_for_same_rpc_name_in_different_services_test() ->
                 "service Account { rpc Create (M) returns (M); }",
                 "service Device  { rpc Create (M) returns (M); }"]}],
              []),
-    [{{msg,'M'}, _},
+    [{{enum_containment, _}, _},
+     {{msg,'M'}, _},
      {{msg_containment,_},_},
      {{rpc_containment,_},[{account,create},{device,create}]},
      {{service,account}, [#?gpb_rpc{name=create}]},

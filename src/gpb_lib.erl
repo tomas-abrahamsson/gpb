@@ -34,6 +34,7 @@
 -export([msgs_or_groups/1]).
 -export([msg_or_group_names/1]).
 -export([msg_names/1]).
+-export([enum_names/1]).
 -export([contains_messages/1]).
 -export([get_field_name/1, get_field_names/1]).
 -export([get_field_rnum/1]).
@@ -159,6 +160,9 @@ msg_or_group_names(Defs) ->
 
 msg_names(Defs) ->
     [Name || {{msg, Name}, _Fields} <- Defs].
+
+enum_names(Defs) ->
+    [Name || {{enum, Name}, _Syms} <- Defs].
 
 contains_messages(Defs) ->
     lists:any(fun({{msg, _}, _}) -> true;

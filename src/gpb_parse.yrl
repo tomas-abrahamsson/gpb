@@ -407,7 +407,8 @@ Erlang code.
                {{pkg_containment, ProtoName::string()}, PkgName::atom()} |
                {{service_containment, ProtoName::string()},
                 [ServiceName::atom()]} |
-               {{rpc_containment, ProtoName::string()}, [RpcName::atom()]}.
+               {{rpc_containment, ProtoName::string()}, [RpcName::atom()]} |
+               {{enum_containment, ProtoName::string()}, [EnumName::atom()]}.
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
@@ -1080,6 +1081,9 @@ reformat_names(Defs) ->
                        [reformat_name(N) || N <- Msgs]};
                  ({{enum,Name}, ENs}) ->
                       {{enum,reformat_name(Name)}, reformat_enum_opt_names(ENs)};
+                 ({{enum_containment, ProtoName}, EnumNames}) ->
+                      {{enum_containment,ProtoName},
+                       [reformat_name(EnumName) || EnumName <- EnumNames]};
                  ({{extensions,Name}, Exts}) ->
                       {{extensions,reformat_name(Name)}, Exts};
                  ({{extend,Name}, Fields}) ->
@@ -1225,11 +1229,15 @@ fetch_imports(Defs) ->
 
 mk_meta_info(ProtoName, Defs, Opts) ->
     meta_msg_containment(ProtoName, Defs)
+        ++ meta_enum_containment(ProtoName, Defs)
         ++ meta_pkg_containment(ProtoName, Defs, Opts)
         ++ meta_service_and_rpc_containment(ProtoName, Defs).
 
 meta_msg_containment(ProtoName, Defs) ->
     [{{msg_containment, ProtoName}, lists:sort(gpb_lib:msg_names(Defs))}].
+
+meta_enum_containment(ProtoName, Defs) ->
+    [{{enum_containment, ProtoName}, lists:sort(gpb_lib:enum_names(Defs))}].
 
 meta_pkg_containment(ProtoName, Defs, Opts) ->
     case proplists:get_value(package, Defs, '$undefined') of
