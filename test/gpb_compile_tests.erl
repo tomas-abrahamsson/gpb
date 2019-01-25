@@ -771,6 +771,38 @@ service_name_to_from_binary_with_renamings_test() ->
          M2:service_and_rpc_name_to_fqbins('foo_bar.my_service', getabc),
     unload_code(M2).
 
+msg_from_binary_test() ->
+    %% No msgs are ok
+    Proto0 = ["enum E { a=1; b=2; }"],
+    M0 = compile_iolist(Proto0, []),
+    ?assertError({gpb_error, _}, M0:fqbin_to_msg_name(<<"x">>)),
+    ?assertError({gpb_error, _}, M0:msg_name_to_fqbin(x)),
+    unload_code(M0),
+
+    Proto1 = ["package foo.bar;",
+              "message SomeMsg { required uint32 f = 1; }"],
+    Renamings = [{rename,{pkg_name, dots_to_underscores}},
+                 {rename,{pkg_name, lowercase}},
+                 {rename,{msg_name, snake_case}}],
+
+    %% Without the use_package option
+    M1 = compile_iolist(Proto1, []),
+    'SomeMsg' = M1:fqbin_to_msg_name(<<"foo.bar.SomeMsg">>),
+    <<"foo.bar.SomeMsg">> = M1:msg_name_to_fqbin('SomeMsg'),
+    unload_code(M1),
+
+    %% _With_ the use_package option
+    M2 = compile_iolist(Proto1, [use_packages]),
+    'foo.bar.SomeMsg' = M2:fqbin_to_msg_name(<<"foo.bar.SomeMsg">>),
+    <<"foo.bar.SomeMsg">> = M2:msg_name_to_fqbin('foo.bar.SomeMsg'),
+    unload_code(M2),
+
+    %% With the use_package option _and_ renamings
+    M3 = compile_iolist(Proto1, [use_packages | Renamings]),
+    'foo_bar.some_msg' = M3:fqbin_to_msg_name(<<"foo.bar.SomeMsg">>),
+    <<"foo.bar.SomeMsg">> = M3:msg_name_to_fqbin('foo_bar.some_msg'),
+    unload_code(M3).
+
 enum_from_binary_test() ->
     %% No enums are ok
     Proto0 = ["message M { required uint32 f = 1; }"],

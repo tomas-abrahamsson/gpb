@@ -48,6 +48,8 @@ format_exports(Defs, _AnRes, _Opts) ->
      ?f("-export([service_name_to_fqbin/1]).~n"),
      ?f("-export([fqbins_to_service_and_rpc_name/2]).~n"),
      ?f("-export([service_and_rpc_name_to_fqbins/2]).~n"),
+     ?f("-export([fqbin_to_msg_name/1]).~n"),
+     ?f("-export([msg_name_to_fqbin/1]).~n"),
      ?f("-export([fqbin_to_enum_name/1]).~n"),
      ?f("-export([enum_name_to_fqbin/1]).~n"),
      ?f("-export([get_package_name/0]).~n"),
@@ -57,6 +59,7 @@ format_exports(Defs, _AnRes, _Opts) ->
 format_introspection(Defs, AnRes, Opts) ->
     Package = proplists:get_value(package, Defs, ''),
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
+    MsgInfos  = compute_msg_infos(MsgDefs, Package, AnRes, Opts),
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
     EnumInfos = compute_enum_infos(EnumDefs, Package, Opts),
     GroupDefs = [Item || {{group, _}, _}=Item <- Defs],
@@ -114,6 +117,10 @@ format_introspection(Defs, AnRes, Opts) ->
      format_fqbins_to_service_and_rpc_name(ServiceInfos),
      ?f("~n"),
      format_service_and_rpc_name_to_fqbins(ServiceInfos),
+     ?f("~n"),
+     format_fqbin_to_msg_name(MsgInfos),
+     ?f("~n"),
+     format_msg_name_to_fqbin(MsgInfos),
      ?f("~n"),
      format_fqbin_to_enum_name(EnumInfos),
      ?f("~n"),
@@ -587,6 +594,51 @@ format_service_and_rpc_name_to_fqbins(ServiceInfos) ->
                          atom_to_binstr_stree(OrigRpcName))]
            || {{FqOrigServiceName, ServiceName}, Rpcs} <- ServiceInfos,
               {OrigRpcName, RpcName} <- Rpcs])])].
+
+compute_msg_infos(Msgs, Package, #anres{renamings = Renamings}, Opts) ->
+    MsgRenamings = renamings_as_list(msgs, Renamings),
+    UsesPackages = proplists:get_bool(use_packages, Opts),
+    [begin
+         {OrigMsg,MsgName} = find_orig_from_renamed(MsgName, MsgRenamings),
+         FqOrigMsg =
+             if UsesPackages ->
+                     OrigMsg;
+                not UsesPackages, Package /= '' ->
+                     list_to_atom(lists:concat([Package, ".", OrigMsg]));
+                not UsesPackages, Package == '' ->
+                     OrigMsg
+             end,
+         {FqOrigMsg, MsgName}
+     end
+     || {{msg,MsgName}, _Fields} <- Msgs].
+
+format_fqbin_to_msg_name(MsgInfos) ->
+    [["-spec msg_name_to_fqbin(_) -> no_return().\n" || MsgInfos == []],
+     gpb_codegen:format_fn(
+       fqbin_to_msg_name,
+       fun('<<"maybe.package.MsgName">>') -> 'MsgName';
+          (E) -> error({gpb_error, {badmsg, E}})
+       end,
+       [repeat_clauses(
+          '<<"maybe.package.MsgName">>',
+          [[replace_tree('<<"maybe.package.MsgName">>',
+                         atom_to_binstr_stree(FqMsgName)),
+            replace_term('MsgName', MsgName)]
+           || {FqMsgName, MsgName} <- MsgInfos])])].
+
+format_msg_name_to_fqbin(MsgInfos) ->
+    [["-spec fqbin_to_msg_name(_) -> no_return().\n" || MsgInfos == []],
+     gpb_codegen:format_fn(
+       msg_name_to_fqbin,
+       fun('MsgName') -> '<<"maybe.package.MsgName">>';
+          (E) -> error({gpb_error, {badmsg, E}})
+       end,
+       [repeat_clauses(
+          'MsgName',
+          [[replace_term('MsgName', MsgName),
+            replace_tree('<<"maybe.package.MsgName">>',
+                         atom_to_binstr_stree(FqMsgName))]
+           || {FqMsgName, MsgName} <- MsgInfos])])].
 
 compute_enum_infos(EnumDefs, Package, Opts) ->
     UsesPackages = proplists:get_bool(use_packages, Opts),
