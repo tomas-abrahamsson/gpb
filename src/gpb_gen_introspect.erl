@@ -54,7 +54,14 @@ format_exports(Defs, _AnRes, _Opts) ->
      ?f("-export([enum_name_to_fqbin/1]).~n"),
      ?f("-export([get_package_name/0]).~n"),
      ?f("-export([uses_packages/0]).~n"),
-     ?f("-export([source_basename/0]).~n")].
+     ?f("-export([source_basename/0]).~n"),
+     ?f("-export([get_all_source_basenames/0]).~n"),
+     ?f("-export([get_all_proto_names/0]).~n"),
+     ?f("-export([get_msg_containment/1]).~n"),
+     ?f("-export([get_pkg_containment/1]).~n"),
+     ?f("-export([get_service_containment/1]).~n"),
+     ?f("-export([get_rpc_containment/1]).~n"),
+     ?f("-export([get_enum_containment/1]).~n")].
 
 format_introspection(Defs, AnRes, Opts) ->
     Package = proplists:get_value(package, Defs, ''),
@@ -130,8 +137,22 @@ format_introspection(Defs, AnRes, Opts) ->
      ?f("~n"),
      format_uses_packages(Opts),
      ?f("~n"),
-     format_source_basename(AnRes)
-    ].
+     format_source_basename(AnRes),
+     ?f("~n"),
+     format_get_all_source_basenames(AnRes),
+     ?f("~n"),
+     format_get_all_proto_names(AnRes),
+     ?f("~n"),
+     format_get_msg_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_pkg_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_service_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_rpc_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_enum_containment(Defs, AnRes),
+     ?f("~n")].
 
 msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
@@ -318,6 +339,28 @@ format_source_basename(#anres{source_filenames=[S1 | _]}) ->
     gpb_codegen:format_fn(
       source_basename, fun() -> '"source.proto"' end,
       [replace_term('"source.proto"', Source)]).
+
+format_get_all_source_basenames(#anres{source_filenames=Ss}) ->
+    Sources = [filename:basename(S) || S <- Ss],
+    ["%% Retrieve all proto file names, also imported ones.\n"
+     "%% The order is top-down. The first element is always the main\n"
+     "%% source file. The files are returned with extension,\n",
+     "%% see get_all_proto_names/0 for a version that returns\n"
+     "%% the basenames sans extension\n",
+     gpb_codegen:format_fn(
+       get_all_source_basenames, fun() -> '["base-with-ext"]' end,
+       [replace_term('["base-with-ext"]', Sources)])].
+
+format_get_all_proto_names(#anres{source_filenames=Ss}) ->
+    Protos = [filename:basename(S, filename:extension(S)) || S <- Ss],
+    ["%% Retrieve all proto file names, also imported ones.\n"
+     "%% The order is top-down. The first element is always the main\n"
+     "%% source file. The files are returned sans .proto extension,\n"
+     "%% to make it easier to use them with the various get_xyz_containment\n"
+     "%% functions.\n",
+     gpb_codegen:format_fn(
+       get_all_proto_names, fun() -> '["base-sans-ext"]' end,
+       [replace_term('["base-sans-ext"]', Protos)])].
 
 % --- service introspection methods
 
@@ -682,6 +725,70 @@ format_enum_name_to_fqbin(EnumInfos) ->
             replace_tree('<<"maybe.package.EnumName">>',
                          atom_to_binstr_stree(FqEnumName))]
            || {FqEnumName, EnumName} <- EnumInfos])])].
+
+%% -- containment ----
+format_get_msg_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, MsgNames}
+               || {{msg_containment, Proto}, MsgNames} <- Defs],
+              AnRes,
+              []),
+    format_get_containment(get_msg_containment, Infos).
+
+format_get_pkg_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, PkgNames}
+               || {{pkg_containment, Proto}, PkgNames} <- Defs],
+              AnRes,
+              undefined),
+    format_get_containment(get_pkg_containment, Infos).
+
+format_get_service_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, ServiceNames}
+               || {{service_containment, Proto}, ServiceNames} <- Defs],
+              AnRes,
+              []),
+    format_get_containment(get_service_containment, Infos).
+
+format_get_rpc_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, RpcNames}
+               || {{rpc_containment, Proto}, RpcNames} <- Defs],
+              AnRes,
+              []),
+    format_get_containment(get_rpc_containment, Infos).
+
+format_get_enum_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, EnumNames}
+               || {{enum_containment, Proto}, EnumNames} <- Defs],
+              AnRes,
+              []),
+    format_get_containment(get_enum_containment, Infos).
+
+default_containment_infos(Infos, #anres{source_filenames=Sources}, Default) ->
+    [begin
+         Proto = filename:basename(S, filename:extension(S)),
+         case lists:keyfind(Proto, 1, Infos) of
+             {Proto, Value} -> {Proto, Value};
+             false          -> {Proto, Default}
+         end
+     end
+     || S <- Sources].
+
+format_get_containment(FnName, Infos) ->
+    [[?f("-spec ~p(_) -> no_return().\n", [FnName]) || Infos == []],
+     gpb_codegen:format_fn(
+       FnName,
+       fun('"base-sans-ext"') -> 'Elems';
+          (P) -> error({gpb_error, {badproto, P}})
+       end,
+       [repeat_clauses(
+          '"base-sans-ext"',
+          [[replace_term('"base-sans-ext"', Proto),
+            replace_term('Elems', Elems)]
+           || {Proto, Elems} <- Infos])])].
 
 %% ---
 atom_to_binstr_stree(A) ->

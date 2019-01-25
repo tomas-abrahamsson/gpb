@@ -826,15 +826,114 @@ enum_from_binary_test() ->
     <<"foo.bar.E1">> = M2:enum_name_to_fqbin('foo.bar.E1'),
     unload_code(M2).
 
-source_basename_test() ->
-    AProto = "message A { required uint32 g = 2; }",
-    M = compile_iolist(["import \"a.proto\";",
-                        "message M { required uint32 f = 1; }\n"],
-                       [{import_fetcher, fun(_F) -> {ok, AProto} end}]),
+sources_and_basenames_test() ->
+    M = compile_protos(
+          [{"<gen>.proto", ["import \"a.proto\";",
+                            "message M { required uint32 f = 1; }\n"]},
+           {"a.proto",     ["message A { required uint32 g = 2; }"]}],
+          []),
     Expected = atom_to_list(M) ++ ".proto",
+    ExpectedSansExt = atom_to_list(M),
     ?assert(Expected /= "a.proto"),
     Expected = M:source_basename(),
+    [Expected, "a.proto"] = M:get_all_source_basenames(),
+    [ExpectedSansExt, "a"] = M:get_all_proto_names(),
     unload_code(M).
+
+get_containments_test() ->
+    Protos = [{"<generated>.proto",
+               ["import \"a.proto\";",
+                "import \"b.proto\";",
+                "import \"c.proto\";",
+                "package top;",
+                "message M { required uint32 f = 1; }\n"]},
+              {"a.proto",
+               ["enum EA { ea1 = 1; ea2 = 2; };",
+                "package a;",
+                "message MA { uint32 f = 1; };",
+                "service SA { ",
+                "  rpc req_RA_1(MA) returns (MA);",
+                "  rpc req_RA_2(MA) returns (MA);",
+                "}"]},
+              {"b.proto",
+               ["enum EB { eb1 = 1; eb2 = 2; };",
+                "package b;",
+                "message MB { uint32 g = 1; };",
+                "service SB { ",
+                "  rpc req_RB_1(MB) returns (MB);",
+                "  rpc req_RB_2(MB) returns (MB);",
+                "}"]},
+              {"c.proto",
+               %% empty to test absence of things
+               ""}],
+    M1 = compile_protos(Protos, [use_packages]),
+    P1 = atom_to_list(M1),
+    M2 = compile_protos(Protos, []),
+    P2 = atom_to_list(M2),
+
+    %% With packages
+    ['top.M'] = M1:get_msg_containment(P1),
+    ['a.MA']  = M1:get_msg_containment("a"),
+    ['b.MB']  = M1:get_msg_containment("b"),
+    []        = M1:get_msg_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_msg_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_msg_containment(wrong_type)),
+    %% Without packages
+    ['M']    = M2:get_msg_containment(P2),
+    ['MA']   = M2:get_msg_containment("a"),
+    ['MB']   = M2:get_msg_containment("b"),
+    []       = M2:get_msg_containment("c"),
+
+    %% With packages
+    []       = M1:get_enum_containment(P1),
+    ['a.EA'] = M1:get_enum_containment("a"),
+    ['b.EB'] = M1:get_enum_containment("b"),
+    []       = M1:get_enum_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_enum_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_enum_containment(wrong_type)),
+    %% Without packages
+    []       = M2:get_enum_containment(P2),
+    ['EA']   = M2:get_enum_containment("a"),
+    ['EB']   = M2:get_enum_containment("b"),
+    []       = M2:get_enum_containment("c"),
+
+    top       = M1:get_pkg_containment(P1),
+    %% With packages
+    a         = M1:get_pkg_containment("a"),
+    b         = M1:get_pkg_containment("b"),
+    undefined = M1:get_pkg_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_pkg_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_pkg_containment(wrong_type)),
+    %% Without packages
+    undefined = M2:get_pkg_containment(P2),
+    undefined = M2:get_pkg_containment("a"),
+    undefined = M2:get_pkg_containment("b"),
+    undefined = M2:get_pkg_containment("c"),
+
+    []       = M1:get_service_containment(P1),
+    ['a.SA'] = M1:get_service_containment("a"),
+    ['b.SB'] = M1:get_service_containment("b"),
+    []       = M1:get_service_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_enum_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_enum_containment(wrong_type)),
+
+    %% With packages
+    []                  = M1:get_rpc_containment(P1),
+    [{'a.SA',req_RA_1},
+     {'a.SA',req_RA_2}] = M1:get_rpc_containment("a"),
+    [{'b.SB',req_RB_1},
+     {'b.SB',req_RB_2}] = M1:get_rpc_containment("b"),
+    []                  = M1:get_rpc_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_enum_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_enum_containment(wrong_type)),
+    %% Without packages
+    []                                = M2:get_rpc_containment(P2),
+    [{'SA',req_RA_1},{'SA',req_RA_2}] = M2:get_rpc_containment("a"),
+    [{'SB',req_RB_1},{'SB',req_RB_2}] = M2:get_rpc_containment("b"),
+    []                                = M2:get_rpc_containment("c"),
+
+    unload_code(M1),
+    unload_code(M2).
 
 %% --- decoder tests ---------------
 
