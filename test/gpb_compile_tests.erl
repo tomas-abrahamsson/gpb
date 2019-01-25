@@ -771,6 +771,28 @@ service_name_to_from_binary_with_renamings_test() ->
          M2:service_and_rpc_name_to_fqbins('foo_bar.my_service', getabc),
     unload_code(M2).
 
+enum_from_binary_test() ->
+    %% No enums are ok
+    Proto0 = ["message M { required uint32 f = 1; }"],
+    M0 = compile_iolist(Proto0, []),
+    ?assertError({gpb_error, _}, M0:fqbin_to_enum_name(<<"x">>)),
+    ?assertError({gpb_error, _}, M0:enum_name_to_fqbin(x)),
+    unload_code(M0),
+
+    Proto1 = ["package foo.bar;",
+              "enum E1 { a=1; b=2; }"],
+    %% Without the use_package option
+    M1 = compile_iolist(Proto1, []),
+    'E1' = M1:fqbin_to_enum_name(<<"foo.bar.E1">>),
+    <<"foo.bar.E1">> = M1:enum_name_to_fqbin('E1'),
+    unload_code(M1),
+
+    %% _With_ the use_package option
+    M2 = compile_iolist(Proto1, [use_packages]),
+    'foo.bar.E1' = M2:fqbin_to_enum_name(<<"foo.bar.E1">>),
+    <<"foo.bar.E1">> = M2:enum_name_to_fqbin('foo.bar.E1'),
+    unload_code(M2).
+
 source_basename_test() ->
     AProto = "message A { required uint32 g = 2; }",
     M = compile_iolist(["import \"a.proto\";",

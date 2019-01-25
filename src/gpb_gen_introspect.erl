@@ -48,6 +48,8 @@ format_exports(Defs, _AnRes, _Opts) ->
      ?f("-export([service_name_to_fqbin/1]).~n"),
      ?f("-export([fqbins_to_service_and_rpc_name/2]).~n"),
      ?f("-export([service_and_rpc_name_to_fqbins/2]).~n"),
+     ?f("-export([fqbin_to_enum_name/1]).~n"),
+     ?f("-export([enum_name_to_fqbin/1]).~n"),
      ?f("-export([get_package_name/0]).~n"),
      ?f("-export([uses_packages/0]).~n"),
      ?f("-export([source_basename/0]).~n")].
@@ -56,6 +58,7 @@ format_introspection(Defs, AnRes, Opts) ->
     Package = proplists:get_value(package, Defs, ''),
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
+    EnumInfos = compute_enum_infos(EnumDefs, Package, Opts),
     GroupDefs = [Item || {{group, _}, _}=Item <- Defs],
     ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
     ServiceInfos = compute_service_renaming_infos(ServiceDefs, Package,
@@ -111,6 +114,10 @@ format_introspection(Defs, AnRes, Opts) ->
      format_fqbins_to_service_and_rpc_name(ServiceInfos),
      ?f("~n"),
      format_service_and_rpc_name_to_fqbins(ServiceInfos),
+     ?f("~n"),
+     format_fqbin_to_enum_name(EnumInfos),
+     ?f("~n"),
+     format_enum_name_to_fqbin(EnumInfos),
      ?f("~n"),
      format_get_package_name(Defs),
      ?f("~n"),
@@ -580,6 +587,49 @@ format_service_and_rpc_name_to_fqbins(ServiceInfos) ->
                          atom_to_binstr_stree(OrigRpcName))]
            || {{FqOrigServiceName, ServiceName}, Rpcs} <- ServiceInfos,
               {OrigRpcName, RpcName} <- Rpcs])])].
+
+compute_enum_infos(EnumDefs, Package, Opts) ->
+    UsesPackages = proplists:get_bool(use_packages, Opts),
+    [begin
+         FqEnumName =
+             if UsesPackages ->
+                     EnumName;
+                not UsesPackages, Package /= '' ->
+                     list_to_atom(lists:concat([Package, ".", EnumName]));
+                not UsesPackages, Package == '' ->
+                     EnumName
+             end,
+         {FqEnumName, EnumName}
+     end
+     || {{enum,EnumName}, _Syms} <- EnumDefs].
+
+format_fqbin_to_enum_name(EnumInfos) ->
+    [["-spec enum_name_to_fqbin(_) -> no_return().\n" || EnumInfos == []],
+     gpb_codegen:format_fn(
+       fqbin_to_enum_name,
+       fun('<<"maybe.package.EnumName">>') -> 'EnumName';
+          (E) -> error({gpb_error, {badenum, E}})
+       end,
+       [repeat_clauses(
+          '<<"maybe.package.EnumName">>',
+          [[replace_tree('<<"maybe.package.EnumName">>',
+                         atom_to_binstr_stree(FqEnumName)),
+            replace_term('EnumName', EnumName)]
+           || {FqEnumName, EnumName} <- EnumInfos])])].
+
+format_enum_name_to_fqbin(EnumInfos) ->
+    [["-spec fqbin_to_enum_name(_) -> no_return().\n" || EnumInfos == []],
+     gpb_codegen:format_fn(
+       enum_name_to_fqbin,
+       fun('EnumName') -> '<<"maybe.package.EnumName">>';
+          (E) -> error({gpb_error, {badenum, E}})
+       end,
+       [repeat_clauses(
+          'EnumName',
+          [[replace_term('EnumName', EnumName),
+            replace_tree('<<"maybe.package.EnumName">>',
+                         atom_to_binstr_stree(FqEnumName))]
+           || {FqEnumName, EnumName} <- EnumInfos])])].
 
 %% ---
 atom_to_binstr_stree(A) ->
