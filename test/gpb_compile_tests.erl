@@ -26,6 +26,7 @@
 -export([test_nifs/1]). %% set whether to test nifs or not
 
 -export([compile_iolist/2]).
+-export([compile_protos/2]).
 -export([compile_to_string_get_hrl/2]).
 -export([compile_erl_iolist/1]).
 -export([unload_code/1]).
@@ -4030,25 +4031,42 @@ compile_defs(MsgDefs, ExtraOpts) ->
     load_code(Mod, Code),
     Mod.
 
+compile_protos([{_, Main} | MoreProtos], Opts) ->
+    compile_iolist(Main, [{test_extra_known_protos, MoreProtos} | Opts]).
+
 compile_iolist(IoList) ->
     compile_iolist(IoList, []).
 
 compile_iolist(IoList, ExtraOpts) ->
     compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, must_succeed).
 
-compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, OnFail) ->
+compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
+    {TestOpts, GpbCompileOpts} =
+        lists:partition(fun({test_extra_known_protos, _}) -> true;
+                           (_GpbCompileOpt) -> false
+                        end,
+                        ExtraOpts0),
+    ExtraProtos = proplists:get_value(test_extra_known_protos, TestOpts, []),
     Mod = find_unused_module(),
-    Contents = iolist_to_binary(IoList),
     ModProto = f("~s.proto", [Mod]),
-    ReadFile = fun(F) -> case filename:basename(F) of
-                             ModProto -> {ok, Contents};
-                             _ -> file:read_file(F)
-                         end
+    KnownProtos = [{ModProto, IoList} | ExtraProtos],
+    ReadFile = fun(F) ->
+                       B = filename:basename(F),
+                       case lists:keyfind(B, 1, KnownProtos) of
+                           {B, Contents} ->
+                               {ok, iolist_to_binary([Contents])};
+                           _ ->
+                               file:read_file(F)
+                       end
                end,
-    ReadFileInfo = fun(F) -> case filename:basename(F) of
-                                 ModProto -> {ok, #file_info{access=read}};
-                                 _ -> file:read_file_info(F)
-                             end
+    ReadFileInfo = fun(F) ->
+                           B = filename:basename(F),
+                           case lists:keyfind(B, 1, KnownProtos) of
+                               {B, _Contents} ->
+                                   {ok, #file_info{access=read}};
+                               _ ->
+                                   file:read_file_info(F)
+                           end
                    end,
 
     CompRes = gpb_compile:file(
@@ -4057,7 +4075,7 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, OnFail) ->
                             {read_file_info, ReadFileInfo},
                             {write_file, fun(_,_) -> ok end}]},
                  {i,"."},
-                 binary, return_errors, return_warnings | ExtraOpts]),
+                 binary, return_errors, return_warnings | GpbCompileOpts]),
     case OnFail of
         must_succeed ->
             %% Mod1 instead of Mod, since some options can change the
