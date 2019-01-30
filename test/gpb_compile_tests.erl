@@ -870,19 +870,27 @@ get_containments_test() ->
     P1 = atom_to_list(M1),
     M2 = compile_protos(Protos, []),
     P2 = atom_to_list(M2),
+    M1S = atom_to_list(M1),
+    M2S = atom_to_list(M2),
 
     %% With packages
     ['top.M'] = M1:get_msg_containment(P1),
-    ['a.MA']  = M1:get_msg_containment("a"),
-    ['b.MB']  = M1:get_msg_containment("b"),
-    []        = M1:get_msg_containment("c"),
+    ['a.MA'] = M1:get_msg_containment("a"),
+    ['b.MB'] = M1:get_msg_containment("b"),
+    []       = M1:get_msg_containment("c"),
+    M1S      = M1:get_proto_by_msg_name_as_fqbin(<<"top.M">>),
     ?assertError({gpb_error, _}, M1:get_msg_containment("x")),
     ?assertError({gpb_error, _}, M1:get_msg_containment(wrong_type)),
+    "a"      = M1:get_proto_by_msg_name_as_fqbin(<<"a.MA">>),
+    "b"      = M1:get_proto_by_msg_name_as_fqbin(<<"b.MB">>),
     %% Without packages
     ['M']    = M2:get_msg_containment(P2),
     ['MA']   = M2:get_msg_containment("a"),
     ['MB']   = M2:get_msg_containment("b"),
     []       = M2:get_msg_containment("c"),
+    M2S      = M2:get_proto_by_msg_name_as_fqbin(<<"top.M">>), % top=first pkg
+    "a"      = M2:get_proto_by_msg_name_as_fqbin(<<"top.MA">>),
+    "b"      = M2:get_proto_by_msg_name_as_fqbin(<<"top.MB">>),
 
     %% With packages
     []       = M1:get_enum_containment(P1),
@@ -891,11 +899,15 @@ get_containments_test() ->
     []       = M1:get_enum_containment("c"),
     ?assertError({gpb_error, _}, M1:get_enum_containment("x")),
     ?assertError({gpb_error, _}, M1:get_enum_containment(wrong_type)),
+    "a"      = M1:get_proto_by_enum_name_as_fqbin(<<"a.EA">>),
+    "b"      = M1:get_proto_by_enum_name_as_fqbin(<<"b.EB">>),
     %% Without packages
     []       = M2:get_enum_containment(P2),
     ['EA']   = M2:get_enum_containment("a"),
     ['EB']   = M2:get_enum_containment("b"),
     []       = M2:get_enum_containment("c"),
+    "a"      = M2:get_proto_by_enum_name_as_fqbin(<<"top.EA">>),
+    "b"      = M2:get_proto_by_enum_name_as_fqbin(<<"top.EB">>),
 
     top       = M1:get_pkg_containment(P1),
     %% With packages
@@ -904,11 +916,15 @@ get_containments_test() ->
     undefined = M1:get_pkg_containment("c"),
     ?assertError({gpb_error, _}, M1:get_pkg_containment("x")),
     ?assertError({gpb_error, _}, M1:get_pkg_containment(wrong_type)),
+    [M1S]     = M1:get_protos_by_pkg_name_as_fqbin(<<"top">>),
+    ["a"]     = M1:get_protos_by_pkg_name_as_fqbin(<<"a">>),
+    ["b"]     = M1:get_protos_by_pkg_name_as_fqbin(<<"b">>),
     %% Without packages
     undefined = M2:get_pkg_containment(P2),
     undefined = M2:get_pkg_containment("a"),
     undefined = M2:get_pkg_containment("b"),
     undefined = M2:get_pkg_containment("c"),
+    ?assertError({gpb_error, _}, M2:get_protos_by_pkg_name_as_fqbin(<<"top">>)),
 
     []       = M1:get_service_containment(P1),
     ['a.SA'] = M1:get_service_containment("a"),
@@ -916,6 +932,10 @@ get_containments_test() ->
     []       = M1:get_service_containment("c"),
     ?assertError({gpb_error, _}, M1:get_enum_containment("x")),
     ?assertError({gpb_error, _}, M1:get_enum_containment(wrong_type)),
+    "a"      = M1:get_proto_by_service_name_as_fqbin(<<"a.SA">>),
+    "b"      = M1:get_proto_by_service_name_as_fqbin(<<"b.SB">>),
+    "a"      = M2:get_proto_by_service_name_as_fqbin(<<"top.SA">>),
+    "b"      = M2:get_proto_by_service_name_as_fqbin(<<"top.SB">>),
 
     %% With packages
     []                  = M1:get_rpc_containment(P1),

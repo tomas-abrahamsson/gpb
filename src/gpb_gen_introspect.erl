@@ -61,7 +61,11 @@ format_exports(Defs, _AnRes, _Opts) ->
      ?f("-export([get_pkg_containment/1]).~n"),
      ?f("-export([get_service_containment/1]).~n"),
      ?f("-export([get_rpc_containment/1]).~n"),
-     ?f("-export([get_enum_containment/1]).~n")].
+     ?f("-export([get_enum_containment/1]).~n"),
+     ?f("-export([get_proto_by_msg_name_as_fqbin/1]).~n"),
+     ?f("-export([get_proto_by_service_name_as_fqbin/1]).~n"),
+     ?f("-export([get_proto_by_enum_name_as_fqbin/1]).~n"),
+     ?f("-export([get_protos_by_pkg_name_as_fqbin/1]).~n")].
 
 format_introspection(Defs, AnRes, Opts) ->
     Package = proplists:get_value(package, Defs, ''),
@@ -152,7 +156,15 @@ format_introspection(Defs, AnRes, Opts) ->
      format_get_rpc_containment(Defs, AnRes),
      ?f("~n"),
      format_get_enum_containment(Defs, AnRes),
-     ?f("~n")].
+     ?f("~n"),
+     format_get_proto_by_msg_name_as_fqbin(MsgInfos, Defs),
+     ?f("~n"),
+     format_get_proto_by_service_name_as_fqbin(ServiceInfos, Defs),
+     ?f("~n"),
+     format_get_proto_by_enum_name_as_fqbin(EnumInfos, Defs),
+     ?f("~n"),
+     format_get_protos_by_pkg_name_as_fqbin(Defs)].
+
 
 msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
@@ -737,8 +749,8 @@ format_get_msg_containment(Defs, AnRes) ->
 
 format_get_pkg_containment(Defs, AnRes) ->
     Infos = default_containment_infos(
-              [{Proto, PkgNames}
-               || {{pkg_containment, Proto}, PkgNames} <- Defs],
+              [{Proto, PkgName}
+               || {{pkg_containment, Proto}, PkgName} <- Defs],
               AnRes,
               undefined),
     format_get_containment(get_pkg_containment, Infos).
@@ -789,6 +801,70 @@ format_get_containment(FnName, Infos) ->
           [[replace_term('"base-sans-ext"', Proto),
             replace_term('Elems', Elems)]
            || {Proto, Elems} <- Infos])])].
+
+format_get_proto_by_msg_name_as_fqbin(MsgInfos, Defs) ->
+    FqbinToProto =
+        compute_proto_by_fqbin(
+          MsgInfos,
+          [{Proto, Names} || {{msg_containment, Proto}, Names} <- Defs]),
+    format_get_proto_aux(get_proto_by_msg_name_as_fqbin, FqbinToProto,
+                        badmsg).
+
+format_get_proto_by_service_name_as_fqbin(ServiceInfos, Defs) ->
+    FqbinToProto =
+        compute_proto_by_fqbin(
+          [{FqName, Name} || {{FqName, Name}, _Rpcs} <- ServiceInfos],
+          [{Proto, Names} || {{service_containment, Proto}, Names} <- Defs]),
+    format_get_proto_aux(get_proto_by_service_name_as_fqbin, FqbinToProto,
+                         badservice).
+
+format_get_proto_by_enum_name_as_fqbin(EnumInfos, Defs) ->
+    FqbinToProto =
+        compute_proto_by_fqbin(
+          EnumInfos,
+          [{Proto, Names} || {{enum_containment, Proto}, Names} <- Defs]),
+    format_get_proto_aux(get_proto_by_enum_name_as_fqbin, FqbinToProto,
+                         badenum).
+
+format_get_protos_by_pkg_name_as_fqbin(Defs) ->
+    FqbinToProtos1 =
+        dict:to_list(
+          lists:foldl(
+            fun({PkgName, Proto}, D) -> dict:append(PkgName, Proto, D) end,
+            dict:new(),
+            [{PkgName, Proto} || {{pkg_containment, Proto}, PkgName} <- Defs])),
+    FqbinToProtos2 = [{Pkg, lists:usort(Protos)}
+                      || {Pkg, Protos} <- FqbinToProtos1],
+    format_get_proto_aux(get_protos_by_pkg_name_as_fqbin, FqbinToProtos2,
+                         badpkg).
+
+format_get_proto_aux(FnName, Infos, BadWhat) ->
+    [[?f("-spec ~p(_) -> no_return().\n", [FnName]) || Infos == []],
+     gpb_codegen:format_fn(
+       FnName,
+       fun('<<"maybe.package.MsgName">>') -> '"Basename-sans-ext"';
+          (E) -> error({gpb_error, {'Bad<What>', E}})
+       end,
+       [repeat_clauses(
+          '<<"maybe.package.MsgName">>',
+          [[replace_tree('<<"maybe.package.MsgName">>',
+                         atom_to_binstr_stree(Fqbin)),
+            replace_term('"Basename-sans-ext"', Proto)]
+           || {Fqbin, Proto} <- Infos]),
+        replace_term('Bad<What>', BadWhat)])].
+
+compute_proto_by_fqbin(Infos, Containment) ->
+    FqbinByName = dict:from_list([{Name, FqBin} || {FqBin, Name} <- Infos]),
+    dict:to_list(
+      lists:foldl(
+        fun({Proto, Names}, D) ->
+                lists:foldl(
+                  fun(Fqbin, D2) -> dict:store(Fqbin, Proto, D2) end,
+                  D,
+                  [dict:fetch(Name, FqbinByName) || Name <- Names])
+        end,
+        dict:new(),
+        Containment)).
 
 %% ---
 atom_to_binstr_stree(A) ->
