@@ -145,7 +145,7 @@ format_introspection(Defs, AnRes, Opts) ->
      ?f("~n"),
      format_get_all_source_basenames(AnRes),
      ?f("~n"),
-     format_get_all_proto_names(AnRes),
+     format_get_all_proto_names(Defs),
      ?f("~n"),
      format_get_msg_containment(Defs, AnRes),
      ?f("~n"),
@@ -363,8 +363,8 @@ format_get_all_source_basenames(#anres{source_filenames=Ss}) ->
        get_all_source_basenames, fun() -> '["base-with-ext"]' end,
        [replace_term('["base-with-ext"]', Sources)])].
 
-format_get_all_proto_names(#anres{source_filenames=Ss}) ->
-    Protos = [gpb_lib:drop_filename_ext(filename:basename(S)) || S <- Ss],
+format_get_all_proto_names(Defs) ->
+    Protos = [PNameSansExt || {file, {PNameSansExt, _PName}} <- Defs],
     ["%% Retrieve all proto file names, also imported ones.\n"
      "%% The order is top-down. The first element is always the main\n"
      "%% source file. The files are returned sans .proto extension,\n"

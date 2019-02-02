@@ -441,9 +441,7 @@ post_process_one_file(FileName, Defs, Opts) ->
                       join_any_msg_options(
                         convert_default_values(
                           flatten_qualify_defnames(Defs, Package)))),
-            FileExt = filename:extension(FileName),
-            ProtoName = filename:basename(FileName, FileExt),
-            MetaInfo = mk_meta_info(ProtoName, Defs1, Opts),
+            MetaInfo = mk_meta_info(FileName, Defs1, Opts),
             {ok, [{file, {FileName, FileName}} | MetaInfo] ++ Defs1};
         {error, Reasons} ->
             {error, Reasons}
@@ -484,17 +482,18 @@ shorten_file_paths(Defs) ->
                     gpb_lib:basenameify_ish(Paths)
             end,
     Mapping = lists:zip(Paths, Bases),
-    lists:map(
-      fun({file, {P, P}}) ->
-              {P, BaseishSansExt} = lists:keyfind(P, 1, Mapping),
-              Baseish = gpb_lib:copy_filename_ext(BaseishSansExt, P),
-              {file, {BaseishSansExt, Baseish}};
-         ({file, _}=Def) ->
-              error({unexpected_file_def, Def});
-         (Other) ->
-              Other
-      end,
-      Defs).
+    Defs2 = lists:map(
+              fun({file, {P, P}}) ->
+                      {P, BaseishSansExt} = lists:keyfind(P, 1, Mapping),
+                      Baseish = gpb_lib:copy_filename_ext(BaseishSansExt, P),
+                      {file, {BaseishSansExt, Baseish}};
+                 ({file, _}=Def) ->
+                      error({unexpected_file_def, Def});
+                 (Other) ->
+                      Other
+              end,
+              Defs),
+    shorten_meta_info(Mapping, Defs2).
 
 %% Find any package specifier. At most one such package specifier
 %% may exist, and it can exist anywhere (top-level) in the proto file,
@@ -1249,19 +1248,19 @@ opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
 fetch_imports(Defs) ->
     [Path || {import,Path} <- Defs].
 
-mk_meta_info(ProtoName, Defs, Opts) ->
-    meta_msg_containment(ProtoName, Defs)
-        ++ meta_enum_containment(ProtoName, Defs)
-        ++ meta_pkg_containment(ProtoName, Defs, Opts)
-        ++ meta_service_and_rpc_containment(ProtoName, Defs).
+mk_meta_info(FileName, Defs, Opts) ->
+    meta_msg_containment(FileName, Defs)
+        ++ meta_enum_containment(FileName, Defs)
+        ++ meta_pkg_containment(FileName, Defs, Opts)
+        ++ meta_service_and_rpc_containment(FileName, Defs).
 
-meta_msg_containment(ProtoName, Defs) ->
-    [{{msg_containment, ProtoName}, lists:sort(gpb_lib:msg_names(Defs))}].
+meta_msg_containment(FileName, Defs) ->
+    [{{msg_containment, FileName}, lists:sort(gpb_lib:msg_names(Defs))}].
 
-meta_enum_containment(ProtoName, Defs) ->
-    [{{enum_containment, ProtoName}, lists:sort(gpb_lib:enum_names(Defs))}].
+meta_enum_containment(FileName, Defs) ->
+    [{{enum_containment, FileName}, lists:sort(gpb_lib:enum_names(Defs))}].
 
-meta_pkg_containment(ProtoName, Defs, Opts) ->
+meta_pkg_containment(FileName, Defs, Opts) ->
     case proplists:get_value(package, Defs, '$undefined') of
         '$undefined' ->
             [];
@@ -1270,11 +1269,11 @@ meta_pkg_containment(ProtoName, Defs, Opts) ->
                 false ->
                     [];
                 true ->
-                    [{{pkg_containment,ProtoName}, Pkg}]
+                    [{{pkg_containment,FileName}, Pkg}]
             end
     end.
 
-meta_service_and_rpc_containment(ProtoName, Defs) ->
+meta_service_and_rpc_containment(FileName, Defs) ->
     Services = [{Name,RPCs} || {{service,Name}, RPCs} <- Defs],
     if Services == [] ->
             [];
@@ -1283,6 +1282,28 @@ meta_service_and_rpc_containment(ProtoName, Defs) ->
             RpcNames = lists:append([[{SName, RName}
                                       || {RName, _In,_Out, _Opts} <- RPCs]
                                      || {SName, RPCs} <- Services]),
-            [{{service_containment, ProtoName}, lists:sort(ServiceNames)},
-             {{rpc_containment, ProtoName}, RpcNames}]
+            [{{service_containment, FileName}, lists:sort(ServiceNames)},
+             {{rpc_containment, FileName}, RpcNames}]
     end.
+
+shorten_meta_info(Mapping, Defs) ->
+    lists:map(
+      fun({{msg_containment, FileName}, MsgNames}) ->
+              {FileName, Baseish} = lists:keyfind(FileName, 1, Mapping),
+              {{msg_containment, Baseish}, MsgNames};
+         ({{enum_containment, FileName}, EnumNames}) ->
+              {FileName, Baseish} = lists:keyfind(FileName, 1, Mapping),
+              {{enum_containment, Baseish}, EnumNames};
+         ({{service_containment, FileName}, Services}) ->
+              {FileName, Baseish} = lists:keyfind(FileName, 1, Mapping),
+              {{service_containment, Baseish}, Services};
+         ({{rpc_containment, FileName}, Rpcs}) ->
+              {FileName, Baseish} = lists:keyfind(FileName, 1, Mapping),
+              {{rpc_containment, Baseish}, Rpcs};
+         ({{pkg_containment, FileName}, PkgName}) ->
+              {FileName, Baseish} = lists:keyfind(FileName, 1, Mapping),
+              {{pkg_containment, Baseish}, PkgName};
+         (Other) ->
+              Other
+      end,
+      Defs).
