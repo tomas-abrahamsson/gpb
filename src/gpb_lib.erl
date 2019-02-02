@@ -115,6 +115,8 @@
 -export([nowarn_dialyzer_attr/3]).
 
 -export([drop_filename_ext/1]).
+-export([copy_filename_ext/2]).
+-export([basenameify_ish/1]).
 
 -export([comma_join/1]).
 -export([nl_join/1]).
@@ -781,6 +783,71 @@ drop_filename_ext(Path) ->
     [B | RRest] = lists:reverse(filename:split(Path)),
     BNoExt = filename:basename(B, filename:extension(B)),
     filename:join(lists:reverse(RRest, [BNoExt])).
+
+copy_filename_ext(FilenameSansExt, FilenameToCopyFrom) ->
+    FilenameSansExt ++ filename:extension(FilenameToCopyFrom).
+
+%% @doc Compute filenames (paths) to basenames
+%% but include last part(s) of the directories as necessary
+%% to make the basenames unique.
+%%
+%% Example:
+%% ```
+%% basenameify_ish(["/home/u/a/b/c/f.proto",
+%%                  "/home/u/a/d/c/f.proto",
+%%                  "/home/u/x/y/z/f.proto",
+%%                  "/home/u/x/y/z/g.proto"]) ->
+%%   ["b/c/f.proto", "d/c/f.proto", "z/f.proto", "g.proto"]
+%% '''
+%% The order of the returned paths is the same as the order of the input
+%% paths, so to create a mapping, one can use for example
+%% `lists:zip(Paths, basenameify_ish(Paths))'
+basenameify_ish(Paths) ->
+    %% Given the example above, split into:
+    %% [{"f.proto", ["c", "b", "a", "u", "home"]},
+    %%  {"f.proto", ["c", "d", "a", "u", "home"]},
+    %%  {"f.proto", ["z", "y", "x", "u", "home"]},
+    %%  {"g.proto", ["z", "y", "x", "u", "home"]}]
+    %% Then for all dups in the first element of these 2-tuples,
+    %% "f.proto" in this case, prepend one more component from the
+    %% RPath (the 2nd elem of the 2-tuples), then iterate until all first
+    %% elements are unique.
+
+    case find_dup_rpath_comps(Paths, []) of
+        []   -> ok;
+        Dups -> error({gpb_error, {multiply_defined_file_or_files, Dups}})
+    end,
+
+    RPathComps = [begin
+                      [Basename | RPath] = lists:reverse(filename:split(P)),
+                      {[Basename], RPath}
+                  end
+                  || P <- Paths],
+    include_dir_comps_until_unique(RPathComps).
+
+include_dir_comps_until_unique(RPathComps) ->
+    case find_dup_rpath_comps([B || {B, _} <- RPathComps], []) of
+        [] ->
+            [filename:join(Baseish) || {Baseish, _} <- RPathComps];
+        Dups ->
+            %% Include one dir component for each elem in dup
+            include_dir_comps_until_unique(
+              [case {lists:member(Baseish, Dups), RPath} of
+                   {true, [Comp | RestRPath]} ->
+                       {[Comp |  Baseish], RestRPath};
+                   {false, _} ->
+                       Item
+               end
+               || {Baseish, RPath}=Item <- RPathComps])
+    end.
+
+find_dup_rpath_comps([X | Rest], Acc) ->
+    case lists:member(X, Rest) of
+        true  -> find_dup_rpath_comps([Y || Y <- Rest, Y =/= X], [X | Acc]);
+        false -> find_dup_rpath_comps(Rest, Acc)
+    end;
+find_dup_rpath_comps([], Acc) ->
+    Acc.
 
 %% Misc ---
 

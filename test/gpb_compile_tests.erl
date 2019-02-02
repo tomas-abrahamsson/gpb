@@ -209,7 +209,8 @@ parses_file_to_binary_test() ->
 
 parses_file_to_msg_defs_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
-    {ok, [{{msg_containment,"X"},['Msg']},
+    {ok, [{file, _},
+          {{msg_containment,"X"},['Msg']},
           {{enum_containment, _}, _},
           {{msg,'Msg'},[#?gpb_field{}]}]=MsgDefs} =
         gpb_compile:file(

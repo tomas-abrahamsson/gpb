@@ -408,7 +408,8 @@ Erlang code.
                {{service_containment, ProtoName::string()},
                 [ServiceName::atom()]} |
                {{rpc_containment, ProtoName::string()}, [RpcName::atom()]} |
-               {{enum_containment, ProtoName::string()}, [EnumName::atom()]}.
+               {{enum_containment, ProtoName::string()}, [EnumName::atom()]} |
+               {file, {BaseSansExt::string(), Base::string()}}.
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
@@ -443,7 +444,7 @@ post_process_one_file(FileName, Defs, Opts) ->
             FileExt = filename:extension(FileName),
             ProtoName = filename:basename(FileName, FileExt),
             MetaInfo = mk_meta_info(ProtoName, Defs1, Opts),
-            {ok, MetaInfo ++ Defs1};
+            {ok, [{file, {FileName, FileName}} | MetaInfo] ++ Defs1};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -454,8 +455,9 @@ post_process_all_files(Defs, _Opts) ->
             {ok, normalize_msg_field_options(
                    handle_proto_syntax_version_all_files(
                      enumerate_msg_fields(
-                       reformat_names(
-                         extend_msgs(Defs2)))))};
+                       shorten_file_paths(
+                         reformat_names(
+                           extend_msgs(Defs2))))))};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -473,6 +475,26 @@ resolve_names(Defs) ->
         {error, Reasons} ->
             {error, Reasons}
     end.
+
+shorten_file_paths(Defs) ->
+    Paths = [Path || {file, {Path, Path}} <- Defs],
+    PathsNoExts = [gpb_lib:drop_filename_ext(P) || P <- Paths],
+    Bases = try gpb_lib:basenameify_ish(PathsNoExts)
+            catch error:{gpb_error, {multiply_defined_file_or_files, _}} ->
+                    gpb_lib:basenameify_ish(Paths)
+            end,
+    Mapping = lists:zip(Paths, Bases),
+    lists:map(
+      fun({file, {P, P}}) ->
+              {P, BaseishSansExt} = lists:keyfind(P, 1, Mapping),
+              Baseish = gpb_lib:copy_filename_ext(BaseishSansExt, P),
+              {file, {BaseishSansExt, Baseish}};
+         ({file, _}=Def) ->
+              error({unexpected_file_def, Def});
+         (Other) ->
+              Other
+      end,
+      Defs).
 
 %% Find any package specifier. At most one such package specifier
 %% may exist, and it can exist anywhere (top-level) in the proto file,
