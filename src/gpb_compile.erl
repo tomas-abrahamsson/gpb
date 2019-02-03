@@ -36,7 +36,7 @@
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [replace_term/2]).
+-import(gpb_lib, [replace_term/2, repeat_clauses/2]).
 
 %% -- Types -----------------------------------------------------
 
@@ -2099,7 +2099,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        gpb_gen_mergers:format_exports(Defs, Opts),
        gpb_gen_verifiers:format_exports(Defs, Opts),
        gpb_gen_introspect:format_exports(Defs, AnRes, Opts),
-       [?f("-export([descriptor/0]).~n")
+       [?f("-export([descriptor/0, descriptor/1]).~n")
         || gpb_lib:get_gen_descriptor_by_opts(Opts)],
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        "\n",
@@ -2233,18 +2233,34 @@ get_erlc_compile_options_str(Opts) ->
 possibly_format_descriptor(Defs, Opts) ->
     case gpb_lib:get_gen_descriptor_by_opts(Opts) of
         true ->
-            try gpb_compile_descr:encode_defs_to_descriptor(Defs) of
-                Bin when is_binary(Bin) ->
-                    gpb_codegen:format_fn(
-                      descriptor, fun() -> 'bin' end,
-                      [replace_term(bin, Bin)])
+            try gpb_compile_descr:encode_defs_to_descriptors(Defs) of
+                {Bin, PBins} when is_binary(Bin), is_list(PBins) ->
+                    [gpb_codegen:format_fn(
+                       descriptor, fun() -> 'bin' end,
+                       [replace_term(bin, Bin)]),
+                     ["-spec descriptor(_) -> no_return().\n" || PBins == []],
+                     gpb_codegen:format_fn(
+                       descriptor,
+                       fun('"base"') -> '<<PBin>>';
+                          (X) -> error({gpb_error, {badname, X}})
+                       end,
+                       [repeat_clauses(
+                          '"base"',
+                          [[replace_term('"base"', ProtoBase),
+                            replace_term('<<PBin>>', PBin)]
+                           || {ProtoBase, PBin} <- PBins])])]
             catch error:undef ->
                     ST = erlang:get_stacktrace(),
                     case {element(1,hd(ST)), element(2,hd(ST))} of
-                        {gpb_compile_descr, encode_defs_to_descriptor} ->
-                            gpb_codegen:format_fn(
-                              descriptor,
-                              fun() -> erlang:error(descr_not_avail) end);
+                        {gpb_compile_descr, encode_defs_to_descriptors} ->
+                            ["-spec descriptor() -> no_return().\n",
+                             gpb_codegen:format_fn(
+                               descriptor,
+                               fun() -> erlang:error(descr_not_avail) end),
+                             "-spec descriptor(_) -> no_return().\n",
+                             gpb_codegen:format_fn(
+                               descriptor,
+                               fun(_) -> erlang:error(descr_not_avail) end)];
                         _ ->
                             %% other error
                             erlang:raise(error, undef, ST)

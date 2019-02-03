@@ -19,27 +19,53 @@
 
 -module(gpb_compile_descr).
 
--export([defs_to_descriptor/1, defs_to_descriptor/2]).
--export([encode_defs_to_descriptor/1, encode_defs_to_descriptor/2]).
+-export([encode_defs_to_descriptors/1, encode_defs_to_descriptors/2]).
 
 -include("gpb_descriptor.hrl").
 -include("../include/gpb.hrl").
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
-encode_defs_to_descriptor(Defs) ->
-    encode_defs_to_descriptor(undefined, Defs).
+encode_defs_to_descriptors(Defs) ->
+    encode_defs_to_descriptors(undefined, Defs).
 
-encode_defs_to_descriptor(Name, Defs) ->
-    gpb_descriptor:encode_msg(defs_to_descriptor(Name, Defs), [verify]).
+encode_defs_to_descriptors(DefaultName, Defs) ->
+    %% Encode the list of files as a #'FileDescriptorSet'{}.
+    %% Encode also for each constituent proto, ie the top level and each
+    %% imported proto separately, as #'FileDescriptorProto'{}.
+    PDefses = partition_protos(Defs, DefaultName, [], []),
+    {FdSet, Infos} = partitioned_defs_to_file_descr_set(PDefses),
+    Bin = gpb_descriptor:encode_msg(FdSet, [verify]),
+    PBins = [{FileNameSansExt, gpb_descriptor:encode_msg(FdProto, [verify])}
+             || {FileNameSansExt, FdProto} <- Infos],
+    {Bin, PBins}.
 
-defs_to_descriptor(Defs) ->
-    defs_to_descriptor(undefined, Defs).
+partition_protos([{file, _Proto}=Item | Rest], Name, Curr, All) ->
+    partition_protos(Rest, Name, [Item], add_to_all(Curr, All));
+partition_protos([Item | Rest], Name, Curr, All) ->
+    partition_protos(Rest, Name, [Item | Curr], All);
+partition_protos([], Name, Curr, All) ->
+    All2 = lists:reverse(add_to_all(Curr, All)),
+    [case Defs of
+         [{file, Names} | _] ->
+             {Names, Defs};
+         _Other ->
+             %% file missing, eg compiled from gpb_compile:proto_defs/2,3
+             {Name, Defs}
+     end
+     || Defs <- All2].
 
-defs_to_descriptor(Name, Defs) ->
-    #'FileDescriptorSet'{file = [defs_to_descr_2(Name, Defs)]}.
+add_to_all([], All)   -> All;
+add_to_all(Curr, All) -> [lists:reverse(Curr) | All].
 
-defs_to_descr_2(Name, Defs) ->
+partitioned_defs_to_file_descr_set(Defses) ->
+    Infos = [{SansExt, defs_to_file_descr_proto(Name, Defs)}
+             || {{SansExt, Name}, Defs} <- Defses],
+    FileDescrProtos = [FdProto || {_SansExt, FdProto} <- Infos],
+    Set = #'FileDescriptorSet'{file = FileDescrProtos},
+    {Set, Infos}.
+
+defs_to_file_descr_proto(Name, Defs) ->
     {TypesToPseudoMsgNames, PseudoMsgs} = compute_map_field_pseudo_msgs(Defs),
     #'FileDescriptorProto'{
        name             = Name,      %% string() | undefined
