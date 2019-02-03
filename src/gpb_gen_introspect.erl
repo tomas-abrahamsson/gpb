@@ -364,7 +364,7 @@ format_get_all_source_basenames(#anres{source_filenames=Ss}) ->
        [replace_term('["base-with-ext"]', Sources)])].
 
 format_get_all_proto_names(#anres{source_filenames=Ss}) ->
-    Protos = [filename:basename(S, filename:extension(S)) || S <- Ss],
+    Protos = [gpb_lib:drop_filename_ext(filename:basename(S)) || S <- Ss],
     ["%% Retrieve all proto file names, also imported ones.\n"
      "%% The order is top-down. The first element is always the main\n"
      "%% source file. The files are returned sans .proto extension,\n"
@@ -781,7 +781,7 @@ format_get_enum_containment(Defs, AnRes) ->
 
 default_containment_infos(Infos, #anres{source_filenames=Sources}, Default) ->
     [begin
-         Proto = filename:basename(S, filename:extension(S)),
+         Proto = gpb_lib:drop_filename_ext(filename:basename(S)),
          case lists:keyfind(Proto, 1, Infos) of
              {Proto, Value} -> {Proto, Value};
              false          -> {Proto, Default}

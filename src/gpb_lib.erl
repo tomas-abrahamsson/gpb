@@ -114,6 +114,8 @@
 -export([nowarn_unused_function/2]).
 -export([nowarn_dialyzer_attr/3]).
 
+-export([drop_filename_ext/1]).
+
 -export([comma_join/1]).
 -export([nl_join/1]).
 -export([or_join/1]).
@@ -771,6 +773,14 @@ do_exprs(F, InitExpr, Seq) ->
           {InitExpr, [], 1},
           Seq),
     lists:reverse([LastExpr | ExprsReversed]).
+
+
+%% File name related ---
+
+drop_filename_ext(Path) ->
+    [B | RRest] = lists:reverse(filename:split(Path)),
+    BNoExt = filename:basename(B, filename:extension(B)),
+    filename:join(lists:reverse(RRest, [BNoExt])).
 
 %% Misc ---
 
