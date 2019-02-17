@@ -407,7 +407,8 @@ Erlang code.
                {{pkg_containment, ProtoName::string()}, PkgName::atom()} |
                {{service_containment, ProtoName::string()},
                 [ServiceName::atom()]} |
-               {{rpc_containment, ProtoName::string()}, [RpcName::atom()]}.
+               {{rpc_containment, ProtoName::string()},
+                [{ServiceName::atom(), RpcName::atom()}]}.
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
