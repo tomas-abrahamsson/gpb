@@ -40,9 +40,114 @@ individual_descriptor_test() ->
                       "message A { optional uint32 g = 1; }"]}],
                    []).
 
+refs_have_pkg_name_test() -> % only refs have package, names do not
+    ProtosAsTxts1 =
+        [{"main.proto",
+          ["syntax=\"proto2\";",
+           "import \"aux.proto\";",
+           "package top.p1;",
+           "message M { optional S f1 = 1;",
+           "            optional E f2 = 2;",
+           "            oneof u { S f3 = 3; };",
+           "            map<uint32,S> f4 = 4;",
+           "            map<uint64,E> f5 = 5; };",
+           "message S { optional uint32 f1 = 1; };",
+           "enum E { a=0;};",
+           "service SomeService {",
+           "  rpc rpc1 (M) returns (S);",
+           "}"]},
+         {"aux.proto",
+          ["syntax=\"proto2\";",
+           "package aux.p2;",
+           "message A { optional B g = 1; }",
+           "message B { optional uint32 h = 1; }"]}],
+
+    %% Without the use_packges option
+    {_,
+     [{"main",
+       #'FileDescriptorProto'{
+          name="main.proto",
+          package="top.p1",
+          message_type =
+              [#'DescriptorProto'{
+                  name="M", % name, not a ref
+                  field=[#'FieldDescriptorProto'{type_name=".top.p1.S"},
+                         #'FieldDescriptorProto'{type_name=".top.p1.E"},
+                         #'FieldDescriptorProto'{type_name=".top.p1.S"},
+                         #'FieldDescriptorProto'{type_name=MapField1Ref},
+                         #'FieldDescriptorProto'{type_name=MapField2Ref}]},
+               #'DescriptorProto'{name="S"},
+               #'DescriptorProto'{
+                  name=MapField1Name,
+                  field=[#'FieldDescriptorProto'{type = 'TYPE_UINT32'},
+                         #'FieldDescriptorProto'{type_name = ".top.p1.S"}]},
+               #'DescriptorProto'{
+                  name=MapField2Name,
+                  field=[#'FieldDescriptorProto'{type = 'TYPE_UINT64'},
+                         #'FieldDescriptorProto'{type_name = ".top.p1.E"}]}],
+          enum_type = [#'EnumDescriptorProto'{name="E"}],
+          service =
+              [#'ServiceDescriptorProto'{
+                  name="SomeService",
+                  method = [#'MethodDescriptorProto'{
+                               name = "rpc1",
+                               input_type=".top.p1.M",
+                               output_type=".top.p1.S"}]}]}},
+      {"aux",
+       #'FileDescriptorProto'{}}]} =
+        Descriptors1 =
+        compile_descriptors(ProtosAsTxts1, []),
+    ?assertEqual(MapField1Ref, ".top.p1." ++ MapField1Name),
+    ?assertEqual(MapField2Ref, ".top.p1." ++ MapField2Name),
+
+    %% With the use_packages option
+    Descriptors1 = compile_descriptors(ProtosAsTxts1, [use_packages]),
+
+    %% A proto with no package definition
+    ProtosAsTxts2 =
+        [{"main.proto",
+          ["syntax=\"proto2\";",
+           "message M { optional S f1 = 1;",
+           "            optional E f2 = 2;",
+           "            oneof u { S f3 = 3; }; };",
+           "message S { optional uint32 f1 = 1; };",
+           "enum E { a=0; };",
+           "service SomeService {",
+           "  rpc rpc1 (M) returns (S);",
+           "}"]}],
+    %% Without the use_packges option
+    {_,
+     [{"main",
+       #'FileDescriptorProto'{
+          name="main.proto",
+          package=undefined,
+          message_type =
+              [#'DescriptorProto'{
+                  name="M", % name, not a ref
+                  field=[#'FieldDescriptorProto'{type_name=".S"},
+                         #'FieldDescriptorProto'{type_name=".E"},
+                         #'FieldDescriptorProto'{type_name=".S"}]},
+               #'DescriptorProto'{name="S"}],
+          enum_type = [#'EnumDescriptorProto'{name="E"}],
+          service =
+              [#'ServiceDescriptorProto'{
+                  name="SomeService",
+                  method = [#'MethodDescriptorProto'{
+                               name = "rpc1",
+                               input_type=".M",
+                               output_type=".S"}]}]}}]} =
+        Descriptors2 =
+        compile_descriptors(ProtosAsTxts2, []),
+    %% With the use_packages option
+    Descriptors2 = compile_descriptors(ProtosAsTxts2, [use_packages]),
+    ok.
+
+%% --helpers----------
+
 compile_descriptors(IoLists, GpbCompileOpts) ->
     {ok, Defs, []=_Warns} = compile_files_as_iolists(IoLists, GpbCompileOpts),
-    {Bin, PBins} = gpb_compile_descr:encode_defs_to_descriptors(Defs),
+    {Bin, PBins} = gpb_compile_descr:encode_defs_to_descriptors(Defs,
+                                                                GpbCompileOpts),
     {gpb_descriptor:decode_msg(Bin, 'FileDescriptorSet'),
      [{ProtoName,gpb_descriptor:decode_msg(ProtoBin, 'FileDescriptorProto')}
       || {ProtoName, ProtoBin} <- PBins]}.

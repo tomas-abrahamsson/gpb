@@ -2233,7 +2233,7 @@ get_erlc_compile_options_str(Opts) ->
 possibly_format_descriptor(Defs, Opts) ->
     case gpb_lib:get_gen_descriptor_by_opts(Opts) of
         true ->
-            try gpb_compile_descr:encode_defs_to_descriptors(Defs) of
+            try gpb_compile_descr:encode_defs_to_descriptors(Defs, Opts) of
                 {Bin, PBins} when is_binary(Bin), is_list(PBins) ->
                     [gpb_codegen:format_fn(
                        descriptor, fun() -> 'bin' end,

@@ -19,22 +19,22 @@
 
 -module(gpb_compile_descr).
 
--export([encode_defs_to_descriptors/1, encode_defs_to_descriptors/2]).
+-export([encode_defs_to_descriptors/2, encode_defs_to_descriptors/3]).
 
 -include("gpb_descriptor.hrl").
 -include("../include/gpb.hrl").
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
-encode_defs_to_descriptors(Defs) ->
-    encode_defs_to_descriptors(undefined, Defs).
+encode_defs_to_descriptors(Defs, Opts) ->
+    encode_defs_to_descriptors(undefined, Defs, Opts).
 
-encode_defs_to_descriptors(DefaultName, Defs) ->
+encode_defs_to_descriptors(DefaultName, Defs, Opts) ->
     %% Encode the list of files as a #'FileDescriptorSet'{}.
     %% Encode also for each constituent proto, ie the top level and each
     %% imported proto separately, as #'FileDescriptorProto'{}.
     PDefses = partition_protos(Defs, DefaultName, [], []),
-    {FdSet, Infos} = partitioned_defs_to_file_descr_set(PDefses),
+    {FdSet, Infos} = partitioned_defs_to_file_descr_set(PDefses, Opts),
     Bin = gpb_descriptor:encode_msg(FdSet, [verify]),
     PBins = [{FileNameSansExt, gpb_descriptor:encode_msg(FdProto, [verify])}
              || {FileNameSansExt, FdProto} <- Infos],
@@ -58,43 +58,150 @@ partition_protos([], Name, Curr, All) ->
 add_to_all([], All)   -> All;
 add_to_all(Curr, All) -> [lists:reverse(Curr) | All].
 
-partitioned_defs_to_file_descr_set(Defses) ->
-    Infos = [{SansExt, defs_to_file_descr_proto(Name, Defs)}
+partitioned_defs_to_file_descr_set(Defses, Opts) ->
+    Infos = [{SansExt, defs_to_file_descr_proto(Name, Defs, Opts)}
              || {{SansExt, Name}, Defs} <- Defses],
     FileDescrProtos = [FdProto || {_SansExt, FdProto} <- Infos],
     Set = #'FileDescriptorSet'{file = FileDescrProtos},
     {Set, Infos}.
 
-defs_to_file_descr_proto(Name, Defs) ->
-    {TypesToPseudoMsgNames, PseudoMsgs} = compute_map_field_pseudo_msgs(Defs),
+defs_to_file_descr_proto(Name, Defs, Opts) ->
+    {Pkg, Adjuster} = compute_adjustment_from_package(Defs, Opts),
+    Defs1 = process_refs(Defs, Adjuster),
+    {TypesToPseudoMsgNames, PseudoMsgs} =
+        compute_map_field_pseudo_msgs(Defs1, Opts, Adjuster),
     #'FileDescriptorProto'{
        name             = Name,      %% string() | undefined
-       package          = defs_to_package(Defs),
+       package          = Pkg,
        dependency       = [],        %% [string()]
-       message_type     = defs_to_msgtype(Defs,
+       message_type     = defs_to_msgtype(Defs1,
                                           TypesToPseudoMsgNames, PseudoMsgs),
-       enum_type        = defs_to_enumtype(Defs),
-       service          = defs_to_service(Defs),
+       enum_type        = defs_to_enumtype(Defs1),
+       service          = defs_to_service(Defs1),
        extension        = [],        %% [#'FieldDescriptorProto'{}]
        options          = undefined, %% #'FileOptions'{} | undefined
        source_code_info = undefined, %% #'SourceCodeInfo'{} | undefined
-       syntax           = proplists:get_value(syntax, Defs, "proto2")
+       syntax           = proplists:get_value(syntax, Defs1, "proto2")
       }.
+
+compute_adjustment_from_package(Defs, Opts) ->
+    case lists:keyfind(package, 1, Defs) of
+        {package, Pkg} ->
+            DescriptorPkg = atom_to_ustring(Pkg),
+            case proplists:get_bool(use_packages, Opts) of
+                true ->
+                    {DescriptorPkg, fun root_ref/1};
+                false ->
+                    PkgCs = name_to_components(Pkg),
+                    RefOp = fun(Ref) -> root_ref(prepend_pkg(Ref, PkgCs)) end,
+                    {DescriptorPkg, RefOp}
+            end;
+        false ->
+            {undefined, fun root_ref/1}
+    end.
+
+process_refs(Defs, RefOp) ->
+    lists:map(
+      fun({{msg_containment,Proto},MsgNames}) ->
+              MsgNames1 = [do_name_ref(Name, RefOp) || Name <- MsgNames],
+              {{msg_containment,Proto}, MsgNames1};
+         ({{service_containment,Proto}, ServiceNames}) ->
+              ServiceNames1 = [do_name_ref(Name, RefOp)
+                               || Name <- ServiceNames],
+              {{service_containment,Proto}, ServiceNames1};
+         ({{rpc_containment,Proto}, Infos}) ->
+              Infos1 = [{do_name_ref(ServiceName, RefOp), RpcName}
+                        || {ServiceName, RpcName} <- Infos],
+              {{rpc_containment,Proto}, Infos1};
+         ({{enum_containment,Proto}, EnumNames}) ->
+              EnumNames1 = [do_name_ref(Name, RefOp) || Name <- EnumNames],
+              {{enum_containment,Proto}, EnumNames1};
+         ({{msg,MsgName},Fields}) ->
+              {{msg,MsgName}, do_field_refs(Fields, RefOp)};
+         ({{group,GName},Fields}) ->
+              {{group,GName}, do_field_refs(Fields, RefOp)};
+         ({{enum,EnumName}, Enums}) ->
+              {{enum,EnumName}, Enums};
+         ({{extensions, MsgName}, FieldNumberExtensions}) ->
+              {{extensions, MsgName}, FieldNumberExtensions};
+         ({{extend, MsgName}, MoreFields}) ->
+              MsgName1 = do_name_ref(MsgName, RefOp),
+              {{extend, MsgName1}, do_field_refs(MoreFields, RefOp)};
+         ({proto3_msgs, MsgNames}) ->
+              MsgNames1 = [do_name_ref(Name, RefOp) || Name <- MsgNames],
+              {proto3_msgs, MsgNames1};
+         ({{reserved_numbers, MsgName}, Reservations}) ->
+              MsgName1 = do_name_ref(MsgName, RefOp),
+              {{reserved_numbers, MsgName1}, Reservations};
+         ({{reserved_names, MsgName}, FieldNames}) ->
+              MsgName1 = do_name_ref(MsgName, RefOp),
+              {{reserved_names, MsgName1}, FieldNames};
+         ({{msg_options, MsgName}, MsgOpts}) ->
+              MsgName1 = do_name_ref(MsgName, RefOp),
+              MsgOpts1 = [{process_refs_path(NameComponents, RefOp), OptVal}
+                          || {NameComponents, OptVal} <- MsgOpts],
+              {{msg_options, MsgName1}, MsgOpts1};
+         ({{service,ServiceName}, Rpcs}) ->
+              Rpcs1 = do_rpc_refs(Rpcs, RefOp),
+              {{service,ServiceName}, Rpcs1};
+         (Other) ->
+              Other
+      end,
+      Defs).
+
+do_field_refs(Fields, RefOp) ->
+    lists:map(
+      fun(#?gpb_field{type={msg,MsgName}}=F) ->
+              MsgName1 = do_name_ref(MsgName, RefOp),
+              F#?gpb_field{type = {msg, MsgName1}};
+         (#?gpb_field{type={group,GName}}=F) ->
+              GName1 = do_name_ref(GName, RefOp),
+              F#?gpb_field{type = {group, GName1}};
+         (#?gpb_field{type={enum,EnumName}}=F) ->
+              EnumName1 = do_name_ref(EnumName, RefOp),
+              F#?gpb_field{type = {enum, EnumName1}};
+         (#?gpb_field{type={map,K,{msg, MsgName}}}=F) ->
+              MsgName1 = do_name_ref(MsgName, RefOp),
+              F#?gpb_field{type = {map, K, {msg, MsgName1}}};
+         (#?gpb_field{type={map,K,{enum, EnumName}}}=F) ->
+              EnumName1 = do_name_ref(EnumName, RefOp),
+              F#?gpb_field{type = {map, K, {enum, EnumName1}}};
+         (#gpb_oneof{fields=Fs}=F) ->
+              Fs1 = do_field_refs(Fs, RefOp),
+              F#gpb_oneof{fields=Fs1};
+         (Other) ->
+              Other
+      end,
+      Fields).
+
+do_rpc_refs(Rpcs, RefOp) ->
+    [R#?gpb_rpc{input = do_name_ref(Input, RefOp),
+                output = do_name_ref(Output, RefOp)}
+     || #?gpb_rpc{input=Input, output=Output}=R <- Rpcs].
+
+name_to_components(Name) ->
+    gpb_lib:string_lexemes(atom_to_list(Name), ".").
+
+components_to_name(["." | Rest]) ->
+    list_to_atom("." ++ gpb_lib:dot_join(Rest));
+components_to_name(Components) ->
+    list_to_atom(gpb_lib:dot_join(Components)).
+
+process_refs_path(NameComponents, RefOp) ->
+    name_to_components(do_name_ref(components_to_name(NameComponents), RefOp)).
+
+do_name_ref(Name, RefOp) when is_atom(Name) ->
+    RefOp(Name).
+
+prepend_pkg(Name, PkgComponents) ->
+    list_to_atom(gpb_lib:dot_join(PkgComponents ++ name_to_components(Name))).
+
+root_ref(Name) ->
+    list_to_atom("." ++ atom_to_list(Name)).
 
 get_all_oneofs(Defs) ->
     lists:flatten([[Name || #gpb_oneof{name=Name} <- Fields]
                    || {{msg,_}, Fields} <- Defs]).
-
-defs_to_package(Defs) ->
-    %% If other proto fiels are imported, and they too contain package
-    %% declarations, there can be more than one package definition. Search for
-    %% the first one, it would be the primary one.
-    case lists:keyfind(package, 1, Defs) of
-        {package, Pkg} ->
-            atom_to_ustring(Pkg);
-        false ->
-            undefined
-    end.
 
 defs_to_msgtype(Defs, MapTypesToPseudoMsgNames, MapPseudoMsgs) ->
     AllOneofs = get_all_oneofs(Defs),
@@ -107,7 +214,7 @@ defs_to_msgtype(Defs, MapTypesToPseudoMsgNames, MapPseudoMsgs) ->
     %% produce) definition, the parser would need to additionally
     %% save also the unprocessed parse results.
     [#'DescriptorProto'{
-        name            = atom_to_ustring(MsgName),
+        name            = atom_to_ustring_base(MsgName),
         field           = field_defs_to_mgstype_fields(
                             Fields, AllOneofs, MapTypesToPseudoMsgNames),
         extension       = [],
@@ -119,7 +226,7 @@ defs_to_msgtype(Defs, MapTypesToPseudoMsgNames, MapPseudoMsgs) ->
        }
      || {_msg_or_group,MsgName,Fields} <- msgs_or_groups(Defs)] ++
         [#'DescriptorProto'{
-            name            = atom_to_ustring(MsgName),
+            name            = atom_to_ustring_base(MsgName),
             field           = field_defs_to_mgstype_fields(
                                 Fields, AllOneofs, MapTypesToPseudoMsgNames),
             extension       = [],
@@ -144,7 +251,7 @@ field_def_to_msgtype_field(#?gpb_field{name=FName,
                            _AllOneofs,
                            MapTypesToPseudoMsgNames) ->
     [#'FieldDescriptorProto'{
-        name          = atom_to_ustring(FName),
+        name          = atom_to_ustring_base(FName),
         number        = FNum,
         label         = occurrence_def_to_descr_label(Occurrence),
         type          = type_to_descr_type(Type),
@@ -238,7 +345,7 @@ field_options(Opts) ->
 
 defs_to_enumtype(Defs) ->
     [#'EnumDescriptorProto'{
-        name  = atom_to_ustring(EnumName),
+        name  = atom_to_ustring_base(EnumName),
         value = [#'EnumValueDescriptorProto'{name   = atom_to_ustring(EName),
                                              number = EValue}
                  || {EName, EValue} <- Enumerators]}
@@ -246,7 +353,7 @@ defs_to_enumtype(Defs) ->
 
 defs_to_service(Defs) ->
     [#'ServiceDescriptorProto'{
-        name   = atom_to_ustring(ServiceName),
+        name   = atom_to_ustring_base(ServiceName),
         method = [#'MethodDescriptorProto'{
                      name        = atom_to_ustring(RpcName),
                      input_type  = atom_to_ustring(Input),
@@ -263,11 +370,22 @@ msgs_or_groups(Defs) ->
     [{Type, Name, Fields} || {{Type,Name}, Fields} <- Defs,
                              Type =:= msg orelse Type =:= group].
 
-compute_map_field_pseudo_msgs(Defs) ->
+compute_map_field_pseudo_msgs(Defs, Opts, Adjuster) ->
     AllMapTypes = find_all_map_types(Defs),
-    MapTypePseudoMsgNames = invent_unused_msg_names(Defs, length(AllMapTypes)),
-    ToName = lists:zip(AllMapTypes, MapTypePseudoMsgNames),
-    ToMapT = lists:zip(MapTypePseudoMsgNames, AllMapTypes),
+    PkgBase = case lists:keyfind(package, 1, Defs) of
+                  {package, Pkg} ->
+                      case proplists:get_bool(use_packages, Opts) of
+                          true  -> atom_to_list(Pkg) ++ ".";
+                          false -> ""
+                      end;
+                  false ->
+                      ""
+              end,
+    MapTypePseudoMsgNames = invent_unused_msg_names(Defs, PkgBase,
+                                                    length(AllMapTypes)),
+    MapTypePseudoMsgNames1 = [Adjuster(Name) || Name <- MapTypePseudoMsgNames],
+    ToName = lists:zip(AllMapTypes, MapTypePseudoMsgNames1),
+    ToMapT = lists:zip(MapTypePseudoMsgNames1, AllMapTypes),
     {dict:from_list(ToName),
      [{{msg, Name}, gpb:map_item_pseudo_fields(KeyType, ValueType)}
       || {Name, {map, KeyType, ValueType}} <- ToMapT]}.
@@ -290,9 +408,9 @@ find_all_map_types(Defs) ->
           sets:new(),
           Defs))).
 
-invent_unused_msg_names(Defs, N) ->
+invent_unused_msg_names(Defs, PkgBase, N) ->
     AllMsgNames = sets:from_list([Name || {{msg,Name}, _Fields} <- Defs]),
-    Base = "MapFieldEntry",
+    Base = PkgBase ++ "MapFieldEntry",
     invent_unused_msg_names_aux(Base, 1, N, AllMsgNames).
 
 invent_unused_msg_names_aux(Base, I, N, AllMsgNames) ->
@@ -305,6 +423,10 @@ invent_unused_msg_names_aux(Base, I, N, AllMsgNames) ->
 
 atom_to_ustring(A) ->
     Utf8Str = atom_to_list(A),
+    unicode:characters_to_list(list_to_binary(Utf8Str), utf8).
+
+atom_to_ustring_base(A) ->
+    Utf8Str = lists:last(gpb_lib:string_lexemes(atom_to_list(A), ".")),
     unicode:characters_to_list(list_to_binary(Utf8Str), utf8).
 
 escape_bytes(<<B, Rest/binary>>) ->
