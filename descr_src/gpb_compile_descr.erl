@@ -21,6 +21,8 @@
 
 -export([encode_defs_to_descriptors/2, encode_defs_to_descriptors/3]).
 
+-include_lib("eunit/include/eunit.hrl").
+
 -include("gpb_descriptor.hrl").
 -include("../include/gpb.hrl").
 
@@ -70,13 +72,14 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
     Defs1 = process_refs(Defs, Adjuster),
     {TypesToPseudoMsgNames, PseudoMsgs} =
         compute_map_field_pseudo_msgs(Defs1, Opts, Adjuster),
+    {Msg, Enums} = nest_defs_to_types(Defs1, TypesToPseudoMsgNames),
+    MapMsgs = maptype_defs_to_msgtype(PseudoMsgs, TypesToPseudoMsgNames),
     #'FileDescriptorProto'{
        name             = Name,      %% string() | undefined
        package          = Pkg,
        dependency       = [],        %% [string()]
-       message_type     = defs_to_msgtype(Defs1,
-                                          TypesToPseudoMsgNames, PseudoMsgs),
-       enum_type        = defs_to_enumtype(Defs1),
+       message_type     = Msg ++ MapMsgs,
+       enum_type        = Enums,
        service          = defs_to_service(Defs1),
        extension        = [],        %% [#'FieldDescriptorProto'{}]
        options          = undefined, %% #'FileOptions'{} | undefined
@@ -199,44 +202,70 @@ prepend_pkg(Name, PkgComponents) ->
 root_ref(Name) ->
     list_to_atom("." ++ atom_to_list(Name)).
 
-get_all_oneofs(Defs) ->
-    lists:flatten([[Name || #gpb_oneof{name=Name} <- Fields]
-                   || {{msg,_}, Fields} <- Defs]).
+nest_defs_to_types(Defs, MapTypesToPseudoMsgNames) ->
+    NCs = lists:sort(
+            lists:foldl(
+              fun({{msg,Name}, _}=Def, Acc) ->
+                      [{name_to_components(Name), Def} | Acc];
+                 ({{group,Name}, _}=Def, Acc) ->
+                      [{name_to_components(Name), Def} | Acc];
+                 ({{enum,Name}, _}=Def, Acc) ->
+                      [{name_to_components(Name), Def} | Acc];
+                 (_Other, Acc) -> Acc
+              end,
+              [],
+              Defs)),
+    Nestings = mk_prefix_tree(NCs, []),
+    defs_to_types(Nestings, MapTypesToPseudoMsgNames, []).
 
-defs_to_msgtype(Defs, MapTypesToPseudoMsgNames, MapPseudoMsgs) ->
-    AllOneofs = get_all_oneofs(Defs),
-    %% There is a slight bit of mismatch here: the DescriptorProto
-    %% contains fields for `nested_type' and `enum_type', and defines
-    %% a name resolution scheme, but the gpb parser already un-nests,
-    %% resolves and extends such things.
-    %%
-    %% To produce a faithful (ie: similar to what protoc would
-    %% produce) definition, the parser would need to additionally
-    %% save also the unprocessed parse results.
+defs_to_types([{{_Path, {{_msg_or_group, MsgName}, Fields}}, ChildItems}
+               | Rest],
+              MapTypesToPseudoMsgNames,
+              Acc) when _msg_or_group == msg;
+                        _msg_or_group == group ->
+    OneofNames = [Name || #gpb_oneof{name=Name} <- Fields],
+    {SubMsgs, SubEnums} = defs_to_types(ChildItems, MapTypesToPseudoMsgNames,
+                                        []),
+    Item = #'DescriptorProto'{
+              name            = atom_to_ustring_base(MsgName),
+              field           = field_defs_to_mgstype_fields(
+                                  Fields, OneofNames, MapTypesToPseudoMsgNames),
+              extension       = [],
+              nested_type     = SubMsgs,
+              enum_type       = SubEnums,
+              extension_range = [],
+              options         = undefined,
+              oneof_decl      = oneof_decl(OneofNames)},
+    defs_to_types(Rest, MapTypesToPseudoMsgNames, [Item | Acc]);
+defs_to_types([{{_Path, {{enum, EnumName}, Enumerators}}, []} | Rest],
+              MapTypesToPseudoMsgNames,
+              Acc) ->
+    Item = #'EnumDescriptorProto'{
+              name  = atom_to_ustring_base(EnumName),
+              value = [#'EnumValueDescriptorProto'{
+                          name   = atom_to_ustring(EName),
+                          number = EValue}
+                       || {EName, EValue} <- Enumerators]},
+    defs_to_types(Rest, MapTypesToPseudoMsgNames, [Item | Acc]);
+defs_to_types([], _MapTypesToPseudoMsgNames, Acc) ->
+    lists:partition(fun(#'DescriptorProto'{}) -> true;
+                       (#'EnumDescriptorProto'{}) -> false
+                    end,
+                    lists:reverse(Acc)).
+
+maptype_defs_to_msgtype(MapPseudoMsgs, MapTypesToPseudoMsgNames) ->
     [#'DescriptorProto'{
         name            = atom_to_ustring_base(MsgName),
         field           = field_defs_to_mgstype_fields(
-                            Fields, AllOneofs, MapTypesToPseudoMsgNames),
+                            Fields, [], MapTypesToPseudoMsgNames),
         extension       = [],
         nested_type     = [],
         enum_type       = [],
         extension_range = [],
-        options         = undefined,
-        oneof_decl      = oneof_decl(AllOneofs)
+        options         = #'MessageOptions'{map_entry=true},
+        oneof_decl      = []
        }
-     || {_msg_or_group,MsgName,Fields} <- msgs_or_groups(Defs)] ++
-        [#'DescriptorProto'{
-            name            = atom_to_ustring_base(MsgName),
-            field           = field_defs_to_mgstype_fields(
-                                Fields, AllOneofs, MapTypesToPseudoMsgNames),
-            extension       = [],
-            nested_type     = [],
-            enum_type       = [],
-            extension_range = [],
-            options         = #'MessageOptions'{map_entry=true},
-            oneof_decl      = []
-           }
-         || {{msg,MsgName}, Fields} <- MapPseudoMsgs].
+     || {{msg,MsgName}, Fields} <- MapPseudoMsgs].
 
 field_defs_to_mgstype_fields(Fields, AllOneofs, MapTypesToPseudoMsgNames) ->
     lists:append([field_def_to_msgtype_field(Field, AllOneofs,
@@ -343,14 +372,6 @@ field_options(Opts) ->
                             deprecated = Deprecated}
     end.
 
-defs_to_enumtype(Defs) ->
-    [#'EnumDescriptorProto'{
-        name  = atom_to_ustring_base(EnumName),
-        value = [#'EnumValueDescriptorProto'{name   = atom_to_ustring(EName),
-                                             number = EValue}
-                 || {EName, EValue} <- Enumerators]}
-     || {{enum,EnumName}, Enumerators} <- Defs].
-
 defs_to_service(Defs) ->
     [#'ServiceDescriptorProto'{
         name   = atom_to_ustring_base(ServiceName),
@@ -365,10 +386,6 @@ defs_to_service(Defs) ->
 
 oneof_decl(AllOneofs) ->
     [#'OneofDescriptorProto'{name=atom_to_ustring(Name)} || Name <- AllOneofs].
-
-msgs_or_groups(Defs) ->
-    [{Type, Name, Fields} || {{Type,Name}, Fields} <- Defs,
-                             Type =:= msg orelse Type =:= group].
 
 compute_map_field_pseudo_msgs(Defs, Opts, Adjuster) ->
     AllMapTypes = find_all_map_types(Defs),
@@ -438,3 +455,29 @@ escape_bytes(<<>>) ->
     "".
 
 escape_char(C) -> ?ff("\\~.8b", [C]).
+
+mk_prefix_tree([{Path,_Def}=PathDef | Rest], Acc) -> % iterates over sorted list
+    {Children, Rest2} =
+        lists:splitwith(fun({Path2,_Def2}) -> lists:prefix(Path, Path2) end,
+                        Rest),
+    ChildTrees = mk_prefix_tree(Children, []),
+    mk_prefix_tree(Rest2, [{PathDef, ChildTrees} | Acc]);
+mk_prefix_tree([], Acc) ->
+    lists:reverse(Acc).
+
+prefix_tree_test() ->
+    [{{[a,b],1},
+      [{{[a,b,c],0},
+        [{{[a,b,c,d],2},[]},
+         {{[a,b,c,e],3},[]}]},
+       {{[a,b,f],5},
+        [{{[a,b,f,g],4},[]}]}]},
+     {{[x],-1},[]}] = mk_prefix_tree(lists:sort(
+                                       [{[a,b], 1},
+                                        {[a,b,c], 0},
+                                        {[a,b,c,d], 2},
+                                        {[a,b,c,e], 3},
+                                        {[a,b,f], 5},
+                                        {[a,b,f,g], 4},
+                                        {[x], -1}]),
+                                     []).

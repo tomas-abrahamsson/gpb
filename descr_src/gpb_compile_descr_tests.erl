@@ -40,6 +40,44 @@ individual_descriptor_test() ->
                       "message A { optional uint32 g = 1; }"]}],
                    []).
 
+oneof_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax=\"proto2\";",
+           "message Ma {",
+           "  oneof u1 { uint32 f11 = 11;",
+           "             uint32 f12 = 12;",
+           "             uint32 f13 = 13; };",
+           "  oneof u2 { uint32 f21 = 21;",
+           "             uint32 f22 = 22; };",
+           "}",
+           "message Mb {",
+           "  oneof u2 { uint32 g11 = 11; };",
+           "  oneof u1 { uint32 g21 = 21; };",
+           "}"]}],
+    {_,
+     [{"main",
+       #'FileDescriptorProto'{
+          name="main.proto",
+          package=undefined,
+          message_type =
+              [#'DescriptorProto'{
+                  name="Ma",
+                  field=[#'FieldDescriptorProto'{name="f11", oneof_index=0},
+                         #'FieldDescriptorProto'{name="f12", oneof_index=0},
+                         #'FieldDescriptorProto'{name="f13", oneof_index=0},
+                         #'FieldDescriptorProto'{name="f21", oneof_index=1},
+                         #'FieldDescriptorProto'{name="f22", oneof_index=1}],
+                  oneof_decl=[#'OneofDescriptorProto'{name="u1"},
+                              #'OneofDescriptorProto'{name="u2"}]},
+               #'DescriptorProto'{
+                  name="Mb",
+                  field=[#'FieldDescriptorProto'{name="g11", oneof_index=0},
+                         #'FieldDescriptorProto'{name="g21", oneof_index=1}],
+                  oneof_decl=[#'OneofDescriptorProto'{name="u2"},
+                              #'OneofDescriptorProto'{name="u1"}]}]}}]} =
+        compile_descriptors(ProtosAsTxts, []).
+
 refs_have_pkg_name_test() -> % only refs have package, names do not
     ProtosAsTxts1 =
         [{"main.proto",
@@ -141,6 +179,39 @@ refs_have_pkg_name_test() -> % only refs have package, names do not
     %% With the use_packages option
     Descriptors2 = compile_descriptors(ProtosAsTxts2, [use_packages]),
     ok.
+
+nested_definitions_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax=\"proto2\";",
+           "message M {",
+           "  optional S f1 = 1;",
+           "  optional E f2 = 2;",
+           "  oneof u { S f3 = 3; };",
+           "  message S { ",
+           "    optional EE f1 = 1;",
+           "    enum EE { aa=0; }",
+           "    };",
+           "  enum E { a=0; };",
+           "}"]}],
+    {_,
+     [{"main",
+       #'FileDescriptorProto'{
+          name="main.proto",
+          package=undefined,
+          message_type =
+              [#'DescriptorProto'{
+                  name="M", % name, not a ref
+                  field=[#'FieldDescriptorProto'{type_name=".M.S"},
+                         #'FieldDescriptorProto'{type_name=".M.E"},
+                         #'FieldDescriptorProto'{type_name=".M.S"}],
+                  nested_type =
+                      [#'DescriptorProto'{
+                          name="S",
+                          field=[#'FieldDescriptorProto'{type_name=".M.S.EE"}],
+                          enum_type=[#'EnumDescriptorProto'{name="EE"}]}],
+                  enum_type = [#'EnumDescriptorProto'{name="E"}]}]}}]} =
+        compile_descriptors(ProtosAsTxts, []).
 
 %% --helpers----------
 
