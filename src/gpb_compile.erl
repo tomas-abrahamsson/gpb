@@ -628,7 +628,8 @@ do_file_or_string(In, Opts0) ->
                     Mod = find_out_mod(In, Opts1),
                     DefaultOutDir = find_default_out_dir(In),
                     Opts2 = Opts1 ++ [{o,DefaultOutDir}],
-                    do_proto_defs_aux1(Mod, Defs1, Sources, Renamings, Opts2);
+                    do_proto_defs_aux1(Mod, Defs1, Defs, Sources, Renamings,
+                                       Opts2);
                 {error, Reason} = Error ->
                     possibly_report_error(Error, Opts1),
                     case proplists:get_bool(return_warnings, Opts1) of
@@ -737,9 +738,10 @@ proto_defs(Mod, Defs) ->
 -spec proto_defs(module(), gpb_parse:defs(), opts()) -> comp_ret().
 proto_defs(Mod, Defs, Opts) ->
     Sources = [lists:concat([Mod, ".proto"])],
-    do_proto_defs_aux1(Mod, Defs, Sources, no_renamings, normalize_opts(Opts)).
+    Opts1 = normalize_opts(Opts),
+    do_proto_defs_aux1(Mod, Defs, Defs, Sources, no_renamings, Opts1).
 
-do_proto_defs_aux1(Mod, Defs, Sources, Renamings, Opts) ->
+do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
     possibly_probe_defs(Defs, Opts),
     Warns0 = check_unpackables_marked_as_packed(Defs),
     Warns1 = check_maps_flat_oneof_may_fail_on_compilation(Opts),
@@ -747,7 +749,8 @@ do_proto_defs_aux1(Mod, Defs, Sources, Renamings, Opts) ->
     AnRes = gpb_analyzer:analyze_defs(Defs, Sources, Renamings, Opts),
     case verify_opts(Defs, Opts) of
         ok ->
-            Res1 = do_proto_defs_aux2(Defs, clean_module_name(Mod), AnRes, Opts),
+            Res1 = do_proto_defs_aux2(Defs, DefsNoRenamings,
+                                      clean_module_name(Mod), AnRes, Opts),
             return_or_report_warnings_or_errors(Res1, Warns, Opts,
                                                 get_output_format(Opts));
         {error, OptError} ->
@@ -844,17 +847,17 @@ msg_defs(Mod, Defs) ->
 msg_defs(Mod, Defs, Opts) ->
     proto_defs(Mod, Defs, Opts).
 
-do_proto_defs_aux2(Defs, Mod, AnRes, Opts) ->
+do_proto_defs_aux2(Defs, DefsNoRenamings, Mod, AnRes, Opts) ->
     case get_output_format(Opts) of
         proto_defs ->
             {ok, Defs};
         binary ->
-            ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
+            ErlTxt = format_erl(Mod, Defs, DefsNoRenamings, AnRes, Opts),
             HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             compile_to_binary(Mod, HrlTxt, ErlTxt, NifTxt, Opts);
         file ->
-            ErlTxt = format_erl(Mod, Defs, AnRes, Opts),
+            ErlTxt = format_erl(Mod, Defs, DefsNoRenamings, AnRes, Opts),
             HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             ErlOutDir = get_erl_outdir(Opts),
@@ -2079,7 +2082,8 @@ check_unpackables_marked_as_packed(Defs) ->
 
 %% -- generating code ----------------------------------------------
 
-format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
+format_erl(Mod, Defs, DefsNoRenamings,
+           #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     AsLib = proplists:get_bool(include_as_lib, Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
@@ -2192,7 +2196,7 @@ format_erl(Mod, Defs, #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
        "\n",
        gpb_gen_introspect:format_introspection(Defs, AnRes, Opts),
        "\n",
-       possibly_format_descriptor(Defs, Opts),
+       possibly_format_descriptor(DefsNoRenamings, Opts),
        "\n",
        ?f("gpb_version_as_string() ->~n"),
        ?f("    \"~s\".~n", [gpb:version_as_string()]),
