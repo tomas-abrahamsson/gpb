@@ -68,6 +68,7 @@ partitioned_defs_to_file_descr_set(Defses, Opts) ->
     {Set, Infos}.
 
 defs_to_file_descr_proto(Name, Defs, Opts) ->
+    Name1 = compute_filename_from_package(Name, Defs),
     {Pkg, Adjuster} = compute_adjustment_from_package(Defs, Opts),
     Defs1 = process_refs(Defs, Adjuster),
     {TypesToPseudoMsgNames, PseudoMsgs} =
@@ -75,7 +76,7 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
     {Msg, Enums} = nest_defs_to_types(Defs1, TypesToPseudoMsgNames),
     MapMsgs = maptype_defs_to_msgtype(PseudoMsgs, TypesToPseudoMsgNames),
     #'FileDescriptorProto'{
-       name             = Name,      %% string() | undefined
+       name             = Name1,     %% string() | undefined
        package          = Pkg,
        dependency       = [],        %% [string()]
        message_type     = Msg ++ MapMsgs,
@@ -86,6 +87,23 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
        source_code_info = undefined, %% #'SourceCodeInfo'{} | undefined
        syntax           = proplists:get_value(syntax, Defs1, "proto2")
       }.
+
+compute_filename_from_package(Name, Defs) ->
+    case lists:keyfind(package, 1, Defs) of
+        {package, Pkg} ->
+            PkgPath = dot_to_slash(atom_to_ustring(Pkg)),
+            if Name /= undefined -> PkgPath ++ "/" ++ Name;
+               Name == undefined -> PkgPath ++ "/" ++ "undefined.proto"
+            end;
+        false ->
+            if Name /= undefined -> Name;
+               Name == undefined -> "undefined.proto"
+            end
+    end.
+
+dot_to_slash("."++Rest)  -> "/"++dot_to_slash(Rest);
+dot_to_slash([C | Rest]) -> [C | dot_to_slash(Rest)];
+dot_to_slash("")         -> "".
 
 compute_adjustment_from_package(Defs, Opts) ->
     case lists:keyfind(package, 1, Defs) of

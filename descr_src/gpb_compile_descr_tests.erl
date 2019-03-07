@@ -104,7 +104,7 @@ refs_have_pkg_name_test() -> % only refs have package, names do not
     {_,
      [{"main",
        #'FileDescriptorProto'{
-          name="main.proto",
+          name="top/p1/main.proto",
           package="top.p1",
           message_type =
               [#'DescriptorProto'{
