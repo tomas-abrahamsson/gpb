@@ -123,6 +123,40 @@ dots_to_underscores_for_nested_msgs_test() ->
                         [{rename, {msg_name, snake_case}},
                          {rename, {msg_name, dots_to_underscores}}]))).
 
+nested_enums_test() ->
+    Defs0 = parse_sort_several_file_lines(
+              [{"x.proto",
+                ["package TopPkg.SubPkg;",
+                 "message MsgName1 {",
+                 "  required EnumName   f1=1;",
+                 "  enum EnumName {a=0; b=1;}",
+                 "};",
+                 "service SvcName1 {",
+                 "  rpc RpcReq(MsgName1) returns (MsgName1) {};",
+                 "}"]}],
+              [use_packages]),
+    [{file,{"x","x.proto"}},
+     {package,'TopPkg.SubPkg'},
+     {{enum,'TopPkg.SubPkg.msg_name_1.EnumName'},[{a,0},{b,1}]},
+     {{enum_containment,"x"},['TopPkg.SubPkg.msg_name_1.EnumName']},
+     {{msg,'TopPkg.SubPkg.msg_name_1'},
+      [#?gpb_field{name = f1,fnum = 1,rnum = 2,
+                   type = {enum,'TopPkg.SubPkg.msg_name_1.EnumName'},
+                   occurrence = required,opts = []}]},
+     {{msg_containment,"x"},['TopPkg.SubPkg.msg_name_1']},
+     {{pkg_containment,"x"},'TopPkg.SubPkg'},
+     {{rpc_containment,"x"},
+      [{'TopPkg.SubPkg.SvcName1','RpcReq'}]},
+     {{service,'TopPkg.SubPkg.SvcName1'},
+      [#?gpb_rpc{name = 'RpcReq',input = 'TopPkg.SubPkg.msg_name_1',
+                 output = 'TopPkg.SubPkg.msg_name_1',input_stream = false,
+                 output_stream = false,opts = []}]},
+     {{service_containment,"x"},['TopPkg.SubPkg.SvcName1']}] =
+        lists:sort(ok(gpb_names:rename_defs(
+                        Defs0,
+                        [{rename, {msg_name, snake_case}},
+                         {rename, {msg_name, dots_to_underscores}}]))).
+
 base_name_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
     [{file, _},

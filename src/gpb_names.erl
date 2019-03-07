@@ -40,6 +40,7 @@
 -type item_type() :: pkgs | % not present if use_packages option is not set
                      msgs |
                      groups |
+                     enums |
                      services |
                      rpcs.
 
@@ -272,6 +273,7 @@ mk_renamings(RenameOps, Defs, Opts) ->
     MsgRenamings = msg_renamings(PkgByProto, PkgRenamings, Defs, RenameOps),
     GroupRenamings = group_renamings(PkgByProto, PkgRenamings, Defs,
                                      RenameOps),
+    EnumRenamings = enum_renamings(PkgByProto, PkgRenamings, Defs, RenameOps),
     ServiceRenamings = service_renamings(PkgByProto, PkgRenamings, Defs,
                                          RenameOps),
     RpcRenamings = rpc_renamings(Defs, RenameOps),
@@ -286,6 +288,7 @@ mk_renamings(RenameOps, Defs, Opts) ->
                             {pkgs, PkgRenamings} || UsePackages],
                            [{msgs, MsgRenamings},
                             {groups, GroupRenamings},
+                            {enums, EnumRenamings},
                             {services, ServiceRenamings},
                             {rpcs, RpcRenamings}]]),
             {ok, Renamings};
@@ -297,6 +300,7 @@ mk_renamer(Renamings) ->
     PkgRenamings = proplists:get_value(pkgs, Renamings),
     MsgRenamings = key1fetch(msgs, Renamings),
     GroupRenamings = key1fetch(groups, Renamings),
+    EnumRenamings = key1fetch(enums, Renamings),
     ServiceRenamings = key1fetch(services, Renamings),
     RpcRenamings = key1fetch(rpcs, Renamings),
     fun(package, Name) ->
@@ -311,6 +315,8 @@ mk_renamer(Renamings) ->
             dict_fetch(Name, MsgRenamings);
        (group, Name) ->
             dict_fetch(Name, GroupRenamings);
+       (enum, Name) ->
+            dict_fetch(Name, EnumRenamings);
        (service, Name) ->
             dict_fetch(Name, ServiceRenamings);
        ({rpc, ServiceName}, RpcName) ->
@@ -373,6 +379,47 @@ group_name_to_msg_name(GName) ->
     Components = gpb_lib:string_lexemes(atom_to_list(GName), "."),
     [_G | ButLast] = lists:reverse(Components),
     list_to_atom(gpb_lib:dot_join(lists:reverse(ButLast))).
+
+enum_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
+    dict:from_list(
+      lists:append(
+        [begin
+             Pkg = dict_fetch_or_default(Proto, PkgByProto, ''),
+             [calc_enum_name_renaming(FqName, Pkg, PkgRenamings, Proto,
+                                      RenameOps)
+              || FqName <- EnumNames]
+         end
+         || {{enum_containment, Proto}, EnumNames} <- Defs])).
+
+calc_enum_name_renaming(FqName, Pkg, PkgRenamings, Proto, RenameOps) ->
+    Name = drop_prefix(Pkg, FqName),
+    %% Enums can be nested inside messages, but not inside other
+    %% enums, so anything we find between the last package and the
+    %% last component is one or several message names that need to
+    %% be renamed according to message renaming rules.
+    case split_enum_name(Name) of
+        {EnumName} ->
+            Pkg1 = dict_fetch_or_default(Pkg, PkgRenamings, ''),
+            {FqName, prefix(Pkg1, EnumName)};
+        {MsgName, EnumBase} ->
+            MsgName1 = run_ops(msg_name, MsgName, Proto, RenameOps),
+            Pkg1 = dict_fetch_or_default(Pkg, PkgRenamings, ''),
+            FqMsgName1 = prefix(Pkg1, MsgName1),
+            FqMsgName2 = run_ops(msg_fqname, FqMsgName1, Proto, RenameOps),
+            FqName2 = prefix(FqMsgName2, EnumBase),
+            {FqName, FqName2}
+    end.
+
+split_enum_name(Name) ->
+    case gpb_lib:string_lexemes(atom_to_list(Name), ".") of
+        [_Component] ->
+            {Name};
+        Components ->
+            [EnumName | MsgNamesCompsRev] = lists:reverse(Components),
+            MsgNames = gpb_lib:dot_join(
+                           lists:reverse(MsgNamesCompsRev)),
+            {list_to_atom(MsgNames), list_to_atom(EnumName)}
+    end.
 
 service_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
     dict:from_list(
@@ -495,6 +542,8 @@ do_rename(RF, Defs) ->
               {{msg, RF(msg, Name)}, rename_fields(RF, Fields, Defs)};
          ({{group,Name}, Fields}) ->
               {{group, RF(group, Name)}, rename_fields(RF, Fields, Defs)};
+         ({{enum, Name}, Enumerators}) ->
+              {{enum, RF(enum, Name)}, Enumerators};
          ({{extensions,Name}, Exts}) ->
               {{extensions, RF(msg, Name)}, Exts};
          ({{service,Name}, Rpcs}) ->
@@ -505,6 +554,8 @@ do_rename(RF, Defs) ->
               {proto3_msgs, [RF(msg, Name) || Name <- Names]};
          ({{msg_containment,Proto}, MsgNames}) ->
               {{msg_containment,Proto}, [RF(msg, Name) || Name <- MsgNames]};
+         ({{enum_containment,Proto}, EnumNames}) ->
+              {{enum_containment,Proto}, [RF(enum, Name) || Name <- EnumNames]};
          ({{pkg_containment,Proto}, PkgName}) ->
               {{pkg_containment,Proto}, RF(package, PkgName)};
          ({{service_containment,Proto}, ServiceNames}) ->
@@ -527,6 +578,10 @@ rename_fields(RF, Fields, Defs) ->
               F#?gpb_field{type={map,KeyType,{msg, RF(msg, MsgName)}}};
          (#?gpb_field{type={group,MsgName}}=F) ->
               F#?gpb_field{type={group, RF(group, MsgName)}};
+         (#?gpb_field{type={enum,EnumName}}=F) ->
+              F#?gpb_field{type={enum, RF(enum, EnumName)}};
+         (#?gpb_field{type={map,KeyType,{enum,EnumName}}}=F) ->
+              F#?gpb_field{type={map,KeyType,{enum, RF(enum, EnumName)}}};
          (#gpb_oneof{fields=Fs}=F) ->
               F#gpb_oneof{fields=rename_fields(RF, Fs, Defs)};
          (#?gpb_field{}=F) ->

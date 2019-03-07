@@ -814,18 +814,33 @@ enum_from_binary_test() ->
     unload_code(M0),
 
     Proto1 = ["package foo.bar;",
-              "enum E1 { a=1; b=2; }"],
+              "enum E1 { a=1; b=2; }",
+              "message Msg { required E2 f = 1;",
+              "  enum E2 { aa=0; bb=1; }", % a nested enum
+              "}"],
     %% Without the use_package option
     M1 = compile_iolist(Proto1, []),
     'E1' = M1:fqbin_to_enum_name(<<"foo.bar.E1">>),
     <<"foo.bar.E1">> = M1:enum_name_to_fqbin('E1'),
+    'Msg.E2' = M1:fqbin_to_enum_name(<<"foo.bar.Msg.E2">>),
+    <<"foo.bar.Msg.E2">> = M1:enum_name_to_fqbin('Msg.E2'),
     unload_code(M1),
 
     %% _With_ the use_package option
     M2 = compile_iolist(Proto1, [use_packages]),
     'foo.bar.E1' = M2:fqbin_to_enum_name(<<"foo.bar.E1">>),
     <<"foo.bar.E1">> = M2:enum_name_to_fqbin('foo.bar.E1'),
-    unload_code(M2).
+    'foo.bar.Msg.E2' = M2:fqbin_to_enum_name(<<"foo.bar.Msg.E2">>),
+    <<"foo.bar.Msg.E2">> = M2:enum_name_to_fqbin('foo.bar.Msg.E2'),
+    unload_code(M2),
+
+    %% With the use_package _and_ renaming option
+    M3 = compile_iolist(Proto1, [use_packages, {rename,{msg_name,lowercase}}]),
+    'foo.bar.E1' = M3:fqbin_to_enum_name(<<"foo.bar.E1">>),
+    <<"foo.bar.E1">> = M3:enum_name_to_fqbin('foo.bar.E1'),
+    'foo.bar.msg.E2' = M3:fqbin_to_enum_name(<<"foo.bar.Msg.E2">>),
+    <<"foo.bar.Msg.E2">> = M3:enum_name_to_fqbin('foo.bar.msg.E2'),
+    unload_code(M3).
 
 sources_and_basenames_test() ->
     M = compile_protos(

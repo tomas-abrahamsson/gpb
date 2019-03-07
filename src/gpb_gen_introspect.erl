@@ -72,7 +72,7 @@ format_introspection(Defs, AnRes, Opts) ->
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     MsgInfos  = compute_msg_infos(MsgDefs, Package, AnRes, Opts),
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
-    EnumInfos = compute_enum_infos(EnumDefs, Package, Opts),
+    EnumInfos = compute_enum_infos(EnumDefs, Package, AnRes, Opts),
     GroupDefs = [Item || {{group, _}, _}=Item <- Defs],
     ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
     ServiceInfos = compute_service_renaming_infos(ServiceDefs, Package,
@@ -695,16 +695,18 @@ format_msg_name_to_fqbin(MsgInfos) ->
                          atom_to_binstr_stree(FqMsgName))]
            || {FqMsgName, MsgName} <- MsgInfos])])].
 
-compute_enum_infos(EnumDefs, Package, Opts) ->
+compute_enum_infos(EnumDefs, Package, #anres{renamings = Renamings}, Opts) ->
+    EnumRenamings = renamings_as_list(enums, Renamings),
     UsesPackages = proplists:get_bool(use_packages, Opts),
     [begin
+         {OrigEnum,EnumName} = find_orig_from_renamed(EnumName, EnumRenamings),
          FqEnumName =
              if UsesPackages ->
-                     EnumName;
+                     OrigEnum;
                 not UsesPackages, Package /= '' ->
-                     list_to_atom(lists:concat([Package, ".", EnumName]));
+                     list_to_atom(lists:concat([Package, ".", OrigEnum]));
                 not UsesPackages, Package == '' ->
-                     EnumName
+                     OrigEnum
              end,
          {FqEnumName, EnumName}
      end
