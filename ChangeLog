@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.7.1
+2018-Mar-08
+
+        * Fix descriptor compilation in rebar3 (and rebar2)
+        also when gpb is compiled as a dependency.
+
 Version 4.7.0
 2018-Mar-08
 
