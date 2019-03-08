@@ -1,5 +1,24 @@
 -*- coding: utf-8 -*-
 
+Version 4.7.0
+2018-Mar-08
+
+        * Generate a set of query functions for translating to and from
+        fully qualified binaries (fqbin) and internal format, as well as
+        functions for locating proto by type definition name. (#163)
+        Thanks to Tristan Sloughter.
+
+        * For descriptors, also keep track of what proto file each type
+        definition belongs to, by new {file,Info} entries interspersed
+        in the definitions. (#163) Thanks to Tristan Sloughter.
+
+        * Bugfix descriptors, ie the self-description info generated when the
+        option descriptor (-descr) is specified. (#163)
+        Thanks to Tristan Sloughter.
+
+        This introduces a POTENTIAL INCOMPATIBILITY, for code that relied
+        on details of the old, erroneous, descriptors.
+
 Version 4.6.0
 2018-Jan-23
 
