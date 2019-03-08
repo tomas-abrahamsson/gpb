@@ -524,14 +524,14 @@ Building outside of a git work tree
 
 The gpb build process requires a git work tree, with tags, to get the
 version numbering right, as described in the
-[Version numbering section](REAMDE.md#version-numbering). To export gpb
+[Version numbering section](#version-numbering). To export gpb
 for building outside of a git work tree, run the
 `helpers/export-from-git` script from a git work tree. The export script
 will create a tar file with the version number already substituted.
 
-In particular, the initial requirement on a git work tree to get the
-version number right, unfortunately also means that it does not work
-to build gitbub's automatically created release tar balls.
+In particular, the requirement on a git work tree (to get the
+version number right) unfortunately also means that it does not work
+to build github's automatically created release tar balls.
 
 
 Related projects
