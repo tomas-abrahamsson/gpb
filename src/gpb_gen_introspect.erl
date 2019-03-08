@@ -48,14 +48,31 @@ format_exports(Defs, _AnRes, _Opts) ->
      ?f("-export([service_name_to_fqbin/1]).~n"),
      ?f("-export([fqbins_to_service_and_rpc_name/2]).~n"),
      ?f("-export([service_and_rpc_name_to_fqbins/2]).~n"),
+     ?f("-export([fqbin_to_msg_name/1]).~n"),
+     ?f("-export([msg_name_to_fqbin/1]).~n"),
+     ?f("-export([fqbin_to_enum_name/1]).~n"),
+     ?f("-export([enum_name_to_fqbin/1]).~n"),
      ?f("-export([get_package_name/0]).~n"),
      ?f("-export([uses_packages/0]).~n"),
-     ?f("-export([source_basename/0]).~n")].
+     ?f("-export([source_basename/0]).~n"),
+     ?f("-export([get_all_source_basenames/0]).~n"),
+     ?f("-export([get_all_proto_names/0]).~n"),
+     ?f("-export([get_msg_containment/1]).~n"),
+     ?f("-export([get_pkg_containment/1]).~n"),
+     ?f("-export([get_service_containment/1]).~n"),
+     ?f("-export([get_rpc_containment/1]).~n"),
+     ?f("-export([get_enum_containment/1]).~n"),
+     ?f("-export([get_proto_by_msg_name_as_fqbin/1]).~n"),
+     ?f("-export([get_proto_by_service_name_as_fqbin/1]).~n"),
+     ?f("-export([get_proto_by_enum_name_as_fqbin/1]).~n"),
+     ?f("-export([get_protos_by_pkg_name_as_fqbin/1]).~n")].
 
 format_introspection(Defs, AnRes, Opts) ->
     Package = proplists:get_value(package, Defs, ''),
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
+    MsgInfos  = compute_msg_infos(MsgDefs, Package, AnRes, Opts),
     EnumDefs = [Item || {{enum, _}, _}=Item <- Defs],
+    EnumInfos = compute_enum_infos(EnumDefs, Package, AnRes, Opts),
     GroupDefs = [Item || {{group, _}, _}=Item <- Defs],
     ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
     ServiceInfos = compute_service_renaming_infos(ServiceDefs, Package,
@@ -112,12 +129,42 @@ format_introspection(Defs, AnRes, Opts) ->
      ?f("~n"),
      format_service_and_rpc_name_to_fqbins(ServiceInfos),
      ?f("~n"),
+     format_fqbin_to_msg_name(MsgInfos),
+     ?f("~n"),
+     format_msg_name_to_fqbin(MsgInfos),
+     ?f("~n"),
+     format_fqbin_to_enum_name(EnumInfos),
+     ?f("~n"),
+     format_enum_name_to_fqbin(EnumInfos),
+     ?f("~n"),
      format_get_package_name(Defs),
      ?f("~n"),
      format_uses_packages(Opts),
      ?f("~n"),
-     format_source_basename(AnRes)
-    ].
+     format_source_basename(AnRes),
+     ?f("~n"),
+     format_get_all_source_basenames(AnRes),
+     ?f("~n"),
+     format_get_all_proto_names(Defs),
+     ?f("~n"),
+     format_get_msg_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_pkg_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_service_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_rpc_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_enum_containment(Defs, AnRes),
+     ?f("~n"),
+     format_get_proto_by_msg_name_as_fqbin(MsgInfos, Defs),
+     ?f("~n"),
+     format_get_proto_by_service_name_as_fqbin(ServiceInfos, Defs),
+     ?f("~n"),
+     format_get_proto_by_enum_name_as_fqbin(EnumInfos, Defs),
+     ?f("~n"),
+     format_get_protos_by_pkg_name_as_fqbin(Defs)].
+
 
 msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
@@ -304,6 +351,28 @@ format_source_basename(#anres{source_filenames=[S1 | _]}) ->
     gpb_codegen:format_fn(
       source_basename, fun() -> '"source.proto"' end,
       [replace_term('"source.proto"', Source)]).
+
+format_get_all_source_basenames(#anres{source_filenames=Ss}) ->
+    Sources = [filename:basename(S) || S <- Ss],
+    ["%% Retrieve all proto file names, also imported ones.\n"
+     "%% The order is top-down. The first element is always the main\n"
+     "%% source file. The files are returned with extension,\n",
+     "%% see get_all_proto_names/0 for a version that returns\n"
+     "%% the basenames sans extension\n",
+     gpb_codegen:format_fn(
+       get_all_source_basenames, fun() -> '["base-with-ext"]' end,
+       [replace_term('["base-with-ext"]', Sources)])].
+
+format_get_all_proto_names(Defs) ->
+    Protos = [PNameSansExt || {file, {PNameSansExt, _PName}} <- Defs],
+    ["%% Retrieve all proto file names, also imported ones.\n"
+     "%% The order is top-down. The first element is always the main\n"
+     "%% source file. The files are returned sans .proto extension,\n"
+     "%% to make it easier to use them with the various get_xyz_containment\n"
+     "%% functions.\n",
+     gpb_codegen:format_fn(
+       get_all_proto_names, fun() -> '["base-sans-ext"]' end,
+       [replace_term('["base-sans-ext"]', Protos)])].
 
 % --- service introspection methods
 
@@ -552,6 +621,224 @@ format_service_and_rpc_name_to_fqbins(ServiceInfos) ->
                          atom_to_binstr_stree(OrigRpcName))]
            || {{FqOrigServiceName, ServiceName}, Rpcs} <- ServiceInfos,
               {OrigRpcName, RpcName} <- Rpcs])])].
+
+compute_msg_infos(Msgs, Package, #anres{renamings = Renamings}, Opts) ->
+    MsgRenamings = renamings_as_list(msgs, Renamings),
+    UsesPackages = proplists:get_bool(use_packages, Opts),
+    [begin
+         {OrigMsg,MsgName} = find_orig_from_renamed(MsgName, MsgRenamings),
+         FqOrigMsg =
+             if UsesPackages ->
+                     OrigMsg;
+                not UsesPackages, Package /= '' ->
+                     list_to_atom(lists:concat([Package, ".", OrigMsg]));
+                not UsesPackages, Package == '' ->
+                     OrigMsg
+             end,
+         {FqOrigMsg, MsgName}
+     end
+     || {{msg,MsgName}, _Fields} <- Msgs].
+
+format_fqbin_to_msg_name(MsgInfos) ->
+    [["-spec msg_name_to_fqbin(_) -> no_return().\n" || MsgInfos == []],
+     gpb_codegen:format_fn(
+       fqbin_to_msg_name,
+       fun('<<"maybe.package.MsgName">>') -> 'MsgName';
+          (E) -> error({gpb_error, {badmsg, E}})
+       end,
+       [repeat_clauses(
+          '<<"maybe.package.MsgName">>',
+          [[replace_tree('<<"maybe.package.MsgName">>',
+                         atom_to_binstr_stree(FqMsgName)),
+            replace_term('MsgName', MsgName)]
+           || {FqMsgName, MsgName} <- MsgInfos])])].
+
+format_msg_name_to_fqbin(MsgInfos) ->
+    [["-spec fqbin_to_msg_name(_) -> no_return().\n" || MsgInfos == []],
+     gpb_codegen:format_fn(
+       msg_name_to_fqbin,
+       fun('MsgName') -> '<<"maybe.package.MsgName">>';
+          (E) -> error({gpb_error, {badmsg, E}})
+       end,
+       [repeat_clauses(
+          'MsgName',
+          [[replace_term('MsgName', MsgName),
+            replace_tree('<<"maybe.package.MsgName">>',
+                         atom_to_binstr_stree(FqMsgName))]
+           || {FqMsgName, MsgName} <- MsgInfos])])].
+
+compute_enum_infos(EnumDefs, Package, #anres{renamings = Renamings}, Opts) ->
+    EnumRenamings = renamings_as_list(enums, Renamings),
+    UsesPackages = proplists:get_bool(use_packages, Opts),
+    [begin
+         {OrigEnum,EnumName} = find_orig_from_renamed(EnumName, EnumRenamings),
+         FqEnumName =
+             if UsesPackages ->
+                     OrigEnum;
+                not UsesPackages, Package /= '' ->
+                     list_to_atom(lists:concat([Package, ".", OrigEnum]));
+                not UsesPackages, Package == '' ->
+                     OrigEnum
+             end,
+         {FqEnumName, EnumName}
+     end
+     || {{enum,EnumName}, _Syms} <- EnumDefs].
+
+format_fqbin_to_enum_name(EnumInfos) ->
+    [["-spec enum_name_to_fqbin(_) -> no_return().\n" || EnumInfos == []],
+     gpb_codegen:format_fn(
+       fqbin_to_enum_name,
+       fun('<<"maybe.package.EnumName">>') -> 'EnumName';
+          (E) -> error({gpb_error, {badenum, E}})
+       end,
+       [repeat_clauses(
+          '<<"maybe.package.EnumName">>',
+          [[replace_tree('<<"maybe.package.EnumName">>',
+                         atom_to_binstr_stree(FqEnumName)),
+            replace_term('EnumName', EnumName)]
+           || {FqEnumName, EnumName} <- EnumInfos])])].
+
+format_enum_name_to_fqbin(EnumInfos) ->
+    [["-spec fqbin_to_enum_name(_) -> no_return().\n" || EnumInfos == []],
+     gpb_codegen:format_fn(
+       enum_name_to_fqbin,
+       fun('EnumName') -> '<<"maybe.package.EnumName">>';
+          (E) -> error({gpb_error, {badenum, E}})
+       end,
+       [repeat_clauses(
+          'EnumName',
+          [[replace_term('EnumName', EnumName),
+            replace_tree('<<"maybe.package.EnumName">>',
+                         atom_to_binstr_stree(FqEnumName))]
+           || {FqEnumName, EnumName} <- EnumInfos])])].
+
+%% -- containment ----
+format_get_msg_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, MsgNames}
+               || {{msg_containment, Proto}, MsgNames} <- Defs],
+              AnRes,
+              []),
+    format_get_containment(get_msg_containment, Infos).
+
+format_get_pkg_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, PkgName}
+               || {{pkg_containment, Proto}, PkgName} <- Defs],
+              AnRes,
+              undefined),
+    format_get_containment(get_pkg_containment, Infos).
+
+format_get_service_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, ServiceNames}
+               || {{service_containment, Proto}, ServiceNames} <- Defs],
+              AnRes,
+              []),
+    format_get_containment(get_service_containment, Infos).
+
+format_get_rpc_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, RpcNames}
+               || {{rpc_containment, Proto}, RpcNames} <- Defs],
+              AnRes,
+              []),
+    format_get_containment(get_rpc_containment, Infos).
+
+format_get_enum_containment(Defs, AnRes) ->
+    Infos = default_containment_infos(
+              [{Proto, EnumNames}
+               || {{enum_containment, Proto}, EnumNames} <- Defs],
+              AnRes,
+              []),
+    format_get_containment(get_enum_containment, Infos).
+
+default_containment_infos(Infos, #anres{source_filenames=Sources}, Default) ->
+    [begin
+         Proto = gpb_lib:drop_filename_ext(filename:basename(S)),
+         case lists:keyfind(Proto, 1, Infos) of
+             {Proto, Value} -> {Proto, Value};
+             false          -> {Proto, Default}
+         end
+     end
+     || S <- Sources].
+
+format_get_containment(FnName, Infos) ->
+    [[?f("-spec ~p(_) -> no_return().\n", [FnName]) || Infos == []],
+     gpb_codegen:format_fn(
+       FnName,
+       fun('"base-sans-ext"') -> 'Elems';
+          (P) -> error({gpb_error, {badproto, P}})
+       end,
+       [repeat_clauses(
+          '"base-sans-ext"',
+          [[replace_term('"base-sans-ext"', Proto),
+            replace_term('Elems', Elems)]
+           || {Proto, Elems} <- Infos])])].
+
+format_get_proto_by_msg_name_as_fqbin(MsgInfos, Defs) ->
+    FqbinToProto =
+        compute_proto_by_fqbin(
+          MsgInfos,
+          [{Proto, Names} || {{msg_containment, Proto}, Names} <- Defs]),
+    format_get_proto_aux(get_proto_by_msg_name_as_fqbin, FqbinToProto,
+                        badmsg).
+
+format_get_proto_by_service_name_as_fqbin(ServiceInfos, Defs) ->
+    FqbinToProto =
+        compute_proto_by_fqbin(
+          [{FqName, Name} || {{FqName, Name}, _Rpcs} <- ServiceInfos],
+          [{Proto, Names} || {{service_containment, Proto}, Names} <- Defs]),
+    format_get_proto_aux(get_proto_by_service_name_as_fqbin, FqbinToProto,
+                         badservice).
+
+format_get_proto_by_enum_name_as_fqbin(EnumInfos, Defs) ->
+    FqbinToProto =
+        compute_proto_by_fqbin(
+          EnumInfos,
+          [{Proto, Names} || {{enum_containment, Proto}, Names} <- Defs]),
+    format_get_proto_aux(get_proto_by_enum_name_as_fqbin, FqbinToProto,
+                         badenum).
+
+format_get_protos_by_pkg_name_as_fqbin(Defs) ->
+    FqbinToProtos1 =
+        dict:to_list(
+          lists:foldl(
+            fun({PkgName, Proto}, D) -> dict:append(PkgName, Proto, D) end,
+            dict:new(),
+            [{PkgName, Proto} || {{pkg_containment, Proto}, PkgName} <- Defs])),
+    FqbinToProtos2 = [{Pkg, lists:usort(Protos)}
+                      || {Pkg, Protos} <- FqbinToProtos1],
+    format_get_proto_aux(get_protos_by_pkg_name_as_fqbin, FqbinToProtos2,
+                         badpkg).
+
+format_get_proto_aux(FnName, Infos, BadWhat) ->
+    [[?f("-spec ~p(_) -> no_return().\n", [FnName]) || Infos == []],
+     gpb_codegen:format_fn(
+       FnName,
+       fun('<<"maybe.package.MsgName">>') -> '"Basename-sans-ext"';
+          (E) -> error({gpb_error, {'Bad<What>', E}})
+       end,
+       [repeat_clauses(
+          '<<"maybe.package.MsgName">>',
+          [[replace_tree('<<"maybe.package.MsgName">>',
+                         atom_to_binstr_stree(Fqbin)),
+            replace_term('"Basename-sans-ext"', Proto)]
+           || {Fqbin, Proto} <- Infos]),
+        replace_term('Bad<What>', BadWhat)])].
+
+compute_proto_by_fqbin(Infos, Containment) ->
+    FqbinByName = dict:from_list([{Name, FqBin} || {FqBin, Name} <- Infos]),
+    dict:to_list(
+      lists:foldl(
+        fun({Proto, Names}, D) ->
+                lists:foldl(
+                  fun(Fqbin, D2) -> dict:store(Fqbin, Proto, D2) end,
+                  D,
+                  [dict:fetch(Name, FqbinByName) || Name <- Names])
+        end,
+        dict:new(),
+        Containment)).
 
 %% ---
 atom_to_binstr_stree(A) ->

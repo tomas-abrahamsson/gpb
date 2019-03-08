@@ -26,6 +26,7 @@
 -export([test_nifs/1]). %% set whether to test nifs or not
 
 -export([compile_iolist/2]).
+-export([compile_protos/2]).
 -export([compile_to_string_get_hrl/2]).
 -export([compile_erl_iolist/1]).
 -export([unload_code/1]).
@@ -208,7 +209,9 @@ parses_file_to_binary_test() ->
 
 parses_file_to_msg_defs_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
-    {ok, [{{msg_containment,"X"},['Msg']},
+    {ok, [{file, _},
+          {{msg_containment,"X"},['Msg']},
+          {{enum_containment, _}, _},
           {{msg,'Msg'},[#?gpb_field{}]}]=MsgDefs} =
         gpb_compile:file(
           "X.proto",
@@ -770,15 +773,203 @@ service_name_to_from_binary_with_renamings_test() ->
          M2:service_and_rpc_name_to_fqbins('foo_bar.my_service', getabc),
     unload_code(M2).
 
-source_basename_test() ->
-    AProto = "message A { required uint32 g = 2; }",
-    M = compile_iolist(["import \"a.proto\";",
-                        "message M { required uint32 f = 1; }\n"],
-                       [{import_fetcher, fun(_F) -> {ok, AProto} end}]),
+msg_from_binary_test() ->
+    %% No msgs are ok
+    Proto0 = ["enum E { a=1; b=2; }"],
+    M0 = compile_iolist(Proto0, []),
+    ?assertError({gpb_error, _}, M0:fqbin_to_msg_name(<<"x">>)),
+    ?assertError({gpb_error, _}, M0:msg_name_to_fqbin(x)),
+    unload_code(M0),
+
+    Proto1 = ["package foo.bar;",
+              "message SomeMsg { required uint32 f = 1; }"],
+    Renamings = [{rename,{pkg_name, dots_to_underscores}},
+                 {rename,{pkg_name, lowercase}},
+                 {rename,{msg_name, snake_case}}],
+
+    %% Without the use_package option
+    M1 = compile_iolist(Proto1, []),
+    'SomeMsg' = M1:fqbin_to_msg_name(<<"foo.bar.SomeMsg">>),
+    <<"foo.bar.SomeMsg">> = M1:msg_name_to_fqbin('SomeMsg'),
+    unload_code(M1),
+
+    %% _With_ the use_package option
+    M2 = compile_iolist(Proto1, [use_packages]),
+    'foo.bar.SomeMsg' = M2:fqbin_to_msg_name(<<"foo.bar.SomeMsg">>),
+    <<"foo.bar.SomeMsg">> = M2:msg_name_to_fqbin('foo.bar.SomeMsg'),
+    unload_code(M2),
+
+    %% With the use_package option _and_ renamings
+    M3 = compile_iolist(Proto1, [use_packages | Renamings]),
+    'foo_bar.some_msg' = M3:fqbin_to_msg_name(<<"foo.bar.SomeMsg">>),
+    <<"foo.bar.SomeMsg">> = M3:msg_name_to_fqbin('foo_bar.some_msg'),
+    unload_code(M3).
+
+enum_from_binary_test() ->
+    %% No enums are ok
+    Proto0 = ["message M { required uint32 f = 1; }"],
+    M0 = compile_iolist(Proto0, []),
+    ?assertError({gpb_error, _}, M0:fqbin_to_enum_name(<<"x">>)),
+    ?assertError({gpb_error, _}, M0:enum_name_to_fqbin(x)),
+    unload_code(M0),
+
+    Proto1 = ["package foo.bar;",
+              "enum E1 { a=1; b=2; }",
+              "message Msg { required E2 f = 1;",
+              "  enum E2 { aa=0; bb=1; }", % a nested enum
+              "}"],
+    %% Without the use_package option
+    M1 = compile_iolist(Proto1, []),
+    'E1' = M1:fqbin_to_enum_name(<<"foo.bar.E1">>),
+    <<"foo.bar.E1">> = M1:enum_name_to_fqbin('E1'),
+    'Msg.E2' = M1:fqbin_to_enum_name(<<"foo.bar.Msg.E2">>),
+    <<"foo.bar.Msg.E2">> = M1:enum_name_to_fqbin('Msg.E2'),
+    unload_code(M1),
+
+    %% _With_ the use_package option
+    M2 = compile_iolist(Proto1, [use_packages]),
+    'foo.bar.E1' = M2:fqbin_to_enum_name(<<"foo.bar.E1">>),
+    <<"foo.bar.E1">> = M2:enum_name_to_fqbin('foo.bar.E1'),
+    'foo.bar.Msg.E2' = M2:fqbin_to_enum_name(<<"foo.bar.Msg.E2">>),
+    <<"foo.bar.Msg.E2">> = M2:enum_name_to_fqbin('foo.bar.Msg.E2'),
+    unload_code(M2),
+
+    %% With the use_package _and_ renaming option
+    M3 = compile_iolist(Proto1, [use_packages, {rename,{msg_name,lowercase}}]),
+    'foo.bar.E1' = M3:fqbin_to_enum_name(<<"foo.bar.E1">>),
+    <<"foo.bar.E1">> = M3:enum_name_to_fqbin('foo.bar.E1'),
+    'foo.bar.msg.E2' = M3:fqbin_to_enum_name(<<"foo.bar.Msg.E2">>),
+    <<"foo.bar.Msg.E2">> = M3:enum_name_to_fqbin('foo.bar.msg.E2'),
+    unload_code(M3).
+
+sources_and_basenames_test() ->
+    M = compile_protos(
+          [{"<gen>.proto", ["import \"a.proto\";",
+                            "message M { required uint32 f = 1; }\n"]},
+           {"a.proto",     ["message A { required uint32 g = 2; }"]}],
+          []),
     Expected = atom_to_list(M) ++ ".proto",
+    ExpectedSansExt = atom_to_list(M),
     ?assert(Expected /= "a.proto"),
     Expected = M:source_basename(),
+    [Expected, "a.proto"] = M:get_all_source_basenames(),
+    [ExpectedSansExt, "a"] = M:get_all_proto_names(),
     unload_code(M).
+
+get_containments_test() ->
+    Protos = [{"<generated>.proto",
+               ["import \"a.proto\";",
+                "import \"b.proto\";",
+                "import \"c.proto\";",
+                "package top;",
+                "message M { required uint32 f = 1; }\n"]},
+              {"a.proto",
+               ["enum EA { ea1 = 1; ea2 = 2; };",
+                "package a;",
+                "message MA { uint32 f = 1; };",
+                "service SA { ",
+                "  rpc req_RA_1(MA) returns (MA);",
+                "  rpc req_RA_2(MA) returns (MA);",
+                "}"]},
+              {"b.proto",
+               ["enum EB { eb1 = 1; eb2 = 2; };",
+                "package b;",
+                "message MB { uint32 g = 1; };",
+                "service SB { ",
+                "  rpc req_RB_1(MB) returns (MB);",
+                "  rpc req_RB_2(MB) returns (MB);",
+                "}"]},
+              {"c.proto",
+               %% empty to test absence of things
+               ""}],
+    M1 = compile_protos(Protos, [use_packages]),
+    P1 = atom_to_list(M1),
+    M2 = compile_protos(Protos, []),
+    P2 = atom_to_list(M2),
+    M1S = atom_to_list(M1),
+    M2S = atom_to_list(M2),
+
+    %% With packages
+    ['top.M'] = M1:get_msg_containment(P1),
+    ['a.MA'] = M1:get_msg_containment("a"),
+    ['b.MB'] = M1:get_msg_containment("b"),
+    []       = M1:get_msg_containment("c"),
+    M1S      = M1:get_proto_by_msg_name_as_fqbin(<<"top.M">>),
+    ?assertError({gpb_error, _}, M1:get_msg_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_msg_containment(wrong_type)),
+    "a"      = M1:get_proto_by_msg_name_as_fqbin(<<"a.MA">>),
+    "b"      = M1:get_proto_by_msg_name_as_fqbin(<<"b.MB">>),
+    %% Without packages
+    ['M']    = M2:get_msg_containment(P2),
+    ['MA']   = M2:get_msg_containment("a"),
+    ['MB']   = M2:get_msg_containment("b"),
+    []       = M2:get_msg_containment("c"),
+    M2S      = M2:get_proto_by_msg_name_as_fqbin(<<"top.M">>), % top=first pkg
+    "a"      = M2:get_proto_by_msg_name_as_fqbin(<<"top.MA">>),
+    "b"      = M2:get_proto_by_msg_name_as_fqbin(<<"top.MB">>),
+
+    %% With packages
+    []       = M1:get_enum_containment(P1),
+    ['a.EA'] = M1:get_enum_containment("a"),
+    ['b.EB'] = M1:get_enum_containment("b"),
+    []       = M1:get_enum_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_enum_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_enum_containment(wrong_type)),
+    "a"      = M1:get_proto_by_enum_name_as_fqbin(<<"a.EA">>),
+    "b"      = M1:get_proto_by_enum_name_as_fqbin(<<"b.EB">>),
+    %% Without packages
+    []       = M2:get_enum_containment(P2),
+    ['EA']   = M2:get_enum_containment("a"),
+    ['EB']   = M2:get_enum_containment("b"),
+    []       = M2:get_enum_containment("c"),
+    "a"      = M2:get_proto_by_enum_name_as_fqbin(<<"top.EA">>),
+    "b"      = M2:get_proto_by_enum_name_as_fqbin(<<"top.EB">>),
+
+    top       = M1:get_pkg_containment(P1),
+    %% With packages
+    a         = M1:get_pkg_containment("a"),
+    b         = M1:get_pkg_containment("b"),
+    undefined = M1:get_pkg_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_pkg_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_pkg_containment(wrong_type)),
+    [M1S]     = M1:get_protos_by_pkg_name_as_fqbin(<<"top">>),
+    ["a"]     = M1:get_protos_by_pkg_name_as_fqbin(<<"a">>),
+    ["b"]     = M1:get_protos_by_pkg_name_as_fqbin(<<"b">>),
+    %% Without packages
+    undefined = M2:get_pkg_containment(P2),
+    undefined = M2:get_pkg_containment("a"),
+    undefined = M2:get_pkg_containment("b"),
+    undefined = M2:get_pkg_containment("c"),
+    ?assertError({gpb_error, _}, M2:get_protos_by_pkg_name_as_fqbin(<<"top">>)),
+
+    []       = M1:get_service_containment(P1),
+    ['a.SA'] = M1:get_service_containment("a"),
+    ['b.SB'] = M1:get_service_containment("b"),
+    []       = M1:get_service_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_enum_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_enum_containment(wrong_type)),
+    "a"      = M1:get_proto_by_service_name_as_fqbin(<<"a.SA">>),
+    "b"      = M1:get_proto_by_service_name_as_fqbin(<<"b.SB">>),
+    "a"      = M2:get_proto_by_service_name_as_fqbin(<<"top.SA">>),
+    "b"      = M2:get_proto_by_service_name_as_fqbin(<<"top.SB">>),
+
+    %% With packages
+    []                  = M1:get_rpc_containment(P1),
+    [{'a.SA',req_RA_1},
+     {'a.SA',req_RA_2}] = M1:get_rpc_containment("a"),
+    [{'b.SB',req_RB_1},
+     {'b.SB',req_RB_2}] = M1:get_rpc_containment("b"),
+    []                  = M1:get_rpc_containment("c"),
+    ?assertError({gpb_error, _}, M1:get_enum_containment("x")),
+    ?assertError({gpb_error, _}, M1:get_enum_containment(wrong_type)),
+    %% Without packages
+    []                                = M2:get_rpc_containment(P2),
+    [{'SA',req_RA_1},{'SA',req_RA_2}] = M2:get_rpc_containment("a"),
+    [{'SB',req_RB_1},{'SB',req_RB_2}] = M2:get_rpc_containment("b"),
+    []                                = M2:get_rpc_containment("c"),
+
+    unload_code(M1),
+    unload_code(M2).
 
 %% --- decoder tests ---------------
 
@@ -3975,25 +4166,42 @@ compile_defs(MsgDefs, ExtraOpts) ->
     load_code(Mod, Code),
     Mod.
 
+compile_protos([{_, Main} | MoreProtos], Opts) ->
+    compile_iolist(Main, [{test_extra_known_protos, MoreProtos} | Opts]).
+
 compile_iolist(IoList) ->
     compile_iolist(IoList, []).
 
 compile_iolist(IoList, ExtraOpts) ->
     compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, must_succeed).
 
-compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, OnFail) ->
+compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
+    {TestOpts, GpbCompileOpts} =
+        lists:partition(fun({test_extra_known_protos, _}) -> true;
+                           (_GpbCompileOpt) -> false
+                        end,
+                        ExtraOpts0),
+    ExtraProtos = proplists:get_value(test_extra_known_protos, TestOpts, []),
     Mod = find_unused_module(),
-    Contents = iolist_to_binary(IoList),
     ModProto = f("~s.proto", [Mod]),
-    ReadFile = fun(F) -> case filename:basename(F) of
-                             ModProto -> {ok, Contents};
-                             _ -> file:read_file(F)
-                         end
+    KnownProtos = [{ModProto, IoList} | ExtraProtos],
+    ReadFile = fun(F) ->
+                       B = filename:basename(F),
+                       case lists:keyfind(B, 1, KnownProtos) of
+                           {B, Contents} ->
+                               {ok, iolist_to_binary([Contents])};
+                           _ ->
+                               file:read_file(F)
+                       end
                end,
-    ReadFileInfo = fun(F) -> case filename:basename(F) of
-                                 ModProto -> {ok, #file_info{access=read}};
-                                 _ -> file:read_file_info(F)
-                             end
+    ReadFileInfo = fun(F) ->
+                           B = filename:basename(F),
+                           case lists:keyfind(B, 1, KnownProtos) of
+                               {B, _Contents} ->
+                                   {ok, #file_info{access=read}};
+                               _ ->
+                                   file:read_file_info(F)
+                           end
                    end,
 
     CompRes = gpb_compile:file(
@@ -4002,7 +4210,7 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts, OnFail) ->
                             {read_file_info, ReadFileInfo},
                             {write_file, fun(_,_) -> ok end}]},
                  {i,"."},
-                 binary, return_errors, return_warnings | ExtraOpts]),
+                 binary, return_errors, return_warnings | GpbCompileOpts]),
     case OnFail of
         must_succeed ->
             %% Mod1 instead of Mod, since some options can change the

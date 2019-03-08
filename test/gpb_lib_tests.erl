@@ -30,3 +30,23 @@ snake_case_test() ->
     "already_snake_case" = gpb_lib:snake_case("already_snake_case"),
     "this_is_273_k" = gpb_lib:snake_case("ThisIs273K"),
     ok.
+
+basenameify_ish_test() ->
+    ["b/c/f.proto", "d/c/f.proto", "z/f.proto", "g.proto"] =
+        gpb_lib:basenameify_ish(["/home/u/a/b/c/f.proto",
+                                 "/home/u/a/d/c/f.proto",
+                                 "/home/u/x/y/z/f.proto",
+                                 "/home/u/x/y/z/g.proto"]),
+    ["f.proto", "g.proto", "h.proto", "i.proto"] =
+        gpb_lib:basenameify_ish(["/home/u/a/b/c/f.proto",
+                                 "/home/u/a/b/c/g.proto",
+                                 "/home/u/a/b/c/h.proto",
+                                 "/home/u/a/b/c/i.proto"]),
+    ["c/f1.proto","f2.proto","z/f1.proto","f4.proto"] =
+        gpb_lib:basenameify_ish(["a/b/c/f1.proto",
+                                 "a/b/f2.proto",
+                                 "x/y/z/f1.proto",
+                                 "f4.proto"]),
+    ?assertError({gpb_error, {multiply_defined_file_or_files, _}},
+                 gpb_lib:basenameify_ish(["x", "x"])).
+

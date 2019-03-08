@@ -22,8 +22,12 @@ set -e
 
 if [ -d "./ebin" ]; then
     OUT="./ebin"
+    TEST="./test"
 else
     OUT="$REBAR_DEPS_DIR/gpb/ebin"
+    TEST="$REBAR_DEPS_DIR/gpb/test"
+    mkdir -p "$OUT"
+    mkdir -p "$TEST"
 fi
 
 is_up_to_date descr_src/gpb_descriptor.erl \
@@ -33,13 +37,19 @@ is_up_to_date descr_src/gpb_descriptor.erl \
         -I priv/proto3/google/protobuf -o descr_src \
     -modprefix gpb_ \
         -s gpb_compile c descriptor.proto ) || exit $?
-is_up_to_date $OUT/gpb_descriptor.beam descr_src/gpb_descriptor.erl || \
+is_up_to_date "$OUT/gpb_descriptor.beam descr_src/gpb_descriptor.erl" || \
     ( echo "Compiling gpb_descriptor.erl..."
-    erlc -Idescr_src -Iinclude -o $OUT +debug_info \
+    erlc -Idescr_src -Iinclude -o "$OUT" +debug_info \
         descr_src/gpb_descriptor.erl ) || exit $?
-is_up_to_date $OUT/gpb_compile_descr.beam \
+is_up_to_date "$OUT/gpb_compile_descr.beam" \
     descr_src/gpb_compile_descr.erl \
     descr_src/gpb_descriptor.hrl || \
     ( echo "Compiling gpb_compile_descr.erl..."
-    erlc -Idescr_src -Iinclude -o $OUT +debug_info \
+    erlc -Idescr_src -Iinclude -o "$OUT" +debug_info \
     descr_src/gpb_compile_descr.erl ) || exit $?
+is_up_to_date "$TEST/gpb_compile_descr_tests.beam" \
+    descr_src/gpb_compile_descr_tests.erl \
+    descr_src/gpb_descriptor.hrl || \
+    ( echo "Compiling gpb_compile_descr_tests.erl..."
+    erlc -Idescr_src -Iinclude -o "$TEST" +debug_info \
+    descr_src/gpb_compile_descr_tests.erl ) || exit $?
