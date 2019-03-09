@@ -562,7 +562,7 @@ or git fetch requests.  Here are some guide lines:
 Version history
 ---------------
 
-New in version 4.0.0:
+##### Major change in version 4.0.0: #####
 
 The default value for the `maps_unset_optional` option has changed
 to `omitted`, from `present_undefined` This concerns only code generated
