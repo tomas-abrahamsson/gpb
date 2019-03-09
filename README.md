@@ -353,6 +353,33 @@ Features of gpb
    - `get_service_names()`, `get_service_def(ServiceName)`, `get_rpc_names(ServiceName)`
    - `find_rpc_def(ServiceName, RpcName)`, `fetch_rpc_def(ServiceName, RpcName)`
 
+   There are also some functions for translating between fully qualified
+   names and internal names. These take any renaming options into
+   consideration. They may be useful for instance with grpc reflection.
+
+   - `fqbin_to_service_name(<<"Package.ServiceName">>)`
+     and `service_name_to_fqbin('ServiceName')`
+   - `fqbins_to_service_and_rpc_name(<<"Package.ServiceName">>, <<"RpcName">>)`
+     and `service_and_rpc_name_to_fqbins('ServiceName', 'RpcName')`
+   - `fqbin_to_msg_name(<<"Package.MsgName">>)` and
+     `msg_name_to_fqbin('MsgName')`
+   - `fqbin_to_enum_name(<<"Package.EnumName">>)` and
+     `enum_name_to_fqbin('EnumName')`
+
+   There are also some functions for querying what proto a type belongs
+   to. Each type belongs to some `"name"` which is a string, usually the
+   file name, sans extension, for example `"name"` if the proto file was
+   `"name.proto"`.
+
+   - `get_all_proto_names() -> ["name1", ...]`
+   - `get_msg_containment("name") -> ['MsgName1', ...]`
+   - `get_pkg_containment("name") -> 'Package'`
+   - `get_service_containment("name") -> ['Service1', ...]`
+   - `get_rpc_containment("name") -> [{'Service1', 'RpcName1}, ...]`
+   - `get_proto_by_msg_name_as_fqbin(<<"Package.MsgName">>) -> "name"`
+   - `get_proto_by_enum_name_as_fqbin(<<"Package.EnumName">>) -> "name"`
+   - `get_protos_by_pkg_name_as_fqbin(<<"Package">>) -> ["name1", ...]`
+
    There are also some version information functions:
 
    - `gpb:version_as_string()` and `gpb:version_as_list()`
