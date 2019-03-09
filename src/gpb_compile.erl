@@ -308,7 +308,7 @@ file(File) ->
 %%   <dt>`{maps_oneof,tuples}'</dt>
 %%   <dd>`#{xf => {a1, Value}}' or `#{xf => {a2, Value}}'</dd>
 %%   <dt>`{maps_oneof,flat}'</dt>
-%%   <dd>`#{a1 => Value}}' or `#{a2 => Value}}'</dd>
+%%   <dd>`#{a1 => Value}' or `#{a2 => Value}'</dd>
 %% </dl>
 %%
 %% <a name="option-maps_key_type"/>
