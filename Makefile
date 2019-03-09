@@ -248,7 +248,7 @@ clean:
 	$(RM) $(DESCR_PROTO_ERL)
 	$(RM) $(DESCR_PROTO_HRL)
 	$(RM) $(TEST_BEAMS)
-	$(RM) -r doc
+	$(RM) -r doc/*.html doc/*.png doc/*.css doc/edoc-info doc/html
 
 test:	all $(TEST_BEAMS) FORCE
 	@echo Testing...
