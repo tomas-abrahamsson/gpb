@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 4.7.2
+2018-Mar-09
+
+        * Wellknown type (google/protobuf/*.proto) can be imported also for
+        syntax="proto2", just like how it is for protoc.
+
+        * Misc doc improvements, including addition of developer's guides,
+        see doc/dev-guide/*.md
+
 Version 4.7.1
 2018-Mar-08
 
