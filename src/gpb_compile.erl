@@ -1832,8 +1832,7 @@ parse_file_and_imports(In, AlreadyImported, Opts) ->
             case scan_and_parse_string(Contents, FName, Opts) of
                 {ok, Defs} ->
                     Imports = gpb_parse:fetch_imports(Defs),
-                    Opts2 = ensure_include_path_to_wellknown_types_if_proto3(
-                              Defs, Imports, Opts),
+                    Opts2 = ensure_include_path_to_wellknown_types(Opts),
                     read_and_parse_imports(Imports, AlreadyImported2,
                                            Defs, Opts2);
                 {error, Reason} ->
@@ -1978,27 +1977,11 @@ read_import(File, Opts) ->
             {error, {read_failed, File, Reason}}
     end.
 
-ensure_include_path_to_wellknown_types_if_proto3(Defs, Imports, Opts) ->
-    case proplists:get_value(syntax, Defs) of
-        "proto3" ->
-            case lists:any(fun imports_wellknown/1, Imports) of
-                true ->
-                    ensure_include_path_to_wellknown_types(Opts);
-                false ->
-                    Opts
-            end;
-        _ ->
-            Opts
-    end.
-
 ensure_include_path_to_wellknown_types(Opts) ->
     PrivDir = get_priv_dir(),
     Wellknown = filename:join(PrivDir, "proto3"),
     sanity_check_installation_wellknown_proto3(Wellknown),
     add_opt_unless_present({i,Wellknown}, Opts).
-
-imports_wellknown("google/protobuf/"++_) -> true;
-imports_wellknown(_) -> false.
 
 add_opt_unless_present(Opt, [Opt | Rest]) ->
     [Opt | Rest];

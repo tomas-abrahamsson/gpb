@@ -2027,6 +2027,16 @@ verify_is_optional_for_translate_toplevel_messages_test() ->
 
 %% --- misc ----------
 
+wellknows_found_also_for_syntax_proto2_test() ->
+    M = compile_iolist(
+          ["syntax=\"proto2\";",
+           "import \"google/protobuf/any.proto\";",
+           "message m {",
+           "  required google.protobuf.Any f1=1;",
+           "}"],
+          [use_packages]),
+    unload_code(M).
+
 typespecs_and_uppercase_oneof_fields_test() ->
     M = compile_iolist(["message M {",
                         "  oneof x {",
