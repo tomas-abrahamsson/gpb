@@ -17,6 +17,76 @@
 %%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 %%% MA  02110-1301  USA
 
+%%% ------------------------------------------------------------------
+%%% @doc
+%%% Compile protobuf definition files to a module that can encode and decode
+%%% values to and from binaries.
+%%%
+%%% The Erlang types for the values are as follows
+%%%
+%%% <a name="protobuf-to-erlang-types"/>
+%%% <table rules="all" frame="border">
+%%% <thead><tr><th align="left">Protobuf type</th>
+%%%            <th align="left">Erlang type</th></tr></thead>
+%%% <tbody>
+%%% <!-- = = = = = = = = = = = = = = = = = = = = = = = = = = = -->
+%%% <tr><td>double, float</td>
+%%%     <td>float() | infinity | '-infinity' | nan<br/>
+%%%         When encoding, integers, too, are accepted</td></tr>
+%%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+%%% <tr><td>   int32,    int64<br/>
+%%%           uint32,   uint64<br/>
+%%%           sint32,   sint64<br/>
+%%%          fixed32,  fixed64<br/>
+%%%         sfixed32, sfixed64</td>
+%%%     <td>integer()</td></tr>
+%%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+%%% <tr><td>bool</td>
+%%%     <td>true | false<br/>
+%%%         When encoding, the integers 1 and 0, too, are accepted</td></tr>
+%%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+%%% <tr><td>enum</td>
+%%%     <td>atom()<br/>
+%%%         unknown enums decode to integer()</td></tr>
+%%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+%%% <tr><td>message</td>
+%%%     <td>record (thus tuple())<br/>
+%%%         or map() if the maps (-maps) option is specified</td></tr>
+%%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+%%% <tr><td>string</td>
+%%%     <td>unicode string, thus list of integers<br/>
+%%%         or binary() if the strings_as_binaries (-strbin) option is
+%%%         specified<br/>
+%%%         When encoding, iolists, too, are accepted</td></tr>
+%%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+%%% <tr><td>bytes</td>
+%%%     <td>binary()<br/>
+%%%         When encoding, iolists, too, are accepted</td></tr>
+%%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+%%% <tr><td>oneof</td>
+%%%     <td><tt>{ChosenFieldName, Value}</tt><br/>
+%%%         or <tt>ChosenFieldName => Value</tt> if the {maps_oneof,flat}
+%%%         (-maps_oneof flat) option is specified (requires maps and
+%%%         maps_unset_optional = omitted)</td></tr>
+%%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+%%% <tr><td><![CDATA[map<_,_>]]></td>
+%%%     <td>An unordered list of 2-tuples, <tt>[{Key,Value}]</tt><br/>
+%%%         or  a map(), if the maps (-maps) option is specified</td></tr>
+%%% </tbody></table>
+%%%
+%%% Repeated fields are represented as lists.
+%%%
+%%% Optional fields are represented as either the value or `undefined' if
+%%% not set. However, for maps, if the option `maps_unset_optional' is set
+%%% to `omitted', then unset optional values are omitted from the map,
+%%% instead of being set to `undefined' when encoding messages. When
+%%% decoding messages, even with `maps_unset_optional' set to `omitted',
+%%% the default value will be set in the decoded map.
+%%%
+%%% @end
+%%% ------------------------------------------------------------------
+
+
 -module(gpb_compile).
 %-compile(export_all).
 -export([file/1, file/2]).
