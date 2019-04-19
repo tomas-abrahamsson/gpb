@@ -585,6 +585,10 @@ or git fetch requests.  Here are some guide lines:
   so that the feature won't get lost in any future refactorization
 * Use a git branch for your feature. This way, the git history will
   look better in case there is need to refetch.
+* By submitting patches to this project, you agree to allow them to be
+  redistributed under the project's license according to the normal
+  forms and usages of the open-source community.
+
 
 Version history
 ---------------
