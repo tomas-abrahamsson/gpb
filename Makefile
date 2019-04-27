@@ -216,7 +216,7 @@ DESCR_MODULES := \
 
 TEST_MODULES := \
 	$(patsubst $(test)/%.erl,%,$(wildcard $(test)/*.erl)) \
-        gpb_compile_descr_tests
+	gpb_compile_descr_tests
 
 # Run eunit on these modules:
 # - If module M and M_tests exist, only include M (M_tests is then implicit)
@@ -266,6 +266,11 @@ doc:	| $(src)/gpb_parse.erl $(src)/gpb_scan.erl
 		ok -> halt(0); \
 		_  -> halt(1) \
 	    end."
+
+doc-check: doc
+	$(silencer)tidy -config .tidyrc -q -e doc/gpb_*.html 2>&1 | \
+	    egrep -v '(trimming empty|inserting implicit) <p>' | \
+	    egrep -v '<table> lacks "summary" attribute' || :
 
 xref: all
 	@echo Checking for calls to undefined functions...
