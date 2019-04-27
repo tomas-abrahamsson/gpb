@@ -87,8 +87,7 @@ Mapping of protocol buffer datatypes to erlang
 <tr><td>oneof</td>
     <td><tt>{ChosenFieldName, Value}</tt><br/>
         or <tt>ChosenFieldName => Value</tt> if the {maps_oneof,flat}
-        (-maps_oneof flat) option is specified (requires maps and
-        maps_unset_optional = omitted)</td></tr>
+        (-maps_oneof flat) option is specified</td></tr>
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <tr><td>map<_,_></td>
     <td>An unordered list of 2-tuples, <tt>[{Key,Value}]</tt><br/>

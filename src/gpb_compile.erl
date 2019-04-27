@@ -24,7 +24,7 @@
 %%%
 %%% The Erlang types for the values are as follows
 %%%
-%%% <a name="protobuf-to-erlang-types"/>
+%%% <a id="protobuf-to-erlang-types"/>
 %%% <table rules="all" frame="border">
 %%% <thead><tr><th align="left">Protobuf type</th>
 %%%            <th align="left">Erlang type</th></tr></thead>
@@ -66,8 +66,7 @@
 %%% <tr><td>oneof</td>
 %%%     <td><tt>{ChosenFieldName, Value}</tt><br/>
 %%%         or <tt>ChosenFieldName => Value</tt> if the {maps_oneof,flat}
-%%%         (-maps_oneof flat) option is specified (requires maps and
-%%%         maps_unset_optional = omitted)</td></tr>
+%%%         (-maps_oneof flat) option is specified</td></tr>
 %%% <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 %%% <tr><td><![CDATA[map<_,_>]]></td>
 %%%     <td>An unordered list of 2-tuples, <tt>[{Key,Value}]</tt><br/>
@@ -235,19 +234,19 @@ file(File) ->
 %% "SomeDefinitions.proto" is ok, while "/path/to/SomeDefinitions.proto"
 %% is not ok.
 %%
-%% <a name="option-i"/>
+%% <a id="option-i"/>
 %% The .proto file is expected to be found in a directories specified by an
 %% `{i,directory()}' option. It is possible to specify `{i,directory()}'
 %% several times, they will be searched in the order specified.
 %%
-%% <a name="option-type_specs"/>
+%% <a id="option-type_specs"/>
 %% The `type_specs' option enables or disables `::Type()' annotations
 %% in the generated .hrl file. Default is `true'. The default changed
 %% in gpb version 4.0.0. Previously, the default was `false'.
 %% If you have messages referencing other messages cyclically, and get into
 %% troubles when compiling the generated files, set this to `false'.
 %%
-%% <a name="option-verify"/>
+%% <a id="option-verify"/>
 %% The `verify' option specifies whether or not to generate code
 %% that verifies, during encoding, that values are of correct type and
 %% within range.  The `verify' option can have the following values:
@@ -268,7 +267,7 @@ file(File) ->
 %% `{gpb_type_error,Reason}'. Regardless of the `verify' option,
 %% a function, `verify_msg/1' is always generated.
 %%
-%% <a name="option-copy_bytes"/>
+%% <a id="option-copy_bytes"/>
 %% The `copy_bytes' option specifies whether when decoding data of
 %% type `bytes' (or strings if the `strings_as_binaries' is set), the
 %% decoded bytes should be copied or not.  Copying requires the
@@ -290,14 +289,14 @@ file(File) ->
 %%           bytes/(sub-)binary.</dd>
 %% </dl>
 %%
-%% <a name="option-strings_as_binaries"/>
+%% <a id="option-strings_as_binaries"/>
 %% The `strings_as_binaries' option specifies whether strings should
 %% be returned from decoding as strings (list of Unicode code points),
 %% or as binaries (UTF-8 encoded). The `copy_bytes' option applies
 %% to strings as well, when the `strings_as_binaries' option is set.
 %% Upon encoding, both binaries and iolists are accepted.
 %%
-%% <a name="option-defs_as_proplists"/>
+%% <a id="option-defs_as_proplists"/>
 %% The `defs_as_proplists' option changes the generated introspection
 %% functions `find_msg_def' and `get_msg_defs' to return the description
 %% of each message field as a proplist, instead of as a `#field{}' record.
@@ -308,7 +307,7 @@ file(File) ->
 %% and related functions for conversion functions between these two
 %% formats.
 %%
-%% <a name="option-descriptor"/>
+%% <a id="option-descriptor"/>
 %% The `descriptor' option specifies whether or not to generate a
 %% function, descriptor/0, which returns a binary that describes the
 %% proto file(s) contents according to the protobuf's `descriptor.proto'.
@@ -316,14 +315,14 @@ file(File) ->
 %% description binary is most likely not identical to what `protoc'
 %% would generate, but the contents is roughly equivalent.
 %%
-%% <a name="option-o"/>
+%% <a id="option-o"/>
 %% The `{o,directory()}' option specifies directory to use for storing
 %% the generated `.erl' and `.hrl' files. Default is the same
 %% directory as for the proto `File'.
 %%
-%% <a name="option-o_erl"/>
-%% <a name="option-o_hrl"/>
-%% <a name="option-o_nif_cc"/>
+%% <a id="option-o_erl"/>
+%% <a id="option-o_hrl"/>
+%% <a id="option-o_nif_cc"/>
 %% The `{o_erl,directory()}', `{o_hrl,directory()}', `{o_nif_cc,directory()}',
 %% options specify output directories for where to generate the `.erl'
 %% and `.hrl' files respectively, and for the NIF C++ file,
@@ -331,10 +330,10 @@ file(File) ->
 %% overrides any `{o,directory()}' option, and similarly for the
 %% other file-type specific output options.
 %%
-%% <a name="option-maps"/>
-%% <a name="option-msgs_as_maps"/>
-%% <a name="option-defs_as_maps"/>
-%% <a name="option-mapfields_as_maps"/>
+%% <a id="option-maps"/>
+%% <a id="option-msgs_as_maps"/>
+%% <a id="option-defs_as_maps"/>
+%% <a id="option-mapfields_as_maps"/>
 %% The `maps' option will generate a protobuf encoder/decoder that
 %% uses maps instead of records. This option expands to the following
 %% options:
@@ -353,7 +352,7 @@ file(File) ->
 %%        proplists instead.</dd>
 %% </dl>
 %%
-%% <a name="option-maps_unset_optional"/>
+%% <a id="option-maps_unset_optional"/>
 %% For messages as maps, for optional fields, if not set, the
 %% `maps_unset_optional' option specifies the Erlang-internal
 %% representation; both how it is expected to be found at encoding,
@@ -369,7 +368,7 @@ file(File) ->
 %%   </dd>
 %% </dl>
 %%
-%% <a name="option-maps_oneof"/>
+%% <a id="option-maps_oneof"/>
 %% The `maps_oneof' option can be used for messages as maps, and can only
 %% take effect if `maps_unset_optional' is `omitted' (default since 4.0.0).
 %% It changes the representation of oneof fields as described below, if
@@ -381,17 +380,17 @@ file(File) ->
 %%   <dd>`#{a1 => Value}' or `#{a2 => Value}'</dd>
 %% </dl>
 %%
-%% <a name="option-maps_key_type"/>
+%% <a id="option-maps_key_type"/>
 %% For messages as maps, the `maps_key_type' option makes it possible
 %% to control whether keys should be atoms (default) or binaries.
 %%
-%% <a name="option-nif"/>
+%% <a id="option-nif"/>
 %% The `nif' option will cause the compiler to generate nif C++ code
 %% for encoding and decoding. The generated nif C++ code can be linked
 %% with the Google protobuf C++ library.  Read the file
 %% `README.nif-cc' for more info.
 %%
-%% <a name="option-binary"/>
+%% <a id="option-binary"/>
 %% The `binary' option will cause the generated and compiled code to be
 %% returned as a binary. No files will be written. The return value
 %% will be on the form `{ok,Mod,Code}' or `{ok,Mod,Code,Warnings}'
@@ -402,21 +401,21 @@ file(File) ->
 %% contains the C++ code. You will have to compile the C++ code with a
 %% C++ compiler, before you can use the Erlang code.
 %%
-%% <a name="option-to_proto_defs"/>
+%% <a id="option-to_proto_defs"/>
 %% The `to_proto_defs' option will result in `{ok,Defs}' or
 %% `{ok,Defs,Warns}' being returned if the compilation is successful.
 %% The returned message definitions can be used with the
 %% {@link proto_defs/2} or {@link proto_defs/3} functions.
 %%
-%% <a name="option-to_msg_defs"/>
+%% <a id="option-to_msg_defs"/>
 %% The `to_msg_defs' option is a deprecated alias for `to_proto_defs'.
 %%
-%% <a name="option-report"/>
-%% <a name="option-report_errors"/>
-%% <a name="option-report_warnings"/>
-%% <a name="option-return"/>
-%% <a name="option-return_errors"/>
-%% <a name="option-return_warnings"/>
+%% <a id="option-report"/>
+%% <a id="option-report_errors"/>
+%% <a id="option-report_warnings"/>
+%% <a id="option-return"/>
+%% <a id="option-return_errors"/>
+%% <a id="option-return_warnings"/>
 %% <dl>
 %%   <dt>`report_errors'/`report_warnings'</dt>
 %%   <dd>Causes errors/warnings to be printed as they occur.</dd>
@@ -434,7 +433,7 @@ file(File) ->
 %%       `return_warnings'.</dd>
 %% </dl>
 %%
-%% <a name="option-warnings_as_errors"/>
+%% <a id="option-warnings_as_errors"/>
 %% Setting the `warnings_as_errors' option will cause warnings to be
 %% treated as errors.  If there are warnings but no errors, and
 %% `return_warnings' is not specified, then `error' will be returned.
@@ -442,24 +441,24 @@ file(File) ->
 %% See {@link format_error/1} for a way to turn an error <i>Reason</i> to
 %% plain text.
 %%
-%% <a name="option-include_as_lib"/>
+%% <a id="option-include_as_lib"/>
 %% If the `include_as_lib' option is set, the generated code will include
 %% gpb.hrl as a library, which is necessary if dependencies are managed with
 %% Rebar. Otherwise, the header file is included directly and must be located
 %% in the path, which is default behavior.
 %%
-%% <a name="option-use_packages"/>
+%% <a id="option-use_packages"/>
 %% The `use_packages' option instructs gpb to prepend the name of a package
 %% to every message it contains. If no package is defined, nothing will be
 %% prepended. This enables the reference of messages in other packages which
 %% would otherwise not be possible. However, for reasons of backward
 %% compatibility, this option is disabled by default.
 %%
-%% <a name="option-erlc_compile_options"/>
+%% <a id="option-erlc_compile_options"/>
 %% If the the `{erlc_compile_options,string()}' option is set,
 %% then the genereted code will contain a directive `-compile([String]).'
 %%
-%% <a name="option-rename"/>
+%% <a id="option-rename"/>
 %% The `{rename,{What,How}}' can transform message names, package names,
 %% service and rpc names in various ways. This option supersedes the
 %% options `{msg_name_prefix,Prefix}', `{msg_name_suffix,Suffix}',
@@ -477,8 +476,8 @@ file(File) ->
 %% the order they are specified. So it is for example possible to
 %% snake_case a name, and then also prefix it.
 %%
-%% <a name="option-msg_name_prefix"/>
-%% <a name="option-msg_name_suffix"/>
+%% <a id="option-msg_name_prefix"/>
+%% <a id="option-msg_name_suffix"/>
 %% The `{msg_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to each message. This might be useful for resolving colliding names,
 %% when incorporating several protocol buffer definitions into the same
@@ -492,28 +491,28 @@ file(File) ->
 %% For backwards compatibility, the `{msg_name_prefix,{by_proto,PrefixList}}'
 %% expands to just `[{rename,{msg_fqname,{prefix,PrefixList}}}]'.
 %%
-%% <a name="option-msg_name_to_lower"/>
-%% <a name="option-msg_name_to_snake_case"/>
+%% <a id="option-msg_name_to_lower"/>
+%% <a id="option-msg_name_to_snake_case"/>
 %% The `msg_name_to_lower' and `msg_name_to_snake_case' options expands
 %% to `[{rename,{pkg_name,X}},{rename,{service_fqname,X}},
 %% {rename,{rpc_name,X}},{rename,{msg_fqname,X}},
 %% {rename,{rpc_name,X}},{rename,{group_fqname,X}}]' where `X' is
 %% `lowercase' or `snake_case' respectively.
 %%
-%% <a name="option-module_name_prefix"/>
-%% <a name="option-module_name_suffix"/>
+%% <a id="option-module_name_prefix"/>
+%% <a id="option-module_name_suffix"/>
 %% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to the generated code and definition files. The `{module_name_suffix,Suffix}'
 %% works correspondingly. For the case of compatibility with Erlang Protobuffs,
 %% the `epb_compatibility' option implies `{module_name_suffix,"_pb"}'
 %%
-%% <a name="option-module_name"/>
+%% <a id="option-module_name"/>
 %% The `{module_name,Name}' can be used to specify the module name of the
 %% generated code freely, instead of basing it on the proto file name.
 %% The name specified with `module_name' can be prefixed and suffixed with
 %% the `module_name_prefix' and `module_name_suffix' options.
 %%
-%% <a name="option-translate_type"/>
+%% <a id="option-translate_type"/>
 %% The `translate_type' option can be used to provide packer and unpacker
 %% functions for message fields of a certain type.
 %% For messages, the `MsgName' refers to a name <em>after</em>
@@ -573,12 +572,12 @@ file(File) ->
 %%   possible to tell these two call sites apart, if needed.</dd>
 %% </dl>
 %%
-%% <a name="option-any_translate"/>
+%% <a id="option-any_translate"/>
 %% The option `{any_translate,Translations}' is retained for backwards
 %% compatibility, and expands to
 %% <code>{translate_type,{'google.protobuf.Any',Translations}}</code>.
 %%
-%% <a name="option-translate_field"/>
+%% <a id="option-translate_field"/>
 %% The `translate_field' option can be used to translate individual fields.
 %% The option format is `{translate_field,{FieldPath,Translations}}' where
 %% each `Translation' consists of `{Op,{Mod,Fn,ArgTemplate}}' elements,
@@ -595,8 +594,8 @@ file(File) ->
 %% `decode_repeated_add_elem' and `decode_repeated_finalize' also exist
 %% and must all be specified.
 %%
-%% <a name="option-epb_compatibility"/>
-%% <a name="option-epb_functions"/>
+%% <a id="option-epb_compatibility"/>
+%% <a id="option-epb_functions"/>
 %% The `epb_compatibility' option is an umbrella-option for
 %% compatibility with the Erlang protobuffs library. It will expand to
 %% the options below. It will expand in-place, meaning any of these
@@ -618,8 +617,8 @@ file(File) ->
 %%   <li>`decode_<MsgName>/1'</li>
 %% </ul>
 %%
-%% <a name="option-defaults_for_omitted_optionals"/>
-%% <a name="option-type_defaults_for_omitted_optionals"/>
+%% <a id="option-defaults_for_omitted_optionals"/>
+%% <a id="option-type_defaults_for_omitted_optionals"/>
 %% The `defaults_for_omitted_optionals' and
 %% `type_defaults_for_omitted_optionals' options generates code that
 %% set default values or type-defaults respectively, on decoding, if
@@ -633,20 +632,20 @@ file(File) ->
 %% set to its type-default value is indistinguishable from an omitted
 %% value.)
 %%
-%% <a name="option-import_fetcher"/>
+%% <a id="option-import_fetcher"/>
 %% The `import_fetcher' option can be used to catch imports. The
 %% option value must be a function taking one argument, the name of
 %% the file to import. It must return either `from_file', letting this
 %% file pass through the normal file import, or `{ok,string()}' if it
 %% has fetched the file itself, or `{error,term()}'.
 %%
-%% <a name="option-target_erlang_version"/>
+%% <a id="option-target_erlang_version"/>
 %% The `target_erlang_version' can be used to specify another major
 %% version of Erlang/OTP to generate code for. The default, `current'
 %% means that the generated code is expected to be compiled and run
 %% on the same major version as gpb runs on.
 %%
-%% <a name="option-bypass_wrappers"/>
+%% <a id="option-bypass_wrappers"/>
 %% The `bypass_wrappers' option exposes the more-or-less internal
 %% top-level encode and decode functions without wrappers. The list
 %% below describe what functionality the wrappers provide. The main
@@ -1137,58 +1136,58 @@ c() ->
 %% The options below are supported. Dashes and underscores inside option names
 %% are equivalent, ie `-o-erl' and `-o_erl' are the same option.
 %% <dl>
-%%   <dt><a name="cmdline-option-I"/>
+%%   <dt><a id="cmdline-option-I"/>
 %%       `-IDir' `-I Dir'</dt>
 %%   <dd>Specify include directory.
 %%       Option may be specified more than once to specify
 %%       several include directories.</dd>
-%%   <dt><a name="cmdline-option-o"/>
+%%   <dt><a id="cmdline-option-o"/>
 %%       `-o Dir'</dt>
 %%   <dd>Specify output directory for where to generate
 %%       the <i>ProtoFile</i>.erl and <i>ProtoFile</i>.hrl</dd>
-%%   <dt><a name="cmdline-option-o-erl"/>
-%%       <a name="cmdline-option-o-hrl"/>
-%%       <a name="cmdline-option-o-nif-cc"/>
+%%   <dt><a id="cmdline-option-o-erl"/>
+%%       <a id="cmdline-option-o-hrl"/>
+%%       <a id="cmdline-option-o-nif-cc"/>
 %%       `-o-erl Dir' | `-o-hrl Dir' | `-o-nif-cc Dir'</dt>
 %%   <dd>Specify output directory for where to generate
 %%       the <i>ProtoFile</i>.erl and <i>ProtoFile</i>.hrl respectively,
 %%       and for the NIF C++ file, if the `-nif' option is specified.
 %%       The `-o-erl Dir' option overrides any `-o Dir' option, and
 %%       similarly for the other file-type specific output options.</dd>
-%%   <dt><a name="cmdline-option-v"/>
+%%   <dt><a id="cmdline-option-v"/>
 %%       `-v optionally | always | never'</dt>
 %%   <dd>Specify how the generated encoder should
 %%       verify the message to be encoded.</dd>
-%%   <dt><a name="cmdline-option-nif"/>
+%%   <dt><a id="cmdline-option-nif"/>
 %%       `-nif'</dt>
 %%   <dd>Generate nifs for linking with the protobuf C(++) library.</dd>
-%%   <dt><a name="cmdline-option-load_nif"/>
+%%   <dt><a id="cmdline-option-load_nif"/>
 %%       `-load_nif FunctionDefinition'</dt>
 %%   <dd>Specify `FunctionDefinition' as the text that defines the
 %%       function `load_nif/0'.  This is called as the `on_load'
 %%       hook for loading the NIF.  See also the doc for the `load_nif'
 %%       option in the {@link file/2} function.</dd>
-%%   <dt><a name="cmdline-option-c"/>
+%%   <dt><a id="cmdline-option-c"/>
 %%       `-c true | false | auto | integer() | float()'</dt>
 %%   <dd>Specify how or when the generated decoder should
 %%       copy fields of type `bytes'. See the `copy_bytes' option
 %%       for the function {@link file/2} for more info.</dd>
-%%   <dt><a name="cmdline-option-strbin"/>
+%%   <dt><a id="cmdline-option-strbin"/>
 %%       `-strbin'</dt>
 %%   <dd>Specify that decoded strings should be returned as binaries,
 %%       instead of as strings (lists).</dd>
-%%   <dt><a name="cmdline-option-pldefs"/>
+%%   <dt><a id="cmdline-option-pldefs"/>
 %%       `-pldefs'</dt>
 %%   <dd>Specify that introspection functions shall return proplists
 %%       instead of `#field{}' records, to make the generated code
 %%       completely free of even compile-time dependencies to gpb.</dd>
-%%   <dt><a name="cmdline-option-pkgs"/>
+%%   <dt><a id="cmdline-option-pkgs"/>
 %%       `-pkgs'</dt>
 %%   <dd>Prepend the name of a package to every message it contains.
 %%       If no package is defined, nothing will be prepended.
 %%       Default is to not prepend package names for backwards
 %%       compatibility, but it is needed for some proto files.</dd>
-%%   <dt><a name="cmdline-option-translate_type"/>
+%%   <dt><a id="cmdline-option-translate_type"/>
 %%       `-translate_type TMsFs'</dt>
 %%   <dd>Call functions in `TMsFs' to pack, unpack, merge and verify
 %%       for the specifed type. The `TMsFs' is a string on the
@@ -1231,7 +1230,7 @@ c() ->
 %%             is deprecated.</dd>
 %%       </dl>
 %%   </dd>
-%%   <dt><a name="cmdline-option-translate_field"/>
+%%   <dt><a id="cmdline-option-translate_field"/>
 %%       `-translate_field FMsFs'</dt>
 %%   <dd>Call functions in FMsFs to pack, unpack, merge, and verify.
 %%       This is similar to the `-translate_type' option, except that
@@ -1262,50 +1261,50 @@ c() ->
 %%             to finalize the field</dd>
 %%       </dl>
 %%   </dd>
-%%   <dt><a name="cmdline-option-any_translate"/>
+%%   <dt><a id="cmdline-option-any_translate"/>
 %%       `-any_translate MsFs'</dt>
 %%   <dd>Call functions in `MsFs' to pack, unpack, merge and verify
 %%       `google.protobuf.Any' messages. The `MsFs' is a string on the
 %%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
 %%       See the translate option for details on the string components.</dd>
-%%   <dt><a name="cmdline-option-msgprefix"/>
+%%   <dt><a id="cmdline-option-msgprefix"/>
 %%       `-msgprefix Prefix'</dt>
 %%   <dd>Prefix each message with `Prefix'. This can be useful to
 %%       when including different sub-projects that have colliding
 %%       message names.</dd>
-%%   <dt><a name="cmdline-option-modprefix"/>
+%%   <dt><a id="cmdline-option-modprefix"/>
 %%       `-modprefix Prefix'</dt>
 %%   <dd>Prefix each module with `Prefix'. Normally the module name of
 %%       the generated code is based on the name of the `.proto' file.
 %%       This option prepends a prefix to the module name, which can be
 %%       useful when including different sub-projects that have
 %%       colliding proto file names.</dd>
-%%   <dt><a name="cmdline-option-msgsuffix"/>
+%%   <dt><a id="cmdline-option-msgsuffix"/>
 %%       `-msgsuffix Suffix'</dt>
 %%   <dd>Suffix each message name with `Suffix'.</dd>
-%%   <dt><a name="cmdline-option-modsuffix"/>
+%%   <dt><a id="cmdline-option-modsuffix"/>
 %%       `-modsuffix Suffix'</dt>
 %%   <dd>Suffix each module name with `Suffix'.</dd>
-%%   <dt><a name="cmdline-option-modname"/>
+%%   <dt><a id="cmdline-option-modname"/>
 %%       `-modname Name'</dt>
 %%   <dd>Specify the name of the generated module.</dd>
-%%   <dt><a name="cmdline-option-msgtolower"/>
+%%   <dt><a id="cmdline-option-msgtolower"/>
 %%       `-msgtolower'</dt>
 %%   <dd>ToLower each message. Any prefixes/suffixes are added
 %%       after case modification.</dd>
-%%   <dt><a name="cmdline-option-il"/>
+%%   <dt><a id="cmdline-option-il"/>
 %%       `-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
 %%       instead of `-include', which is the default.</dd>
-%%   <dt><a name="cmdline-option-type"/>
-%%       <a name="cmdline-option-notype"/>
+%%   <dt><a id="cmdline-option-type"/>
+%%       <a id="cmdline-option-notype"/>
 %%       `-type'<br/>`-no_type'</dt>
 %%   <dd>Enables or disables `::Type()' annotations in the generated code.
 %%       Default is to enable if there are no cyclic dependencies.</dd>
-%%   <dt><a name="cmdline-option-descr"/>
+%%   <dt><a id="cmdline-option-descr"/>
 %%       `-descr'</dt>
 %%   <dd>Generate self-description information.</dd>
-%%   <dt><a name="cmdline-option-maps"/>
+%%   <dt><a id="cmdline-option-maps"/>
 %%       `-maps'</dt>
 %%   <dd>This option expands to the following options:
 %%       <ul>
@@ -1315,35 +1314,37 @@ c() ->
 %%       </ul>
 %%       See the `maps' option for the function {@link file/2}
 %%       for more info.</dd>
-%%   <dt><a name="cmdline-option-maps_unser_optional"/>
+%%   <dt><a id="cmdline-option-maps_unser_optional"/>
 %%       `-maps_unset_optional omitted | present_undefined'</dt>
 %%   <dd>Specifies the internal format for optional fields that are unset.</dd>
-%%   <dt><a name="cmdline-option-maps_oneof"/>
+%%   <dt><a id="cmdline-option-maps_oneof"/>
 %%       `-maps_oneof tuples | flat'</dt>
-%%   <dd>Specifies the internal format for oneof fields in maps.</dd>
-%%   <dt><a name="cmdline-option-maps_key_type"/>
+%%   <dd>Specifies the internal format for oneof fields in maps. (Requires
+%%       `-maps' and `-maps_unset_optional omitted', of which the latter
+%%       is default since 4.0.0.)</dd>
+%%   <dt><a id="cmdline-option-maps_key_type"/>
 %%       `-maps_key_type atom | binary'</dt>
 %%   <dd>Specifies the key type for maps.</dd>
-%%   <dt><a name="cmdline-option-msgs-as-maps"/>
+%%   <dt><a id="cmdline-option-msgs-as-maps"/>
 %%       `-msgs-as-maps'</dt>
 %%   <dd>Specifies that messages should be maps. No `.hrl' file will
 %%       be generated.
 %%       Without this option, messages will be records.</dd>
-%%   <dt><a name="cmdline-option-mapfields-as-maps"/>
+%%   <dt><a id="cmdline-option-mapfields-as-maps"/>
 %%       `-mapfields-as-maps'</dt>
 %%   <dd>Specifies that fields of type `map<_,_>' should be maps.
 %%       Otherwise, they will be 2-tuples.</dd>
-%%   <dt><a name="cmdline-option-defs-as-maps"/>
+%%   <dt><a id="cmdline-option-defs-as-maps"/>
 %%       `-defs-as-maps'</dt>
 %%   <dd>Specifies that proto defintions from the generated code
 %%       are to be returned as maps. Otherwise, they will be lists
 %%       of tuples and records (or proplists if the `-pldefs' option
 %%       is specified)</dd>
-%%   <dt><a name="cmdline-option-erlc_compile_options"/>
+%%   <dt><a id="cmdline-option-erlc_compile_options"/>
 %%       `-erlc_compile_options Options'</dt>
 %%   <dd>Specifies compilation options, in a comma separated string, to pass
 %%       along to the `-compile(...)' directive on the generated code.</dd>
-%%   <dt><a name="cmdline-option-epb"/>
+%%   <dt><a id="cmdline-option-epb"/>
 %%       `-epb'</dt>
 %%   <dd>Enable compatibility with the Erlang Protobuffs library:
 %%       <ul>
@@ -1352,35 +1353,35 @@ c() ->
 %%         <li>Implies the `-modsuffix _pb' option</li>
 %%         <li>Implies the `-msgtolower' option</li>
 %%       </ul></dd>
-%%   <dt><a name="cmdline-option-epb-functions"/>
+%%   <dt><a id="cmdline-option-epb-functions"/>
 %%       `-epb-functions'</dt>
 %%   <dd>For compatibility with the Erlang Protobuffs library, generate also
 %%       the following functions: `encode/1', `decode/2', `encode_MsgName/1'
 %%       and `decode_MsgName/1'</dd>
-%%   <dt><a name="cmdline-option-defaults-for-omitted-optionals"/>
+%%   <dt><a id="cmdline-option-defaults-for-omitted-optionals"/>
 %%       `-defaults-for-omitted-optionals'</dt>
 %%   <dd>For optional fields not present on decoding, set the field to
 %%       its default value, if any, instead of to `undefined'.</dd>
-%%   <dt><a name="cmdline-option-type-defaults-for-omitted-optionals"/>
+%%   <dt><a id="cmdline-option-type-defaults-for-omitted-optionals"/>
 %%       `-type-defaults-for-omitted-optionals'</dt>
 %%   <dd>For optional fields not present on decoding, set the field to
 %%       its type-default, instead of to `undefined'.</dd>
-%%   <dt><a name="cmdline-option-for-version"/>
+%%   <dt><a id="cmdline-option-for-version"/>
 %%       `-for-version N'</dt>
 %%   <dd>Generate code for Erlang/OTP version N instead of current.</dd>
-%%   <dt><a name="cmdline-option-bypass-wrappers"/>
+%%   <dt><a id="cmdline-option-bypass-wrappers"/>
 %%       `-bypass-wrappers'</dt>
 %%   <dd>Bypass wrappers.</dd>
-%%   <dt><a name="cmdline-option-W"/>
+%%   <dt><a id="cmdline-option-W"/>
 %%       `-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
 %%       `-W' and `-Wall' are the same as `-W1'</dd>
-%%   <dt><a name="cmdline-option-help"/>
-%%       <a name="cmdline-option-h"/>
+%%   <dt><a id="cmdline-option-help"/>
+%%       <a id="cmdline-option-h"/>
 %%       `--help' or `-h'</dt>
 %%   <dd>Show help.</dd>
-%%   <dt><a name="cmdline-option-version"/>
+%%   <dt><a id="cmdline-option-version"/>
 %%       `--version' or `-V'</dt>
 %%   <dd>Show the version number of gpb.</dd>
 %% </dl>
