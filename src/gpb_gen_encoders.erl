@@ -384,7 +384,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                   true ->
                                        '<enc>'('TrF',
                                                <<'<Bin>'/binary, '<Key>'>>,
-                                               'MaybeTrUserData')
+                                               'TrUserData')
                                end
                            end,
                            [replace_term('<TypeDefault>', TypeDefault)
