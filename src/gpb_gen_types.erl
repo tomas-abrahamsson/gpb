@@ -444,7 +444,7 @@ msg_to_typestr(M, Opts) ->
 string_to_typestr(true) ->
   "iodata()";
 string_to_typestr(false) ->
-  "iolist()".
+  "binary() | iolist()".
 
 enum_typestr(E, Defs, Opts) ->
     UnknownEnums = case proplists:get_bool(nif, Opts) of
