@@ -685,7 +685,7 @@ compute_enum_infos(EnumDefs, Package, #anres{renamings = Renamings}, Opts) ->
      || {{enum,EnumName}, _Syms} <- EnumDefs].
 
 format_fqbin_to_enum_name(EnumInfos) ->
-    [["-spec enum_name_to_fqbin(_) -> no_return().\n" || EnumInfos == []],
+    [["-spec fqbin_to_enum_name(_) -> no_return().\n" || EnumInfos == []],
      gpb_codegen:format_fn(
        fqbin_to_enum_name,
        fun('<<"maybe.package.EnumName">>') -> 'EnumName';
@@ -699,7 +699,7 @@ format_fqbin_to_enum_name(EnumInfos) ->
            || {FqEnumName, EnumName} <- EnumInfos])])].
 
 format_enum_name_to_fqbin(EnumInfos) ->
-    [["-spec fqbin_to_enum_name(_) -> no_return().\n" || EnumInfos == []],
+    [["-spec enum_name_to_fqbin(_) -> no_return().\n" || EnumInfos == []],
      gpb_codegen:format_fn(
        enum_name_to_fqbin,
        fun('EnumName') -> '<<"maybe.package.EnumName">>';
