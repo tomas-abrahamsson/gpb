@@ -206,6 +206,22 @@ parses_dotted_references_test() ->
            "  repeated Msg.Msg2 y=1;",
            "}"]).
 
+whitespace_in_dotted_references_test() ->
+    %% Motivation: this snippet:
+    %%
+    %%   google.ads.googleads.v0.enums.DisplayAdFormatSettingEnum
+    %%       .DisplayAdFormatSetting format_setting = 13;
+    %%
+    %% Occurring here:
+    %% https://github.com/googleapis/googleapis/blob/316b54c401ab9bc08ed71cb362915b9e7a23bb05/google/ads/googleads/v0/common/ad_type_infos.proto#L127-L129
+    {ok, [{{msg,'Msg3'}, [#?gpb_field{name=y,
+                                      type={ref,['Msg','.','Msg2']}}]}]} =
+        parse_lines(
+          ["message Msg3 {",
+           "  repeated Msg\n"
+           "      .Msg2 y=1;",
+           "}"]).
+
 parses_package_test() ->
     {ok, [{package,[p1,'.',p2]}, {{enum,e1}, _}]} =
         parse_lines(["package p1.p2;",
