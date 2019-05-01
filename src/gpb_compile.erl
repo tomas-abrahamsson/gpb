@@ -2443,6 +2443,7 @@ format_erl(Mod, Defs, DefsNoRenamings,
            #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     AsLib = proplists:get_bool(include_as_lib, Opts),
+    DoJson = gpb_lib:json_by_opts(Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
       [?f("%% @private~n"
@@ -2459,6 +2460,7 @@ format_erl(Mod, Defs, DefsNoRenamings,
        gpb_gen_decoders:format_exports(Defs, Opts),
        gpb_gen_mergers:format_exports(Defs, Opts),
        gpb_gen_verifiers:format_exports(Defs, Opts),
+       [gpb_gen_json_encoders:format_exports(Defs, Opts) || DoJson],
        gpb_gen_introspect:format_exports(Defs, AnRes, Opts),
        [?f("-export([descriptor/0, descriptor/1]).~n")
         || gpb_lib:get_gen_descriptor_by_opts(Opts)],
@@ -2524,6 +2526,7 @@ format_erl(Mod, Defs, DefsNoRenamings,
                                                      false),
                 gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts)]
        end,
+       gpb_gen_encoders:format_aux_common_encoders(Defs, AnRes, Opts),
        "\n",
        gpb_gen_decoders:format_decoders_top_function(Defs, AnRes, Opts),
        "\n\n",
@@ -2545,11 +2548,16 @@ format_erl(Mod, Defs, DefsNoRenamings,
        if not DoNif ->
                [gpb_gen_translators:format_aux_transl_helpers(),
                 gpb_gen_translators:format_translators(Defs, AnRes, Opts)];
+          DoJson ->
+               [gpb_gen_translators:format_aux_transl_helpers(),
+                gpb_gen_translators:format_translators(Defs, AnRes, Opts)];
           DoNif ->
                [gpb_gen_translators:format_aux_transl_helpers(),
                 gpb_gen_translators:format_merge_translators(Defs, AnRes,
                                                              Opts)]
        end,
+       "\n",
+       [gpb_gen_json_encoders:format_encoders(Defs, AnRes, Opts) || DoJson],
        "\n",
        gpb_gen_introspect:format_introspection(Defs, AnRes, Opts),
        "\n",

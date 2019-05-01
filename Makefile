@@ -329,6 +329,7 @@ $(ebin)/gpb_gen_mergers.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_gen_verifiers.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_gen_introspect.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_gen_translators.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_gen_json_encoders.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_gen_nif.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_lib.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_codemorpher.beam: $(ebin)/gpb_codegen.beam
@@ -368,6 +369,9 @@ $(ebin)/gpb_gen_types.beam: $(src)/gpb_compile.hrl
 $(ebin)/gpb_gen_verifiers.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_gen_verifiers.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_gen_verifiers.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_json_encoders.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_gen_json_encoders.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_gen_json_encoders.beam: $(src)/gpb_compile.hrl
 $(ebin)/gpb_lib.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_lib.beam: $(src)/gpb_compile.hrl
 $(ebin)/gpb_lib.beam: $(incdir)/gpb.hrl

@@ -102,6 +102,7 @@
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
+-export([var_j_n/1]).
 -export([var_n/2]).
 -export([var/2]).
 -export([prefix_var/2]).
@@ -792,6 +793,7 @@ json_null(Opts) ->
 
 var_f_n(N) -> var_n("F", N).
 var_b_n(N) -> var_n("B", N).
+var_j_n(N) -> var_n("J", N).
 
 var_n(S, N) ->
     var("~s~w", [S, N]).
