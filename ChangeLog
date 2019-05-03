@@ -1,5 +1,10 @@
 -*- coding: utf-8 -*-
 
+Version 4.7.3
+2018-May-03
+
+        * Bugfix type specs for strings. Thanks to 柯林呵呵呵. (#166)
+
 Version 4.7.2
 2018-Mar-09
 
