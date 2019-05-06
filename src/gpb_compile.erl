@@ -205,10 +205,12 @@
 -type import_fetcher_fun() :: fun((string()) -> fetcher_ret()).
 
 %% Compilation return values
--type comp_ret() :: mod_ret() | bin_ret() | error_ret().
+-type comp_ret() :: mod_ret() | bin_ret() | defs_ret() | error_ret().
 -type mod_ret() :: ok | {ok, [warning()]}.
 -type bin_ret() :: {ok, module(), code()} |
                    {ok, module(), code(), [warning()]}.
+-type defs_ret() :: {ok, gpb_parse:defs()} |
+                    {ok, gpb_parse:defs(), [warning()]}.
 -type error_ret() :: error | {error, reason()} | {error, reason(), [warning()]}.
 -type warning() :: term().
 -type reason() :: term().
