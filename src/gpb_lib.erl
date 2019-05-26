@@ -128,6 +128,7 @@
 -export([lowercase/1]).
 -export([uppercase/1]).
 -export([snake_case/1]).
+-export([camel_case/1]).
 
 -include("../include/gpb.hrl").
 
@@ -1025,3 +1026,25 @@ snake_case(Str) ->
                              %% uppercase with lowercase
                              %% or digit before it
                              "([a-z0-9])([A-Z])"])).
+
+camel_case(Str) ->
+    camel_case(Str, true).
+
+-define(is_lower_case(C), $a =< C, C =< $z).
+-define(is_upper_case(C), $A =< C, C =< $Z).
+-define(is_digit(C),      $0 =< C, C =< $9).
+camel_case([LC | Tl], CapNextLetter) when ?is_lower_case(LC) ->
+    if CapNextLetter     -> [capitalize_letter(LC) | camel_case(Tl, false)];
+       not CapNextLetter -> [LC | camel_case(Tl, false)]
+    end;
+camel_case([UC | Tl], _) when ?is_upper_case(UC) ->
+    [UC | camel_case(Tl, false)];
+camel_case([D | Tl], _) when ?is_digit(D) ->
+    [D | camel_case(Tl, true)];
+camel_case([_ | Tl], _) -> %% underscore and possibly more
+    camel_case(Tl, true);
+camel_case([], _) ->
+    [].
+
+capitalize_letter(C) ->
+    C + ($A - $a).

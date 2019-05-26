@@ -1727,26 +1727,7 @@ to_upper(A) when is_atom(A) ->
     list_to_atom(gpb_lib:uppercase(atom_to_list(A))).
 
 camel_case(A) when is_atom(A) ->
-    list_to_atom(camel_case(atom_to_list(A), true)).
-
--define(is_lower_case(C), $a =< C, C =< $z).
--define(is_upper_case(C), $A =< C, C =< $Z).
--define(is_digit(C),      $0 =< C, C =< $9).
-camel_case([LC | Tl], CapNextLetter) when ?is_lower_case(LC) ->
-    if CapNextLetter     -> [capitalize_letter(LC) | camel_case(Tl, false)];
-       not CapNextLetter -> [LC | camel_case(Tl, false)]
-    end;
-camel_case([UC | Tl], _) when ?is_upper_case(UC) ->
-    [UC | camel_case(Tl, false)];
-camel_case([D | Tl], _) when ?is_digit(D) ->
-    [D | camel_case(Tl, true)];
-camel_case([_ | Tl], _) -> %% underscore and possibly more
-    camel_case(Tl, true);
-camel_case([], _) ->
-    [].
-
-capitalize_letter(C) ->
-    C + ($A - $a).
+    list_to_atom(gpb_lib:camel_case(atom_to_list(A))).
 
 mk_c_fn(Prefix, Suffix) ->
     dot_to_underscore(lists:concat([Prefix, Suffix])).
