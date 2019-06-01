@@ -129,6 +129,7 @@
 -export([uppercase/1]).
 -export([snake_case/1]).
 -export([camel_case/1]).
+-export([lower_camel_case/1]).
 
 -include("../include/gpb.hrl").
 
@@ -1029,6 +1030,12 @@ snake_case(Str) ->
 
 camel_case(Str) ->
     camel_case(Str, true).
+
+%% Like camel case, but first letter is lower case
+lower_camel_case(S) ->
+    [C1 | Rest] = camel_case(S),
+    [LC1] = lowercase([C1]),
+    [LC1 | Rest].
 
 -define(is_lower_case(C), $a =< C, C =< $z).
 -define(is_upper_case(C), $A =< C, C =< $Z).
