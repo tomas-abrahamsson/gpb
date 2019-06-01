@@ -163,6 +163,15 @@
                {import_fetcher, import_fetcher_fun()} |
                {target_erlang_version, integer() | current} |
                boolean_opt(bypass_wrappers) |
+               boolean_opt(json) |
+               boolean_opt(json_always_print_primitive_fields) |
+               boolean_opt(json_preserve_proto_field_names) |
+               {json_format, json_format()} |
+               {json_object_format, json_object_format()} |
+               {json_key_format, json_key_format()} |
+               {json_array_format, json_array_format()} |
+               {json_string_format, json_string_format()} |
+               {json_null, atom()} |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -204,6 +213,23 @@
 
 -type fetcher_ret() :: from_file | {ok, string()} | {error, term()}.
 -type import_fetcher_fun() :: fun((string()) -> fetcher_ret()).
+
+-type json_format() :: jsx | mochijson2 | jiffy | maps.
+%% Convenience shorthand to specify object, key, array and string and null
+%% format.
+-type json_object_format() :: eep18 | {proplist} | {atom(), proplist} | map.
+%% <ul>
+%%   <li>`eep18' means objects on format `[{}] | proplist()', such as
+%%       for instance for jsx.</li>
+%%   <li>`{proplist}' means a `proplist()' in a tuple.</li>
+%%   <li>`{atom(),proplist}' means a `proplist()' in a tagged tuple,
+%%       such as `{struct, proplist()}' for instance for mochijson2.</li>
+%%   <li>`map' means as a map</li>
+%% </ul>
+-type json_key_format() :: atom | binary | string.
+-type json_array_format() :: list | {atom(), list}.
+%% A list or a list in a tagged tuple.
+-type json_string_format() :: binary | list.
 
 %% Compilation return values
 -type comp_ret() :: mod_ret() | bin_ret() | error_ret().
@@ -671,6 +697,108 @@ file(File) ->
 %%     <li>Reading of options for any translation `user_data'.</li>
 %%   </ul></dd>
 %% </dl>
+%%
+%% <a name="option-json"/>
+%% The `json' option will cause gpb to also generate functions for
+%% converting between internal format and a JSON representation.
+%%
+%% Note that gpb will not encode to an actual JSON text.
+%% Instead, it returns an erlang structure that can be used with some other
+%% JSON library to turn it into actual JSON text. Ditto for decoding.
+%% It is possible to flexibly specify details of the JSON representation,
+%% with shorthand presets for some common libraries.
+%%
+%% <a name="option-json_always_print_primitive_fields"/>
+%% The `json_always_print_primitive_fields' makes the generated
+%% `to_json' function always emit json key-value items also when the
+%% value is the type's default value.  The default is to omit such
+%% values, as per the language guide.  This holds for messages in files
+%% with proto3 syntax.
+%%
+%% <a name="option-json_preserve_proto_field_names"/>
+%% The `json_preserve_proto_field_names' makes the generated `to_json'
+%% function always use the field name in the `.proto' file. The default
+%% is to use lowerCamelCase, as per the language guide.
+%%
+%% <a name="option-json_format"/>
+%% The `{json_format,Format}' option is a convenience shorthand, and will expand
+%% as indicated below. If the json_format is not specified, it defaults to
+%% `map' if the `maps' option is specified, and otherwise to `eep18' when
+%% generating code for records.
+%% <dl>
+%%   <dt>jsx</dt>
+%%   <dd><code>[{json_object_format, eep18},
+%%              {json_key_format, binary},
+%%              {json_array_format, list},
+%%              {json_string_format, binary},
+%%              {json_null, null}]</code></dd>
+%%   <dt>mochijson2</dt>
+%%   <dd><code>[{json_object_format, {struct, proplist}},
+%%              {json_key_format, binary},
+%%              {json_array_format, list},
+%%              {json_string_format, binary},
+%%              {json_null, null}]</code></dd>
+%%   <dt>jiffy</dt>
+%%   <dd><code>[{json_object_format, {proplist}},
+%%              {json_key_format, binary},
+%%              {json_array_format, list},
+%%              {json_string_format, binary},
+%%              {json_null, null}]</code></dd>
+%%   <dt>map</dt>
+%%   <dd><code>[{json_object_format, map},
+%%              {json_key_format, binary},
+%%              {json_array_format, list},
+%%              {json_string_format, binary},
+%%              {json_null, null}]</code></dd>
+%% </dl>
+%%
+%% <a name="option-json_object_format"/>
+%% The `{json_object_format,Format}' option specifies the format
+%% of json object, as indicated below. (Note that the format of the keys
+%% is specified by the `json_object_key' option, see further below.)
+%% <dl>
+%%   <dt>`eep18'</dt>
+%%   <dd>The empty json object is represented as `[{}]'.<br/>
+%%       Non-empty json objects are represented as proplists.</dd>
+%%   <dt>`{proplist}'</dt>
+%%   <dd>A json object is represented as a proplist in a tuple.</dd>
+%%   <dt>`{atom(), proplist}'</dt>
+%%   <dd>A json object is represented as a proplist in a tagged tuple,
+%%       with the possibility to specify the tag.</dd>
+%%   <dt>`map'</dt>
+%%   <dd>The json object is represented as an Erlang map.</dd>
+%% </dl>
+%%
+%% <a name="option-json_key_format"/>
+%% The `{json_key_format,Format}' option specifies the format
+%% of json object keys, as follows:
+%% <ul>
+%%   <li>`atom'</li>
+%%   <li>`binary' (default)</li>
+%%   <li>`string'</li>
+%% </ul>
+%%
+%% <a name="option-json_array_format"/>
+%% The `{json_array_format,Format}' option specifies the format
+%% of json arrays, as follows:
+%% <ul>
+%%   <li>`list' (default)</li>
+%%   <li>`{atom(), list}' A list in a tagged tuple, with the possibility
+%%       to specify the tag.</li>
+%% </ul>
+%%
+%% <a name="option-json_string_format"/>
+%% The `{json_string_format,Format}' option specifies the format
+%% of json arrays, as follows:
+%% <ul>
+%%   <li>`list'</li>
+%%   <li>`binary' (default)</li>
+%% </ul>
+%%
+%% <a name="option-json_null"/>
+%% The `{json_null,atom()}' option specifies the atom to use
+%% for the JSON `null' value. The default is to use the atom `null'.
+
 
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
@@ -725,7 +853,8 @@ normalize_alias_opts(Opts) ->
                 [fun norm_opt_alias_to_msg_proto_defs/1,
                  fun norm_opt_epb_compat_opt/1,
                  fun norm_opt_map_opts/1,
-                 fun norm_opt_any_translate/1]).
+                 fun norm_opt_any_translate/1,
+                 fun norm_opt_json_format/1]).
 
 norm_opt_alias_to_msg_proto_defs(Opts) ->
     lists:map(fun(to_msg_defs)         -> to_proto_defs;
@@ -762,6 +891,30 @@ norm_opt_any_translate(Opts) ->
                       Opt
               end,
               Opts).
+
+norm_opt_json_format(Opts) ->
+    proplists:expand(
+      [{{json_format, jsx},        [{json_object_format, eep18},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]},
+       {{json_format, mochijson2}, [{json_object_format, {struct, proplist}},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]},
+       {{json_format, jiffy},      [{json_object_format, {proplist}},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]},
+       {{json_format, maps},       [{json_object_format, map},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]}],
+      Opts).
 
 normalize_return_report_opts(Opts1) ->
     Opts2 = expand_opt(return, [return_warnings, return_errors], Opts1),
@@ -1371,6 +1524,49 @@ c() ->
 %%   <dt><a name="cmdline-option-bypass-wrappers"/>
 %%       `-bypass-wrappers'</dt>
 %%   <dd>Bypass wrappers.</dd>
+%%   <dt><a name="cmdline-option-json"/>
+%%       `-json'</dt>
+%%   <dd>Generate functions for converting to and from a JSON
+%%       representation.</dd>
+%%   <dt><a name="cmdline-option-json-format"/>
+%%       `-json-format jsx | mochijson2 | jiffy | maps'</dt>
+%%   <dd>Specify format for the JSON representation.
+%%       `maps' is default if the `-maps' option is specified,
+%%       otherwise the jsx format is default.</dd>
+%%   <dt><a name="cmdline-option-json-object-format"/>
+%%       `-json-object-format eep18 | tpl | tpl:Tag | map'</dt>
+%%   <dd>Specify JSON object format:
+%%      <ul>
+%%        <li>`eep18' means `[{}] | proplist()', this is the default.</li>
+%%        <li>`tpl' means `{proplist()}'.</li>
+%%        <li>`tpl:Tag' means `{Tag, proplist()}'.</li>
+%%        <li>`map' means `map()'.</li>
+%%      </ul>
+%%   </dd>
+%%   <dt><a name="cmdline-option-json-key-format"/>
+%%       `-json-key-format binary | atom | string'</dt>
+%%   <dd>Specify JSON object key format. `binary' is the default.</dd>
+%%   <dt><a name="cmdline-option-json-array-format"/>
+%%       `-json-array-format list | tl:Tag'</dt>
+%%   <dd>Specify JSON object array format.
+%%      <ul>
+%%        <li>`list' means `list()', this is the default.</li>
+%%        <li>`tl:Tag' means `{Tag, list()}'.</li>
+%%      </ul>
+%%   </dd>
+%%   <dt><a name="cmdline-option-json-string-format"/>
+%%       `-json-string-format binary | list'</dt>
+%%   <dd>Specify JSON string format. `binary' is the default.</dd>
+%%   <dt><a name="cmdline-option-json-null"/>
+%%       `-json-null Null'</dt>
+%%   <dd>Specify JSON null value, `null' is the default.</dd>
+%%   <dt><a name="cmdline-option-json-always-print-primitive-fields"/>
+%%       `-json-always-print-primitive-fields'</dt>
+%%   <dd>Print also fields whose value is their type's default.</dd>
+%%   <dt><a name="cmdline-option-json-preserve-proto-field-names"/>
+%%       `-json-preserve-proto-field-names'</dt>
+%%   <dd>Print the fields' names as in `.proto' file, not
+%%       as lowerCamelCase.</dd>
 %%   <dt><a name="cmdline-option-W"/>
 %%       `-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
@@ -1491,6 +1687,8 @@ parse_opt(_, {_OptName, undefined, OptTag, _Descr}, Rest) ->
     {ok, {OptTag, Rest}};
 parse_opt(_, {_OptName, 'string()', OptTag, _Descr}, [OptArg | Rest]) ->
     {ok, {{OptTag, OptArg}, Rest}};
+parse_opt(_, {_OptName, 'atom()', OptTag, _Descr}, [OptArg | Rest]) ->
+    {ok, {{OptTag, list_to_atom(OptArg)}, Rest}};
 parse_opt(_, {OptName, 'integer()', OptTag, _Descr}, [OptArg | Rest]) ->
     try list_to_integer(OptArg) of
         N -> {ok, {{OptTag, N}, Rest}}
@@ -1674,6 +1872,43 @@ opt_specs() ->
       "       Generate code for Erlang/OTP version N instead of current.\n"},
      {"bypass-wrappers", undefined, bypass_wrappers, "\n"
       "       Bypass wrappers.\n"},
+     {"json", undefined, json, "\n"
+      "       Generate functions for converting to and from\n"
+      "       a JSON representation.\n"},
+     {"json-format", {jsx,mochijson2,jiffy,maps}, json_format, "\n"
+      "       Specify format for JSON representation:\n"
+      "       * jsx          (default if -maps is not specified)\n"
+      "       * mochihison2\n"
+      "       * jiffy\n"
+      "       * maps         (default if -maps is specified)\n"},
+     {"json-object-format", fun opt_json_object_format/2,json_object_format,"\n"
+      "       Specify format for JSON object representation:\n"
+      "       * eep18        [{}] | proplist()  this is the default\n"
+      "       * tpl          {proplist()}\n"
+      "       * tpl:Tag      {Tag, proplist()}\n"
+      "       * map          map()\n"},
+     {"json-key-format", {binary,atom,string}, json_key_format, "\n"
+      "       Specify format for JSON object keys:\n"
+      "       * binary       (default)\n"
+      "       * atom\n"
+      "       * string\n"},
+     {"json-array-format", fun opt_json_array_format/2, json_array_format, "\n"
+      "       Specify format for JSON arrays:\n"
+      "       * list       list() this is the default\n"
+      "       * tl:Tag     {Tag,list()}\n"},
+     {"json-string-format", {binary,list}, json_string_format, "\n"
+      "       Specify format for JSON strings:\n"
+      "       * binary       this is the default\n"
+      "       * list\n"},
+     {"json-null", 'atom()', json_null, "\n"
+      "       Specify format for the JSON null value, null is the default.\n"},
+     {"json-always-print-primitive-fields", undefined,
+      json_always_print_primitive_fields, "\n"
+      "       Print also fields whose value is their type's default.\n"},
+     {"json-preserve-proto-field-names", undefined,
+      json_preserve_proto_field_names, "\n"
+      "       Print the fields' names as in the .proto file, not as\n"
+      "       lowerCamelCase.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
@@ -1791,8 +2026,6 @@ opt_translate_elempath(S) ->
         _ -> throw({badopt, "Invalid element path"})
     end.
 
-s2a(S) -> list_to_atom(S).
-
 read_s([Delim|Rest], Delim, Acc) -> {lists:reverse(Acc), Rest};
 read_s([C|Rest], Delim, Acc)     -> read_s(Rest, Delim, [C | Acc]);
 read_s("", _Delim, _Acc)         -> throw({badopt, "Unexpected end of string"}).
@@ -1819,6 +2052,29 @@ opt_mf_str_verify(S) ->
 
 opt_arg_template(Arity) ->
     [list_to_atom(?ff("$~w", [I])) || I <- lists:seq(1,Arity)].
+
+opt_json_object_format(OptTag, [S | Rest]) ->
+    case S of
+        "eep18"     -> {ok, {{OptTag, eep18}, Rest}};
+        "tpl"       -> {ok, {{OptTag, {proplist}}, Rest}};
+        "tpl:"++Tag -> {ok, {{OptTag, {s2a(Tag), proplist}}, Rest}};
+        "map"       -> {ok, {{OptTag, map}, Rest}};
+        _           -> {error, "Invalid JSON object format: "++S}
+    end;
+opt_json_object_format(_OptTag, []) ->
+    {error, "Missing JSON object format"}.
+
+
+opt_json_array_format(OptTag, [S | Rest]) ->
+    case S of
+        "list"     -> {ok, {{OptTag, list}, Rest}};
+        "tl:"++Tag -> {ok, {{OptTag, {s2a(Tag),list}}, Rest}};
+        _          -> {error, "Invalid JSON array format: "++S}
+    end;
+opt_json_array_format(_OptTag, []) ->
+    {error, "Missing JSON array format"}.
+
+s2a(S) -> list_to_atom(S).
 
 determine_cmdline_op(Opts, FileNames) ->
     case {lists:member(help, Opts), lists:member(version, Opts)} of

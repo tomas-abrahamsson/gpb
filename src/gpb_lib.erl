@@ -93,6 +93,12 @@
 -export([proto2_type_default/3]).
 -export([proto3_type_default/3]).
 -export([get_maps_key_type_by_opts/1]).
+-export([json_by_opts/1]).
+-export([json_object_format_by_opts/1]).
+-export([json_key_format_by_opts/1]).
+-export([json_array_format_by_opts/1]).
+-export([json_string_format_by_opts/1]).
+-export([json_null/1]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
@@ -730,6 +736,57 @@ type_default(Type, Defs, Opts, GetTypeDefault) ->
 
 get_maps_key_type_by_opts(Opts) ->
     proplists:get_value(maps_key_type, Opts, atom).
+
+json_by_opts(Opts) ->
+    proplists:get_bool(json, Opts).
+
+json_object_format_by_opts(Opts) ->
+    case proplists:get_value(json_object_format, Opts) of
+        undefined ->
+            case gpb_lib:get_records_or_maps_by_opts(Opts) of
+                maps ->
+                    map;
+                records ->
+                    eep18
+            end;
+        eep18 ->
+            eep18;
+        {proplist} ->
+            {proplist};
+        {Atom, proplist} when is_atom(Atom) ->
+            {Atom, proplist};
+        map ->
+            map
+    end.
+
+json_key_format_by_opts(Opts) ->
+    case proplists:get_value(json_key_format, Opts, binary) of
+        atom ->
+            atom;
+        binary ->
+            binary;
+        string ->
+            string
+    end.
+
+json_array_format_by_opts(Opts) ->
+    case proplists:get_value(json_array_format, Opts, list) of
+        list ->
+            list;
+        {Atom, list} when is_atom(Atom) ->
+            {Atom, list}
+    end.
+
+json_string_format_by_opts(Opts) ->
+    case proplists:get_value(json_string_format, Opts, binary) of
+        binary ->
+            binary;
+        list ->
+            list
+    end.
+
+json_null(Opts) ->
+    proplists:get_value(json_string_format, Opts, null).
 
 %% Syntax tree stuff ----
 
