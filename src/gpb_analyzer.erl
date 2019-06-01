@@ -682,8 +682,10 @@ has_p3_opt_strings(Defs) ->
              end,
     try gpb_lib:fold_msg_or_group_fields_o(
           fun(_msg_or_group, MsgName, #?gpb_field{type=Type,occurrence=Occ},
-              _IsOneOf, Acc) ->
-                  if Type == string, Occ == optional ->
+              IsOneOf, Acc) ->
+                  %% Consider only top-level fields, not inside oneof,
+                  %% since these are handled as if required eg during encoding
+                  if Type == string, Occ == optional, not IsOneOf ->
                           case lists:member(MsgName, P3Msgs) of
                               true -> throw(true);
                               false -> Acc

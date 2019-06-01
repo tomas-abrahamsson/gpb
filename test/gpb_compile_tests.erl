@@ -1300,6 +1300,39 @@ verifies_both_strings_and_binaries_as_input_test() ->
     ?assertError(_, M:verify_msg({m1, "a", <<97,98,99,255,191>>})),
     unload_code(M).
 
+iodata_as_input_for_proto3_string_test() ->
+    M = compile_iolist(["syntax=\"proto3\";\n"
+                        "message m1 {"
+                        "  string a = 1;",
+                        "}"],
+                        [strings_as_binaries]),
+    B1 = M:encode_msg({m1, "xyz"}),
+    ?assert(is_binary(B1)),
+    ?assert(byte_size(B1) > 0),
+    B1 = M:encode_msg({m1, <<"xyz">>}),
+    B1 = M:encode_msg({m1, ["x", <<"y">> | "z"]}),
+    <<>> = M:encode_msg({m1, [[], [[[<<>> | <<>>] | []], ""]]}),
+    <<>> = M:encode_msg({m1, ""}),
+    <<>> = M:encode_msg({m1, <<>>}),
+    unload_code(M).
+
+iodata_as_input_for_proto3_string_only_in_oneof_test() ->
+    M = compile_iolist(["syntax=\"proto3\";\n"
+                        "message m1 {"
+                        "  oneof c { string a1 = 2; }",
+                        "}"],
+                        [strings_as_binaries]),
+    B1 = M:encode_msg({m1, {a1, "xyz"}}),
+    ?assert(is_binary(B1)),
+    ?assert(byte_size(B1) > 0),
+    B1 = M:encode_msg({m1, {a1, <<"xyz">>}}),
+    B1 = M:encode_msg({m1, {a1, ["x", <<"y">> | "z"]}}),
+    %% should be present even if empty, I think
+    EmptyA1 = {m1, {a1, <<>>}},
+    <<18,0>> = B2 = M:encode_msg(EmptyA1),
+    EmptyA1 = M:decode_msg(B2, m1),
+    unload_code(M).
+
 utf8_bom_test() ->
     Utf8ByteOrderMark = <<239,187,191>>, % EF BB BF
     M = compile_iolist([Utf8ByteOrderMark,
