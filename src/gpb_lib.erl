@@ -89,6 +89,7 @@
 -export([target_can_do_flat_oneof_for_maps/1]).
 -export([target_may_fail_compilation_for_flat_oneof_for_maps/1]).
 -export([target_has_stacktrace_syntax/1]).
+-export([target_has_map_iterators/1]).
 -export([current_otp_release/0]).
 -export([proto2_type_default/3]).
 -export([proto3_type_default/3]).
@@ -715,6 +716,11 @@ target_may_fail_compilation_for_flat_oneof_for_maps(Opts) ->
 %%   catch Class:Reason:Stacktrace -> ...
 %%   end
 target_has_stacktrace_syntax(Opts) ->
+    is_target_major_version_at_least(21, Opts).
+
+%% In Erlang 21, there is maps:iterator/1 and maps:next/1 where "the memory
+%% usage is guaranteed to be bounded no matter the size of the map."
+target_has_map_iterators(Opts) ->
     is_target_major_version_at_least(21, Opts).
 
 proto2_type_default(Type, Defs, Opts) ->
