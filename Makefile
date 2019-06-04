@@ -322,6 +322,7 @@ $(ebin):
 
 # To compile gpb_compile, we first need the parse transform in gpb_codegen
 $(ebin)/gpb_compile.beam: $(ebin)/gpb_codegen.beam
+$(ebin)/gpb_decoders_lib.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_gen_encoders.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_gen_decoders.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_gen_mergers.beam: $(ebin)/gpb_codegen.beam
@@ -339,9 +340,14 @@ $(ebin)/gpb_compile.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_compile.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_compile.beam: $(src)/gpb_compile.hrl
 $(ebin)/gpb.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_decoders_lib.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_decoders_lib.beam: $(src)/gpb_codegen.hrl
+$(ebin)/gpb_decoders_lib.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_decoders_lib.beam: $(src)/gpb_decoders_lib.hrl
 $(ebin)/gpb_gen_decoders.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_gen_decoders.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_gen_decoders.beam: $(src)/gpb_compile.hrl
+$(ebin)/gpb_gen_decoders.beam: $(src)/gpb_decoders_lib.hrl
 $(ebin)/gpb_gen_encoders.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_gen_encoders.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_gen_encoders.beam: $(src)/gpb_compile.hrl
