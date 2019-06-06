@@ -56,8 +56,9 @@
 
 -export([fold_msg_fields/3]).
 -export([fold_msg_or_group_fields/3]).
--export([fold_msgdef_fields/3]).
 -export([fold_msg_or_group_fields_o/3]).
+-export([fold_msgdef_fields/3]).
+-export([fold_msgdef_fields_o/3]).
 
 -export([mapping_match/3]).
 -export([mapping_create/3]).
