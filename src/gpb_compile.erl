@@ -589,7 +589,7 @@ file(File) ->
 %%   <li>`[MsgName]' for the message itself on the top-level</li>
 %%   <li>`[MsgName,FieldName]' for fields, generally</li>
 %%   <li>`[MsgName,FieldName,[]]' for elements of repeated fields</li>
-%%   <li>`[MsgName,OnoefFieldName,FieldName]' for elements of oneof
+%%   <li>`[MsgName,OneofFieldName,FieldName]' for elements of oneof
 %%     fields.</li>
 %% </ul>
 %% For repeated fields, the additional operations `decode_init_default',
@@ -890,13 +890,13 @@ verify_opts_flat_oneof(Opts) ->
     end.
 
 check_maps_flat_oneof_may_fail_on_compilation(Opts) ->
-    CanFlatOnoef = gpb_lib:target_can_do_flat_oneof_for_maps(Opts),
+    CanFlatOneof = gpb_lib:target_can_do_flat_oneof_for_maps(Opts),
     MayFail = gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps(Opts),
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         #maps{oneof=flat} ->
-            if CanFlatOnoef, MayFail ->
+            if CanFlatOneof, MayFail ->
                     [maps_flat_oneof_generated_code_may_fail_to_compile];
-               not CanFlatOnoef ->
+               not CanFlatOneof ->
                     []; % a later check will signal an error
                true ->
                     []

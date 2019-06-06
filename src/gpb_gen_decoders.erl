@@ -379,7 +379,7 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
             end
     end.
 
-field_infos(MsgDef, FlattenOnoef, IsProto3) ->
+field_infos(MsgDef, FlattenOneof, IsProto3) ->
     [case Field of
          #?gpb_field{name=FName, type={msg,_}} ->
              {FName, optional};
@@ -390,13 +390,13 @@ field_infos(MsgDef, FlattenOnoef, IsProto3) ->
                      %% On finalization, treat proto3 (scalar) fields as
                      %% requried, to avoid redundant if F == '$undef' -> ...
                      %% checks;  it can never be '$undef' since it has a
-                     %% type-default. (except for sub messages and onoef)
+                     %% type-default. (except for sub messages and oneof)
                      {FName, required}
              end;
          #gpb_oneof{name=FName} ->
-             if not FlattenOnoef ->
+             if not FlattenOneof ->
                      {FName, optional};
-                FlattenOnoef ->
+                FlattenOneof ->
                      {FName, flatten_oneof}
              end
      end

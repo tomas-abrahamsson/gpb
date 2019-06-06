@@ -667,9 +667,9 @@ find_group_occurrences(Defs) ->
     gpb_lib:fold_msg_or_group_fields_o(
       fun(_msg_or_group, _MsgName,
           #?gpb_field{type={group,GroupName}, occurrence=Occurrence},
-          _IsOnoeof, D)->
+          _IsOneof, D)->
               dict:store(GroupName, Occurrence, D);
-         (_msg_or_group, _MsgName, _Field, _IsOnoeof, D) ->
+         (_msg_or_group, _MsgName, _Field, _IsOneof, D) ->
               D
       end,
       dict:new(),
