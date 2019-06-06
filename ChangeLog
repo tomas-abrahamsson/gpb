@@ -1,12 +1,12 @@
 -*- coding: utf-8 -*-
 
 Version 4.7.3
-2018-May-03
+2019-May-03
 
         * Bugfix type specs for strings. Thanks to 柯林呵呵呵. (#166)
 
 Version 4.7.2
-2018-Mar-09
+2019-Mar-09
 
         * Wellknown type (google/protobuf/*.proto) can be imported also for
         syntax="proto2", just like how it is for protoc.
@@ -15,13 +15,13 @@ Version 4.7.2
         see doc/dev-guide/*.md
 
 Version 4.7.1
-2018-Mar-08
+2019-Mar-08
 
         * Fix descriptor compilation in rebar3 (and rebar2)
         also when gpb is compiled as a dependency.
 
 Version 4.7.0
-2018-Mar-08
+2019-Mar-08
 
         * Generate a set of query functions for translating to and from
         fully qualified binaries (fqbin) and internal format, as well as
@@ -40,7 +40,7 @@ Version 4.7.0
         on details of the old, erroneous, descriptors.
 
 Version 4.6.0
-2018-Jan-23
+2019-Jan-23
 
         * Fix error when generating descriptors for protos importing other
         protos, each having package definitions. Thanks to Tristan Sloughter
@@ -54,13 +54,13 @@ Version 4.6.0
         gpb_scan.erl got prepended multiple times with a @doc chunk.
 
 Version 4.5.1
-2018-Jan-09
+2019-Jan-09
 
         * Fix dialyzer error in generate code when there were no services.
         Thanks to Guilherme Andrade. (#161)
 
 Version 4.5.0
-2018-Jan-03
+2019-Jan-03
 
         * Don't edoc generated files by marking them as @private. Thanks to
         Tristan Sloughter. (#159)
