@@ -2377,7 +2377,6 @@ compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
                  {ok, Form} ->
                      Form;
                  {error, Reason} ->
-                     io:format(user, "Ts=~p~n", [Ts]),
                      erlang:error(
                        {internal_error,?MODULE,Mod,Ts,Reason,
                         {more_info,[{full_erl,ErlCode2},{hrl,HrlText},
