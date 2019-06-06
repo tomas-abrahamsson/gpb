@@ -1,5 +1,18 @@
 -*- coding: utf-8 -*-
 
+Version 4.8.0
+2019-Jun-06
+
+        * Drop support for Erlang 17 and earlier, now that Erlang 22 is
+        out and rebar3 has dropped support for the same versions.  At
+        the moment, things still work, but in the future, the support
+        will gradually erode. (#133)
+
+        * Bugfix generation of an unused functions for when strings were
+        only occurring in proto3 oneof fields.
+
+        * Bugfix compilation functions return type spec.
+
 Version 4.7.3
 2019-May-03
 
