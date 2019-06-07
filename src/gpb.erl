@@ -17,6 +17,20 @@
 %%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 %%% MA  02110-1301  USA
 
+%% @doc This module contains a data-driven encoder/decoder plus some auxiliary
+%% helper functions.
+%%
+%% For information on how to generate code for a set or `.proto' files,
+%% see {@link gpb_compile}.
+%%
+%% The reason for keeping this (slower) data-driven encoder/decoder is
+%% mostly to be able to cross-check with the generated encoder/decoder.
+%% and also to some extent for easier interop testing.
+%%
+%% The encoder/decoder in this module currently does not support maps.
+%%
+%% @end
+
 -module(gpb).
 %-compile(export_all).
 -export([decode_msg/3]).
