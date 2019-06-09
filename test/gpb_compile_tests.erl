@@ -38,7 +38,7 @@
 -export([nif_mapfield_tests_check_prerequisites/1]).
 -export([nif_proto3_tests_check_prerequisites/1]).
 -export([increase_timeouts/1]).
--export([with_tmpdir/1]).
+-export([with_tmpdir/1, with_tmpdir/2]).
 -export([in_separate_vm/4]).
 -export([compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
 -export([check_protoc_can_do_oneof/0]).
@@ -4234,6 +4234,13 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
                 {ok, Mod1, Code, Warnings} -> % Mod1 insead of Mod, see above
                     load_code(Mod1, Code),
                     {ok, Mod1, Warnings};
+                {error, Reasons, Warnings} ->
+                    {error, Reasons, Warnings}
+            end;
+        get_code ->
+            case CompRes of
+                {ok, Mod1, Code, Warnings} -> % Mod1 insead of Mod, see above
+                    {ok, Mod1, Code, Warnings};
                 {error, Reasons, Warnings} ->
                     {error, Reasons, Warnings}
             end
