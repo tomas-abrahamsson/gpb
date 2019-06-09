@@ -361,13 +361,15 @@ format_nif_cc_mk_is_key(_Mod, _Defs, _AnRes, Opts) ->
              "    return (xb.size == key_len &&\n"
              "            memcmp(xb.data, key_to_check_for, key_len) == 0);\n"
              "}\n"];
-       true ->
+       Maps ->
             ["static int is_key(ErlNifEnv *env,\n"
              "                  const ERL_NIF_TERM x,\n"
              "                  const ERL_NIF_TERM key_to_check_for)\n",
              "{\n",
              "    return enif_is_identical(x, key_to_check_for);\n"
-             "}\n"]
+             "}\n"];
+       true ->
+            ""
     end.
 
 format_nif_cc_mk_mk_key(_Mod, _Defs, _AnRes, Opts) ->
@@ -386,12 +388,14 @@ format_nif_cc_mk_mk_key(_Mod, _Defs, _AnRes, Opts) ->
              "    memmove(data, key, len);\n"
              "    return b;\n"
              "}\n"];
-       true ->
+       Maps ->
             ["static ERL_NIF_TERM mk_key(ErlNifEnv *env,\n"
              "                           const ERL_NIF_TERM key)\n",
              "{\n",
              "    return key;\n"
-             "}\n"]
+             "}\n"];
+       true ->
+            ""
     end.
 
 format_nif_cc_utf8_conversion(_Mod, _Defs, AnRes, Opts) ->
