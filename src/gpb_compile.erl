@@ -708,6 +708,14 @@ file(File) ->
 %% It is possible to flexibly specify details of the JSON representation,
 %% with shorthand presets for some common libraries.
 %%
+%% However, with the `nif' option, the generated code uses the Google
+%% C++ protobuf library, which produces already-formatted JSON text, as
+%% binaries, with no further processing required. When `nif' is
+%% specified, the various JSON format options are thus not used.
+%% The `json_always_print_primitive_fields' and the
+%% `json_preserve_proto_field_names' options are honoured with `nif',
+%% though.
+%%
 %% <a name="option-json_always_print_primitive_fields"/>
 %% The `json_always_print_primitive_fields' makes the generated
 %% `to_json' function always emit json key-value items also when the
@@ -2550,17 +2558,26 @@ format_erl(Mod, Defs, DefsNoRenamings,
        if not DoNif ->
                [gpb_gen_translators:format_aux_transl_helpers(),
                 gpb_gen_translators:format_translators(Defs, AnRes, Opts)];
-          DoJson ->
-               [gpb_gen_translators:format_aux_transl_helpers(),
-                gpb_gen_translators:format_translators(Defs, AnRes, Opts)];
           DoNif ->
                [gpb_gen_translators:format_aux_transl_helpers(),
                 gpb_gen_translators:format_merge_translators(Defs, AnRes,
                                                              Opts)]
        end,
        "\n",
-       [[gpb_gen_json_encoders:format_encoders(Defs, AnRes, Opts),
-         gpb_gen_json_decoders:format_decoders(Defs, AnRes, Opts)]
+       [[gpb_gen_json_encoders:format_top_function(Defs, AnRes, Opts),
+         if DoNif ->
+                [gpb_gen_nif:format_nif_to_json_error_wrappers(
+                   Defs, AnRes, Opts)];
+           not DoNif ->
+                [gpb_gen_json_encoders:format_encoders(Defs, AnRes, Opts)]
+         end,
+         gpb_gen_json_decoders:format_top_function(Defs, AnRes, Opts),
+         if DoNif ->
+                 [gpb_gen_nif:format_nif_from_json_error_wrappers(
+                    Defs, AnRes, Opts)];
+            not DoNif ->
+                 [gpb_gen_json_decoders:format_decoders(Defs, AnRes, Opts)]
+         end]
         || DoJson],
        "\n",
        gpb_gen_introspect:format_introspection(Defs, AnRes, Opts),

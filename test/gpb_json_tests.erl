@@ -22,9 +22,46 @@
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
+-include("gpb_nif_test_helpers.hrl"). % the `?nif_if_supported(FnName)' macro
 
 -import(gpb_compile_tests, [compile_iolist/2]).
 -import(gpb_compile_tests, [unload_code/1]).
+
+-import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
+-import(gpb_compile_tests, [guess_features/1]).
+-import(gpb_compile_tests, [with_tmpdir/2]).
+-import(gpb_compile_tests, [in_separate_vm/4]).
+-import(gpb_compile_tests, [compile_nif_msg_defs/4]).
+
+-import(gpb_compile_maps_tests, [flat_map_prerequisites/1]).
+
+-export([json_encode/1, json_decode/1]). % for debugging
+
+-ifdef('OTP_RELEASE').
+%% ?assertEqual/3 appeared in Erlang 20 already,
+%% but it is easier to test for 'OTP_RELEASE' which
+%% appeared in Erlang 21, and we need a fallback to
+%% support older releases anyway...
+-define(assert_eq_3(ExpectedExpr, ActualExpr, DebugInfo),
+        ?assertEqual(ExpectedExpr, ActualExpr, DebugInfo)).
+-else. % -ifdef('OTP_RELEASE').
+%% Fallback
+-define(assert_eq_3(ExpectedExpr, ActualExpr, DebugInfo),
+        ((fun() ->
+                  X@@ = (ExpectedExpr),
+                  case (ActualExpr) of
+                      X@@ -> ok;
+                      Actual@@ ->
+                          error({not_equal, [{line, ?LINE},
+                                             {expr,??ActualExpr},
+                                             {debug, DebugInfo},
+                                             {expected,X@@},
+                                             {actual,Actual@@}]})
+                  end
+
+          end)())).
+-endif. % -ifdef('OTP_RELEASE').
+
 
 object_format_test() ->
     Proto = "
@@ -444,20 +481,6 @@ flat_oneof_maps_test_() ->
     flat_map_prerequisites(
       [{"flat oneof", fun flat_oneof_maps_test_aux/0}]).
 
-flat_map_prerequisites(Tests) ->
-    CanDoFlatMaps = gpb_lib:target_can_do_flat_oneof_for_maps([]),
-    MayFailCompilation =
-        gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps([]),
-    if CanDoFlatMaps,
-       MayFailCompilation ->
-            {"flat oneof for maps skipped (may hit compiler error)", []};
-       CanDoFlatMaps,
-       not MayFailCompilation ->
-            {"flat oneof for maps", Tests};
-       not CanDoFlatMaps ->
-            {"flat oneof for maps skipped (Erlang 17 or earlier)", []}
-    end.
-
 flat_oneof_maps_test_aux() ->
     M1 = compile_iolist(oneof_proto(), [json, maps, {maps_oneof, flat}]),
     ?assertEqual(#{},                M1:to_json(#{}, 'Msg')),
@@ -742,3 +765,428 @@ cmdline_json_opt_test() ->
            "-json-preserve-proto-field-names",
            "x.proto"]),
     ok.
+
+%% nif ------------------------------------------------
+
+nif_test_() ->
+    nif_tests_check_prerequisites(
+      [?nif_if_supported(nif_misc_types_rec),
+       ?nif_if_supported(nif_field_names),
+       ?nif_if_supported(nif_type_defaults),
+       ?nif_if_supported(nif_oneof_rec),
+       ?nif_if_supported(nif_mapfields_rec)]).
+
+
+-ifndef(NO_HAVE_MAPS).
+nif_maps_test_() ->
+    nif_tests_check_prerequisites(
+      [?nif_if_supported(nif_misc_types_maps),
+       ?nif_if_supported(nif_oneof_maps),
+       ?nif_if_supported(nif_oneof_flat_maps),
+       ?nif_if_supported(nif_mapfields_maps)]).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+nif_misc_types_proto() ->
+    "
+        syntax=\"proto2\";
+        message M {
+          optional uint32 op = 1;
+          required uint32 rq = 2;
+          repeated uint32 rp = 3;
+        }
+        message Top {
+          optional Sub f = 1;
+        }
+        message Sub {
+          optional uint32 f = 1;
+        }
+        message Ints {
+          optional int32   i32 = 1;
+          optional fixed32 f32 = 2;
+          optional int64   i64 = 3;
+          optional fixed64 f64 = 4;
+        }
+        message Floats {
+          optional float   f = 1;
+          optional double  d = 2;
+        }
+        message Bool {
+          optional bool    b = 1;
+        }
+        message Strs {
+          optional string  s = 1;
+          optional bytes   b = 2;
+        }
+        message Enums {
+          optional EE      e = 1;
+        }
+        enum EE { EE_A = 0; EE_B = 1; EE_C = 2; }
+        ".
+
+nif_misc_types_rec(features) ->
+    [json | guess_features(nif_misc_types_proto())];
+nif_misc_types_rec(title) ->
+    "types (records)".
+nif_misc_types_rec() ->
+    nif_to_from_json_aux(
+      dont_save,
+      nif_misc_types_proto(),
+      fun(NifM, ErlM) ->
+              Bigint = (1 bsl 60) - 1, % bigger than 2^53
+              j_roundtrip({'Top', {'Sub', 4711}}, NifM, ErlM),
+              j_roundtrip({'M', 12, 13, [14]}, NifM, ErlM),
+              j_roundtrip({'Ints', 11, 12, 4711, Bigint}, NifM, ErlM),
+              j_roundtrip({'Floats', -2.0, 1.25e-1}, NifM, ErlM),
+              j_roundtrip({'Bool', true}, NifM, ErlM),
+              j_roundtrip({'Bool', false}, NifM, ErlM),
+              j_roundtrip({'Strs', "abc", <<255,1,0>>}, NifM, ErlM),
+              j_roundtrip({'Enums', 'EE_A'}, NifM, ErlM),
+              j_roundtrip({'Enums', 'EE_B'}, NifM, ErlM),
+              ok
+      end,
+      [json]).
+
+-ifndef(NO_HAVE_MAPS).
+nif_misc_types_maps(features) -> [json|guess_features(nif_misc_types_proto())];
+nif_misc_types_maps(title) -> "types (maps)".
+nif_misc_types_maps() ->
+    nif_to_from_json_aux(
+      dont_save,
+      nif_misc_types_proto(),
+      fun(NifM, ErlM) ->
+              Bigint = (1 bsl 60) - 1, % bigger than 2^53
+              j_map_roundtrip(#{f => #{f => 4711}},
+                              'Top', NifM, ErlM),
+              j_map_roundtrip(#{op => 12, rq => 13, rp => [14]},
+                              'M', NifM, ErlM),
+              j_map_roundtrip(#{i32 => 11, f32 => 12,
+                                i64 => 4711, f64 => Bigint},
+                              'Ints', NifM, ErlM),
+              j_map_roundtrip(#{f => -2.0, d => 1.25e-1}, 'Floats', NifM, ErlM),
+              j_map_roundtrip(#{b => true}, 'Bool', NifM, ErlM),
+              j_map_roundtrip(#{b => false}, 'Bool', NifM, ErlM),
+              j_map_roundtrip(#{s => "abc", b => <<255,1,0>>},
+                              'Strs', NifM, ErlM),
+              j_map_roundtrip(#{e => 'EE_A'}, 'Enums', NifM, ErlM),
+              j_map_roundtrip(#{e => 'EE_B'}, 'Enums', NifM, ErlM),
+              ok
+      end,
+      [json, maps]).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+field_names_and_defaults_proto() ->
+    "
+    syntax=\"proto3\";
+    message IntMsg  { uint32 foo_bar_int = 1; };
+    ".
+
+nif_field_names(features) -> [json, json_preserve_proto_field_names, proto3];
+nif_field_names(title) -> "field names".
+nif_field_names() ->
+    Msg1 = {'IntMsg', 1},
+    nif_to_from_json_aux(
+      dont_save,
+      field_names_and_defaults_proto(),
+      fun(NifM, _ErlM) ->
+              [{<<"fooBarInt">>,  _}] = json_decode(NifM:to_json(Msg1)),
+              ok
+      end,
+      [json]),
+    nif_to_from_json_aux(
+      dont_save,
+      field_names_and_defaults_proto(),
+      fun(NifM, _ErlM) ->
+              [{<<"foo_bar_int">>,  _}] = json_decode(NifM:to_json(Msg1)),
+              ok
+      end,
+      [json, json_preserve_proto_field_names]).
+
+nif_type_defaults(features) -> [json, proto3];
+nif_type_defaults(title) -> "type defaults".
+nif_type_defaults() ->
+    Msg0 = {'IntMsg', 0},
+    Msg1 = {'IntMsg', 1},
+    nif_to_from_json_aux(
+      dont_save,
+      field_names_and_defaults_proto(),
+      fun(NifM, _ErlM) ->
+              [{}]           = json_decode(NifM:to_json(Msg0)),
+              [{_,  1}]      = json_decode(NifM:to_json(Msg1)),
+              ok
+      end,
+      [json]),
+    nif_to_from_json_aux(
+      dont_save,
+      field_names_and_defaults_proto(),
+      fun(NifM, _ErlM) ->
+              [{_,  0}]       = json_decode(NifM:to_json(Msg0)),
+              [{_,  1}]       = json_decode(NifM:to_json(Msg1)),
+              ok
+      end,
+      [json, json_always_print_primitive_fields]).
+
+nif_oneof_rec(features) -> [json | guess_features(oneof_proto())];
+nif_oneof_rec(title) -> "oneof (records)".
+nif_oneof_rec() ->
+    nif_to_from_json_aux(
+      dont_save,
+      oneof_proto(),
+      fun(NifM, ErlM) ->
+              j_roundtrip({'Msg', {a, 10}}, NifM, ErlM),
+              j_roundtrip({'Msg', {b, true}}, NifM, ErlM),
+              ok
+      end,
+      [json]).
+
+-ifndef(NO_HAVE_MAPS).
+nif_oneof_maps(features) -> [json | guess_features(oneof_proto())];
+nif_oneof_maps(title) -> "oneof (maps)".
+nif_oneof_maps() ->
+    nif_to_from_json_aux(
+      dont_save,
+      oneof_proto(),
+      fun(NifM, ErlM) ->
+              j_map_roundtrip(#{c => {a, 10}}, 'Msg', NifM, ErlM),
+              j_map_roundtrip(#{c => {b, true}}, 'Msg', NifM, ErlM),
+              ok
+      end,
+      [json, maps]).
+
+nif_oneof_flat_maps(features) -> [json | guess_features(oneof_proto())];
+nif_oneof_flat_maps(extra_checks) -> [fun can_do_flat_oneof/1];
+nif_oneof_flat_maps(title) -> "oneof (flat maps)".
+nif_oneof_flat_maps() ->
+    nif_to_from_json_aux(
+      dont_save,
+      oneof_proto(),
+      fun(NifM, ErlM) ->
+              j_map_roundtrip(#{a => 10}, 'Msg', NifM, ErlM),
+              j_map_roundtrip(#{b => true}, 'Msg', NifM, ErlM),
+              ok
+      end,
+      [json, maps, {maps_oneof, flat}]).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+mapfields_proto() ->
+    "
+    syntax=\"proto2\";
+    message I32ToStr  { map<int32,string>  f = 1; };
+    message BoolToStr { map<bool,string>   f = 1; };
+    message StrToStr  { map<string,string> f = 1; };
+    message I64ToSub  { map<int64,Sub>     f = 1; };
+    message Sub       { optional uint32    i = 1; };
+    ".
+
+nif_mapfields_rec(features) -> [json | guess_features(mapfields_proto())];
+nif_mapfields_rec(title) -> "map<_,_> fields (records)".
+nif_mapfields_rec() ->
+    nif_to_from_json_aux(
+      dont_save,
+      mapfields_proto(),
+      fun(NifM, ErlM) ->
+              j_roundtrip({'I32ToStr', [{0,"a"},{1,"b"}]}, NifM, ErlM,
+                          fun element2sort/1),
+              j_roundtrip({'BoolToStr', [{false,"a"},{true,"b"}]}, NifM, ErlM,
+                          fun element2sort/1),
+              j_roundtrip({'StrToStr', [{"a","z"},{"b","x"}]}, NifM, ErlM,
+                          fun element2sort/1),
+              j_roundtrip({'I64ToSub', [{1,{'Sub',11}}, {2,{'Sub',22}}]},
+                          NifM, ErlM, fun element2sort/1),
+              ok
+      end,
+      [json]).
+
+-ifndef(NO_HAVE_MAPS).
+nif_mapfields_maps(features) -> [json | guess_features(mapfields_proto())];
+nif_mapfields_maps(title) -> "map<_,_> fields (maps)".
+nif_mapfields_maps() ->
+    nif_to_from_json_aux(
+      dont_save,
+      mapfields_proto(),
+      fun(NifM, ErlM) ->
+              j_map_roundtrip(#{f => #{0 => "a",
+                                       1 => "b"}},
+                              'I32ToStr', NifM, ErlM),
+              j_map_roundtrip(#{f => #{false => "a",
+                                       true => "b"}},
+                              'BoolToStr', NifM, ErlM),
+              j_map_roundtrip(#{f => #{"a" => "z",
+                                       "b" => "x"}},
+                              'StrToStr', NifM, ErlM),
+              j_map_roundtrip(#{f => #{1 => #{i => 11},
+                                       2 => #{i => 22}}},
+                              'I64ToSub', NifM, ErlM),
+              ok
+      end,
+      [json, maps]).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+nif_to_from_json_aux(SaveOrNot, Proto, TestF, ExtraOpts) ->
+    with_tmpdir(
+      SaveOrNot,
+      fun(TmpDir) ->
+              NifM = gpb_jnif_test_ed1,
+              NifOpts = [nif] ++ ExtraOpts,
+              {ok, Code} = compile_nif_msg_defs(NifM, Proto, TmpDir, NifOpts),
+              in_separate_vm(
+                TmpDir, NifM, Code,
+                fun() ->
+                        ErlOpts = NifOpts -- [nif],
+                        ErlM = compile_iolist(Proto, ErlOpts),
+                        TestF(NifM, ErlM)
+                end)
+      end).
+
+-compile({nowarn_unused_function, with_tmpdir/1}).
+with_tmpdir(F) ->
+    with_tmpdir(dont_save, F). % -import()ed from gpb_compile_tests
+
+-ifndef(NO_HAVE_MAPS).
+can_do_flat_oneof(Features) ->
+    gpb_compile_maps_tests:can_do_flat_oneof(Features).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+
+%% roundtrip for records/tuples
+j_roundtrip(Msg, NifModule, ErlModule) ->
+    j_roundtrip(Msg, NifModule, ErlModule, fun id/1).
+j_roundtrip(Msg, NifModule, ErlModule, PrepF) when is_tuple(Msg) ->
+    j_roundtrip_nif_to_erl(Msg, NifModule, ErlModule, PrepF),
+    j_roundtrip_erl_to_nif(Msg, NifModule, ErlModule, PrepF).
+
+j_roundtrip_nif_to_erl(Msg, NifModule, ErlModule, PrepF) ->
+    JStr = NifModule:to_json(Msg),
+    JRepr = json_decode(JStr),
+    MsgName = element(1, Msg),
+    DebugInfo = [nif_to_erl, {jstr, JStr}, {jrepr, JRepr}],
+    ?assert_eq_3(Msg, PrepF(ErlModule:from_json(JRepr, MsgName)), DebugInfo).
+
+j_roundtrip_erl_to_nif(Msg, NifModule, ErlModule, PrepF) ->
+    JRepr = ErlModule:to_json(Msg),
+    JStr = json_encode(JRepr),
+    MsgName = element(1, Msg),
+    DebugInfo = [erl_to_nif, {jstr, JStr}, {jrepr, JRepr}],
+    ?assert_eq_3(Msg, PrepF(NifModule:from_json(JStr, MsgName)), DebugInfo).
+
+id(X) -> X.
+
+-ifndef(NO_HAVE_MAPS).
+%% roundtrip for maps
+j_map_roundtrip(Msg, MsgName, NifModule, ErlModule) when is_map(Msg) ->
+    j_map_roundtrip_nif_to_erl(Msg, MsgName, NifModule, ErlModule),
+    j_map_roundtrip_erl_to_nif(Msg, MsgName, NifModule, ErlModule).
+
+j_map_roundtrip_nif_to_erl(Msg, MsgName, NifModule, ErlModule) ->
+    JStr = NifModule:to_json(Msg, MsgName),
+    JRepr = pl_to_map(json_decode(JStr)),
+    DebugInfo = [nif_to_erl, {jstr, JStr}, {jrepr, JRepr}],
+    ?assert_eq_3(Msg, ErlModule:from_json(JRepr, MsgName), DebugInfo).
+
+j_map_roundtrip_erl_to_nif(Msg, MsgName, NifModule, ErlModule) ->
+    JRepr = ErlModule:to_json(Msg, MsgName),
+    JStr = json_encode(map_to_pl(JRepr)),
+    DebugInfo = [erl_to_nif, {jstr, JStr}, {jrepr, JRepr}],
+    ?assert_eq_3(Msg, NifModule:from_json(JStr, MsgName), DebugInfo).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+%% -- Simplified json encoder/decoder for subset that occurs here --
+json_encode(Obj) -> iolist_to_binary(je(Obj)).
+
+je([{}]) ->
+    <<"{}">>;
+je(L) when is_list(L), is_tuple(hd(L)) ->
+    [${, comma_join([[$\",K,$\",$:, je(V)] || {K,V} <- L]), $}];
+je(L) when is_list(L) ->
+    [$[, comma_join([je(Elem) || Elem <- L]), $]];
+je(I) when is_integer(I) -> integer_to_list(I);
+je(F) when is_float(F) -> float_to_list(F);
+je(S) when is_binary(S) -> [$\",S,$\"]; % string
+je(true) -> <<"true">>;
+je(false) -> <<"false">>;
+je(null) -> <<"null">>.
+
+comma_join([]) -> []; % gpb_lib:comma_join introduces spaces, so use our own
+comma_join([Hd|Tl]) -> [Hd | [[",",Elem] || Elem <- Tl]].
+
+%% Expect well-conforming input as a binary.
+%% - assume object keys always strings
+%% - assume floating point numbers well formed (eg leading digit, no leading +)
+%% - assume strings have no escaped chars
+json_decode(B) ->
+    {JTerm, ""} = jd(binary_to_list(B)),
+    JTerm.
+
+%% Assume any preceding whitespace has been stripped (see sp/1)
+%% Return {Token, Rest} where Rest has been stripped of leading whitespace
+-define(is_digit(C), $0 =< C, C =< $9).
+jd("{}"++Rest) -> {[{}], sp(Rest)};
+jd("{"++Rest) -> jd_obj(Rest, []);
+jd("\""++Rest) -> jd_str(Rest, "");
+jd("["++Rest) -> jd_array(Rest, []);
+jd("-"++[D|Rest]) when ?is_digit(D) -> jd_num(Rest, [D,$-]);
+jd([D|_]=Rest) when ?is_digit(D) -> jd_num(Rest, []);
+jd("true"++Rest) -> {true, sp(Rest)};
+jd("false"++Rest) -> {false, sp(Rest)};
+jd("null"++Rest) -> {null, sp(Rest)}.
+
+jd_obj(S, Acc) ->
+    {K, ":"++Rest} = jd(S),
+    case jd(sp(Rest)) of
+        {V, ","++Rest2} -> jd_obj(sp(Rest2), [{K,V} | Acc]);
+        {V, "}"++Rest2} -> {lists:reverse([{K,V} | Acc]), sp(Rest2)}
+    end.
+
+jd_array(S, Acc) ->
+    case jd(S) of
+        {Elem, ","++Rest} -> jd_obj(sp(Rest), [Elem | Acc]);
+        {Elem, "]"++Rest} -> {lists:reverse([Elem | Acc]), sp(Rest)}
+    end.
+
+jd_str("\""++Rest, Acc) -> {list_to_binary(lists:reverse(Acc)), sp(Rest)};
+jd_str("\\"++Rest, Acc) -> error({oops, didnt_expect_escaped, Rest, Acc});
+jd_str([C|Rest], Acc)   -> jd_str(Rest, [C | Acc]).
+
+jd_num([D|Rest], Acc) when ?is_digit(D) -> jd_num(Rest, [D | Acc]);
+jd_num("."++Rest, Acc) -> jd_frac(Rest, "." ++ Acc);
+jd_num("E"++Rest, Acc) -> jd_exp(Rest, lists:reverse(".0e", Acc));
+jd_num("e"++Rest, Acc) -> jd_exp(Rest, lists:reverse(".0e", Acc));
+jd_num(Rest, Acc) -> {list_to_integer(lists:reverse(Acc)), sp(Rest)}.
+
+jd_frac([D | Rest], Acc) when ?is_digit(D) -> jd_frac(Rest, [D | Acc]);
+jd_frac("e"++Rest, Acc) -> jd_exp(Rest, "e" ++ Acc);
+jd_frac("E"++Rest, Acc) -> jd_exp(Rest, "e" ++ Acc);
+jd_frac(Rest, Acc) -> {list_to_float(lists:reverse(Acc)), sp(Rest)}.
+
+jd_exp([D | Rest], Acc) when ?is_digit(D) -> jd_exp_d(Rest, [D | Acc]);
+jd_exp("+"++Rest, Acc) -> jd_exp_d(Rest, "+" ++ Acc);
+jd_exp("-"++Rest, Acc) -> jd_exp_d(Rest, "-" ++ Acc).
+
+jd_exp_d([D|Rest], Acc) when ?is_digit(D) -> jd_exp_d(Rest, [D | Acc]);
+jd_exp_d(Rest, Acc) -> {list_to_float(lists:reverse(Acc)), sp(Rest)}.
+
+sp(" "++Rest) -> sp(Rest);
+sp("\t"++Rest) -> sp(Rest);
+sp("\n"++Rest) -> sp(Rest);
+sp(Rest) -> Rest.
+
+%% Extra helpers for maps
+-ifndef(NO_HAVE_MAPS).
+map_to_pl(M) when is_map(M) ->
+    case [{K, map_to_pl(V)} || {K,V} <- maps:to_list(M)] of
+        [] -> [{}];
+        Pl -> Pl
+    end;
+map_to_pl(L) when is_list(L) ->
+    [map_to_pl(Elem) || Elem <- L];
+map_to_pl(X) ->
+    X.
+
+pl_to_map([{}]) ->
+    #{};
+pl_to_map(L) when is_list(L), is_tuple(hd(L)) ->
+    maps:from_list([{K, pl_to_map(V)} || {K,V} <- L]);
+pl_to_map(L) when is_list(L) ->
+    [pl_to_map(Elem) || Elem <- L];
+pl_to_map(X) ->
+    X.
+-endif. % -ifndef(NO_HAVE_MAPS).

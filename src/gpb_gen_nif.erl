@@ -30,6 +30,8 @@
 -export([format_load_nif/2]).
 -export([format_nif_encoder_error_wrappers/3]).
 -export([format_nif_decoder_error_wrappers/3]).
+-export([format_nif_to_json_error_wrappers/3]).
+-export([format_nif_from_json_error_wrappers/3]).
 -export([format_nif_cc/4]).
 
 -include("../include/gpb.hrl").
@@ -72,6 +74,7 @@ replace_tilde_s(<<C, Rest/binary>>, ModBin, VsnBin) ->
 replace_tilde_s(<<>>, _ModBin, _VsnBin) ->
     <<>>.
 
+%% error wrappers for encoders
 format_nif_encoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_encode_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
@@ -84,6 +87,7 @@ format_msg_nif_encode_error_wrapper(MsgName) ->
       end,
       [replace_term('<msg-name>', MsgName)]).
 
+%% error wrappers for decoders
 format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_decode_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
@@ -96,13 +100,44 @@ format_msg_nif_decode_error_wrapper(MsgName) ->
       end,
       [replace_term('<msg-name>', MsgName)]).
 
+%% error wrappers for to_json
+format_nif_to_json_error_wrappers(Defs, _AnRes, _Opts) ->
+    [format_msg_nif_to_json_error_wrapper(MsgName)
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+format_msg_nif_to_json_error_wrapper(MsgName) ->
+    gpb_codegen:format_fn(
+      gpb_lib:mk_fn(to_json_msg_, MsgName),
+      fun(Msg) ->
+              erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Msg])
+      end,
+      [replace_term('<msg-name>', MsgName)]).
+
+%% error wrappers for from_json
+format_nif_from_json_error_wrappers(Defs, _AnRes, _Opts) ->
+    [format_msg_nif_from_json_error_wrapper(MsgName)
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+format_msg_nif_from_json_error_wrapper(MsgName) ->
+    gpb_codegen:format_fn(
+      gpb_lib:mk_fn(from_json_msg_, MsgName),
+      fun(JBin) ->
+              erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [JBin])
+      end,
+      [replace_term('<msg-name>', MsgName)]).
+
+%% -- NIF C++ code ---
+
 format_nif_cc(Mod, Defs, AnRes, Opts) ->
+    DoJson = gpb_lib:json_by_opts(Opts),
     iolist_to_binary(
       [format_nif_cc_includes(Mod, Defs, AnRes, Opts),
        format_nif_cc_oneof_version_check_if_present(Defs),
        format_nif_cc_maptype_version_check_if_present(Defs),
        format_nif_cc_proto3_version_check_if_present(Defs),
        format_nif_cc_map_api_check_if_needed(Opts),
+       format_nif_cc_json_api_check_if_needed(Opts),
+       format_nif_cc_json_includes_if_needed(Opts),
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
        format_nif_cc_mk_consts(Mod, Defs, AnRes, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
@@ -113,6 +148,8 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_packers(Mod, Defs, Opts),
        format_nif_cc_decoders(Mod, Defs, Opts),
        format_nif_cc_unpackers(Mod, Defs, Opts),
+       [[format_nif_cc_to_jsoners(Mod, Defs, Opts),
+         format_nif_cc_from_jsoners(Mod, Defs, Opts)] || DoJson],
        format_nif_cc_foot(Mod, Defs, Opts)]).
 
 get_cc_pkg(Defs) ->
@@ -236,6 +273,41 @@ format_nif_cc_map_api_check_if_needed(Opts) ->
              "#error \"update Erlang.\"\n"
              "#endif\n"
              "\n"]
+    end.
+
+format_nif_cc_json_api_check_if_needed(Opts) ->
+    case gpb_lib:json_by_opts(Opts) of
+        true ->
+            PreserveFNames =
+                proplists:get_bool(json_preserve_proto_field_names, Opts),
+            ["#if GOOGLE_PROTOBUF_VERSION < 3000000\n"
+             "#error \"The json option was specified,\"\n"
+             "#error \"this feature appeared in protobuf 3, but\"\n"
+             "#error \"it appears your protobuf is older.  Please\"\n"
+             "#error \"update protobuf.\"\n"
+             "#endif\n",
+             if PreserveFNames ->
+                     ["\n"
+                      "#if GOOGLE_PROTOBUF_VERSION < 3003000\n"
+                      "#error \"The json_preserve_proto_field_names option\"\n"
+                      "#error \"was set, but protobuf support for this\"\n"
+                      "#error \"first appeared in protobuf 3.3.0, and\"\n"
+                      "#error \"it appears your protobuf is older.  Please\"\n"
+                      "#error \"update protobuf.\"\n"
+                      "#endif\n"];
+                true ->
+                     ""
+             end];
+        false ->
+            ""
+    end.
+
+format_nif_cc_json_includes_if_needed(Opts) ->
+    case gpb_lib:json_by_opts(Opts) of
+        true ->
+            ["#include <google/protobuf/util/json_util.h>\n"];
+        false ->
+            ""
     end.
 
 format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
@@ -688,7 +760,7 @@ format_nif_cc_utf8_conversion_code(Opts) ->
      end,
      "\n"].
 
-format_nif_cc_foot(Mod, Defs, _Opts) ->
+format_nif_cc_foot(Mod, Defs, Opts) ->
     ["static int\n",
      "load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)\n",
      "{\n",
@@ -721,12 +793,12 @@ format_nif_cc_foot(Mod, Defs, _Opts) ->
      %% but only if Erlang was configured with --enable-dirty-schedulers
      "#if ", format_nif_check_version_or_later(2, 7), "\n"
      "#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT\n",
-     format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND, "),
+     format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND, ", Opts),
      "#else /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
-     format_nif_cc_nif_funcs_list(Defs, ""),
+     format_nif_cc_nif_funcs_list(Defs, "", Opts),
      "#endif /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
      "#else /* before 2.7 or 17.3 */\n",
-     format_nif_cc_nif_funcs_list(Defs, no_flags),
+     format_nif_cc_nif_funcs_list(Defs, no_flags, Opts),
      "#endif /* before 2.7 or 17.3 */\n"
      "};\n",
      "\n",
@@ -739,7 +811,8 @@ format_nif_check_version_or_later(Major, Minor) ->
        "(ERL_NIF_MAJOR_VERSION == ~w && ERL_NIF_MINOR_VERSION >= ~w)",
        [Major, Major, Minor]).
 
-format_nif_cc_nif_funcs_list(Defs, Flags) ->
+format_nif_cc_nif_funcs_list(Defs, Flags, Opts) ->
+    DoJson = gpb_lib:json_by_opts(Opts),
     MsgNames = [MsgName || {{msg, MsgName}, _MsgFields} <- Defs],
     FlagStr = if Flags == no_flags -> "";
                  true -> ", " ++ Flags
@@ -749,12 +822,25 @@ format_nif_cc_nif_funcs_list(Defs, Flags) ->
          EncodeCFnName = mk_c_fn(encode_msg_, MsgName),
          DecodeFnName = gpb_lib:mk_fn(decode_msg_, MsgName),
          DecodeCFnName = mk_c_fn(decode_msg_, MsgName),
+         ToJsonFnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+         ToJsonCFnName = mk_c_fn(to_json_msg_, MsgName),
+         FromJsonFnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+         FromJsonCFnName = mk_c_fn(from_json_msg_, MsgName),
          IsLast = I == length(MsgNames),
          Comma = ["," || not IsLast],
-         [?f("    {\"~s\", 1, ~s~s},\n",
-             [EncodeFnName, EncodeCFnName, FlagStr]),
-          ?f("    {\"~s\", 1, ~s~s}~s\n",
-             [DecodeFnName, DecodeCFnName, FlagStr, Comma])]
+         DComma = if DoJson     -> ",";
+                     not DoJson -> Comma
+                  end,
+         [?f(  "    {\"~s\", 1, ~s~s},\n",
+               [EncodeFnName, EncodeCFnName, FlagStr]),
+          ?f(  "    {\"~s\", 1, ~s~s}~s\n",
+               [DecodeFnName, DecodeCFnName, FlagStr, DComma]),
+          [[?f("    {\"~s\", 1, ~s~s},\n",
+               [ToJsonFnName, ToJsonCFnName, FlagStr]),
+            ?f("    {\"~s\", 1, ~s~s}~s\n",
+               [FromJsonFnName, FromJsonCFnName, FlagStr, Comma])]
+           || DoJson]]
+
      end
      || {I, MsgName} <- gpb_lib:index_seq(MsgNames)].
 
@@ -1667,6 +1753,131 @@ format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field, Defs, Opts) ->
      "    }\n",
      "}\n"].
 
+
+format_nif_cc_to_jsoners(Mod, Defs, Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [format_nif_cc_to_jsoner(Mod, CPkg, MsgName, Fields, Opts)
+     || {{msg, MsgName}, Fields} <- Defs].
+
+format_nif_cc_to_jsoner(_Mod, CPkg, MsgName, _Fields, Opts) ->
+    FnName = mk_c_fn(to_json_msg_, MsgName),
+    PackFnName = mk_c_fn(p_msg_, MsgName),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    AlwaysPrintPrimitives =
+        atom_to_list(
+          proplists:get_bool(json_always_print_primitive_fields, Opts)),
+    PreserveFNames =
+        atom_to_list(proplists:get_bool(json_preserve_proto_field_names, Opts)),
+    %% The preserve_proto_field_names and always_print_enums_as_ints
+    %% JsonPrintOptions fields were added in in 3.3.0, so check for that.
+    %% There is an error check earlier for when it needs to be set to true.
+    %% Here, just don't fail if in the interval 3.0.0 .. 3.2.x.
+    ["static ERL_NIF_TERM\n",
+     FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
+     "{\n",
+     "    ERL_NIF_TERM result;\n",
+     "    ",CMsgType," *m = new ",CMsgType,"();\n",
+     "    ::std::string j;\n"
+     "    ::google::protobuf::util::JsonPrintOptions jopts;\n\n"
+     ""
+     "    jopts.add_whitespace = false;\n"
+     "    jopts.always_print_primitive_fields = ",AlwaysPrintPrimitives,";\n"
+     "#if GOOGLE_PROTOBUF_VERSION >= 3003000\n"
+     "    jopts.preserve_proto_field_names = ",PreserveFNames,";\n"
+     "    jopts.always_print_enums_as_ints = false;\n\n"
+     "#endif\n"
+     ""
+     "    if (argc != 1)\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n\n"
+     ""
+     "    if (m == NULL)\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n\n"
+     ""
+     "    if (!",PackFnName,"(env, argv[0], m))\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n\n"
+     ""
+     "    if (::google::protobuf::util::MessageToJsonString(*m, &j, jopts)\n"
+     "        == ::google::protobuf::util::Status::OK)\n"
+     "    {\n"
+     "        unsigned char *data;\n"
+     "        const char    *jData = j.data();\n"
+     "        unsigned int   jSize = j.size();\n"
+     "        data = enif_make_new_binary(env, jSize, &result);\n"
+     "        memmove(data, jData, jSize);\n"
+     "    }\n"
+     "    else\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n\n"
+     ""
+     "    delete m;\n"
+     "    return result;\n"
+     "}\n"
+     "\n"].
+
+format_nif_cc_from_jsoners(Mod, Defs, Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [format_nif_cc_from_jsoner(Mod, CPkg, MsgName, Fields, Opts)
+     || {{msg, MsgName}, Fields} <- Defs].
+
+format_nif_cc_from_jsoner(_Mod, CPkg, MsgName, _Fields, _Opts) ->
+    FnName = mk_c_fn(from_json_msg_, MsgName),
+    UnpackFnName = mk_c_fn(u_msg_, MsgName),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    ["static ERL_NIF_TERM\n",
+     FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
+     "{\n",
+     "    ErlNifBinary data;\n",
+     "    ERL_NIF_TERM res;\n",
+     "    ",CMsgType," *m = new ",CMsgType,"();\n",
+     "    ::std::string j;\n"
+     "    ::google::protobuf::util::JsonParseOptions jopts;\n"
+     "\n"
+     %% The JsonParseOptions contained ignore_unknown_fields already in 3.0.0
+     "    jopts.ignore_unknown_fields = true;\n"
+     "\n"
+     "    if (argc != 1)\n",
+     "    {\n",
+     "        delete m;\n",
+     "        return enif_make_badarg(env);\n",
+     "    }\n",
+     "\n",
+     "    if (m == NULL)\n",
+     "    {\n",
+     "        delete m;\n",
+     "        return enif_make_badarg(env);\n", %% FIXME: enomem?
+     "    }\n",
+     "\n",
+     "    if (!enif_inspect_binary(env, argv[0], &data))\n"
+     "    {\n",
+     "        delete m;\n",
+     "        return enif_make_badarg(env);\n",
+     "    }\n",
+     "\n",
+     %% try/catch bad_alloc and return enomem?
+     "    j.assign(reinterpret_cast<char *>(data.data), data.size);\n"
+     "    if (::google::protobuf::util::JsonStringToMessage(j, m, jopts)\n"
+     "        != ::google::protobuf::util::Status::OK)"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n"
+     "\n"
+     "    res = ",UnpackFnName,"(env, m);\n",
+     "    delete m;\n",
+     "    return res;\n",
+     "}\n"
+     "\n"].
 
 mk_cctype_name({enum,EnumName}, Defs) ->
     EPrefix = case is_dotted(EnumName) of

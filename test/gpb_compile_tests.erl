@@ -42,6 +42,7 @@
 -export([check_protoc_can_do_oneof/0]).
 -export([check_protoc_can_do_mapfields/0]).
 -export([check_protoc_can_do_proto3/0]).
+-export([check_protoc_can_do_json/0]).
 
 %% internally used
 -export([main_in_separate_vm/1]).
@@ -2723,7 +2724,9 @@ needed_vsn_to_text(Vsn) ->
 protoc_feature_version_appearance(oneof)        -> [2,6];
 protoc_feature_version_appearance(cxx_keywords) -> [3,0];
 protoc_feature_version_appearance(mapfields)    -> [3,0];
-protoc_feature_version_appearance(proto3)       -> [3,0].
+protoc_feature_version_appearance(proto3)       -> [3,0];
+protoc_feature_version_appearance(json)         -> [3,0];
+protoc_feature_version_appearance(json_preserve_proto_field_names) -> [3,3].
 
 check_extras([Check | Rest], NeededFeatures) ->
     case Check(NeededFeatures) of
@@ -3534,6 +3537,11 @@ check_protoc_can_do_mapfields() ->
                     fun() -> check_protoc_version_is_at_least([3,0]) end).
 
 check_protoc_can_do_proto3() ->
+    cachingly_check('$cached_check_protoc_can_do_proto3',
+                    %% proto3 appeared in 3.0.0 :)
+                    fun() -> check_protoc_version_is_at_least([3,0]) end).
+
+check_protoc_can_do_json() ->
     cachingly_check('$cached_check_protoc_can_do_proto3',
                     %% proto3 appeared in 3.0.0 :)
                     fun() -> check_protoc_version_is_at_least([3,0]) end).

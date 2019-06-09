@@ -40,6 +40,9 @@ no_maps_tests__test() ->
 -export([e_ipv4/1, d_ipv4/1, v_ipv4/1]).
 -export([e_ipv6/1, d_ipv6/1, v_ipv6/1]).
 
+-export([flat_map_prerequisites/1]).
+-export([can_do_flat_oneof/0, can_do_flat_oneof/1]).
+
 -import(gpb_compile_tests, [compile_iolist/2]).
 -import(gpb_compile_tests, [compile_to_string_get_hrl/2]).
 -import(gpb_compile_tests, [compile_erl_iolist/1]).

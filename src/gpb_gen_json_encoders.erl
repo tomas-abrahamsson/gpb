@@ -23,6 +23,7 @@
 -module(gpb_gen_json_encoders).
 
 -export([format_exports/2]).
+-export([format_top_function/3]).
 -export([format_encoders/3]).
 
 -include("../include/gpb.hrl").
@@ -40,11 +41,6 @@ format_exports(_Defs, Opts) ->
             ?f("-export([to_json/2, to_json/3]).~n")
     end.
 
-format_encoders(Defs, AnRes, Opts) ->
-    [format_top_function(Defs, AnRes, Opts),
-     format_to_json_msgs(Defs, AnRes, Opts),
-     format_json_helpers(Defs, AnRes, Opts)].
-
 format_top_function(Defs, AnRes, Opts) ->
     case [Item || {{msg, _}, _}=Item <- Defs] of
         [] ->
@@ -52,6 +48,10 @@ format_top_function(Defs, AnRes, Opts) ->
         MsgDefs ->
             format_top_function_aux(MsgDefs, AnRes, Opts)
     end.
+
+format_encoders(Defs, AnRes, Opts) ->
+    [format_to_json_msgs(Defs, AnRes, Opts),
+     format_json_helpers(Defs, AnRes, Opts)].
 
 format_top_function_no_msgs(Opts) ->
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
@@ -88,7 +88,9 @@ format_top_function_aux(MsgDefs, AnRes, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
     JVerify = proplists:get_value(json_verify, Opts, Verify),
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    DoNif = proplists:get_bool(nif, Opts),
     [case Mapping of
+
          records ->
              [gpb_codegen:format_fn(
                 to_json,
@@ -114,7 +116,7 @@ format_top_function_aux(MsgDefs, AnRes, Opts) ->
                TrUserData = proplists:get_value(user_data, Opts),
                case MsgName of
                    '<msg-name-match>' ->
-                       'to_json_Msg'('Tr'(Msg, TrUserData), TrUserData);
+                       'to_json_Msg'('Tr'(Msg, TrUserData), 'TrUserData');
                    X ->
                        error({gpb_error, {no_such_message, X}})
                end
@@ -140,7 +142,10 @@ format_top_function_aux(MsgDefs, AnRes, Opts) ->
                [replace_term('<msg-name-match>', MsgName),
                 replace_term('to_json_Msg', gpb_lib:mk_fn(to_json_msg_,
                                                           MsgName)),
-                replace_term('Tr', Transl)]
+                replace_term('Tr', Transl),
+                splice_trees('TrUserData', if DoNif -> [];
+                                              true  -> [?expr(TrUserData)]
+                                           end)]
            end
            || {{msg,MsgName}, _Fields} <- MsgDefs])])].
 

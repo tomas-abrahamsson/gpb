@@ -23,6 +23,7 @@
 -module(gpb_gen_json_decoders).
 
 -export([format_exports/2]).
+-export([format_top_function/3]).
 -export([format_decoders/3]).
 
 -include("../include/gpb.hrl").
@@ -31,20 +32,19 @@
 -include("gpb_decoders_lib.hrl").
 
 -import(gpb_lib, [replace_term/2, replace_tree/2,
-                  repeat_clauses/2]).
+                  splice_trees/2, repeat_clauses/2]).
 
 format_exports(_Defs, _Opts) ->
     ?f("-export([from_json/2, from_json/3]).~n").
-
-format_decoders(Defs, AnRes, Opts) ->
-    [format_top_function(Defs, AnRes, Opts),
-     format_msg_decoders(Defs, AnRes, Opts)].
 
 format_top_function(Defs, AnRes, Opts) ->
     case gpb_lib:contains_messages(Defs) of
         true  -> format_top_function_msgs(Defs, AnRes, Opts);
         false -> format_top_function_no_msgs(Opts)
     end.
+
+format_decoders(Defs, AnRes, Opts) ->
+    [format_msg_decoders(Defs, AnRes, Opts)].
 
 format_top_function_no_msgs(_Opts) ->
     ["-spec from_json(term(), atom()) -> no_return().\n",
@@ -60,7 +60,7 @@ format_top_function_no_msgs(_Opts) ->
                erlang:error({gpb_error, no_messages})
        end)].
 
-format_top_function_msgs(Defs, AnRes, _Opts) ->
+format_top_function_msgs(Defs, AnRes, Opts) ->
     Error = ("error({gpb_error," ++
              ""     "{from_json_failure," ++
              ""     " {Json, MsgName, {Class, Reason, StackTrace}}}})"),
@@ -76,6 +76,7 @@ format_top_function_msgs(Defs, AnRes, _Opts) ->
            "        StackTrace = erlang:get_stacktrace(),~n"
            "        ~s~n"
            "    end.~n", [Error]),
+    DoNif = proplists:get_bool(nif, Opts),
     [gpb_codegen:format_fn(
        from_json,
        fun(Json, MsgName) ->
@@ -95,7 +96,7 @@ format_top_function_msgs(Defs, AnRes, _Opts) ->
      gpb_codegen:format_fn(
        from_json_2_doit,
        fun('MsgName', Json, TrUserData) ->
-               'Tr'('from-json-fn'(Json, TrUserData), TrUserData)
+               'Tr'('from-json-fn'(Json, 'TrUserData'), TrUserData)
        end,
        [repeat_clauses(
           'MsgName',
@@ -106,7 +107,10 @@ format_top_function_msgs(Defs, AnRes, _Opts) ->
                [replace_term('MsgName', MsgName),
                 replace_term('Tr', Transl),
                 replace_term('from-json-fn',
-                             gpb_lib:mk_fn(from_json_msg_, MsgName))]
+                             gpb_lib:mk_fn(from_json_msg_, MsgName)),
+                splice_trees('TrUserData', if DoNif -> [];
+                                              true  -> [?expr(TrUserData)]
+                                           end)]
            end
            || {{msg, MsgName}, _Fields} <- Defs])])].
 
