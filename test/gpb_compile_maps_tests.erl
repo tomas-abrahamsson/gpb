@@ -46,8 +46,9 @@ no_maps_tests__test() ->
 -import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
 -import(gpb_compile_tests, [nif_oneof_tests_check_prerequisites/3]).
 -import(gpb_compile_tests, [nif_mapfield_tests_check_prerequisites/1]).
+-import(gpb_compile_tests, [nif_proto3_tests_check_prerequisites/1]).
 -import(gpb_compile_tests, [increase_timeouts/1]).
--import(gpb_compile_tests, [with_tmpdir/1]).
+-import(gpb_compile_tests, [with_tmpdir/2]).
 -import(gpb_compile_tests, [in_separate_vm/4]).
 -import(gpb_compile_tests, [compile_nif_msg_defs/4]).
 -import(gpb_compile_tests, [check_protoc_can_do_oneof/0]).
@@ -974,7 +975,10 @@ nif_test_() ->
            "Nif encode decode with flat oneof",
            fun flat_map_prerequisites/1,
            [{"nif_encode_decode_flat_oneof",
-             fun nif_encode_decode_flat_oneof/0}]),
+             fun nif_encode_decode_flat_oneof/0},
+            nif_proto3_tests_check_prerequisites(
+              [{"nif_encode_decode_flat_oneof_proto3",
+                fun nif_encode_decode_flat_oneof_proto3/0}])]),
          {"Nif encode decode with binary keys",
           fun nif_encode_decode_binary_keys/0},
          increase_timeouts(
@@ -1071,22 +1075,55 @@ nif_encode_decode_flat_oneof() -> % this test only called if prerequisite true
               in_separate_vm(
                 TmpDir, M, Code,
                 fun() ->
-                        <<8, 100>>  = B1A = M:encode_msg(#{a => 100}, x_fo),
-                        #{a := 100} = M1A = M:decode_msg(B1A, x_fo),
-                        1 = maps:size(M1A),
-                        <<26,2, 24,13>> = B1C =
-                            M:encode_msg(#{c => #{f => 13}}, x_fo),
-                        #{c := #{f := 13}} = M:decode_msg(B1C, x_fo),
+                        Msg1 = #{a => 100},
+                        <<8, 100>>  = B1A = M:encode_msg(Msg1, x_fo),
+                        ?assertEqual(Msg1, M:decode_msg(B1A, x_fo)),
 
-                        <<34,4, 32,14, 32,24>> = B1D =
-                            M:encode_msg(#{d => #{g => [14,24]}}, x_fo),
-                        #{d := #{g := [14,24]}} = M1D =
-                            M:decode_msg(B1D, x_fo),
-                        1 = maps:size(M1D),
+                        Msg2 = #{c => #{f => 13}},
+                        <<26,2, 24,13>> = B1C = M:encode_msg(Msg2, x_fo),
+                        ?assertEqual(Msg2, M:decode_msg(B1C, x_fo)),
+
+                        Msg3 = #{d => #{g => [14,24]}},
+                        <<34,4, 32,14, 32,24>> = B1D = M:encode_msg(Msg3, x_fo),
+                        ?assertEqual(Msg3, M:decode_msg(B1D, x_fo)),
                         ok
                 end)
       end).
 
+nif_encode_decode_flat_oneof_proto3() -> %  only called if prerequisite true
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_test_fo_ed1,
+              Defs = ["syntax=\"proto3\";",
+                      "message x_fo {",
+                      "  oneof x {",
+                      "    uint32 a = 1;",
+                      "    string b = 2;",
+                      "    x_fo3  c = 3;",
+                      "    x_fo4  d = 4;",
+                      "  }",
+                      "}",
+                      "message x_fo3 { uint32 f = 3; }",
+                      "message x_fo4 { repeated uint32 g = 4; }"],
+              Opts = [maps, {maps_unset_optional,omitted}, {maps_oneof, flat}],
+              {ok, Code} = compile_nif_msg_defs(M, Defs, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Msg1 = #{a => 100},
+                        <<8, 100>>  = B1A = M:encode_msg(Msg1, x_fo),
+                        ?assertEqual(Msg1, M:decode_msg(B1A, x_fo)),
+
+                        Msg2 = #{c => #{f => 13}},
+                        <<26,2, 24,13>> = B1C = M:encode_msg(Msg2, x_fo),
+                        ?assertEqual(Msg2, M:decode_msg(B1C, x_fo)),
+
+                        Msg3 = #{d => #{g => [14,24]}},
+                        <<34,4, 34,2, 14,24>> = B1D = M:encode_msg(Msg3, x_fo),
+                        ?assertEqual(Msg3, M:decode_msg(B1D, x_fo)),
+                        ok
+                end)
+      end).
 
 nif_encode_decode_binary_keys() ->
     ProtocCanOneof = check_protoc_can_do_oneof(),
@@ -1202,5 +1239,8 @@ bypass_wrappers_maps_nif() ->
                 end)
       end).
 
+-compile({nowarn_unused_function, with_tmpdir/1}).
+with_tmpdir(F) ->
+    with_tmpdir(dont_save, F). % -import()ed from gpb_compile_tests
 
 -endif. %% NO_HAVE_MAPS
