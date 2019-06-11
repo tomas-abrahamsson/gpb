@@ -2676,7 +2676,9 @@ increase_timeouts({Descr, Tests}) ->
      {timeout, PerTestTimeout * length(Tests),  %% timeout for all tests
       [{timeout, PerTestTimeout,
         [{TestDescr, TestFun}]}
-       || {TestDescr, TestFun} <- Tests]}}.
+       || {TestDescr, TestFun} <- Tests]}};
+increase_timeouts(Tests) when is_list(Tests) ->
+    [{timeout, 140, Test} || Test <- Tests].
 
 nif_tests_check_prerequisites(Tests) ->
     case nif_verify_prerequisites() of
