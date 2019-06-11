@@ -1406,7 +1406,7 @@ decode_zigzag(ExtValueExpr, Tr, TrUserDataVar) ->
           end,
           [replace_tree('ExtValueExpr', ExtValueExpr),
            replace_term('Tr', Tr(decode)),
-           replace_term('TrUserData', TrUserDataVar)]).
+           replace_tree('TrUserData', TrUserDataVar)]).
 
 decode_uint_to_int(ExtValueExpr, NumBits, Tr, TrUserDataVar) ->
     %% Contrary to the 64 bit encoding done for int32 (and enum),
