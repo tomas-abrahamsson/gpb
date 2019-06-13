@@ -578,8 +578,9 @@ or git fetch requests.  Here are some guide lines:
 
 * Use only spaces for indentation, no tabs. Indentation is 4 spaces.
 * The code must fit 80 columns
-* Verify that the code and documentation compiles and that tests are ok:
-  rebar clean compile eunit doc xref
+* Verify that the code and documentation compiles and that tests are ok:<br/>
+  `rebar clean; rebar eunit && rebar doc`<br/>
+  (if you are still on rebar2, you will need to run rebar compile before eunit)
 * If you add a feature, test cases are most welcome,
   so that the feature won't get lost in any future refactorization
 * Use a git branch for your feature. This way, the git history will
