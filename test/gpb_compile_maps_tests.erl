@@ -32,6 +32,8 @@ no_maps_tests__test() ->
 
 -else. %% NO_HAVE_MAPS
 
+-include("gpb_nif_test_helpers.hrl"). % the `?nif_if_supported(FnName)' macro
+
 -export([dict_to_map/1, map_to_dict/1]).
 
 %% Translators for {translate_field, {<Oneof>,...}} tests
@@ -44,10 +46,6 @@ no_maps_tests__test() ->
 -import(gpb_compile_tests, [unload_code/1]).
 
 -import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
--import(gpb_compile_tests, [nif_oneof_tests_check_prerequisites/3]).
--import(gpb_compile_tests, [nif_mapfield_tests_check_prerequisites/1]).
--import(gpb_compile_tests, [nif_proto3_tests_check_prerequisites/1]).
--import(gpb_compile_tests, [increase_timeouts/1]).
 -import(gpb_compile_tests, [with_tmpdir/2]).
 -import(gpb_compile_tests, [in_separate_vm/4]).
 -import(gpb_compile_tests, [compile_nif_msg_defs/4]).
@@ -275,20 +273,6 @@ map_type_with_mapfields_as_maps_option_test() ->
     Msg2 = M2:decode_msg(B2, m2),
     Msg2 = M2:merge_msgs(Msg2, Msg2, m2),
     unload_code(M2).
-
-flat_map_prerequisites(Tests) ->
-    CanDoFlatMaps = gpb_lib:target_can_do_flat_oneof_for_maps([]),
-    MayFailCompilation =
-        gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps([]),
-    if CanDoFlatMaps,
-       MayFailCompilation ->
-            {"flat oneof for maps skipped (may hit compiler error)", []};
-       CanDoFlatMaps,
-       not MayFailCompilation ->
-            {"flat oneof for maps", Tests};
-       not CanDoFlatMaps ->
-            {"flat oneof for maps skipped (Erlang 17 or earlier)", []}
-    end.
 
 flat_oneof_maps_test_() ->
     flat_map_prerequisites(
@@ -961,33 +945,22 @@ bypassed_wrappers_maps_test() ->
     unload_code(Mod3).
 
 
-
 %% nif ------------------------------------------------
 
 nif_test_() ->
-    increase_timeouts(
-      nif_tests_check_prerequisites(
-        [{"Nif encode decode with unset optionals present_undefined",
-          fun nif_encode_decode_present_undefined/0},
-         {"Nif encode decode with unset optionals omitted",
-          fun nif_encode_decode_omitted/0},
-         nif_oneof_tests_check_prerequisites(
-           "Nif encode decode with flat oneof",
-           fun flat_map_prerequisites/1,
-           [{"nif_encode_decode_flat_oneof",
-             fun nif_encode_decode_flat_oneof/0},
-            nif_proto3_tests_check_prerequisites(
-              [{"nif_encode_decode_flat_oneof_proto3",
-                fun nif_encode_decode_flat_oneof_proto3/0}])]),
-         {"Nif encode decode with binary keys",
-          fun nif_encode_decode_binary_keys/0},
-         increase_timeouts(
-           nif_mapfield_tests_check_prerequisites(
-             [{"Encode decode", fun nif_encode_decode_mapfields/0},
-              {"mapfields_as_maps", fun nif_with_mapfields_as_maps/0}])),
-         {"bypass_wrappers",
-          fun bypass_wrappers_maps_nif/0}])).
+    nif_tests_check_prerequisites(
+      [?nif_if_supported(nif_encode_decode_present_undefined),
+       ?nif_if_supported(nif_encode_decode_omitted),
+       ?nif_if_supported(nif_encode_decode_flat_oneof),
+       ?nif_if_supported(nif_encode_decode_flat_oneof_proto3),
+       ?nif_if_supported(nif_encode_decode_binary_keys),
+       ?nif_if_supported(nif_encode_decode_mapfields),
+       ?nif_if_supported(nif_with_mapfields_as_maps),
+       ?nif_if_supported(bypass_wrappers_maps_nif)]).
 
+nif_encode_decode_present_undefined(features) -> [oneof];
+nif_encode_decode_present_undefined(title) ->
+    "Nif encode decode with unset optionals present_undefined".
 nif_encode_decode_present_undefined() ->
     ProtocCanOneof = check_protoc_can_do_oneof(),
     with_tmpdir(
@@ -1022,6 +995,9 @@ nif_encode_decode_present_undefined() ->
                 end)
       end).
 
+nif_encode_decode_omitted(features) -> [oneof];
+nif_encode_decode_omitted(title) ->
+    "Nif encode decode with unset optionals omitted".
 nif_encode_decode_omitted() ->
     ProtocCanOneof = check_protoc_can_do_oneof(),
     with_tmpdir(
@@ -1056,7 +1032,10 @@ nif_encode_decode_omitted() ->
                 end)
       end).
 
-nif_encode_decode_flat_oneof() -> % this test only called if prerequisite true
+nif_encode_decode_flat_oneof(features) -> [oneof];
+nif_encode_decode_flat_oneof(extra_checks) -> [fun can_do_flat_oneof/1];
+nif_encode_decode_flat_oneof(title) -> "Nif encode decode with flat oneof".
+nif_encode_decode_flat_oneof() ->
     with_tmpdir(
       fun(TmpDir) ->
               M = gpb_nif_test_fo_ed1,
@@ -1090,7 +1069,10 @@ nif_encode_decode_flat_oneof() -> % this test only called if prerequisite true
                 end)
       end).
 
-nif_encode_decode_flat_oneof_proto3() -> %  only called if prerequisite true
+nif_encode_decode_flat_oneof_proto3(features) -> [oneof, proto3];
+nif_encode_decode_flat_oneof_proto3(extra_checks) -> [fun can_do_flat_oneof/1];
+nif_encode_decode_flat_oneof_proto3(title) -> "Flat oneof with proto3".
+nif_encode_decode_flat_oneof_proto3() ->
     with_tmpdir(
       fun(TmpDir) ->
               M = gpb_nif_test_fo_ed1,
@@ -1125,6 +1107,9 @@ nif_encode_decode_flat_oneof_proto3() -> %  only called if prerequisite true
                 end)
       end).
 
+
+nif_encode_decode_binary_keys(features) -> [];
+nif_encode_decode_binary_keys(title) -> "Nif encode decode with binary keys".
 nif_encode_decode_binary_keys() ->
     ProtocCanOneof = check_protoc_can_do_oneof(),
     with_tmpdir(
@@ -1161,6 +1146,9 @@ nif_encode_decode_binary_keys() ->
                 end)
       end).
 
+
+nif_encode_decode_mapfields(features) -> [mapfields];
+nif_encode_decode_mapfields(title) -> "Encode decode map<_,_> fields".
 nif_encode_decode_mapfields() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -1190,6 +1178,8 @@ nif_encode_decode_mapfields() ->
                 end)
       end).
 
+nif_with_mapfields_as_maps(features) -> [mapfields];
+nif_with_mapfields_as_maps(title) -> "The mapfields_as_maps option".
 nif_with_mapfields_as_maps() ->
     Defs = ["message m1 {\n",
             "   map<fixed32,string> a = 1;\n"
@@ -1221,6 +1211,8 @@ nif_with_mapfields_as_maps() ->
                 end)
       end).
 
+bypass_wrappers_maps_nif(features) -> [];
+bypass_wrappers_maps_nif(title) -> "The bypass_wrappers option".
 bypass_wrappers_maps_nif() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -1242,5 +1234,28 @@ bypass_wrappers_maps_nif() ->
 -compile({nowarn_unused_function, with_tmpdir/1}).
 with_tmpdir(F) ->
     with_tmpdir(dont_save, F). % -import()ed from gpb_compile_tests
+
+flat_map_prerequisites(Tests) ->
+    case can_do_flat_oneof() of
+        ok -> {"flat oneof for maps", Tests};
+        {error, Text} -> {Text, []}
+    end.
+
+can_do_flat_oneof(_Features) ->
+    can_do_flat_oneof().
+
+can_do_flat_oneof() ->
+    CanDoFlatMaps = gpb_lib:target_can_do_flat_oneof_for_maps([]),
+    MayFailCompilation =
+        gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps([]),
+    if CanDoFlatMaps,
+       MayFailCompilation ->
+            {error, "flat oneof for maps skipped (may hit compiler error)"};
+       CanDoFlatMaps,
+       not MayFailCompilation ->
+            ok;
+       not CanDoFlatMaps ->
+            {error, "flat oneof for maps skipped (Erlang 17 or earlier)"}
+    end.
 
 -endif. %% NO_HAVE_MAPS
