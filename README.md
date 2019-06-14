@@ -568,6 +568,11 @@ Related projects
   [Elixir](http://elixir-lang.org)
 * [enif_protobuf](https://github.com/jg513/enif_protobuf) for a NIF
   encoder/decoder
+* [grpcbox](https://github.com/tsloughter/grpcbox), for creating
+  grpc services (client and server)
+* [grpc](https://github.com/Bluehouse-Technology/grpc) and
+  [grpc_client](https://github.com/Bluehouse-Technology/grpc_client)
+  for a grpc server and client
 
 
 Contributing
