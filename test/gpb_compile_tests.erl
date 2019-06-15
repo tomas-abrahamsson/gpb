@@ -1776,6 +1776,9 @@ apply_ipv4_netmask({A,B,C,D}, Net) ->
       binary_to_list(<<((N band Mask) + (Ip band Subnetmask)):32>>)).
 
 translate_all_scalar_types_test() ->
+    {timeout,10,fun translate_all_scalar_types_test_aux/0}.
+
+translate_all_scalar_types_test_aux() ->
     M = compile_iolist(
           ["message o_i32     { optional int32      f = 1; }",
            "message o_s32     { optional sint32     f = 1; }",

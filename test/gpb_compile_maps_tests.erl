@@ -457,7 +457,7 @@ map_to_sorted_list_r(M) ->
 %% --- default values --------------
 
 default_value_handling_test_() ->
-    {timeout,15,fun 'default_value_handling_test_aux'/0}.
+    {timeout,30,fun 'default_value_handling_test_aux'/0}.
 
 default_value_handling_test_aux() ->
     Proto = ["message m {",
