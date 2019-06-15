@@ -2061,23 +2061,71 @@ add_opt_unless_present(Opt, []) ->
     [Opt].
 
 get_priv_dir() ->
-    case application:get_application(?MODULE) of
+    case locate_app_dir() of
         {ok,CurrApp} ->
             code:priv_dir(CurrApp);
         undefined ->
             %% Not loaded as an application, just executing code;
             %% from an escript possibly? (or even from an ez archive?)
-            MDir = filename:dirname(code:which(?MODULE)),
-            case filename:basename(MDir) of
-                "ebin" ->
-                    filename:join(filename:dirname(MDir), "priv");
-                _ ->
-                    case code:priv_dir(gpb) of % hard-wired app name...
-                        Dir when is_list(Dir) ->
-                            Dir;
-                        {error,Reason} ->
-                            error({failed_to_locate_privdir,Reason})
-                    end
+            case locate_priv_dir_by_module(?MODULE) of
+                {ok, PrivDir} ->
+                    PrivDir;
+                {error, Reason} ->
+                    error({failed_to_locate_privdir,Reason})
+            end
+    end.
+
+locate_app_dir() ->
+    case application:get_application(?MODULE) of
+        {ok,CurrApp} ->
+            %% Have seen situations where there is a code path (eg via
+            %% $ERL_LIBS) to another app named gpb-addon or similar.
+            %% This can fool the code loader functions into wrongly
+            %% thinking that the `-addon' part indicates a version
+            %% number of an app named `gpb'.
+            %% So do an extra safety check: this module should be located
+            %% in the app's ebin dir.
+            SelfBeamBase = filename:basename(code:which(?MODULE)),
+            AppEbinDir = filename:join(code:lib_dir(CurrApp), "ebin"),
+            case filelib:is_file(filename:join(AppEbinDir, SelfBeamBase)) of
+                true ->
+                    {ok, CurrApp};
+                false ->
+                    %% todo: Maybe we should attempt to find the true `gpb'
+                    %% by searching further towards the end of the code path
+                    %% but for now keep it simple(ish): rely on the fallback.
+                    undefined
+            end;
+        undefined ->
+            undefined
+    end.
+
+locate_priv_dir_by_module(Mod) ->
+    case calc_priv_dir_by_module_aux(Mod) of
+        {ok, PrivDir} ->
+            case filelib:is_dir(PrivDir) of
+                true ->
+                    {ok, PrivDir};
+                false ->
+                    {error, {candidate_for_mod_is_no_dir, Mod, PrivDir}}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+calc_priv_dir_by_module_aux(Mod) ->
+    MDir = filename:dirname(code:which(Mod)),
+    case filename:basename(MDir) of
+        "ebin" ->
+            {ok, filename:join(filename:dirname(MDir), "priv")};
+        ".eunit" -> % Probably rebar2: a .eunit dir in the app's top dir
+            {ok, filename:join(filename:dirname(MDir), "priv")};
+        _ ->
+            case code:priv_dir(gpb) of % hard-wired app name...
+                Dir when is_list(Dir) ->
+                    {ok, Dir};
+                {error,Reason} ->
+                    {error, {priv_failed_for_fallback, Reason, MDir}}
             end
     end.
 
