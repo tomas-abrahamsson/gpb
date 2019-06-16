@@ -220,9 +220,11 @@
 -export_type([opts/0, opt/0]).
 -export_type([comp_ret/0]).
 
--ifndef(NO_HAVE_STACKTRACE_SYNTAX).
--compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
--endif.
+-ifdef(OTP_RELEASE).
+-define(STACKTRACE(C,R,St), C:R:St ->).
+-else. % -ifdef(OTP_RELEASE).
+-define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
+-endif. % -ifdef(OTP_RELEASE).
 
 %% @equiv file(File, [])
 -spec file(string()) -> comp_ret().
@@ -2309,8 +2311,7 @@ possibly_format_descriptor(Defs, Opts) ->
                           [[replace_term('"base"', ProtoBase),
                             replace_term('<<PBin>>', PBin)]
                            || {ProtoBase, PBin} <- PBins])])]
-            catch error:undef ->
-                    ST = erlang:get_stacktrace(),
+            catch ?STACKTRACE(error,undef,ST) % ->
                     case {element(1,hd(ST)), element(2,hd(ST))} of
                         {gpb_compile_descr, encode_defs_to_descriptors} ->
                             ["-spec descriptor() -> no_return().\n",

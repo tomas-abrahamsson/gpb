@@ -78,9 +78,11 @@
 -export([e_value_to_msg/2, d_msg_to_value/2, v_value/2]).
 
 
--ifndef(NO_HAVE_STACKTRACE_SYNTAX).
--compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
--endif.
+-ifdef(OTP_RELEASE).
+-define(STACKTRACE(C,R,St), C:R:St ->).
+-else. % -ifdef(OTP_RELEASE).
+-define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
+-endif. % -ifdef(OTP_RELEASE).
 
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
@@ -2119,8 +2121,7 @@ report_or_return_warnings_or_errors_test_aux() ->
          Options = WarningOptions ++ ErrorOptions ++ WarnsAsErrsOpts,
          try
              rwre_go(Options, CompileTo, SrcType, SrcQuality)
-         catch Class:Reason ->
-                 Stack = erlang:get_stacktrace(),
+         catch ?STACKTRACE(Class,Reason,Stack)
                  %% Need some trouble shooting info for the failing combination
                  %% This could have been made into a test generator,
                  %% with each combination its won test,
@@ -3394,7 +3395,8 @@ main_in_separate_vm([FBinFile, FResFile]) ->
     {ok, FBin} = file:read_file(FBinFile),
     Fun = binary_to_term(FBin),
     Res = try Fun()
-          catch Class:Reason -> {'EXIT',{Class,Reason,erlang:get_stacktrace()}}
+          catch ?STACKTRACE(Class,Reason,Stack) % ->
+                  {'EXIT',{Class,Reason,Stack}}
           end,
     ResBin = term_to_binary(Res),
     WRes = file:write_file(FResFile, ResBin),

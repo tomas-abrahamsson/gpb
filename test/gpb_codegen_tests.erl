@@ -22,9 +22,11 @@
 -include("../src/gpb_codegen.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--ifndef(NO_HAVE_STACKTRACE_SYNTAX).
--compile({nowarn_deprecated_function, {erlang, get_stacktrace, 0}}).
--endif.
+-ifdef(OTP_RELEASE).
+-define(STACKTRACE(C,R,St), C:R:St ->).
+-else. % -ifdef(OTP_RELEASE).
+-define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
+-endif. % -ifdef(OTP_RELEASE).
 
 %-compile(export_all).
 
@@ -360,8 +362,7 @@ l(Mod, Exports, Form) ->
             ?debugFmt("~nCompilation Error:~n~s~n  ~p~n",
                       [format_form_debug(Form), Error]),
             Error
-    catch error:Error ->
-            ST = erlang:get_stacktrace(),
+    catch ?STACKTRACE(error,Error,ST) % ->
             ?debugFmt("~nCompilation crashed (malformed parse-tree?):~n"
                       ++ "~s~n"
                       ++ "  ~p~n",
