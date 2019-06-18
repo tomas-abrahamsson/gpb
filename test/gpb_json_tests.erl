@@ -390,9 +390,6 @@ enums_proto() ->
 decoding_enums_test() ->
     M1 = compile_iolist(enums_proto(), [json]),
     {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"EE_B">>}], 'EnumMsg'),
-    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"EE-B">>}], 'EnumMsg'),
-    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"ee-b">>}], 'EnumMsg'),
-    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"ee-B">>}], 'EnumMsg'),
     %% enums can be given as integers too, even ints represented as strings
     {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"1">>}], 'EnumMsg'),
     {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, 1}], 'EnumMsg'),
@@ -405,6 +402,16 @@ decoding_enums_test() ->
     {'EnumMsg', 'EE_A'} = M1:from_json([{<<"f">>, <<"9">>}], 'EnumMsg'),
     {'EnumMsg', 'EE_A'} = M1:from_json([{<<"f">>, <<"EE/B">>}], 'EnumMsg'),
     {'EnumMsg', 'EE_A'} = M1:from_json([{<<"f">>, <<"EE/B">>}], 'EnumMsg'),
+    unload_code(M1).
+
+decoding_enums_case_insensitively_test() ->
+    M1 = compile_iolist(enums_proto(),
+                        [json, json_case_insensitive_enum_parsing]),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"EE_B">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"EE-B">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"ee_b">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"ee_B">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"ee-B">>}], 'EnumMsg'),
     unload_code(M1).
 
 types_defaults_proto() ->
@@ -784,11 +791,13 @@ cmdline_json_opt_test() ->
     %% Misc options
     {ok, {[json,
            json_always_print_primitive_fields,
-           json_preserve_proto_field_names],
+           json_preserve_proto_field_names,
+           json_case_insensitive_enum_parsing],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-json", "-json-always-print-primitive-fields",
            "-json-preserve-proto-field-names",
+           "-json-case-insensitive-enum-parsing",
            "x.proto"]),
     ok.
 

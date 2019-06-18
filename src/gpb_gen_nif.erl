@@ -280,6 +280,8 @@ format_nif_cc_json_api_check_if_needed(Opts) ->
         true ->
             PreserveFNames =
                 proplists:get_bool(json_preserve_proto_field_names, Opts),
+            CaseInsensitiveEnums =
+                proplists:get_value(json_case_insensitive_enum_parsing, Opts),
             ["#if GOOGLE_PROTOBUF_VERSION < 3000000\n"
              "#error \"The json option was specified,\"\n"
              "#error \"this feature appeared in protobuf 3, but\"\n"
@@ -297,6 +299,20 @@ format_nif_cc_json_api_check_if_needed(Opts) ->
                       "#endif\n"];
                 true ->
                      ""
+             end,
+             if CaseInsensitiveEnums == true;
+                CaseInsensitiveEnums == undefined -> % default is true
+                     "";
+                CaseInsensitiveEnums == false ->
+                     ["\n"
+                      "#if GOOGLE_PROTOBUF_VERSION < 3007000\n"
+                      "#error \"The json_case_insensitive_enum_parsing\"\n"
+                      "#error \"option was set to false, but support \"\n"
+                      "#error \"for configuring this first appeared\"\n"
+                      "#error \"in version 3.7.0, and it appears \"\n"
+                      "#error \"your protobuf is older.  Please\"\n"
+                      "#error \"update protobuf.\"\n"
+                      "#endif\n"]
              end];
         false ->
             ""
@@ -1830,10 +1846,13 @@ format_nif_cc_from_jsoners(Mod, Defs, Opts) ->
     [format_nif_cc_from_jsoner(Mod, CPkg, MsgName, Fields, Opts)
      || {{msg, MsgName}, Fields} <- Defs].
 
-format_nif_cc_from_jsoner(_Mod, CPkg, MsgName, _Fields, _Opts) ->
+format_nif_cc_from_jsoner(_Mod, CPkg, MsgName, _Fields, Opts) ->
     FnName = mk_c_fn(from_json_msg_, MsgName),
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    CaseInsensitiveEnums =
+        atom_to_list(
+          proplists:get_bool(json_case_insensitive_enum_parsing, Opts)),
     ["static ERL_NIF_TERM\n",
      FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
      "{\n",
@@ -1845,6 +1864,11 @@ format_nif_cc_from_jsoner(_Mod, CPkg, MsgName, _Fields, _Opts) ->
      "\n"
      %% The JsonParseOptions contained ignore_unknown_fields already in 3.0.0
      "    jopts.ignore_unknown_fields = true;\n"
+     %% Case insensitive enum parsing is default in 3.8.0,
+     %% and the option appeared in 3.7.0
+     "#if GOOGLE_PROTOBUF_VERSION >= 3007000\n"
+     "    jopts.case_insensitive_enum_parsing = ",CaseInsensitiveEnums,";\n\n"
+     "#endif\n"
      "\n"
      "    if (argc != 1)\n",
      "    {\n",

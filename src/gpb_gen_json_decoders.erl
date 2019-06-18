@@ -695,7 +695,7 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
           gpb_codegen:format_fn(
             gpb_lib:mk_fn(fj_enum_, EnumName),
             fun(S) when is_binary(S) ->
-                    case fj_case_canonicalize_enum(S, <<>>) of
+                    case  fj_casecanon_enum(S, <<>>) of
                         '<<"Str">>' -> '<EnumSym>';
                         _ -> 'FirstSym'
                     end;
@@ -714,20 +714,29 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
       end
       || {{enum,EnumName}, [{Sym1,_} | _]=Enums} <- Defs,
          NeedEnumType],
-     [[%% Extra enum helper(s)
-       gpb_codegen:format_fn(
-        fj_case_canonicalize_enum,
-        fun(<<C, Tl/binary>>, Acc) ->
-                call_self(Tl, <<Acc/binary, (fj_case_canonicalize_char(C))>>);
-           (<<>>, Acc) ->
-                Acc
-        end),
-       gpb_codegen:format_fn(
-        fj_case_canonicalize_char,
-        fun(C) when $a =< C, C =< $z -> C - 32; % $a - $A == 32
-           ($-) -> $_;
-           (C) -> C
-        end)]
+     [%% Extra enum helper(s)
+      case proplists:get_bool(json_case_insensitive_enum_parsing, Opts) of
+          true ->
+              [gpb_codegen:format_fn(
+                 fj_casecanon_enum,
+                 fun(<<C, Tl/binary>>, Acc) ->
+                         call_self(Tl, <<Acc/binary, (fj_casecanon_char(C))>>);
+                    (<<>>, Acc) ->
+                         Acc
+                 end),
+               gpb_codegen:format_fn(
+                 fj_casecanon_char, % to uppercase
+                 fun(C) when $a =< C, C =< $z -> C - 32; % $a - $A == 32
+                    ($-) -> $_;
+                    (C) -> C
+                 end)];
+          false ->
+              [gpb_codegen:format_fn(
+                 fj_casecanon_enum,
+                 fun(B, _Acc) ->
+                         B
+                 end)]
+      end
       || NeedEnumType],
      [[%% float with helper
        gpb_codegen:format_fn(

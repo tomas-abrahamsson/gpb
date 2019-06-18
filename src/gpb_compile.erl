@@ -166,6 +166,7 @@
                boolean_opt(json) |
                boolean_opt(json_always_print_primitive_fields) |
                boolean_opt(json_preserve_proto_field_names) |
+               boolean_opt(json_case_insensitive_enum_parsing) |
                {json_format, json_format()} |
                {json_object_format, json_object_format()} |
                {json_key_format, json_key_format()} |
@@ -712,8 +713,9 @@ file(File) ->
 %% C++ protobuf library, which produces already-formatted JSON text, as
 %% binaries, with no further processing required. When `nif' is
 %% specified, the various JSON format options are thus not used.
-%% The `json_always_print_primitive_fields' and the
-%% `json_preserve_proto_field_names' options are honoured with `nif',
+%% The `json_always_print_primitive_fields', the
+%% `json_preserve_proto_field_names' and the
+%% `json_case_insensitive_enum_parsing' options are honoured with `nif',
 %% though.
 %%
 %% <a name="option-json_always_print_primitive_fields"/>
@@ -727,6 +729,12 @@ file(File) ->
 %% The `json_preserve_proto_field_names' makes the generated `to_json'
 %% function always use the field name in the `.proto' file. The default
 %% is to use lowerCamelCase, as per the language guide.
+%%
+%% <a name="option-json_case_insensitive_enum_parsing"/>
+%% If the the `json_case_insensitive_enum_parsing' option is specified,
+%% case is not significant when parsing json enums. Also, dashes instead
+%% of underscores are allowed. Default is that that case <em>is</em>
+%% significant.
 %%
 %% <a name="option-json_format"/>
 %% The `{json_format,Format}' option is a convenience shorthand, and will expand
@@ -1575,6 +1583,11 @@ c() ->
 %%       `-json-preserve-proto-field-names'</dt>
 %%   <dd>Print the fields' names as in `.proto' file, not
 %%       as lowerCamelCase.</dd>
+%%   <dt><a name="cmdline-option-json-case-insensitive-enum-parsing"/>
+%%       `-json-case-insensitive-enum-parsing'</dt>
+%%   <dd>Make case insignificant when parsing enums in JSON. Also allow
+%%       dash as alternative to undercore.
+%%       Default is that case <em>is</em> significant when parsing enums.</dd>
 %%   <dt><a name="cmdline-option-W"/>
 %%       `-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
@@ -1917,6 +1930,11 @@ opt_specs() ->
       json_preserve_proto_field_names, "\n"
       "       Print the fields' names as in the .proto file, not as\n"
       "       lowerCamelCase.\n"},
+     {"json-case-insensitive-enum-parsing", undefined,
+      json_case_insensitive_enum_parsing, "\n"
+      "       Make case insignificant when parsing enums in JSON. Also allow\n"
+      "       dash as alternative to undercore.\n"
+      "       Default is that case _is_ significant when parsing enums."},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
