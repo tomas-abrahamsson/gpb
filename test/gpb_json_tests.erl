@@ -297,7 +297,6 @@ various_types_test() ->
     {'MsgMsg', {'Sub', 11}} = M1:from_json([{<<"f">>, [{<<"s">>, 11}]}],
                                            'MsgMsg'),
     {'EnumMsg', 'A'} = M1:from_json([{<<"f">>, <<"A">>}], 'EnumMsg'),
-    {'EnumMsg', 'A'} = M1:from_json([{<<"f">>, 0}], 'EnumMsg'),
     {'BoolMsg', true} = M1:from_json([{<<"f">>, true}], 'BoolMsg'),
     {'BoolMsg', false} = M1:from_json([{<<"f">>, false}], 'BoolMsg'),
     %% string: check that it accepts iodata
@@ -380,6 +379,33 @@ various_types_maps_test() ->
     ?assertEqual(#{}, M1:from_json(#{}, 'MsgMsg')),
     unload_code(M1).
 -endif. % -ifndef(NO_HAVE_MAPS).
+
+enums_proto() ->
+    "
+     syntax=\"proto3\";
+     message EnumMsg   { optional EE f = 1; };
+     enum EE { EE_A=0; EE_B=1; };
+    ".
+
+decoding_enums_test() ->
+    M1 = compile_iolist(enums_proto(), [json]),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"EE_B">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"EE-B">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"ee-b">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"ee-B">>}], 'EnumMsg'),
+    %% enums can be given as integers too, even ints represented as strings
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"1">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, 1}], 'EnumMsg'),
+    %% gpb normally decodes unknown enums as integers
+    {'EnumMsg', 9} = M1:from_json([{<<"f">>, 9}], 'EnumMsg'),
+    %% Unparsables or unknowns: when string: treat the field as not present
+    %% In proto2 should decode to undefined instead of EE_A
+    %% but need some more handling to do that...
+    {'EnumMsg', 'EE_A'} = M1:from_json([{<<"f">>, <<" 1">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_A'} = M1:from_json([{<<"f">>, <<"9">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_A'} = M1:from_json([{<<"f">>, <<"EE/B">>}], 'EnumMsg'),
+    {'EnumMsg', 'EE_A'} = M1:from_json([{<<"f">>, <<"EE/B">>}], 'EnumMsg'),
+    unload_code(M1).
 
 types_defaults_proto() ->
     "syntax=\"proto3\";\n"

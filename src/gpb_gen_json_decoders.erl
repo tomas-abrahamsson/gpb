@@ -479,10 +479,10 @@ type_decode_expr(Type, JValueExpr, TrUserDataVar) ->
             ?expr(fj_bool('Var'),
                   [replace_tree('Var', JValueExpr)]);
         {enum,EnumName} ->
-            DecodeEnumFn = gpb_lib:mk_fn(d_enum_, EnumName),
-            ?expr(fj_enum('Var', fun 'd_enum_<EName>'/1),
+            DecodeEnumFn = gpb_lib:mk_fn(fj_enum_, EnumName),
+            ?expr('fj_enum_<EName>'('Var'),
                   [replace_tree('Var', JValueExpr),
-                   replace_term('d_enum_<EName>', DecodeEnumFn)]);
+                   replace_term('fj_enum_<EName>', DecodeEnumFn)]);
         Int32 when Int32 == fixed32;
                    Int32 == sfixed32 ->
             ?expr(fj_int('Var'),
@@ -521,7 +521,7 @@ format_helpers(Defs, AnRes, Opts) ->
     [format_json_msg_iterator_helpers(Defs, Opts),
      format_json_array_helpers(Defs, AnRes, Opts),
      format_mapfield_helper(AnRes, Opts),
-     format_json_type_helpers(AnRes, Opts)].
+     format_json_type_helpers(Defs, AnRes, Opts)].
 
 format_json_msg_iterator_helpers(Defs, Opts) ->
     HaveNonemptyMsgs = have_nonempty_msg(Defs),
@@ -654,7 +654,7 @@ format_mapfield_helper(#anres{map_types=MapTypes}, Opts) ->
                 [replace_tree('#{key => EKey, value => EValue}', MkMapExpr)])
       end] || HaveMapfields].
 
-format_json_type_helpers(#anres{used_types=UsedTypes}, Opts) ->
+format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
     StrBin = gpb_lib:get_strings_as_binaries_by_opts(Opts),
     NeedIntType = lists:any(fun(T) -> gpb_lib:smember(T, UsedTypes) end,
                             [sint32, int32, uint32,
@@ -686,15 +686,49 @@ format_json_type_helpers(#anres{used_types=UsedTypes}, Opts) ->
         fun(B) when is_boolean(B) ->
                 B
         end) || NeedBoolType],
-     [gpb_codegen:format_fn(
-        fj_enum,
-        fun(S, _EnumDecoder) when is_binary(S) ->
-                list_to_atom(binary_to_list(S));
-           (S, _EnumDecoder) when is_list(S) ->
-                list_to_atom(S);
-           (N, EnumDecoder) when is_integer(N) ->
-                EnumDecoder(N)
-        end) || NeedEnumType],
+     [begin
+          {Syms, Ints} = lists:unzip(Enums),
+          IntStrs = [integer_to_list(I) || I <- Ints],
+          CanonicalSymStrs = [enum_canonical_str(Sym, Opts) || Sym <- Syms],
+          StrSyms = (lists:zip(CanonicalSymStrs, Syms)
+                     ++ lists:zip(IntStrs, Syms)),
+          gpb_codegen:format_fn(
+            gpb_lib:mk_fn(fj_enum_, EnumName),
+            fun(S) when is_binary(S) ->
+                    case fj_case_canonicalize_enum(S, <<>>) of
+                        '<<"Str">>' -> '<EnumSym>';
+                        _ -> 'FirstSym'
+                    end;
+               (N) when is_integer(N) ->
+                    'd_enum_<EName>'(N);
+               (S) when is_list(S) ->
+                    call_self(list_to_binary(S))
+            end,
+            [replace_term('d_enum_<EName>', gpb_lib:mk_fn(d_enum_, EnumName)),
+             replace_term('FirstSym', Sym1),
+             repeat_clauses(
+               '<<"Str">>',
+               [[replace_tree('<<"Str">>', bstr(Str)),
+                 replace_term('<EnumSym>', Sym)]
+                || {Str, Sym} <- StrSyms])])
+      end
+      || {{enum,EnumName}, [{Sym1,_} | _]=Enums} <- Defs,
+         NeedEnumType],
+     [[%% Extra enum helper(s)
+       gpb_codegen:format_fn(
+        fj_case_canonicalize_enum,
+        fun(<<C, Tl/binary>>, Acc) ->
+                call_self(Tl, <<Acc/binary, (fj_case_canonicalize_char(C))>>);
+           (<<>>, Acc) ->
+                Acc
+        end),
+       gpb_codegen:format_fn(
+        fj_case_canonicalize_char,
+        fun(C) when $a =< C, C =< $z -> C - 32; % $a - $A == 32
+           ($-) -> $_;
+           (C) -> C
+        end)]
+      || NeedEnumType],
      [[%% float with helper
        gpb_codegen:format_fn(
          fj_float,
@@ -784,3 +818,11 @@ have_repeated_aux([_ | Rest]) ->
     have_repeated_aux(Rest);
 have_repeated_aux([]) ->
     false.
+
+bstr(S) when is_list(S) ->
+    %% Want <<"str">> and not <<102,110,97,109,101>>
+    %% so make a text node
+    erl_syntax:text(?ff("<<~p>>", [S])).
+
+enum_canonical_str(A, _Opts) when is_atom(A) ->
+    gpb_lib:uppercase(atom_to_list(A)).
