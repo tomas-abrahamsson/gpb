@@ -681,11 +681,33 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
            (S) when is_list(S) ->
                 list_to_integer(S)
         end) || NeedIntType],
-     [gpb_codegen:format_fn(
-        fj_bool,
-        fun(B) when is_boolean(B) ->
-                B
-        end) || NeedBoolType],
+     [[%% The protobuf also accepts both boolean values as well as
+       %% string representation of the same. It seems to also accepts
+       %% string representations of 0 and 1, but oddly enough
+       %% not the integers 0 and 1.  (protobuf 3.8.0-rc1)
+       gpb_codegen:format_fn(
+         fj_bool,
+         fun(B) when is_boolean(B) -> B;
+            (B) when is_binary(B) ->
+                 case fj_bool_bin_casecanon(B, <<>>) of
+                     (<<"true">>)           -> true;
+                     (<<"false">>)          -> false;
+                     (<<"1">>)              -> true;
+                     (<<"0">>)              -> false
+                 end;
+            (S) when is_list(S) ->
+                 call_self(list_to_binary(S))
+         end),
+       gpb_codegen:format_fn(
+         fj_bool_bin_casecanon, % to lowercase
+         fun(<<C, Rest/binary>>, Acc) when $A =< C, C =< $Z ->
+                 call_self(Rest, <<Acc/binary, (C + 32)>>); % $a - $A == 32
+            (<<C, Rest/binary>>, Acc) ->
+                 call_self(Rest, <<Acc/binary, C>>);
+            (<<>>, Acc) ->
+                 Acc
+         end)]
+      || NeedBoolType],
      [begin
           {Syms, Ints} = lists:unzip(Enums),
           IntStrs = [integer_to_list(I) || I <- Ints],

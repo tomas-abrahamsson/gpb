@@ -297,8 +297,12 @@ various_types_test() ->
     {'MsgMsg', {'Sub', 11}} = M1:from_json([{<<"f">>, [{<<"s">>, 11}]}],
                                            'MsgMsg'),
     {'EnumMsg', 'A'} = M1:from_json([{<<"f">>, <<"A">>}], 'EnumMsg'),
+    %% bool: accept also boolean values as strings (case insensitively)
     {'BoolMsg', true} = M1:from_json([{<<"f">>, true}], 'BoolMsg'),
     {'BoolMsg', false} = M1:from_json([{<<"f">>, false}], 'BoolMsg'),
+    {'BoolMsg', true} = M1:from_json([{<<"f">>, <<"true">>}], 'BoolMsg'),
+    {'BoolMsg', true} = M1:from_json([{<<"f">>, <<"TRUe">>}], 'BoolMsg'),
+    {'BoolMsg', true} = M1:from_json([{<<"f">>, <<"1">>}], 'BoolMsg'),
     %% string: check that it accepts iodata
     [{<<"f">>, <<"abc">>}] = M1:to_json({'StringMsg', "abc"}),
     [{<<"f">>, <<"abc">>}] = M1:to_json({'StringMsg', <<"abc">>}),
