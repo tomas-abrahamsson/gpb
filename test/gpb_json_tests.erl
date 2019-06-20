@@ -325,6 +325,10 @@ various_types_test() ->
     {'Int32Msg', 10}  = M1:from_json([{<<"f">>, <<"10">>}], 'Int32Msg'),
     {'Int32Msg', -10} = M1:from_json([{<<"f">>, -10}], 'Int32Msg'),
     {'Int32Msg', -10} = M1:from_json([{<<"f">>, <<"-10">>}], 'Int32Msg'),
+    %% Check some other representations of integers: Leading 0 not to
+    %% be treated as octal, and leading plus seems to be allowed
+    {'Int32Msg', 377} = M1:from_json([{<<"f">>, <<"0377">>}], 'Int32Msg'),
+    {'Int32Msg', 10} = M1:from_json([{<<"f">>, <<"+10">>}], 'Int32Msg'),
     %% int32 to be encoded as strings
     %% (presumably because max javascript int is often approx 2^53-1,
     %% although the json format as such does not have an explicit max)
