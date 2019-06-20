@@ -348,6 +348,13 @@ various_types_test() ->
     {Fl, infinity}    = M1:from_json([{<<"f">>, <<"Infinity">>}], Fl),
     {Fl, '-infinity'} = M1:from_json([{<<"f">>, <<"-Infinity">>}], Fl),
     {Fl, 'nan'}       = M1:from_json([{<<"f">>, <<"NaN">>}], Fl),
+    %% Protobuf also allows the following:
+    {Fl, 1.0}         = M1:from_json([{<<"f">>, <<"+1">>}], Fl),
+    {Fl, 0.125}       = M1:from_json([{<<"f">>, <<".125">>}], Fl),
+    {Fl, 1.0}         = M1:from_json([{<<"f">>, <<"1.">>}], Fl),
+    {Fl, 10.0}        = M1:from_json([{<<"f">>, <<"1.e1">>}], Fl),
+    {Fl, -1.0}        = M1:from_json([{<<"f">>, <<"-.1e1">>}], Fl),
+    {Fl, 1.0}         = M1:from_json([{<<"f">>, <<"+.1e1">>}], Fl),
 
     %% Omitted optional values
     [{}] = M1:to_json({'MsgMsg', undefined}),

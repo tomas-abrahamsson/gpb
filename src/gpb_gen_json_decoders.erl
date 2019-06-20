@@ -779,12 +779,24 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
          fj_d_num2e,
          fun("-"++Rest, St, Acc) ->
                  call_self(Rest, St, "-" ++ Acc);
+            ("+"++Rest, St, ""=Acc) ->
+                 %% Ignore leading plus
+                 call_self(Rest, St, Acc);
             ([D | Rest], St, Acc) when $0 =< D, D =< $9 ->
                  call_self(Rest, St, [D | Acc]);
-            ("."++_ = Rest, _, Acc) ->
+            ("."++_ = S, _, Acc) when Acc =:= ""; Acc =:= "-" ->
+                 %% Initial leading decimal point: prepend a leading zero
+                 %% and continue processing
+                 call_self(S, float, "0" ++ Acc);
+            ("."++[D|_] = S, _, Acc) when $0 =< D, D =< $9 ->
                  %% A decimal point: the rest (if wellformed as per rfc 7159)
                  %% will be parseable as an erlang float
-                 {float, lists:reverse(Acc, Rest)};
+                 {float, lists:reverse(Acc, S)};
+            ("."++Rest, _, Acc) ->
+                 %% A decimal point followed by non-digit (exponent or
+                 %% or end  of string): Turn "." into ".0" to make
+                 %% it parseable as an Erlang float
+                 {float, lists:reverse(Acc, ".0" ++ Rest)};
             ([E | _]=Rest, integer, Acc) when E == $e; E == $E ->
                  %% Exponent: not preceded by a decimal point:
                  %% add ".0" before the exponent, and it will (if wellformed)
