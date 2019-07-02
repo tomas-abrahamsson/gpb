@@ -27,6 +27,8 @@
 -export([rename_defs/2]).
 -export([compute_renamings/2]).
 -export([apply_renamings/2]).
+-export([apply_enum_type_renaming/2]).
+-export([apply_msg_type_renaming/2]).
 
 -export([format_error/1]).
 
@@ -42,7 +44,9 @@
                      groups |
                      enums |
                      services |
-                     rpcs.
+                     rpcs |
+                     msg_types |
+                     enum_types.
 
 -define(f(Fmt, Args), io_lib:format(Fmt, Args)).
 
@@ -128,6 +132,18 @@ apply_renamings(Defs, no_renamings) ->
 apply_renamings(Defs, Renamings) ->
     RF = mk_renamer(Renamings),
     do_rename(RF, Defs).
+
+%% @doc Apply enum type renamings
+apply_enum_type_renaming(EnumName, no_renamings) ->
+    EnumName;
+apply_enum_type_renaming(EnumName, Renamings) ->
+    do_rename_type(EnumName, enum_types, Renamings).
+
+%% @doc Apply msg type renamings
+apply_msg_type_renaming(MsgName, no_renamings) ->
+    MsgName;
+apply_msg_type_renaming(MsgName, Renamings) ->
+    do_rename_type(MsgName, msg_types, Renamings).
 
 format_error({error, {rename_defs, Reason}}) -> fmt_err(Reason);
 format_error({rename_defs, Reason}) -> fmt_err(Reason);
@@ -217,7 +233,9 @@ mk_rename_op(group_fqname, How) -> mk_msg_rename_op(How);
 mk_rename_op(group_name, How) -> mk_group_rename_op(How);
 mk_rename_op(service_fqname, How) -> mk_service_rename_op(How);
 mk_rename_op(service_name, How) -> mk_service_rename_op(How);
-mk_rename_op(rpc_name, How) -> mk_rpc_rename_op(How).
+mk_rename_op(rpc_name, How) -> mk_rpc_rename_op(How);
+mk_rename_op(msg_typename, How) -> mk_msgtype_rename_op(How);
+mk_rename_op(enum_typename, How) -> mk_enumtype_rename_op(How).
 
 mk_pkg_rename_op(PrimOp) ->
     fun(Name, _Proto) -> do_prim_op(PrimOp, Name) end.
@@ -238,6 +256,12 @@ mk_service_rename_op(PrimOp) ->
     fun(Name, _Proto) -> do_prim_op(PrimOp, Name) end.
 
 mk_rpc_rename_op(PrimOp) ->
+    fun(Name, _Proto) -> do_prim_op(PrimOp, Name) end.
+
+mk_msgtype_rename_op(PrimOp) ->
+    fun(Name, _Proto) -> do_prim_op(PrimOp, Name) end.
+
+mk_enumtype_rename_op(PrimOp) ->
     fun(Name, _Proto) -> do_prim_op(PrimOp, Name) end.
 
 do_prim_op({prefix, Prefix}, Name) ->
@@ -280,6 +304,9 @@ mk_renamings(RenameOps, Defs, Opts) ->
     MostRenamings = [PkgRenamings, MsgRenamings, GroupRenamings,
                     ServiceRenamings],
     UsePackages = proplists:get_bool(use_packages, Opts),
+    MsgTypeRenamings = msg_type_renamings(MsgRenamings, GroupRenamings,
+                                          RenameOps),
+    EnumTypeRenamings = enum_type_renamings(EnumRenamings, RenameOps),
     case check_no_dups(MostRenamings, RpcRenamings) of
         ok ->
             Renamings = lists:append(
@@ -290,7 +317,9 @@ mk_renamings(RenameOps, Defs, Opts) ->
                             {groups, GroupRenamings},
                             {enums, EnumRenamings},
                             {services, ServiceRenamings},
-                            {rpcs, RpcRenamings}]]),
+                            {rpcs, RpcRenamings},
+                            {msg_types, MsgTypeRenamings},
+                            {enum_types, EnumTypeRenamings}]]),
             {ok, Renamings};
         {error, Reason}  ->
             {error, Reason}
@@ -450,6 +479,27 @@ rpc_renamings(Defs, RenameOps) ->
          end
          || {{rpc_containment, Proto}, Rpcs} <- Defs])).
 
+msg_type_renamings(MsgRenamings, GroupRenamings, RenameOps) ->
+    Renamed = dict_values(MsgRenamings) ++ dict_values(GroupRenamings),
+    dict:from_list(
+      [begin
+           Name2 = run_ops(msg_typename, Name, '', RenameOps),
+           {Name, Name2}
+       end
+       || Name <- Renamed]).
+
+enum_type_renamings(EnumRenamings, RenameOps) ->
+    dict:from_list(
+      [begin
+           Name2 = run_ops(enum_typename, Name, '', RenameOps),
+           {Name, Name2}
+       end
+       || Name <- dict_values(EnumRenamings)]).
+
+
+dict_values(Dict) ->
+    dict:fold(fun(_K, V, Acc) -> [V | Acc] end, [], Dict).
+
 run_ops(What, Name0, Proto, RenameOps) ->
     lists:foldl(fun(F, Name) -> F(Name, Proto) end,
                 Name0,
@@ -597,3 +647,7 @@ rename_rpcs(RF, ServiceName, RPCs) ->
                          output=RF(msg, Return)}
       end,
       RPCs).
+
+do_rename_type(Name, Key, Renamings) ->
+    TypeRenamings = proplists:get_value(Key, Renamings),
+    dict:fetch(Name, TypeRenamings).

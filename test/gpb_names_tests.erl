@@ -495,6 +495,29 @@ error_for_duplicates_after_rename_test() ->
          gpb_lib:is_substr("msg1", Txt),
          gpb_lib:is_substr("Unexpected error", Txt)}.
 
+enum_type_names_test() ->
+    Defs = parse_sort_several_file_lines(
+             [{"xyz.proto",
+               ["enum ee { a=0; b=1; };",
+                "message msg1 {",
+                "  required ee f1 = 1;",
+                "  required group gg = 2 {",
+                "    required uint32 f2 = 3;",
+                "  }",
+                "};"]}],
+             []),
+    {ok, Renamings1} = gpb_names:compute_renamings(Defs, []),
+    ee = gpb_names:apply_msg_type_renaming(ee, Renamings1),
+    msg1 = gpb_names:apply_msg_type_renaming(msg1, Renamings1),
+
+    {ok, Renamings2} = gpb_names:compute_renamings(
+                         Defs,
+                         [{rename, {msg_typename, {prefix, msg_x_}}},
+                          {rename, {enum_typename, {prefix, "enum_x_"}}}]),
+    enum_x_ee = gpb_names:apply_enum_type_renaming(ee, Renamings2),
+    msg_x_msg1 = gpb_names:apply_msg_type_renaming(msg1, Renamings2),
+    ok.
+
 no_error_for_same_rpc_name_in_different_services_test() ->
     Defs = parse_sort_several_file_lines(
              [{"a.proto",

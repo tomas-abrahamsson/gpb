@@ -1144,6 +1144,24 @@ module_name_with_suffix_prefix_test() ->
     end,
     ok.
 
+type_name_prefix_test() ->
+    Proto = ["enum EE { a=0; b=1; };\n"
+             "message M {\n"
+             "  required EE f1=1;\n"
+             "  optional M  f2=2;\n"
+             "};\n"],
+    RenameOpts = [{rename, {msg_typename, {prefix, "mp_"}}},
+                  {rename, {msg_typename, {suffix, "_ms"}}},
+                  {rename, {enum_typename, {prefix, "ep_"}}},
+                  {rename, {enum_typename, {suffix, "_es"}}}],
+    S = compile_to_string(Proto, RenameOpts),
+    H = compile_to_string_get_hrl(Proto, RenameOpts),
+    Spaces = "\\s+",
+    assert_contains_regexp(S, "-type" ++ Spaces ++ "mp_M_ms()"),
+    assert_contains_regexp(S, "-type" ++ Spaces ++ "ep_EE_es()"),
+    assert_contains_regexp(H, ":mp_M_ms()"),
+    ok.
+
 assert_contains_regexp(IoData, Re) ->
     case re:run(IoData, Re) of
         {match, _} -> ok;

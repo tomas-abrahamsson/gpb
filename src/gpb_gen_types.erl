@@ -23,7 +23,7 @@
 
 -export([format_msg_record/5]).
 -export([format_maps_as_msgs_record_defs/1]).
--export([format_enum_typespec/2]).
+-export([format_enum_typespec/3]).
 -export([format_record_typespec/5]).
 -export([format_export_types/3]).
 
@@ -55,7 +55,7 @@ format_export_types(Defs, AnRes, Opts) ->
         true ->
             iolist_to_binary(
               ["%% enumerated types\n",
-               gpb_lib:nl_join([format_enum_typespec(Enum, Enumeration)
+               gpb_lib:nl_join([format_enum_typespec(Enum, Enumeration, AnRes)
                                 || {{enum, Enum}, Enumeration} <- Defs]),
                "\n",
                ?f("-export_type([~s]).",
@@ -74,15 +74,17 @@ format_export_types(Defs, AnRes, Opts) ->
                "\n"])
     end.
 
-format_enum_typespec(Enum, Enumeration) ->
-  ?f("-type '~s'() :: ~s.", [Enum,
-    gpb_lib:or_join(
-      ["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumeration])]).
+format_enum_typespec(Enum, Enumeration, AnRes) ->
+    Enum1 = rename_enum_type(Enum, AnRes),
+    Enumerators = gpb_lib:or_join([?f("~p", [EName])
+                                   || {EName, _} <- Enumeration]),
+    ?f("-type ~p() :: ~s.", [Enum1, Enumerators]).
 
 format_record_typespec(Msg, Fields, Defs, AnRes, Opts) ->
+    MsgType = rename_msg_type(Msg, AnRes),
     case gpb_lib:get_records_or_maps_by_opts(Opts) of
         records ->
-            ?f("-type ~p() :: #~p{}.~n", [Msg, Msg]);
+            ?f("-type ~p() :: #~p{}.~n", [MsgType, Msg]);
         maps ->
             HFields = format_hfields(Msg, 7 + 1, Fields, AnRes, Opts, Defs),
             BType = calc_keytype_override(Fields, Opts),
@@ -90,13 +92,13 @@ format_record_typespec(Msg, Fields, Defs, AnRes, Opts) ->
                     ?f("-type ~p() ::~n"
                        "      #{~s~n"
                        "       }.~n",
-                       [Msg, gpb_lib:outdent_first(HFields)]);
+                       [MsgType, gpb_lib:outdent_first(HFields)]);
                true ->
                     ?f("-type ~p() ::~n"
                        "      #{~s~n" % all fields gets rendered as comments
                        "        ~s~n"
                        "       }.~n",
-                       [Msg, gpb_lib:outdent_first(HFields), BType])
+                       [MsgType, gpb_lib:outdent_first(HFields), BType])
             end
     end.
 
@@ -341,7 +343,7 @@ type_to_typestr(MsgName,
                 optional -> TypeStr ++ OrUndefined
             end;
         false ->
-            TypeStr = type_to_typestr_2(Type, Defs, Opts),
+            TypeStr = type_to_typestr_2(Type, Defs, AnRes, Opts),
             case Occurrence of
                 required ->
                     TypeStr;
@@ -392,7 +394,7 @@ type_to_typestr(MsgName,
                        {true, TypeStr} ->
                            TypeStr;
                        false ->
-                           TypeStr = type_to_typestr_2(Type, Defs, Opts),
+                           TypeStr = type_to_typestr_2(Type, Defs, AnRes, Opts),
                            ?f("{~p, ~s}", [Name, TypeStr])
                    end
                end
@@ -400,27 +402,30 @@ type_to_typestr(MsgName,
               ++ OrUndefinedElems)
     end.
 
-type_to_typestr_2(sint32, _Defs, _Opts)   -> "integer()";
-type_to_typestr_2(sint64, _Defs, _Opts)   -> "integer()";
-type_to_typestr_2(int32, _Defs, _Opts)    -> "integer()";
-type_to_typestr_2(int64, _Defs, _Opts)    -> "integer()";
-type_to_typestr_2(uint32, _Defs, _Opts)   -> "non_neg_integer()";
-type_to_typestr_2(uint64, _Defs, _Opts)   -> "non_neg_integer()";
-type_to_typestr_2(bool, _Defs, _Opts)     -> "boolean() | 0 | 1";
-type_to_typestr_2(fixed32, _Defs, _Opts)  -> "non_neg_integer()";
-type_to_typestr_2(fixed64, _Defs, _Opts)  -> "non_neg_integer()";
-type_to_typestr_2(sfixed32, _Defs, _Opts) -> "integer()";
-type_to_typestr_2(sfixed64, _Defs, _Opts) -> "integer()";
-type_to_typestr_2(float, _Defs, _Opts)    -> float_spec();
-type_to_typestr_2(double, _Defs, _Opts)   -> float_spec();
-type_to_typestr_2(string, _Defs, _Opts)   -> "iodata()";
-type_to_typestr_2(bytes, _Defs, _Opts)    -> "iodata()";
-type_to_typestr_2({enum,E}, Defs, Opts)   -> enum_typestr(E, Defs, Opts);
-type_to_typestr_2({msg,M}, _Defs, Opts)   -> msg_to_typestr(M, Opts);
-type_to_typestr_2({group,G}, _Defs, Opts) -> msg_to_typestr(G, Opts);
-type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
-    KTStr = type_to_typestr_2(KT, Defs, Opts),
-    VTStr = type_to_typestr_2(VT, Defs, Opts),
+type_to_typestr_2(sint32, _Defs, _AnRes, _Opts)   -> "integer()";
+type_to_typestr_2(sint64, _Defs, _AnRes, _Opts)   -> "integer()";
+type_to_typestr_2(int32, _Defs, _AnRes, _Opts)    -> "integer()";
+type_to_typestr_2(int64, _Defs, _AnRes, _Opts)    -> "integer()";
+type_to_typestr_2(uint32, _Defs, _AnRes, _Opts)   -> "non_neg_integer()";
+type_to_typestr_2(uint64, _Defs, _AnRes, _Opts)   -> "non_neg_integer()";
+type_to_typestr_2(bool, _Defs, _AnRes, _Opts)     -> "boolean() | 0 | 1";
+type_to_typestr_2(fixed32, _Defs, _AnRes, _Opts)  -> "non_neg_integer()";
+type_to_typestr_2(fixed64, _Defs, _AnRes, _Opts)  -> "non_neg_integer()";
+type_to_typestr_2(sfixed32, _Defs, _AnRes, _Opts) -> "integer()";
+type_to_typestr_2(sfixed64, _Defs, _AnRes, _Opts) -> "integer()";
+type_to_typestr_2(float, _Defs, _AnRes, _Opts)    -> float_spec();
+type_to_typestr_2(double, _Defs, _AnRes, _Opts)   -> float_spec();
+type_to_typestr_2(string, _Defs, _AnRes, _Opts)   -> "iodata()";
+type_to_typestr_2(bytes, _Defs, _AnRes, _Opts)    -> "iodata()";
+type_to_typestr_2({enum,E}, Defs, _AnRes, Opts) ->
+    enum_typestr(E, Defs, Opts);
+type_to_typestr_2({msg,M}, _Defs, AnRes, Opts) ->
+    msg_to_typestr(M, AnRes, Opts);
+type_to_typestr_2({group,G}, _Defs, AnRes, Opts) ->
+    msg_to_typestr(G, AnRes, Opts);
+type_to_typestr_2({map,KT,VT}, Defs, AnRes, Opts) ->
+    KTStr = type_to_typestr_2(KT, Defs, AnRes, Opts),
+    VTStr = type_to_typestr_2(VT, Defs, AnRes, Opts),
     MapSep = mandatory_map_item_type_sep(Opts),
     case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
         '2tuples' -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
@@ -430,13 +435,16 @@ type_to_typestr_2({map,KT,VT}, Defs, Opts) ->
 float_spec() ->
     "float() | integer() | infinity | '-infinity' | nan".
 
-msg_to_typestr(M, Opts) ->
-  case gpb_lib:get_records_or_maps_by_opts(Opts) of
-    records ->
-      Mod = proplists:get_value(module, Opts),
-      ?f("~p:~p()", [Mod, M]);
-    maps -> ?f("~p()", [M])
-  end.
+msg_to_typestr(M, AnRes, Opts) ->
+    MsgType = rename_msg_type(M, AnRes),
+    case gpb_lib:get_records_or_maps_by_opts(Opts) of
+        records ->
+            %% Prefix with module since records live in an hrl file
+            Mod = proplists:get_value(module, Opts),
+            ?f("~p:~p()", [Mod, MsgType]);
+        maps ->
+            ?f("~p()", [MsgType])
+    end.
 
 enum_typestr(E, Defs, Opts) ->
     UnknownEnums = case proplists:get_bool(nif, Opts) of
@@ -445,7 +453,7 @@ enum_typestr(E, Defs, Opts) ->
                    end,
     {value, {{enum,E}, Enumerations}} = lists:keysearch({enum,E}, 1, Defs),
     gpb_lib:or_join(
-      ["'"++atom_to_list(EName)++"'" || {EName, _} <- Enumerations])
+      [?f("~p", [EName]) || {EName, _} <- Enumerations])
         ++ UnknownEnums.
 
 type_to_comment(MsgName, Field, TypeSpec, AnRes) ->
@@ -486,3 +494,9 @@ lineup(CurrentCol, TargetCol) when CurrentCol < TargetCol ->
     lists:duplicate(TargetCol - CurrentCol, $\s);
 lineup(_, _) ->
     " ".
+
+rename_enum_type(Name, #anres{renamings=Renamings}) ->
+    gpb_names:apply_enum_type_renaming(Name, Renamings).
+
+rename_msg_type(Name, #anres{renamings=Renamings}) ->
+    gpb_names:apply_msg_type_renaming(Name, Renamings).

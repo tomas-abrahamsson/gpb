@@ -181,7 +181,9 @@
                     {group_fqname, name_change()} |
                     {service_name, name_change()} |
                     {service_fqname, name_change()} |
-                    {rpc_name, name_change()}.
+                    {rpc_name, name_change()} |
+                    {msg_typename, name_change()} |
+                    {enum_typename, name_change()}.
 
 -type name_change() :: {prefix, string() | atom()} |
                        {suffix, string() | atom()} |
@@ -501,7 +503,8 @@ file(File) ->
 %% `msg_fqname' refers to the fully qualified message name, as in
 %% `Package.MsgName', while the `msg_name' refers to just the message
 %% name without package. The `service_fqname' and `service_name' specifiers
-%% work analogously.
+%% work analogously. The `enum_typename' and `msg_typename' operate on
+%% any enum or msg renamings already applied.
 %%
 %% It is possible to stack `rename' options, and they will be applied in
 %% the order they are specified. So it is for example possible to
