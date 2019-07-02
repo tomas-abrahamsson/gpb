@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.9.0
+2019-Jul-02
+
+        * Add JSON support via the json options (#164)
+        * Add option to prefix/suffix type names  (#165)
+        * Minor fixes and updates
+
 Version 4.8.0
 2019-Jun-06
 
