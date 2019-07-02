@@ -785,7 +785,7 @@ drop_filename_ext(Path) ->
     filename:join(lists:reverse(RRest, [BNoExt])).
 
 copy_filename_ext(FilenameSansExt, FilenameToCopyFrom) ->
-    FilenameSansExt ++ filename:extension(FilenameToCopyFrom).
+    iolist_to_binary([FilenameSansExt, filename:extension(FilenameToCopyFrom)]).
 
 %% @doc Compute filenames (paths) to basenames
 %% but include last part(s) of the directories as necessary
