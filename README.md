@@ -305,6 +305,7 @@ Features of gpb
      - Callback functions can be specified for automatically translating
        google.protobuf.Any messages
    - groups
+   - JSON mapping is supported, see the json (-json) option(s)
 
    gpb reads but ignores or throws away:
    - options other than `packed` or `default`
@@ -313,7 +314,9 @@ Features of gpb
    gpb does not support:
    - aggregate custom options introduced in protobuf 2.4.0
    - rpc
-   - proto3 JSON mapping
+   - JSON limitations:
+     - does not handle google/protobuf/* wellknowns
+     - does not handle the json_name option
 
 *  Characteristics of gpb:
    - Skipping over unknown message fields or groups, when decoding,

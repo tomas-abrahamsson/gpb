@@ -37,6 +37,7 @@
 -include("../include/gpb.hrl").
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
+-include("gpb_decoders_lib.hrl").
 
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
@@ -76,15 +77,6 @@ format_exports(Defs, Opts) ->
         is_tuple(X)
         andalso tuple_size(X) =:= 2
         andalso (element(1, X) =:= msg orelse element(1, X) =:= group)).
-
--record(fn, {
-          name :: atom(),
-          initializes_fields   = false :: boolean(),
-          has_finalizer        = false :: boolean(),
-          fields_in_tail_calls = false :: boolean(),
-          passes_msg           = false :: boolean(),
-          tree   % the syntax tree
-         }).
 
 format_decoders_top_function(Defs, AnRes, Opts) ->
     case gpb_lib:contains_messages(Defs) of
@@ -235,7 +227,8 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     %%   is also done post-generation using the code-morpher.
     %%
     TrUserDataVar = ?expr(TrUserData),
-    InitExprs = init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts),
+    InitExprs = gpb_decoders_lib:init_exprs(MsgName, MsgDef, Defs,
+                                            TrUserDataVar, AnRes, Opts),
     Fns = lists:flatten(
             [format_msg_decoder_read_field(MsgName, MsgDef, InitExprs,
                                            AnRes),
@@ -245,275 +238,49 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     FNames = [FName || {FName, _InitExpr} <- InitExprs],
     IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
-    FieldInfos = case MappingUnset of
-                     #maps{unset_optional=omitted, oneof=flat} ->
-                         field_infos(MsgDef, true, IsProto3);
-                     _ ->
-                         field_infos(MsgDef, false, IsProto3)
-                 end,
+    FieldInfos = gpb_decoders_lib:calc_field_infos(MsgDef, IsProto3, Opts),
     %% Compute extra post-generation operations needed for maps
     %% and pass_as_params
     Ops = case {MappingUnset, FieldPass} of
               {records, pass_as_record} ->
-                  [underscore_unused_vars()];
+                  [gpb_decoders_lib:underscore_unused_vars()];
               {records, pass_as_params} ->
-                  [explode_param_init(MsgName, InitExprs, 4),
-                   explode_param_pass(MsgName, FNames, 4),
-                   underscore_unused_vars()];
+                  [gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 4),
+                   gpb_decoders_lib:explode_param_pass(MsgName, FNames, 4),
+                   gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=present_undefined},pass_as_record} ->
-                  [rework_records_to_maps(4, FieldInfos, undefined),
-                   underscore_unused_vars(),
-                   finalize_marked_map_exprs(Opts)];
+                  [gpb_decoders_lib:rework_records_to_maps(4, FieldInfos,
+                                                           undefined),
+                   gpb_decoders_lib:underscore_unused_vars(),
+                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
               {#maps{unset_optional=present_undefined},pass_as_params} ->
-                  [explode_param_init(MsgName, InitExprs, 4),
-                   explode_param_pass(MsgName, FNames, 4),
-                   implode_to_map_exprs_all_mandatory(),
-                   underscore_unused_vars(),
-                   finalize_marked_map_exprs(Opts)];
+                  [gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 4),
+                   gpb_decoders_lib:explode_param_pass(MsgName, FNames, 4),
+                   gpb_decoders_lib:implode_to_map_exprs_all_mandatory(),
+                   gpb_decoders_lib:underscore_unused_vars(),
+                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
               {#maps{unset_optional=omitted}, pass_as_record} ->
-                  [change_undef_marker_in_clauses('$undef'),
-                   rework_records_to_maps(4, FieldInfos, '$undef'),
-                   underscore_unused_vars(),
-                   finalize_marked_map_exprs(Opts)];
+                  [gpb_decoders_lib:change_undef_marker_in_clauses('$undef'),
+                   gpb_decoders_lib:rework_records_to_maps(4, FieldInfos,
+                                                           '$undef'),
+                   gpb_decoders_lib:underscore_unused_vars(),
+                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
               {#maps{unset_optional=omitted}, pass_as_params} ->
-                  [change_undef_marker_in_clauses('$undef'),
-                   explode_param_init(MsgName, InitExprs, 4),
-                   explode_param_pass(MsgName, FNames, 4),
-                   implode_to_map_exprs(4, FieldInfos, '$undef'),
-                   underscore_unused_vars(),
-                   finalize_marked_map_exprs(Opts)]
+                  [gpb_decoders_lib:change_undef_marker_in_clauses('$undef'),
+                   gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 4),
+                   gpb_decoders_lib:explode_param_pass(MsgName, FNames, 4),
+                   gpb_decoders_lib:implode_to_map_exprs(4, FieldInfos,
+                                                         '$undef'),
+                   gpb_decoders_lib:underscore_unused_vars(),
+                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)]
           end,
-    run_morph_ops(Ops, Fns).
-
-init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
-    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
-    IsMapMsg = is_map_msg(MsgName, AnRes),
-    UseDefaults = proplists:get_bool(defaults_for_omitted_optionals, Opts),
-    UseTypeDefaults = proplists:get_bool(type_defaults_for_omitted_optionals,
-                                         Opts),
-    ExprInfos1 =
-        [case Field of
-             #?gpb_field{name=FName, occurrence=Occurrence0, type=Type,
-                         opts=FOpts} ->
-                 HasDefault = lists:keymember(default, 1, FOpts),
-                 SubMsgType = is_msg_type(Type),
-                 Occurrence = if IsMapMsg, not SubMsgType -> optional;
-                                 true -> Occurrence0
-                              end,
-                 {Undefined, Undef, P} =
-                     if IsProto3 ->
-                             TD = gpb_lib:proto3_type_default(Type, Defs, Opts),
-                             ATD = erl_syntax:abstract(TD),
-                             if SubMsgType     -> {ATD, ?expr('$undef'), o};
-                                not SubMsgType -> {ATD, ATD, o}
-                             end;
-                        IsProto3, not SubMsgType ->
-                             TD = gpb_lib:proto3_type_default(Type, Defs, Opts),
-                             ATD = erl_syntax:abstract(TD),
-                             {ATD, ATD, m};
-                        IsMapMsg, not SubMsgType ->
-                             TD = gpb_lib:proto3_type_default(Type, Defs, Opts),
-                             ATD = erl_syntax:abstract(TD),
-                             {ATD, ATD, o};
-                        UseDefaults, HasDefault ->
-                             {default,D} = lists:keyfind(default, 1, FOpts),
-                             AD = erl_syntax:abstract(D),
-                             {AD, AD, m};
-                        UseTypeDefaults ->
-                             TD = gpb_lib:proto2_type_default(Type, Defs, Opts),
-                             ATD = erl_syntax:abstract(TD),
-                             {ATD, ATD, m};
-                        true ->
-                             Pr = if HasDefault -> d;
-                                     true -> o
-                                  end,
-                             {?expr(undefined), ?expr('$undef'), Pr}
-                     end,
-                 case Occurrence of
-                     repeated -> {FName, m, ?expr([]),        ?expr([])};
-                     required -> {FName, o, ?expr(undefined), ?expr('$undef')};
-                     optional -> {FName, P, Undefined,        Undef}
-                 end;
-             #gpb_oneof{name=FName} ->
-                 {FName, o, ?expr(undefined), ?expr('$undef')}
-         end
-         || Field <- MsgDef],
-    ExprInfos2 =
-        [begin
-             ElemPath = [MsgName, FName],
-             TranslFn = gpb_gen_translators:find_translation(
-                          ElemPath,
-                          decode_init_default,
-                          AnRes),
-             TrInitExpr = ?expr('Tr'('InitExpr', 'TrUserData'),
-                                [replace_tree('InitExpr', InitExpr),
-                                 replace_term('Tr', TranslFn),
-                                 replace_tree('TrUserData', TrUserDataVar)]),
-             TrMOExpr = ?expr('Tr'('MOExpr', 'TrUserData'),
-                              [replace_tree('MOExpr', MOExpr),
-                               replace_term('Tr', TranslFn),
-                               replace_tree('TrUserData', TrUserDataVar)]),
-             {FName, Presence, TrInitExpr, TrMOExpr}
-         end
-         || {FName, Presence, InitExpr, MOExpr} <- ExprInfos1],
-    case gpb_lib:get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                records ->
-                    [{FName, Expr} || {FName, _, Expr, _MOExpr} <- ExprInfos2];
-                #maps{unset_optional=present_undefined} ->
-                    [{FName, Expr} || {FName, _, Expr, _MOExpr} <- ExprInfos2];
-                #maps{unset_optional=omitted} ->
-                    [{FName, MapsOmittedExpr}
-                     || {FName, _, _Expr, MapsOmittedExpr} <- ExprInfos2]
-            end;
-        pass_as_record ->
-            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                records ->
-                    [{FName, Expr} || {FName, P, Expr, _} <- ExprInfos2,
-                                      P == m orelse P == d];
-                #maps{unset_optional=present_undefined} ->
-                    [{FName, Expr} || {FName, _, Expr, _} <- ExprInfos2];
-                #maps{unset_optional=omitted} ->
-                    [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos2]
-            end
-    end.
-
-field_infos(MsgDef, FlattenOneof, IsProto3) ->
-    [case Field of
-         #?gpb_field{name=FName, type={msg,_}} ->
-             {FName, optional};
-         #?gpb_field{name=FName} ->
-             if not IsProto3 ->
-                     {FName, gpb_lib:get_field_occurrence(Field)};
-                IsProto3 ->
-                     %% On finalization, treat proto3 (scalar) fields as
-                     %% requried, to avoid redundant if F == '$undef' -> ...
-                     %% checks;  it can never be '$undef' since it has a
-                     %% type-default. (except for sub messages and oneof)
-                     {FName, required}
-             end;
-         #gpb_oneof{name=FName} ->
-             if not FlattenOneof ->
-                     {FName, optional};
-                FlattenOneof ->
-                     {FName, flatten_oneof}
-             end
-     end
-     || Field <- MsgDef].
-
-run_morph_ops([Op | Rest], Fns) ->
-    run_morph_ops(Rest, Op(Fns));
-run_morph_ops([], Fns) ->
-    [gpb_codegen:erl_prettypr_format_nl(Tree) || #fn{tree=Tree} <- Fns].
-
-loop_fns(MapFun, Filter, Fns) ->
-    [case matches_filter(Fn, Filter) of
-         true  -> Fn#fn{tree = MapFun(FnTree)};
-         false -> Fn
-     end
-     || #fn{tree=FnTree}=Fn <- Fns].
-
-matches_filter(#fn{}=Fn, Filter) ->
-    Filter(Fn).
-
-process_all() -> fun(#fn{}) -> true end.
-
-process_initializer() -> fun(#fn{initializes_fields=Bool}) -> Bool end.
-
-process_finalizers() -> fun(#fn{has_finalizer=Bool}) -> Bool end.
-
-process_msg_passers() -> fun(#fn{passes_msg=Bool}) -> Bool end.
-
-process_initializers_finalizers_and_msg_passers() ->
-    fun(#fn{initializes_fields=B1,
-            has_finalizer=B2,
-            passes_msg=B3}) ->
-            B1 or B2 or B3
-    end.
-
-underscore_unused_vars() ->
-    fun(Fns) ->
-            loop_fns(fun gpb_codemorpher:underscore_unused_vars/1,
-                     process_all(),
-                     Fns)
-    end.
-
-explode_param_init(MsgName, InitExprs, ArgPos) ->
-    fun(Fns) ->
-            loop_fns(
-              fun(FnTree) ->
-                      gpb_codemorpher:explode_record_fields_to_params_init(
-                        FnTree, ArgPos, {MsgName, InitExprs})
-              end,
-              process_initializer(),
-              Fns)
-    end.
-
-explode_param_pass(MsgName, FNames, ArgPos) ->
-    fun(Fns) ->
-            loop_fns(
-              fun(FnTree) ->
-                      gpb_codemorpher:explode_record_fields_to_params(
-                        FnTree, ArgPos, {MsgName, FNames})
-              end,
-              process_msg_passers(),
-              Fns)
-    end.
-
-change_undef_marker_in_clauses(Undef) ->
-    fun(Fns) ->
-            loop_fns(
-              fun(FnTree) ->
-                      gpb_codemorpher:change_undef_marker_in_clauses(
-                        FnTree, Undef)
-              end,
-              process_all(),
-              Fns)
-    end.
-
-implode_to_map_exprs_all_mandatory() ->
-    fun(Fns) ->
-            loop_fns(fun gpb_codemorpher:implode_to_map_expr/1,
-                     process_finalizers(),
-                     Fns)
-    end.
-
-implode_to_map_exprs(F1Pos, FieldInfos, Undef) ->
-    fun(Fns) ->
-            loop_fns(
-              fun(FnTree) ->
-                      gpb_codemorpher:implode_to_map_exprs(
-                        FnTree, F1Pos, FieldInfos, Undef)
-              end,
-              process_finalizers(),
-              Fns)
-    end.
-
-rework_records_to_maps(RecordParamPos, FieldInfos, Undef) ->
-    fun(Fns) ->
-            loop_fns(
-              fun(FnTree) ->
-                      gpb_codemorpher:rework_records_to_maps(
-                        FnTree, RecordParamPos, FieldInfos, Undef)
-              end,
-              process_initializers_finalizers_and_msg_passers(),
-              Fns)
-    end.
-
-finalize_marked_map_exprs(Opts) ->
-    F = fun(MarkedExpr) ->
-                gpb_codemorpher:marked_map_expr_to_map_expr(MarkedExpr, Opts)
-        end,
-    fun(Fns) ->
-            loop_fns(F, process_initializers_finalizers_and_msg_passers(), Fns)
-    end.
+    gpb_decoders_lib:run_morph_ops(Ops, Fns).
 
 format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes) ->
     Key = ?expr(Key),
     Rest = ?expr(Rest),
     {Param, FParam, FParamBinds} =
-        decoder_read_field_param(MsgName, MsgDef),
+        gpb_decoders_lib:decoder_read_field_param(MsgName, MsgDef),
     Bindings = new_bindings([{'<Param>', Param},
                              {'<FParam>', FParam},
                              {'<FFields>', FParamBinds},
@@ -562,7 +329,7 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
                replace_tree('<calls-to-field-decoding>', FnCall)]
               || {BinMatch, FnCall} <- decoder_fp(Bindings, MsgName, MsgDef)]),
            replace_tree('<finalize-result>',
-                        decoder_finalize_result(
+                        gpb_decoders_lib:decoder_finalize_result(
                           Param, FFields,
                           MsgName, ?expr(TrUserData),
                           AnRes)),
@@ -600,52 +367,14 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
            replace_tree('<calls-to-field-decoding-or-skip>',
                         decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
            replace_tree('<finalize-result>',
-                        decoder_finalize_result(Param, FFields,
-                                                MsgName, ?expr(TrUserData),
-                                                AnRes))]),
+                        gpb_decoders_lib:decoder_finalize_result(
+                          Param, FFields,
+                          MsgName, ?expr(TrUserData),
+                          AnRes))]),
     #fn{name = generic,
         has_finalizer = true,
         passes_msg = true,
         tree = T}.
-
-is_map_msg(MsgName, #anres{maps_as_msgs=MapsAsMsgs}) ->
-    lists:keymember({msg,MsgName}, 1, MapsAsMsgs).
-
-is_msg_type({msg,_}) -> true;
-is_msg_type(_)       -> false.
-
-decoder_read_field_param(MsgName, MsgDef) ->
-    %% Maps currently don't support single value access, ie: M#{f},
-    %% so when passing as records/maps, in the end, we must reverse
-    %% repeated fields to get a linear amortized cost of
-    %% reading/adding elements)
-    %%
-    %% So instead of generating code that looks
-    %% like below for the maps case (similar for records):
-    %%
-    %%    d_read_field_m_f(<<>>, _, _, M) ->
-    %%      M#{f1 = lists:reverse(M#{f1})
-    %%
-    %% we generate code like this:
-    %%
-    %%    d_read_field_m_f(<<>>, _, _, #{f1 := F1}=M) ->
-    %%      M#{f1 := lists:reverse(F1)
-    %%
-    %% Here we must provide enough info to generate
-    %% the finalizing code (ie: the function body in the example above)
-    %%
-    MappingVar = ?expr(Msg),
-    FFields = [{FName, gpb_lib:var_n("R", I)}
-               || {I,FName} <- gpb_lib:index_seq(
-                                 repeated_field_names(MsgDef))],
-    FMatch = gpb_lib:record_match(MsgName, FFields),
-    FParam = ?expr(matching = '<Var>',
-                   [replace_tree(matching, FMatch),
-                    replace_tree('<Var>', MappingVar)]),
-    {MappingVar, FParam, FFields}.
-
-repeated_field_names(MsgDef) ->
-    [FName || #?gpb_field{name=FName, occurrence=repeated} <- MsgDef].
 
 %% compute info for the fast-path field recognition/decoding-call
 decoder_fp(Bindings, MsgName, MsgDef) ->
@@ -756,25 +485,6 @@ decoder_field_selectors(MsgName, MsgDef) ->
                 end
         end,
         MsgDef)).
-
-decoder_finalize_result(MsgVar, FFields, MsgName, TrUserDataVar, AnRes) ->
-    gpb_lib:record_update(
-      MsgVar,
-      MsgName,
-      [begin
-           ElemPath = [MsgName, FName],
-           Finalizer = gpb_gen_translators:find_translation(
-                         ElemPath,
-                         decode_repeated_finalize,
-                         AnRes),
-           FValueExpr = ?expr('lists:reverse'('<FVar>', 'TrUserData'),
-                              [replace_term('lists:reverse',Finalizer),
-                               replace_tree('<FVar>', FVar),
-                               replace_tree('TrUserData',
-                                            TrUserDataVar)]),
-           {FName, FValueExpr}
-       end
-       || {FName, FVar} <- FFields]).
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
     map_msgdef_fields_o(
@@ -1403,7 +1113,7 @@ decode_zigzag(ExtValueExpr, Tr, TrUserDataVar) ->
           end,
           [replace_tree('ExtValueExpr', ExtValueExpr),
            replace_term('Tr', Tr(decode)),
-           replace_term('TrUserData', TrUserDataVar)]).
+           replace_tree('TrUserData', TrUserDataVar)]).
 
 decode_uint_to_int(ExtValueExpr, NumBits, Tr, TrUserDataVar) ->
     %% Contrary to the 64 bit encoding done for int32 (and enum),

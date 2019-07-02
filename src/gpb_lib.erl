@@ -56,8 +56,9 @@
 
 -export([fold_msg_fields/3]).
 -export([fold_msg_or_group_fields/3]).
--export([fold_msgdef_fields/3]).
 -export([fold_msg_or_group_fields_o/3]).
+-export([fold_msgdef_fields/3]).
+-export([fold_msgdef_fields_o/3]).
 
 -export([mapping_match/3]).
 -export([mapping_create/3]).
@@ -88,13 +89,21 @@
 -export([target_can_do_flat_oneof_for_maps/1]).
 -export([target_may_fail_compilation_for_flat_oneof_for_maps/1]).
 -export([target_has_stacktrace_syntax/1]).
+-export([target_has_map_iterators/1]).
 -export([current_otp_release/0]).
 -export([proto2_type_default/3]).
 -export([proto3_type_default/3]).
 -export([get_maps_key_type_by_opts/1]).
+-export([json_by_opts/1]).
+-export([json_object_format_by_opts/1]).
+-export([json_key_format_by_opts/1]).
+-export([json_array_format_by_opts/1]).
+-export([json_string_format_by_opts/1]).
+-export([json_null/1]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
+-export([var_j_n/1]).
 -export([var_n/2]).
 -export([var/2]).
 -export([prefix_var/2]).
@@ -128,6 +137,8 @@
 -export([lowercase/1]).
 -export([uppercase/1]).
 -export([snake_case/1]).
+-export([camel_case/1]).
+-export([lower_camel_case/1]).
 
 -include("../include/gpb.hrl").
 
@@ -707,6 +718,11 @@ target_may_fail_compilation_for_flat_oneof_for_maps(Opts) ->
 target_has_stacktrace_syntax(Opts) ->
     is_target_major_version_at_least(21, Opts).
 
+%% In Erlang 21, there is maps:iterator/1 and maps:next/1 where "the memory
+%% usage is guaranteed to be bounded no matter the size of the map."
+target_has_map_iterators(Opts) ->
+    is_target_major_version_at_least(21, Opts).
+
 proto2_type_default(Type, Defs, Opts) ->
     type_default(Type, Defs, Opts, fun gpb:proto2_type_default/2).
 
@@ -728,10 +744,62 @@ type_default(Type, Defs, Opts, GetTypeDefault) ->
 get_maps_key_type_by_opts(Opts) ->
     proplists:get_value(maps_key_type, Opts, atom).
 
+json_by_opts(Opts) ->
+    proplists:get_bool(json, Opts).
+
+json_object_format_by_opts(Opts) ->
+    case proplists:get_value(json_object_format, Opts) of
+        undefined ->
+            case gpb_lib:get_records_or_maps_by_opts(Opts) of
+                maps ->
+                    map;
+                records ->
+                    eep18
+            end;
+        eep18 ->
+            eep18;
+        {proplist} ->
+            {proplist};
+        {Atom, proplist} when is_atom(Atom) ->
+            {Atom, proplist};
+        map ->
+            map
+    end.
+
+json_key_format_by_opts(Opts) ->
+    case proplists:get_value(json_key_format, Opts, binary) of
+        atom ->
+            atom;
+        binary ->
+            binary;
+        string ->
+            string
+    end.
+
+json_array_format_by_opts(Opts) ->
+    case proplists:get_value(json_array_format, Opts, list) of
+        list ->
+            list;
+        {Atom, list} when is_atom(Atom) ->
+            {Atom, list}
+    end.
+
+json_string_format_by_opts(Opts) ->
+    case proplists:get_value(json_string_format, Opts, binary) of
+        binary ->
+            binary;
+        list ->
+            list
+    end.
+
+json_null(Opts) ->
+    proplists:get_value(json_string_format, Opts, null).
+
 %% Syntax tree stuff ----
 
 var_f_n(N) -> var_n("F", N).
 var_b_n(N) -> var_n("B", N).
+var_j_n(N) -> var_n("J", N).
 
 var_n(S, N) ->
     var("~s~w", [S, N]).
@@ -1025,3 +1093,31 @@ snake_case(Str) ->
                              %% uppercase with lowercase
                              %% or digit before it
                              "([a-z0-9])([A-Z])"])).
+
+camel_case(Str) ->
+    camel_case(Str, true).
+
+%% Like camel case, but first letter is lower case
+lower_camel_case(S) ->
+    [C1 | Rest] = camel_case(S),
+    [LC1] = lowercase([C1]),
+    [LC1 | Rest].
+
+-define(is_lower_case(C), $a =< C, C =< $z).
+-define(is_upper_case(C), $A =< C, C =< $Z).
+-define(is_digit(C),      $0 =< C, C =< $9).
+camel_case([LC | Tl], CapNextLetter) when ?is_lower_case(LC) ->
+    if CapNextLetter     -> [capitalize_letter(LC) | camel_case(Tl, false)];
+       not CapNextLetter -> [LC | camel_case(Tl, false)]
+    end;
+camel_case([UC | Tl], _) when ?is_upper_case(UC) ->
+    [UC | camel_case(Tl, false)];
+camel_case([D | Tl], _) when ?is_digit(D) ->
+    [D | camel_case(Tl, true)];
+camel_case([_ | Tl], _) -> %% underscore and possibly more
+    camel_case(Tl, true);
+camel_case([], _) ->
+    [].
+
+capitalize_letter(C) ->
+    C + ($A - $a).

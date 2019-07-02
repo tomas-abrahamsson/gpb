@@ -22,6 +22,7 @@
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
+-include("gpb_nif_test_helpers.hrl"). % the `?nif_if_supported(FnName)' macro
 
 -export([test_nifs/1]). %% set whether to test nifs or not
 
@@ -33,17 +34,15 @@
 
 %% NIF related
 -export([nif_tests_check_prerequisites/1]).
--export([nif_oneof_tests_check_prerequisites/1]).
--export([nif_oneof_tests_check_prerequisites/3]).
--export([nif_mapfield_tests_check_prerequisites/1]).
--export([nif_proto3_tests_check_prerequisites/1]).
--export([increase_timeouts/1]).
--export([with_tmpdir/1]).
+-export([check_nif_features_supported/2]).
+-export([guess_features/1]).
+-export([with_tmpdir/1, with_tmpdir/2]).
 -export([in_separate_vm/4]).
 -export([compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
 -export([check_protoc_can_do_oneof/0]).
 -export([check_protoc_can_do_mapfields/0]).
 -export([check_protoc_can_do_proto3/0]).
+-export([check_protoc_can_do_json/0]).
 
 %% internally used
 -export([main_in_separate_vm/1]).
@@ -2675,35 +2674,26 @@ generates_nif_as_binary_and_file_test() ->
     ?assertMatch(Nif1, Nif2).
 
 nif_code_test_() ->
-    increase_timeouts(
-      nif_tests_check_prerequisites(
-        [{"Verify errors in sepatarate vm are caught",
-          fun verify_errors_in_separate_vm_are_caught/0},
-         {"Nif compiles", fun nif_compiles/0},
-         {"Nif encode decode", fun nif_encode_decode/0},
-         increase_timeouts(
-           nif_oneof_tests_check_prerequisites(
-             [{"encode decode", fun nif_encode_decode_oneof/0}])),
-         increase_timeouts(
-           nif_mapfield_tests_check_prerequisites(
-             [{"encode decode", fun nif_encode_decode_mapfields/0}])),
-         increase_timeouts(
-           nif_proto3_tests_check_prerequisites(
-             [{"encode decode", fun nif_encode_decode_proto3/0},
-              {"Nif with C++ keywords", fun nif_with_cxx_keywords/0}])),
-         {"Nif enums in msgs", fun nif_enum_in_msg/0},
-         {"Nif enums with pkgs", fun nif_enum_with_pkgs/0},
-         {"Nif enums from integers", fun nif_enum_from_integers/0},
-         {"Nif with groups", fun nif_with_groups/0},
-         {"Nif with strbin", fun nif_with_strbin/0},
-         {"Nif with booleans", fun nif_with_booleans/0},
-         {"Nif with list indata for bytes",
-          fun nif_with_list_indata_for_bytes/0},
-         {"Nif and +-Inf/NaN", fun nif_with_non_normal_floats/0},
-         {"Error if both Any translations and nif",
-          fun error_if_both_translations_and_nif/0},
-         {"bypass_wrappers",
-          fun bypass_wrappers_records_nif/0}])).
+    nif_tests_check_prerequisites(
+      [{"Verify errors in sepatarate vm are caught",
+        fun verify_errors_in_separate_vm_are_caught/0},
+       ?nif_if_supported(nif_compiles),
+       ?nif_if_supported(nif_encode_decode),
+       ?nif_if_supported(nif_encode_decode_oneof),
+       ?nif_if_supported(nif_encode_decode_mapfields),
+       ?nif_if_supported(nif_encode_decode_mapfields),
+       ?nif_if_supported(nif_encode_decode_proto3),
+       ?nif_if_supported(nif_with_cxx_keywords),
+       ?nif_if_supported(nif_enum_in_msg),
+       ?nif_if_supported(nif_enum_with_pkgs),
+       ?nif_if_supported(nif_enum_from_integers),
+       ?nif_if_supported(nif_with_groups),
+       ?nif_if_supported(nif_with_strbin),
+       ?nif_if_supported(nif_with_booleans),
+       ?nif_if_supported(nif_with_list_indata_for_bytes),
+       ?nif_if_supported(nif_with_non_normal_floats),
+       ?nif_if_supported(error_if_both_translations_and_nif),
+       ?nif_if_supported(bypass_wrappers_records_nif)]).
 
 increase_timeouts({Descr, Tests}) ->
     %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
@@ -2712,13 +2702,15 @@ increase_timeouts({Descr, Tests}) ->
     {Descr,
      {timeout, PerTestTimeout * length(Tests),  %% timeout for all tests
       [{timeout, PerTestTimeout,
-        [{TestDescr, TestFun}]}
-       || {TestDescr, TestFun} <- Tests]}}.
+        [Test]} % Test can be for instance fun/0 or {"descr", fun/0
+       || Test <- Tests]}}.
 
 nif_tests_check_prerequisites(Tests) ->
     case nif_verify_prerequisites() of
-        ok            -> {"nif tests", Tests};
-        {error, Text} -> {Text, []}
+        ok ->
+            increase_timeouts({"nif tests", lists:flatten(Tests)});
+        {error, Text} ->
+            {Text, []}
     end.
 
 nif_verify_prerequisites() ->
@@ -2729,29 +2721,66 @@ nif_verify_prerequisites() ->
         {_,_,_}     -> ok
     end.
 
-'do_nif?'() ->
-    nif_verify_prerequisites() == ok.
-
-nif_oneof_tests_check_prerequisites(Tests) ->
-    nif_oneof_tests_check_prerequisites("Nif with oneof fields", fun id/1, Tests).
-
-nif_oneof_tests_check_prerequisites(Title, ExtraPrereq, Tests) ->
-    case 'do_nif?'() andalso check_protoc_can_do_oneof() of
-        true  -> {Title, ExtraPrereq(Tests)};
-        false -> {"Protoc < 2.6.0, not testing nifs with oneof", []}
+check_nif_features_supported(NeededFeatures, ExtraChecks) ->
+    case nif_verify_prerequisites() of
+        ok ->
+            case protoc_meets_needs(NeededFeatures) of
+                ok ->
+                    case check_extras(ExtraChecks, NeededFeatures) of
+                        ok ->
+                            ok;
+                        {error, Text} ->
+                            {error, Text}
+                    end;
+                {error, Text} ->
+                    {error, Text}
+            end;
+        {error, Text} ->
+            {error, Text}
     end.
 
-nif_mapfield_tests_check_prerequisites(Tests) ->
-    case 'do_nif?'() andalso check_protoc_can_do_mapfields() of
-        true  -> {"Nif with map fields", Tests};
-        false -> {"Protoc < 3.0.0, not testing nifs with map fields", []}
+protoc_meets_needs(NeededFeatures) ->
+    NeedMax = lists:max([protoc_feature_version_appearance(F)
+                         || F <- NeededFeatures] ++ [[1,0]]),
+    case cachingly_find_protoc_version() of
+        {ok, Vsn} when Vsn >= NeedMax ->
+            ok;
+        {ok, _} ->
+            {error, "needs protoc >= " ++ needed_vsn_to_text(NeedMax)};
+        {error, _Text} ->
+            {error, "needs protoc >= " ++ needed_vsn_to_text(NeedMax)}
     end.
 
-nif_proto3_tests_check_prerequisites(Tests) ->
-    case 'do_nif?'() andalso check_protoc_can_do_proto3() of
-        true  -> {"Nif with proto3", Tests};
-        false -> {"Protoc < 3.0.0, not testing nifs with proto3", []}
-    end.
+needed_vsn_to_text(Vsn) ->
+    Vsn3 = case Vsn of
+               [Major, Minor]        -> [Major, Minor, 0];
+               [Major, Minor, P | _] -> [Major, Minor, P]
+           end,
+    gpb_lib:dot_join([integer_to_list(N) || N <- Vsn3]).
+
+protoc_feature_version_appearance(oneof)        -> [2,6];
+protoc_feature_version_appearance(cxx_keywords) -> [3,0];
+protoc_feature_version_appearance(mapfields)    -> [3,0];
+protoc_feature_version_appearance(proto3)       -> [3,0];
+protoc_feature_version_appearance(json)         -> [3,0];
+protoc_feature_version_appearance(json_preserve_proto_field_names) -> [3,3].
+
+check_extras([Check | Rest], NeededFeatures) ->
+    case Check(NeededFeatures) of
+        ok ->
+            check_extras(Rest, NeededFeatures);
+        {error, Text} ->
+            {error, Text}
+    end;
+check_extras([], _) ->
+    ok.
+
+guess_features(S) ->
+    S2 = binary_to_list(iolist_to_binary(S)),
+    [Feat || {Substr, Feat} <- [{"syntax=\"proto3\"", proto3},
+                                {"oneof", oneof},
+                                {"map<", mapfields}],
+             gpb_lib:is_substr(Substr, S2)].
 
 verify_errors_in_separate_vm_are_caught() ->
     %% Sanity check of the machinery for running tests in a separate vm
@@ -2774,6 +2803,8 @@ create_dummy_module(MName) ->
     {ok,MName,Code} = compile:forms([Form]),
     Code.
 
+nif_compiles(features) -> [];
+nif_compiles(title) -> "Nif compiles".
 nif_compiles() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -2782,6 +2813,8 @@ nif_compiles() ->
               {ok, _Code} = compile_nif_msg_defs(NCM, Defs, TmpDir)
       end).
 
+nif_encode_decode(features) -> [];
+nif_encode_decode(title) -> "Encode decode basic types".
 nif_encode_decode() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -2848,6 +2881,8 @@ nif_encode_decode_strings(NEDM, Defs) ->
                   end,
                   CodePoints).
 
+nif_encode_decode_oneof(features) -> [oneof];
+nif_encode_decode_oneof(title) -> "Encode decode oneof".
 nif_encode_decode_oneof() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -2883,6 +2918,8 @@ nif_encode_decode_oneof(NEDM, Defs) ->
                   end,
                   Alts).
 
+nif_encode_decode_mapfields(features) -> [mapfields];
+nif_encode_decode_mapfields(title) -> "Encode decode map<_,_> fields".
 nif_encode_decode_mapfields() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -2897,6 +2934,8 @@ nif_encode_decode_mapfields() ->
                 end)
       end).
 
+nif_encode_decode_proto3(features) -> [proto3, oneof];
+nif_encode_decode_proto3(title) -> "Encode decode proto3".
 nif_encode_decode_proto3() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -2939,6 +2978,8 @@ map_all_fields(R, Fn) ->
     [RName | Fields] = tuple_to_list(R),
     list_to_tuple([RName | [Fn(Field) || Field <- Fields]]).
 
+nif_enum_in_msg(features) -> [];
+nif_enum_in_msg(title) -> "Enums in messages".
 nif_enum_in_msg() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -2968,6 +3009,8 @@ nif_enum_in_msg() ->
                 end)
       end).
 
+nif_enum_with_pkgs(features) -> [];
+nif_enum_with_pkgs(title) -> "Enums with pkgs".
 nif_enum_with_pkgs() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -2997,6 +3040,8 @@ nif_enum_with_pkgs() ->
                 end)
       end).
 
+nif_enum_from_integers(features) -> [];
+nif_enum_from_integers(title) -> "Enums from integers".
 nif_enum_from_integers() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -3022,6 +3067,8 @@ nif_enum_from_integers() ->
                 end)
       end).
 
+nif_with_groups(features) -> [];
+nif_with_groups(title) -> "Nif with groups".
 nif_with_groups() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -3057,6 +3104,8 @@ nif_with_groups() ->
                 end)
       end).
 
+nif_with_strbin(features) -> [];
+nif_with_strbin(title) -> "Nif with strbin".
 nif_with_strbin() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -3083,6 +3132,8 @@ nif_with_strbin() ->
                 end)
       end).
 
+nif_with_booleans(features) -> [];
+nif_with_booleans(title) -> "Nif with booleans".
 nif_with_booleans() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -3108,6 +3159,9 @@ nif_with_booleans() ->
                 end)
       end).
 
+
+nif_with_cxx_keywords(features) -> [oneof, cxx_keywords];
+nif_with_cxx_keywords(title) -> "Handling of C++ keywords".
 nif_with_cxx_keywords() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -3141,6 +3195,9 @@ nif_with_cxx_keywords() ->
                 end)
       end).
 
+
+nif_with_list_indata_for_bytes(features) -> [];
+nif_with_list_indata_for_bytes(title) -> "Nif with list indata for bytes".
 nif_with_list_indata_for_bytes() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -3166,6 +3223,9 @@ nif_with_list_indata_for_bytes() ->
                 end)
       end).
 
+
+nif_with_non_normal_floats(features) -> [];
+nif_with_non_normal_floats(title) -> "Nif and +-Inf/NaN".
 nif_with_non_normal_floats() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -3195,6 +3255,9 @@ nif_with_non_normal_floats() ->
                 end)
       end).
 
+error_if_both_translations_and_nif(features) -> [];
+error_if_both_translations_and_nif(title) -> "Error if both Any translations "
+                                                 ++ "and nif".
 error_if_both_translations_and_nif() ->
     %% This is expected to fail, already at option verification, ie
     %% not produce any files at all, but should it accidentally
@@ -3223,6 +3286,8 @@ error_if_both_translations_and_nif() ->
               ok
       end).
 
+bypass_wrappers_records_nif(features) -> [];
+bypass_wrappers_records_nif(title) -> "Nif with the bypass_wrappers option".
 bypass_wrappers_records_nif() ->
     with_tmpdir(
       fun(TmpDir) ->
@@ -3510,6 +3575,11 @@ check_protoc_can_do_mapfields() ->
                     fun() -> check_protoc_version_is_at_least([3,0]) end).
 
 check_protoc_can_do_proto3() ->
+    cachingly_check('$cached_check_protoc_can_do_proto3',
+                    %% proto3 appeared in 3.0.0 :)
+                    fun() -> check_protoc_version_is_at_least([3,0]) end).
+
+check_protoc_can_do_json() ->
     cachingly_check('$cached_check_protoc_can_do_proto3',
                     %% proto3 appeared in 3.0.0 :)
                     fun() -> check_protoc_version_is_at_least([3,0]) end).
@@ -4272,6 +4342,13 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
                 {ok, Mod1, Code, Warnings} -> % Mod1 insead of Mod, see above
                     load_code(Mod1, Code),
                     {ok, Mod1, Warnings};
+                {error, Reasons, Warnings} ->
+                    {error, Reasons, Warnings}
+            end;
+        get_code ->
+            case CompRes of
+                {ok, Mod1, Code, Warnings} -> % Mod1 insead of Mod, see above
+                    {ok, Mod1, Code, Warnings};
                 {error, Reasons, Warnings} ->
                     {error, Reasons, Warnings}
             end

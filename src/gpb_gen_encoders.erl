@@ -27,6 +27,7 @@
 -export([format_msg_encoders/4]).
 -export([format_map_encoders/4]).
 -export([format_aux_encoders/3]).
+-export([format_aux_common_encoders/3]).
 
 -include("../include/gpb.hrl").
 -include("gpb_codegen.hrl").
@@ -190,9 +191,12 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
     [format_enum_encoders(Defs, AnRes),
-     format_type_encoders(),
-     format_is_empty_string(AnRes)
+     format_type_encoders()
     ].
+
+format_aux_common_encoders(_Defs, AnRes, _Opts) ->
+    %% Used also from json encoding
+    format_is_empty_string(AnRes).
 
 format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
     [gpb_codegen:format_fn(

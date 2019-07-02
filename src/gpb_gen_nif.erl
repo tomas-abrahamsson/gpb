@@ -30,6 +30,8 @@
 -export([format_load_nif/2]).
 -export([format_nif_encoder_error_wrappers/3]).
 -export([format_nif_decoder_error_wrappers/3]).
+-export([format_nif_to_json_error_wrappers/3]).
+-export([format_nif_from_json_error_wrappers/3]).
 -export([format_nif_cc/4]).
 
 -include("../include/gpb.hrl").
@@ -72,6 +74,7 @@ replace_tilde_s(<<C, Rest/binary>>, ModBin, VsnBin) ->
 replace_tilde_s(<<>>, _ModBin, _VsnBin) ->
     <<>>.
 
+%% error wrappers for encoders
 format_nif_encoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_encode_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
@@ -84,6 +87,7 @@ format_msg_nif_encode_error_wrapper(MsgName) ->
       end,
       [replace_term('<msg-name>', MsgName)]).
 
+%% error wrappers for decoders
 format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_decode_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
@@ -96,13 +100,44 @@ format_msg_nif_decode_error_wrapper(MsgName) ->
       end,
       [replace_term('<msg-name>', MsgName)]).
 
+%% error wrappers for to_json
+format_nif_to_json_error_wrappers(Defs, _AnRes, _Opts) ->
+    [format_msg_nif_to_json_error_wrapper(MsgName)
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+format_msg_nif_to_json_error_wrapper(MsgName) ->
+    gpb_codegen:format_fn(
+      gpb_lib:mk_fn(to_json_msg_, MsgName),
+      fun(Msg) ->
+              erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [Msg])
+      end,
+      [replace_term('<msg-name>', MsgName)]).
+
+%% error wrappers for from_json
+format_nif_from_json_error_wrappers(Defs, _AnRes, _Opts) ->
+    [format_msg_nif_from_json_error_wrapper(MsgName)
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+format_msg_nif_from_json_error_wrapper(MsgName) ->
+    gpb_codegen:format_fn(
+      gpb_lib:mk_fn(from_json_msg_, MsgName),
+      fun(JBin) ->
+              erlang:nif_error({error,{nif_not_loaded,'<msg-name>'}}, [JBin])
+      end,
+      [replace_term('<msg-name>', MsgName)]).
+
+%% -- NIF C++ code ---
+
 format_nif_cc(Mod, Defs, AnRes, Opts) ->
+    DoJson = gpb_lib:json_by_opts(Opts),
     iolist_to_binary(
       [format_nif_cc_includes(Mod, Defs, AnRes, Opts),
        format_nif_cc_oneof_version_check_if_present(Defs),
        format_nif_cc_maptype_version_check_if_present(Defs),
        format_nif_cc_proto3_version_check_if_present(Defs),
        format_nif_cc_map_api_check_if_needed(Opts),
+       format_nif_cc_json_api_check_if_needed(Opts),
+       format_nif_cc_json_includes_if_needed(Opts),
        format_nif_cc_local_function_decls(Mod, Defs, Opts),
        format_nif_cc_mk_consts(Mod, Defs, AnRes, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
@@ -113,6 +148,8 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_packers(Mod, Defs, Opts),
        format_nif_cc_decoders(Mod, Defs, Opts),
        format_nif_cc_unpackers(Mod, Defs, Opts),
+       [[format_nif_cc_to_jsoners(Mod, Defs, Opts),
+         format_nif_cc_from_jsoners(Mod, Defs, Opts)] || DoJson],
        format_nif_cc_foot(Mod, Defs, Opts)]).
 
 get_cc_pkg(Defs) ->
@@ -238,6 +275,57 @@ format_nif_cc_map_api_check_if_needed(Opts) ->
              "\n"]
     end.
 
+format_nif_cc_json_api_check_if_needed(Opts) ->
+    case gpb_lib:json_by_opts(Opts) of
+        true ->
+            PreserveFNames =
+                proplists:get_bool(json_preserve_proto_field_names, Opts),
+            CaseInsensitiveEnums =
+                proplists:get_value(json_case_insensitive_enum_parsing, Opts),
+            ["#if GOOGLE_PROTOBUF_VERSION < 3000000\n"
+             "#error \"The json option was specified,\"\n"
+             "#error \"this feature appeared in protobuf 3, but\"\n"
+             "#error \"it appears your protobuf is older.  Please\"\n"
+             "#error \"update protobuf.\"\n"
+             "#endif\n",
+             if PreserveFNames ->
+                     ["\n"
+                      "#if GOOGLE_PROTOBUF_VERSION < 3003000\n"
+                      "#error \"The json_preserve_proto_field_names option\"\n"
+                      "#error \"was set, but protobuf support for this\"\n"
+                      "#error \"first appeared in protobuf 3.3.0, and\"\n"
+                      "#error \"it appears your protobuf is older.  Please\"\n"
+                      "#error \"update protobuf.\"\n"
+                      "#endif\n"];
+                true ->
+                     ""
+             end,
+             if CaseInsensitiveEnums == true;
+                CaseInsensitiveEnums == undefined -> % default is true
+                     "";
+                CaseInsensitiveEnums == false ->
+                     ["\n"
+                      "#if GOOGLE_PROTOBUF_VERSION < 3007000\n"
+                      "#error \"The json_case_insensitive_enum_parsing\"\n"
+                      "#error \"option was set to false, but support \"\n"
+                      "#error \"for configuring this first appeared\"\n"
+                      "#error \"in version 3.7.0, and it appears \"\n"
+                      "#error \"your protobuf is older.  Please\"\n"
+                      "#error \"update protobuf.\"\n"
+                      "#endif\n"]
+             end];
+        false ->
+            ""
+    end.
+
+format_nif_cc_json_includes_if_needed(Opts) ->
+    case gpb_lib:json_by_opts(Opts) of
+        true ->
+            ["#include <google/protobuf/util/json_util.h>\n"];
+        false ->
+            ""
+    end.
+
 format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
     CPkg = get_cc_pkg(Defs),
     [[begin
@@ -256,68 +344,130 @@ format_nif_cc_local_function_decls(_Mod, Defs, _Opts) ->
 format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
     MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
-    EnumAtoms = lists:flatten([[Sym || {Sym, _V} <- EnumDef]
-                               || {{enum, _}, EnumDef} <- Defs]),
-    RecordAtoms = [MsgName
-                   || {_, MsgName, _Fields} <- gpb_lib:msgs_or_groups(Defs)],
-    OneofNames0 = collect_oneof_fields(Defs),
-    MiscAtoms0 = case is_any_field_of_type_enum(AnRes) of
-                     true  -> [undefined];
-                     false -> []
-                 end,
-    MiscAtoms1 = case is_any_field_of_type_bool(AnRes) of
-                     true  -> MiscAtoms0 ++ [true, false];
-                     false -> MiscAtoms0
-                 end,
-    MiscAtoms2 = case is_any_field_of_type_float_or_double(AnRes) of
-                     true  -> MiscAtoms1 ++ [infinity, '-infinity', nan];
-                     false -> MiscAtoms1
-                 end,
-    FieldAtoms0 = if Maps ->
-                          lists:flatten(
-                            [[gpb_lib:get_field_name(Field) || Field <- Fields]
-                             || {_, _Name, Fields} <- gpb_lib:msgs_or_groups(
-                                                        Defs)]);
-                     not Maps ->
-                          []
-                  end,
-    {FieldAtoms, OneofNames} =
-        case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-            #maps{oneof=flat} ->
-                {lists:usort(FieldAtoms0 ++ OneofNames0), []};
-            _ ->
-                {lists:usort(FieldAtoms0), lists:usort(OneofNames0)}
-        end,
-    Atoms = lists:usort(EnumAtoms ++ RecordAtoms ++ OneofNames ++ MiscAtoms2),
-    AtomVars0 = [{mk_c_var(gpb_aa_, minus_to_m(A)), A} || A <- Atoms],
-    NoValue = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+    %% About gpb_aa_<...> vs gpb_fa_<...> C variables
+    %% ----------------------------------------------
+    %% gpb_aa_<...>:
+    %% Things that are used as atoms will be in C variables gpb_aa_<...>
+    %% These are:
+    %% * constants: true, false, undefined, infinity, '-infinity', nan
+    %% * message names (record names)a
+    %% * enum symbols
+    %% * oneof tags when _not_ flat oneofs
+    %%
+    %% gpb_fa_<...>
+    %% Map fields names can be either atoms or binaries, depending on
+    %% the maps_key_type option. Additionally, with maps_oneof = flat, the
+    %% oneof tags will be map keys. Things that will be map keys,
+    %% are stored in C variables gpb_fa_<...>. These are either
+    %% atoms or C strings (char arrays) used for constructing and comparing
+    %% binaries (the is_key and mk_key functions).
+    %% Here are:
+    %% * map key field names, ie names of #?gpb_field{}s
+    %% * #gpb_oneof{} field names when _not_ flat oneofs (avoid unused vars)
+    %% * oneof tags when flat oneofs
+
+    {AtomVars, FieldNameVars} = calc_atoms_fields(Defs, AnRes, Opts),
+    [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
+     if Maps, MapsKeyType == binary ->
+             [?f("static const char *~s = \"~s\";\n", [Var, Atom])
+              || {Var,Atom} <- FieldNameVars];
+        true ->
+             [?f("static ERL_NIF_TERM ~s;\n", [Var])
+              || {Var,_Atom} <- FieldNameVars]
+     end,
+     "\n",
+     ["static void install_atoms(ErlNifEnv *env)\n"
+      "{\n",
+      [?f("    ~s = enif_make_atom(env, \"~s\");\n", [Var, Atom])
+       || {Var, Atom} <- AtomVars],
+      if Maps, MapsKeyType == binary ->
+              "";
+         true ->
+              [?f("    ~s = enif_make_atom(env, \"~s\");\n", [Var, Atom])
+               || {Var, Atom} <- FieldNameVars]
+      end,
+      "}\n",
+      "\n"]].
+
+calc_atoms_fields(Defs, AnRes, Opts) ->
+    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
+    FlatMaps = case MappingUnset of
+                   #maps{unset_optional=omitted, oneof=flat} -> true;
+                   _ -> false
+               end,
+    %% Calculate things that are to be always atoms
+    Atoms0 = % deep list of atoms
+        [[collect_record_names(Defs) || MappingUnset == records],
+         collect_constants(AnRes),
+         collect_enum_syms(Defs),
+         [collect_oneof_tags(Defs) || not FlatMaps]],
+    Atoms1 = deep_list_to_unqiue_list(Atoms0),
+    AtomVars0 = [{mk_c_var(gpb_aa_, minus_to_m(A)), A} || A <- Atoms1],
+    NoValue = case MappingUnset of
                   records -> undefined;
                   #maps{unset_optional=present_undefined} -> undefined;
                   #maps{unset_optional=omitted} -> '$undef'
               end,
     AtomVars1 = [{"gpb_x_no_value", NoValue} | AtomVars0],
-    FieldAtomVars = [{mk_c_var(gpb_fa_, minus_to_m(A)), A} || A <- FieldAtoms],
-    [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars1],
-     if Maps, MapsKeyType == binary ->
-             [?f("static const char *~s = \"~s\";\n", [Var, Atom])
-              || {Var,Atom} <- FieldAtomVars];
-        true ->
-             [?f("static ERL_NIF_TERM ~s;\n", [Var])
-              || {Var,_Atom} <- FieldAtomVars]
+
+    %% Calculate map fields names (atoms or eventually binaries depending on
+    %% option)
+    FieldNames0 = % deep list of atoms
+        [[collect_toplevel_non_oneof_field_names(Defs) || Maps],
+         [collect_oneof_names(Defs) || Maps, not FlatMaps],
+         [collect_oneof_tags(Defs) || FlatMaps]],
+    FieldNames = deep_list_to_unqiue_list(FieldNames0),
+    FieldNameVars = [{mk_c_var(gpb_fa_, minus_to_m(A)), A} || A <- FieldNames],
+    {AtomVars1, FieldNameVars}.
+
+collect_record_names(Defs) ->
+    [MsgName || {_, MsgName, _Fields} <- gpb_lib:msgs_or_groups(Defs)].
+
+collect_enum_syms(Defs) ->
+    [[Sym || {Sym, _V} <- EnumDef] || {{enum, _}, EnumDef} <- Defs].
+
+collect_constants(AnRes) ->
+    [case is_any_field_of_type_enum(AnRes) of
+         true  -> [undefined];
+         false -> []
      end,
-     "\n",
-     ["static void install_atoms(ErlNifEnv *env)\n"
-      "{\n",
-      [?f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
-       || {AtomVar, Atom} <- AtomVars1],
-      if Maps, MapsKeyType == binary ->
-              "";
-         true ->
-              [?f("    ~s = enif_make_atom(env, \"~s\");\n", [AtomVar, Atom])
-               || {AtomVar, Atom} <- FieldAtomVars]
-      end,
-      "}\n",
-      "\n"]].
+     case is_any_field_of_type_bool(AnRes) of
+         true  -> [true, false];
+         false -> []
+     end,
+     case is_any_field_of_type_float_or_double(AnRes) of
+         true  -> [infinity, '-infinity', nan];
+         false -> []
+     end].
+
+collect_oneof_tags(Defs) ->
+    [[[Tag
+       || #?gpb_field{name=Tag} <- OFields]
+      || #gpb_oneof{fields=OFields} <- Fields]
+     || {_msg_or_group, _, Fields} <- gpb_lib:msgs_or_groups(Defs)].
+
+collect_toplevel_non_oneof_field_names(Defs) ->
+    [[FName || #?gpb_field{name=FName} <- Fields]
+     || {_, _Name, Fields} <- gpb_lib:msgs_or_groups(Defs)].
+
+collect_oneof_names(Defs) ->
+    [[FName || #gpb_oneof{name=FName} <- Fields]
+     || {_, _Name, Fields} <- gpb_lib:msgs_or_groups(Defs)].
+
+deep_list_to_unqiue_list(DL) ->
+    sets:to_list(deep_get_unique_aux(DL, sets:new())).
+
+deep_get_unique_aux(L, InitAcc) when is_list(L) ->
+    lists:foldl(fun deep_get_unique_aux/2, InitAcc, L);
+deep_get_unique_aux(Elem, Acc) ->
+    sets:add_element(Elem, Acc).
+
+minus_to_m(A) ->
+    case atom_to_list(A) of
+        "-"++Rest -> "m"++Rest;
+        _         -> A
+    end.
 
 format_nif_cc_mk_consts(_Mod, _Defs, AnRes, _Opts) ->
     case is_any_field_of_type_bool(AnRes) of
@@ -330,20 +480,6 @@ format_nif_cc_mk_consts(_Mod, _Defs, AnRes, _Opts) ->
              "{\n",
              "}\n"]
     end.
-
-minus_to_m(A) ->
-    case atom_to_list(A) of
-        "-"++Rest -> "m"++Rest;
-        _         -> A
-    end.
-
-collect_oneof_fields(Defs) ->
-    lists:usort(
-      lists:flatten(
-        [[[FOFName
-           || #?gpb_field{name=FOFName} <- OFields]
-          || #gpb_oneof{fields=OFields} <- Fields]
-         || {_msg_or_group, _, Fields} <- gpb_lib:msgs_or_groups(Defs)])).
 
 format_nif_cc_mk_is_key(_Mod, _Defs, _AnRes, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
@@ -640,7 +776,7 @@ format_nif_cc_utf8_conversion_code(Opts) ->
      end,
      "\n"].
 
-format_nif_cc_foot(Mod, Defs, _Opts) ->
+format_nif_cc_foot(Mod, Defs, Opts) ->
     ["static int\n",
      "load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)\n",
      "{\n",
@@ -673,12 +809,12 @@ format_nif_cc_foot(Mod, Defs, _Opts) ->
      %% but only if Erlang was configured with --enable-dirty-schedulers
      "#if ", format_nif_check_version_or_later(2, 7), "\n"
      "#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT\n",
-     format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND, "),
+     format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND, ", Opts),
      "#else /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
-     format_nif_cc_nif_funcs_list(Defs, ""),
+     format_nif_cc_nif_funcs_list(Defs, "", Opts),
      "#endif /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
      "#else /* before 2.7 or 17.3 */\n",
-     format_nif_cc_nif_funcs_list(Defs, no_flags),
+     format_nif_cc_nif_funcs_list(Defs, no_flags, Opts),
      "#endif /* before 2.7 or 17.3 */\n"
      "};\n",
      "\n",
@@ -691,7 +827,8 @@ format_nif_check_version_or_later(Major, Minor) ->
        "(ERL_NIF_MAJOR_VERSION == ~w && ERL_NIF_MINOR_VERSION >= ~w)",
        [Major, Major, Minor]).
 
-format_nif_cc_nif_funcs_list(Defs, Flags) ->
+format_nif_cc_nif_funcs_list(Defs, Flags, Opts) ->
+    DoJson = gpb_lib:json_by_opts(Opts),
     MsgNames = [MsgName || {{msg, MsgName}, _MsgFields} <- Defs],
     FlagStr = if Flags == no_flags -> "";
                  true -> ", " ++ Flags
@@ -701,12 +838,25 @@ format_nif_cc_nif_funcs_list(Defs, Flags) ->
          EncodeCFnName = mk_c_fn(encode_msg_, MsgName),
          DecodeFnName = gpb_lib:mk_fn(decode_msg_, MsgName),
          DecodeCFnName = mk_c_fn(decode_msg_, MsgName),
+         ToJsonFnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+         ToJsonCFnName = mk_c_fn(to_json_msg_, MsgName),
+         FromJsonFnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+         FromJsonCFnName = mk_c_fn(from_json_msg_, MsgName),
          IsLast = I == length(MsgNames),
          Comma = ["," || not IsLast],
-         [?f("    {\"~s\", 1, ~s~s},\n",
-             [EncodeFnName, EncodeCFnName, FlagStr]),
-          ?f("    {\"~s\", 1, ~s~s}~s\n",
-             [DecodeFnName, DecodeCFnName, FlagStr, Comma])]
+         DComma = if DoJson     -> ",";
+                     not DoJson -> Comma
+                  end,
+         [?f(  "    {\"~s\", 1, ~s~s},\n",
+               [EncodeFnName, EncodeCFnName, FlagStr]),
+          ?f(  "    {\"~s\", 1, ~s~s}~s\n",
+               [DecodeFnName, DecodeCFnName, FlagStr, DComma]),
+          [[?f("    {\"~s\", 1, ~s~s},\n",
+               [ToJsonFnName, ToJsonCFnName, FlagStr]),
+            ?f("    {\"~s\", 1, ~s~s}~s\n",
+               [FromJsonFnName, FromJsonCFnName, FlagStr, Comma])]
+           || DoJson]]
+
      end
      || {I, MsgName} <- gpb_lib:index_seq(MsgNames)].
 
@@ -1273,54 +1423,71 @@ format_nif_cc_unpackers(_Mod, Defs, Opts) ->
     [format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts)
      || {_msg_or_group, MsgName, Fields} <- gpb_lib:msgs_or_groups(Defs)].
 
-format_nif_cc_unpacker(CPkg, MsgName, Fields0, Defs, Opts) ->
+format_nif_cc_unpacker(CPkg, MsgName, Fields, Defs, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
-    Fields1 = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                  #maps{unset_optional=omitted, oneof=flat} ->
-                      gpb_lib:flatten_oneof_fields(Fields0);
-                  _ ->
-                      Fields0
-              end,
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
-    Is = [I || {I,_} <- gpb_lib:index_seq(Fields1)],
+    IFields = gpb_lib:index_seq(Fields),
+    Is = [I || {I,_} <- IFields],
     IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
+    %% Initialize the keys to silence "may be used uninitialized"
+    %% warnings for oneof fields for maps (not set in the default,
+    %% but checked for instead by checking for no_value)
+    {KeyVarType, KeyInitExpr} =
+        case gpb_lib:get_maps_key_type_by_opts(Opts) of
+            binary -> {"const char  *", "NULL"};
+            atom   -> {"ERL_NIF_TERM ", "gpb_x_no_value"}
+        end,
     ["static ERL_NIF_TERM\n",
      UnpackFnName,"(ErlNifEnv *env, const ",CMsgType," *m)\n",
      "{\n",
      "    ERL_NIF_TERM res;\n",
      [?f("    ERL_NIF_TERM rname = ~s;\n", [mk_c_var(gpb_aa_, MsgName)])
       || not Maps],
-     [?f("    ERL_NIF_TERM elem~w;\n", [I]) || I <- Is],
+     [ ?f("    ERL_NIF_TERM elem~w;\n", [I]) || I <- Is],
+     [?f("    ~s"         "key~w = ~s;\n", [KeyVarType, I, KeyInitExpr])
+      || I <- Is, Maps],
      "\n",
-     [begin
-          DestVar = ?f("elem~w",[I]),
-          gpb_lib:split_indent_iolist(
-            4,
-            format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field,
-                                         Defs, Opts, IsProto3))
+     %% Unpack each field
+     [case Field of
+          #?gpb_field{name=FName} ->
+              DestVar = ?f("elem~w",[I]),
+              gpb_lib:split_indent_iolist(
+                4,
+                [[?f("key~w = gpb_fa_~s;\n", [I, FName]) || Maps],
+                 format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field,
+                                              Defs, Opts, IsProto3)]);
+          #gpb_oneof{} ->
+              {KSetter, VSetter, UndefSetter} =
+                  calc_oneof_key_value_updaters(I, Field, Opts),
+              gpb_lib:split_indent_iolist(
+                4,
+                format_nif_cc_field_oneof_unpacker(
+                  "m", MsgName, Field, KSetter, VSetter, UndefSetter,
+                  Defs, Opts, IsProto3))
       end
-      || {I, Field} <- gpb_lib:index_seq(Fields1)],
+      || {I, Field} <- IFields],
      "\n",
+     %% Wrap the result into a record or map
      case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
          records ->
              ?f("    res = enif_make_tuple(env, ~w, rname~s);\n",
-                [length(Fields1) + 1, [?f(", elem~w",[I]) || I <- Is]]);
+                [length(Fields) + 1, [?f(", elem~w",[I]) || I <- Is]]);
          #maps{unset_optional=present_undefined} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [?f("    enif_make_map_put(env, res,\n"
                   "                      mk_key(env, gpb_fa_~s), elem~w,\n"
                   "                      &res);\n",
                   [gpb_lib:get_field_name(Field), I])
-               || {I, Field} <- gpb_lib:index_seq(Fields1)]];
+               || {I, Field} <- IFields]];
          #maps{unset_optional=omitted} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [begin
                    Put = ?f("enif_make_map_put(env, res,\n"
-                            "                  mk_key(env, gpb_fa_~s),\n"
+                            "                  mk_key(env, key~w),\n"
                             "                  elem~w,\n"
                             "                  &res);",
-                            [gpb_lib:get_field_name(Field), I]),
+                            [I, I]),
                    Test = ?f("if (!enif_is_identical(elem~w, gpb_x_no_value))",
                              [I]),
                    PutLine = Put ++ "\n",
@@ -1333,11 +1500,33 @@ format_nif_cc_unpacker(CPkg, MsgName, Fields0, Defs, Opts) ->
                            gpb_lib:indent(4, PutLine)
                    end
                end
-               || {I, Field} <- gpb_lib:index_seq(Fields1)]]
+               || {I, Field} <- IFields]]
      end,
      "    return res;\n"
      "}\n",
      "\n"].
+
+calc_oneof_key_value_updaters(I, #gpb_oneof{name=FName}, Opts) ->
+    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+        records ->
+            {fun(_Tag) -> nop end,
+             fun(Tag,V) ->
+                     ?f("elem~w = enif_make_tuple2(env, gpb_aa_~s, ~s)",
+                        [I, Tag, V])
+             end,
+             fun() -> ?f("elem~w = gpb_x_no_value", [I]) end};
+        #maps{oneof=tuples}  ->
+            {fun(_Tag) -> ?f("key~w = gpb_fa_~s", [I, FName]) end,
+             fun(Tag,V) ->
+                     ?f("elem~w = enif_make_tuple2(env, gpb_aa_~s, ~s)",
+                        [I, Tag, V])
+             end,
+             fun() -> ?f("elem~w = gpb_x_no_value", [I]) end};
+        #maps{oneof=flat} ->
+            {fun(Tag) -> ?f("key~w = gpb_fa_~s", [I, Tag]) end,
+             fun(_Tag,V) -> ?f("elem~w = ~s", [I, V]) end,
+             fun() -> ?f("elem~w = gpb_x_no_value", [I]) end}
+    end.
 
 format_nif_cc_field_unpacker(DestVar, MsgVar, _MsgName, #?gpb_field{}=Field,
                              Defs, Opts, IsProto3) ->
@@ -1358,10 +1547,12 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, _MsgName, #?gpb_field{}=Field,
                     format_nif_cc_field_unpacker_repeated(DestVar, MsgVar,
                                                           Field, Defs)
             end
-    end;
-format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
-                             Defs, _Opts, _IsProto3) ->
-    #gpb_oneof{name=OFName, fields=OFields} = Field,
+    end.
+
+format_nif_cc_field_oneof_unpacker(MsgVar, MsgName,
+                                   #gpb_oneof{name=OFName, fields=OFields},
+                                   KSetter, VSetter, UndefSetter,
+                                   Defs, _Opts, _IsProto3) ->
     CPkg = get_cc_pkg(Defs),
     CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
     UCOFName = to_upper(OFName),
@@ -1369,7 +1560,8 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
      ?f("{\n"),
      [begin
           CamelCaseFOFName = camel_case(FOFName),
-          AtomVar = mk_c_var(gpb_aa_, FOFName),
+          KSetExpr = KSetter(FOFName),
+          VSetExpr = VSetter(FOFName, "ores"),
           gpb_lib:split_indent_iolist(
             4,
             [?f("case ~s::k~s:\n", [CMsgType, CamelCaseFOFName]),
@@ -1377,10 +1569,10 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
              ?f("        ERL_NIF_TERM ores;\n"),
              gpb_lib:split_indent_iolist(
                8,
-               format_nif_cc_field_unpacker_by_field("ores", MsgVar,
-                                                     OField, Defs)),
-             ?f("        ~s = enif_make_tuple2(env, ~s, ores);\n",
-                [DestVar, AtomVar]),
+               [format_nif_cc_field_unpacker_by_field("ores", MsgVar,
+                                                     OField, Defs),
+                [[KSetExpr,";\n"] || KSetExpr /= nop],
+                [VSetExpr,";\n"]]),
              ?f("    }\n"),
              ?f("    break;\n\n")])
       end
@@ -1389,7 +1581,7 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, MsgName, #gpb_oneof{}=Field,
        4,
        [?f("case ~s::~s_NOT_SET: /* FALL THROUGH */~n", [CMsgType, UCOFName]),
         ?f("default:~n"),
-        ?f("    ~s = gpb_x_no_value;\n", [DestVar])]),
+        gpb_lib:split_indent_iolist(4, [UndefSetter(),";\n"])]),
      ?f("}\n"),
      "\n"].
 
@@ -1578,6 +1770,139 @@ format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field, Defs, Opts) ->
      "}\n"].
 
 
+format_nif_cc_to_jsoners(Mod, Defs, Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [format_nif_cc_to_jsoner(Mod, CPkg, MsgName, Fields, Opts)
+     || {{msg, MsgName}, Fields} <- Defs].
+
+format_nif_cc_to_jsoner(_Mod, CPkg, MsgName, _Fields, Opts) ->
+    FnName = mk_c_fn(to_json_msg_, MsgName),
+    PackFnName = mk_c_fn(p_msg_, MsgName),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    AlwaysPrintPrimitives =
+        atom_to_list(
+          proplists:get_bool(json_always_print_primitive_fields, Opts)),
+    PreserveFNames =
+        atom_to_list(proplists:get_bool(json_preserve_proto_field_names, Opts)),
+    %% The preserve_proto_field_names and always_print_enums_as_ints
+    %% JsonPrintOptions fields were added in in 3.3.0, so check for that.
+    %% There is an error check earlier for when it needs to be set to true.
+    %% Here, just don't fail if in the interval 3.0.0 .. 3.2.x.
+    ["static ERL_NIF_TERM\n",
+     FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
+     "{\n",
+     "    ERL_NIF_TERM result;\n",
+     "    ",CMsgType," *m = new ",CMsgType,"();\n",
+     "    ::std::string j;\n"
+     "    ::google::protobuf::util::JsonPrintOptions jopts;\n\n"
+     ""
+     "    jopts.add_whitespace = false;\n"
+     "    jopts.always_print_primitive_fields = ",AlwaysPrintPrimitives,";\n"
+     "#if GOOGLE_PROTOBUF_VERSION >= 3003000\n"
+     "    jopts.preserve_proto_field_names = ",PreserveFNames,";\n"
+     "    jopts.always_print_enums_as_ints = false;\n\n"
+     "#endif\n"
+     ""
+     "    if (argc != 1)\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n\n"
+     ""
+     "    if (m == NULL)\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n\n"
+     ""
+     "    if (!",PackFnName,"(env, argv[0], m))\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n\n"
+     ""
+     "    if (::google::protobuf::util::MessageToJsonString(*m, &j, jopts)\n"
+     "        == ::google::protobuf::util::Status::OK)\n"
+     "    {\n"
+     "        unsigned char *data;\n"
+     "        const char    *jData = j.data();\n"
+     "        unsigned int   jSize = j.size();\n"
+     "        data = enif_make_new_binary(env, jSize, &result);\n"
+     "        memmove(data, jData, jSize);\n"
+     "    }\n"
+     "    else\n"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n\n"
+     ""
+     "    delete m;\n"
+     "    return result;\n"
+     "}\n"
+     "\n"].
+
+format_nif_cc_from_jsoners(Mod, Defs, Opts) ->
+    CPkg = get_cc_pkg(Defs),
+    [format_nif_cc_from_jsoner(Mod, CPkg, MsgName, Fields, Opts)
+     || {{msg, MsgName}, Fields} <- Defs].
+
+format_nif_cc_from_jsoner(_Mod, CPkg, MsgName, _Fields, Opts) ->
+    FnName = mk_c_fn(from_json_msg_, MsgName),
+    UnpackFnName = mk_c_fn(u_msg_, MsgName),
+    CMsgType = CPkg ++ "::" ++ dot_replace_s(MsgName, "::"),
+    CaseInsensitiveEnums =
+        atom_to_list(
+          proplists:get_bool(json_case_insensitive_enum_parsing, Opts)),
+    ["static ERL_NIF_TERM\n",
+     FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
+     "{\n",
+     "    ErlNifBinary data;\n",
+     "    ERL_NIF_TERM res;\n",
+     "    ",CMsgType," *m = new ",CMsgType,"();\n",
+     "    ::std::string j;\n"
+     "    ::google::protobuf::util::JsonParseOptions jopts;\n"
+     "\n"
+     %% The JsonParseOptions contained ignore_unknown_fields already in 3.0.0
+     "    jopts.ignore_unknown_fields = true;\n"
+     %% Case insensitive enum parsing is default in 3.8.0,
+     %% and the option appeared in 3.7.0
+     "#if GOOGLE_PROTOBUF_VERSION >= 3007000\n"
+     "    jopts.case_insensitive_enum_parsing = ",CaseInsensitiveEnums,";\n\n"
+     "#endif\n"
+     "\n"
+     "    if (argc != 1)\n",
+     "    {\n",
+     "        delete m;\n",
+     "        return enif_make_badarg(env);\n",
+     "    }\n",
+     "\n",
+     "    if (m == NULL)\n",
+     "    {\n",
+     "        delete m;\n",
+     "        return enif_make_badarg(env);\n", %% FIXME: enomem?
+     "    }\n",
+     "\n",
+     "    if (!enif_inspect_binary(env, argv[0], &data))\n"
+     "    {\n",
+     "        delete m;\n",
+     "        return enif_make_badarg(env);\n",
+     "    }\n",
+     "\n",
+     %% try/catch bad_alloc and return enomem?
+     "    j.assign(reinterpret_cast<char *>(data.data), data.size);\n"
+     "    if (::google::protobuf::util::JsonStringToMessage(j, m, jopts)\n"
+     "        != ::google::protobuf::util::Status::OK)"
+     "    {\n"
+     "        delete m;\n"
+     "        return enif_make_badarg(env);\n"
+     "    }\n"
+     "\n"
+     "    res = ",UnpackFnName,"(env, m);\n",
+     "    delete m;\n",
+     "    return res;\n",
+     "}\n"
+     "\n"].
+
 mk_cctype_name({enum,EnumName}, Defs) ->
     EPrefix = case is_dotted(EnumName) of
                   false -> atom_to_list(EnumName);
@@ -1637,26 +1962,7 @@ to_upper(A) when is_atom(A) ->
     list_to_atom(gpb_lib:uppercase(atom_to_list(A))).
 
 camel_case(A) when is_atom(A) ->
-    list_to_atom(camel_case(atom_to_list(A), true)).
-
--define(is_lower_case(C), $a =< C, C =< $z).
--define(is_upper_case(C), $A =< C, C =< $Z).
--define(is_digit(C),      $0 =< C, C =< $9).
-camel_case([LC | Tl], CapNextLetter) when ?is_lower_case(LC) ->
-    if CapNextLetter     -> [capitalize_letter(LC) | camel_case(Tl, false)];
-       not CapNextLetter -> [LC | camel_case(Tl, false)]
-    end;
-camel_case([UC | Tl], _) when ?is_upper_case(UC) ->
-    [UC | camel_case(Tl, false)];
-camel_case([D | Tl], _) when ?is_digit(D) ->
-    [D | camel_case(Tl, true)];
-camel_case([_ | Tl], _) -> %% underscore and possibly more
-    camel_case(Tl, true);
-camel_case([], _) ->
-    [].
-
-capitalize_letter(C) ->
-    C + ($A - $a).
+    list_to_atom(gpb_lib:camel_case(atom_to_list(A))).
 
 mk_c_fn(Prefix, Suffix) ->
     dot_to_underscore(lists:concat([Prefix, Suffix])).
