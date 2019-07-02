@@ -736,6 +736,29 @@ ignores_unknown_items_on_decoding_test() ->
                                 {<<"f">>,   17}], 'Msg'),
     unload_code(M1).
 
+bypass_wrappers_proto() ->
+    "
+         syntax=\"proto2\";
+         message Msg {
+           optional uint32 f = 1;
+         }
+    ".
+
+bypass_wrappers_test() ->
+    M1 = compile_iolist(bypass_wrappers_proto(), [json, bypass_wrappers]),
+    [{<<"f">>, 17}] = M1:to_json_msg_Msg({'Msg', 17}),
+    {'Msg', 17} = M1:from_json_msg_Msg([{<<"f">>, 17}]),
+    unload_code(M1).
+
+-ifndef(NO_HAVE_MAPS).
+bypass_wrappers_maps_test() ->
+    M1 = compile_iolist(bypass_wrappers_proto(),
+                        [json, maps, bypass_wrappers]),
+    ?assertEqual(#{<<"f">> => 17}, M1:to_json_msg_Msg(#{f => 17})),
+    ?assertEqual(#{f => 17}, M1:from_json_msg_Msg(#{<<"f">> => 17})),
+    unload_code(M1).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
 cmdline_json_opt_test() ->
     {ok, {[json],
           ["x.proto"]}} =
@@ -824,7 +847,8 @@ nif_test_() ->
        ?nif_if_supported(nif_field_names),
        ?nif_if_supported(nif_type_defaults),
        ?nif_if_supported(nif_oneof_rec),
-       ?nif_if_supported(nif_mapfields_rec)]).
+       ?nif_if_supported(nif_mapfields_rec),
+       ?nif_if_supported(nif_bypass_wrappers)]).
 
 
 -ifndef(NO_HAVE_MAPS).
@@ -1070,6 +1094,19 @@ nif_mapfields_maps() ->
       end,
       [json, maps]).
 -endif. % -ifndef(NO_HAVE_MAPS).
+
+nif_bypass_wrappers(features) -> [json |
+                                  guess_features(bypass_wrappers_proto())];
+nif_bypass_wrappers(title) -> "bypass_wrappers".
+nif_bypass_wrappers() ->
+    nif_to_from_json_aux(
+      dont_save,
+      bypass_wrappers_proto(),
+      fun(NifM, _ErlM) ->
+              JsonTxt = NifM:to_json_msg_Msg({'Msg', 17}),
+              {'Msg', 17} = NifM:from_json_msg_Msg(JsonTxt)
+      end,
+      [json, bypass_wrappers]).
 
 nif_to_from_json_aux(SaveOrNot, Proto, TestF, ExtraOpts) ->
     with_tmpdir(

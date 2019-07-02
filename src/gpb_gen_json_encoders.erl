@@ -33,13 +33,26 @@
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
 
-format_exports(_Defs, Opts) ->
-    case gpb_lib:get_records_or_maps_by_opts(Opts) of
-        records ->
-            ?f("-export([to_json/1, to_json/2, to_json/3]).~n");
-        maps ->
-            ?f("-export([to_json/2, to_json/3]).~n")
-    end.
+format_exports(Defs, Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    [case gpb_lib:get_records_or_maps_by_opts(Opts) of
+         records ->
+             ?f("-export([to_json/1, to_json/2, to_json/3]).~n");
+         maps ->
+             ?f("-export([to_json/2, to_json/3]).~n")
+     end,
+     [[[begin
+            NoWrapperFnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+            if DoNif ->
+                    ?f("-export([~p/1]).~n", [NoWrapperFnName]);
+               not DoNif ->
+                    ?f("-export([~p/1, ~p/2]).~n",
+                       [NoWrapperFnName, NoWrapperFnName])
+            end
+        end
+        || {{msg,MsgName}, _Fields} <- Defs],
+       "\n"]
+      || gpb_lib:get_bypass_wrappers_by_opts(Opts)]].
 
 format_top_function(Defs, AnRes, Opts) ->
     case [Item || {{msg, _}, _}=Item <- Defs] of
@@ -216,7 +229,17 @@ format_to_json_msg_aux(MsgName, MsgDef, FNames, Defs, AnRes, Opts) ->
                                replace_tree('M', MsgVar)])
                 end
         end,
-    [gpb_codegen:format_fn(
+    [[[gpb_codegen:format_fn(
+         gpb_lib:mk_fn(to_json_msg_, MsgName),
+         fun(Msg) ->
+                 %% The undefined is the default TrUserData
+                 'to_json_msg_MsgName'(Msg, undefined)
+         end,
+         [replace_term('to_json_msg_MsgName',
+                       gpb_lib:mk_fn(to_json_msg_, MsgName))]),
+       "\n"]
+      || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
+     gpb_codegen:format_fn(
        FnName,
        fun('<msg-matching>', TrUserData) ->
                J0 = tj_new_object(),

@@ -34,8 +34,22 @@
 -import(gpb_lib, [replace_term/2, replace_tree/2,
                   splice_trees/2, repeat_clauses/2]).
 
-format_exports(_Defs, _Opts) ->
-    ?f("-export([from_json/2, from_json/3]).~n").
+format_exports(Defs, Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    NoNif = not DoNif,
+    [?f("-export([from_json/2"),[", from_json/3" || NoNif], ?f("]).~n"),
+     [[[begin
+            NoWrapperFnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+            if DoNif ->
+                    ?f("-export([~p/1]).~n", [NoWrapperFnName]);
+               not DoNif ->
+                    ?f("-export([~p/1, ~p/2]).~n",
+                       [NoWrapperFnName, NoWrapperFnName])
+            end
+        end
+        || {{msg,MsgName}, _Fields} <- Defs],
+       "\n"]
+      || gpb_lib:get_bypass_wrappers_by_opts(Opts)]].
 
 format_top_function(Defs, AnRes, Opts) ->
     case gpb_lib:contains_messages(Defs) of
@@ -115,8 +129,16 @@ format_top_function_msgs(Defs, AnRes, Opts) ->
            || {{msg, MsgName}, _Fields} <- Defs])])].
 
 format_msg_decoders(Defs, AnRes, Opts) ->
-    [[format_msg_decoder(Name, MsgDef, Defs, AnRes, Opts)
-     || {_Type, Name, MsgDef} <- gpb_lib:msgs_or_groups(Defs)],
+    [[[gpb_codegen:format_fn(
+         gpb_lib:mk_fn(from_json_msg_, MsgName),
+         fun(Bin) ->
+                 %% The undefined is the default TrUserData
+                 call_self(Bin, undefined)
+         end)
+       || {{msg,MsgName},_Fields} <- Defs]
+      || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
+     [format_msg_decoder(Name, MsgDef, Defs, AnRes, Opts)
+      || {_Type, Name, MsgDef} <- gpb_lib:msgs_or_groups(Defs)],
      format_helpers(Defs, AnRes, Opts)].
 
 format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
