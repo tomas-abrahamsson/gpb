@@ -77,7 +77,7 @@ post_process_one_file(FileName, Defs, Opts) ->
 %% @hidden
 %% @doc Post-process definitions once the file and all its imports
 %% each have been parsed and processed.
-post_process_all_files(Defs, _Opts) ->
+post_process_all_files(Defs, Opts) ->
     case resolve_names(Defs) of
         {ok, Defs2} ->
             {ok, normalize_msg_field_options(
@@ -87,7 +87,8 @@ post_process_all_files(Defs, _Opts) ->
                          reformat_names(
                            extend_msgs(Defs2))))))};
         {error, Reasons} ->
-            {error, Reasons}
+            Reasons2 = possibly_hint_use_packages_opt(Reasons, Defs, Opts),
+            {error, Reasons2}
     end.
 
 %% -> {ok, Defs} | {error, [Reason]}
@@ -673,6 +674,9 @@ format_post_process_error({error, Reasons}) ->
 fmt_err({multiple_pkg_specifiers, Pkgs}) ->
     ?f("package specified more than once: ~s~n",
        [gpb_lib:comma_join([atom_to_list(Pkg) || Pkg <- Pkgs])]);
+fmt_err({hint,{{use_packages,option}, unresolved_references}}) ->
+    ?f("hint: use the option use_packages (-pkgs) "
+       "to use messages or enums in other packages", []);
 fmt_err({ref_to_undefined_msg_or_enum, {{Msg, Field}, To}}) ->
     ?f("in msg ~s, field ~s: undefined reference  ~s",
        [name_to_dstr(Msg), name_to_dstr(Field), name_to_absdstr(To)]);
@@ -941,3 +945,53 @@ shorten_meta_info(Mapping, Defs) ->
               Other
       end,
       Defs).
+
+possibly_hint_use_packages_opt(Reasons, Defs, Opts) ->
+    UsePackagesOptPresent = case proplists:get_value(use_packages, Opts) of
+                                undefined -> false;
+                                _ -> true
+                            end,
+    UnresolvedRefs = lists:any(fun is_unresolved_ref_reason/1, Reasons),
+    Imports = lists:any(fun is_import_item/1, Defs),
+    DifferentPackages = length(lists:usort(find_pkgs(Defs))) =/= 1,
+    if not UsePackagesOptPresent,
+       UnresolvedRefs,
+       Imports,
+       DifferentPackages ->
+            Hint = {hint, {{use_packages, option}, unresolved_references}},
+            [Hint | Reasons];
+       true ->
+            Reasons
+    end.
+
+%% Check whether the the files in Defs are in different packages.
+%% A {package, _} tuple indicates a package, but a file could also
+%% be void of such an indicator.
+find_pkgs(Defs) ->
+    [proplists:get_value(package, FileChunk)
+     || FileChunk <- file_chunks(Defs)].
+
+%% Split to chunks separated by {file,_} items
+file_chunks(Defs) ->
+    %% Skip anything before first {file,_} item.
+    %% There should not be any such chunks, but if there would be,
+    %% they would not contain any package declaratins in any case.
+    Defs1 = lists:dropwhile(fun is_not_file_item/1, Defs),
+    file_chunks2(Defs1, []).
+
+file_chunks2([{file, _}=FileItem | _]=Defs, Acc) ->
+    {Chunk, Rest} = lists:splitwith(fun is_not_file_item/1, tl(Defs)),
+    file_chunks2(Rest, [[FileItem | Chunk] | Acc]);
+file_chunks2([], Acc) ->
+    lists:reverse(Acc).
+
+is_not_file_item(X) -> not is_file_item(X).
+
+is_file_item({file, _}) -> true;
+is_file_item(_) -> false.
+
+is_import_item({import, _}) -> true;
+is_import_item(_) -> false.
+
+is_unresolved_ref_reason({ref_to_undefined_msg_or_enum,_}) -> true;
+is_unresolved_ref_reason(_) -> false.

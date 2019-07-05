@@ -1349,6 +1349,45 @@ verify_catches_invalid_rpc_arg_ref_test() ->
     Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["s1", "req", "m2", "arg"]).
 
+verify_hints_about_use_packages_option_test() ->
+    {error, _} = Error1 =
+        parse_several_file_lines(
+          [{"a.proto", ["import \"b.proto\";",
+                        "message MsgA { optional pkg.b.MsgB f1 = 1; }"]},
+           {"b.proto", ["package pkg.b;",
+                        "message MsgB { optional uint32 g = 1; }"]}],
+          [],
+          expect_error,
+          verify_imports),
+    Msg1 = verify_flat_string(gpb_parse:format_post_process_error(Error1)),
+    verify_strings_present(Msg1, ["use_packages"]),
+    %% Part of the heuristics for the hinting is that there are different
+    %% package. Try two files, one imported, but with the same package.
+    {error, _} = Error2 =
+        parse_several_file_lines(
+          [{"a.proto", ["import \"b.proto\";",
+                        "package pkg.ab;",
+                        "message MsgA { optional pkg.ab.BadMsgRef f1 = 1; }"]},
+           {"b.proto", ["package pkg.ab;",
+                        "message MsgB { optional uint32 g = 1; }"]}],
+          [],
+          expect_error,
+          verify_imports),
+    Msg2 = verify_flat_string(gpb_parse:format_post_process_error(Error2)),
+    verify_strings_not_present(Msg2, ["use_packages"]),
+    %% no hint about the option when it is already included
+    {error, _} = Error3 =
+        parse_several_file_lines(
+          [{"a.proto", ["import \"b.proto\";",
+                        "message MsgA { optional pkg.b.BadMsgRef f1 = 1; }"]},
+           {"b.proto", ["package pkg.b;",
+                        "message MsgB { optional uint32 g = 1; }"]}],
+          [use_packages],
+          expect_error,
+          verify_imports),
+    Msg3 = verify_flat_string(gpb_parse:format_post_process_error(Error3)),
+    verify_strings_not_present(Msg3, ["use_packages"]).
+
 do_parse_verify_defs(Lines) ->
     {ok, Elems} = parse_lines(Lines),
     case post_process(Elems, []) of
@@ -1370,6 +1409,12 @@ verify_strings_present(Str, StringsToTestFor) ->
         Missing -> erlang:error(missing_substring, [Missing, Str])
     end.
 
+verify_strings_not_present(Str, StringsToTestFor) ->
+    case [ToTest || ToTest <- StringsToTestFor, is_present(Str, ToTest)] of
+        []      -> ok;
+        Present -> erlang:error(unexpectedly_found, [Present, Str])
+    end.
+
 is_present(Str, ToTest) -> gpb_lib:is_substr(ToTest, Str).
 
 %% test helpers
@@ -1377,30 +1422,64 @@ parse_sort_several_file_lines(ProtoLines, Opts) ->
     lists:sort(parse_several_file_lines(ProtoLines, Opts)).
 
 parse_several_file_lines(ProtoLines, Opts) ->
+    parse_several_file_lines(ProtoLines, Opts,
+                             expect_success, filter_away_import_lines).
+
+parse_several_file_lines(ProtoLines, Opts,
+                         ExpectedResult, ImportLineHandling) ->
     {AllProtoNames, _AllLines} = lists:unzip(ProtoLines),
     AllProtoBases = lists:map(fun filename:basename/1, AllProtoNames),
     AllDefs1 = [begin
-                    {ok, Defs1} = parse_lines(
-                                    filter_away_import_lines(
-                                      Lines, AllProtoBases)),
+                    Lines1 = case ImportLineHandling of
+                                 filter_away_import_lines ->
+                                     filter_away_import_lines(Lines,
+                                                              AllProtoBases);
+                                 verify_imports ->
+                                     verify_imports(Lines, AllProtoBases)
+                             end,
+                    {ok, Defs1} = parse_lines(Lines1),
                     {ok, Defs2} = gpb_defs:post_process_one_file(
                                     FName, Defs1, Opts),
                     Defs2
                 end
                 || {FName, Lines} <- ProtoLines],
-    {ok, AllDefs2} = gpb_defs:post_process_all_files(
-                       lists:append(AllDefs1),
-                       Opts),
-    AllDefs2.
+    case ExpectedResult of
+        expect_success ->
+            {ok, AllDefs2} = gpb_parse:post_process_all_files(
+                               lists:append(AllDefs1),
+                               Opts),
+            AllDefs2;
+        expect_error ->
+            {error, Reasons} = gpb_parse:post_process_all_files(
+                                 lists:append(AllDefs1),
+                                 Opts),
+            {error, Reasons}
+    end.
 
 filter_away_import_lines(Lines, AllProtoNames) ->
+    case extract_check_imports(Lines, AllProtoNames) of
+        {ok, RestLines} ->
+            RestLines;
+        {error, Reason} ->
+            error({bad_test, Reason})
+    end.
+
+verify_imports(Lines, AllProtoNames) ->
+    case extract_check_imports(Lines, AllProtoNames) of
+        {ok, _RestLines} ->
+            Lines;
+        {error, Reason} ->
+            error({bad_test, Reason})
+    end.
+
+extract_check_imports(Lines, AllProtoNames) ->
     {ImportLines, RestLines} = lists:partition(fun is_import_line/1, Lines),
     Imports = lists:map(fun protobase_by_importline/1, ImportLines),
     StrayImports = lists:filter(
                      fun(I) -> not lists:member(I, AllProtoNames) end,
                      Imports),
-    if StrayImports == [] -> RestLines;
-       true -> error({bad_test, stray_import_of_missing_proto, Imports, Lines})
+    if StrayImports == [] -> {ok, RestLines};
+       true -> {error, {stray_import_of_missing_proto, Imports, Lines}}
     end.
 
 is_import_line("import \""++_) -> true;
