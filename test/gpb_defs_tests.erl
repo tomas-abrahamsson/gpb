@@ -483,7 +483,7 @@ field_opt_normalization_test() ->
                              "  required uint32 f3=3 [packed,default=2];",
                              "  required uint32 f4=4 [deprecated=true];",
                              "  required uint32 f5=5 [deprecated=false];",
-                             "  required uint32 f6=5 [deprecated];",
+                             "  required uint32 f6=6 [deprecated];",
                              "  required bool   f7=7 [packed,default=true];",
                              "}"]),
     [{file, _},
