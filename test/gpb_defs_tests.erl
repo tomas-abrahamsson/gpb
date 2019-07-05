@@ -1,4 +1,4 @@
-%%% Copyright (C) 2010-2011  Tomas Abrahamsson
+%%% Copyright (C) 2019  Tomas Abrahamsson
 %%%
 %%% Author: Tomas Abrahamsson <tab@lysator.liu.se>
 %%%
@@ -17,7 +17,9 @@
 %%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 %%% MA  02110-1301  USA
 
--module(gpb_parse_tests).
+%% Test gpb_defs.erl and (somewhat implicitly) gpb_parse.yrl and gpb_scan.xrl
+
+-module(gpb_defs_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
@@ -1175,7 +1177,7 @@ fetches_imports_test() ->
                                "import 'd/e/f.proto';",
                                "message m1 { required uint32 x = 1; }",
                                "enum    e1 { a = 17; }"]),
-    ["a/b/c.proto", "d/e/f.proto"] = gpb_parse:fetch_imports(Elems).
+    ["a/b/c.proto", "d/e/f.proto"] = gpb_defs:fetch_imports(Elems).
 
 verify_ignores_import_statements_test() ->
     ok = do_parse_verify_defs(["import \"Y.proto\";",
@@ -1189,7 +1191,7 @@ verify_succeeds_for_defined_ref_in_message_test() ->
 verify_catches_missing_ref_in_message_test() ->
     {error, [{ref_to_undefined_msg_or_enum, _}]} = Error =
         do_parse_verify_defs(["message m1 { required m2 f1 = 1; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "m2"]).
 
 verify_succeeds_for_good_enum_default_value_test() ->
@@ -1201,7 +1203,7 @@ verify_catches_undefined_enum_value_in_default_test() ->
     {error, [_]} = Error = do_parse_verify_defs(
                              ["enum e { e1 = 1; e2 = 2; }"
                               "message m1 { required e f1 = 1 [default=e3];}"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "e3"]).
 
 verify_succeeds_for_valid_integer_in_default_test() ->
@@ -1212,21 +1214,21 @@ verify_catches_invalid_integer_in_default_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required uint32 f1 = 1 [default=-1]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "-1"]).
 
 verify_catches_invalid_integer_in_default_2_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required uint32 f1 = 1 [default=e3]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "e3"]).
 
 verify_catches_invalid_integer_in_default_3_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required uint32 f1 = 1 [default=\"abc\"]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1"]).
 
 verify_succeeds_for_valid_string_in_default_test() ->
@@ -1239,7 +1241,7 @@ verify_catches_invalid_string_in_default_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required string f1 = 1 [default=344]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "344"]).
 
 verify_succeeds_for_valid_float_in_default_test() ->
@@ -1254,7 +1256,7 @@ verify_catches_invalid_float_in_default_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required float f1 = 1 [default=\"abc\"]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "abc"]).
 
 verify_succeeds_for_bool_in_default_test() ->
@@ -1271,28 +1273,28 @@ verify_catches_invalid_bool_in_default_1_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required bool f1 = 1 [default=\"abc\"]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "abc"]).
 
 verify_catches_invalid_bool_in_default_2_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required bool f1 = 1 [default=TRUE]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "TRUE"]).
 
 verify_catches_invalid_bool_in_default_3_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required bool f1 = 1 [default=2]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1"]).
 
 verify_catches_invalid_bool_in_default_4_test() ->
     {error, [_]} = Error =
         do_parse_verify_defs(
           ["message m1 { required bool f1 = 1 [default=-1]; }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1"]).
 
 verify_catches_invalid_rpc_return_type_test() ->
@@ -1301,7 +1303,7 @@ verify_catches_invalid_rpc_return_type_test() ->
           ["enum e1 { a=1; }",
            "message m1 { required uint32 x = 1; }",
            "service s1 { rpc req(m1) returns (e1); }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["s1", "req", "e1", "return"]).
 
 verify_catches_invalid_rpc_return_ref_test() ->
@@ -1309,7 +1311,7 @@ verify_catches_invalid_rpc_return_ref_test() ->
         do_parse_verify_defs(
           ["message m1 { required uint32 x = 1; }",
            "service s1 { rpc req(m1) returns (m2); }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["s1", "req", "m2", "return"]).
 
 verify_catches_invalid_rpc_arg_type_test() ->
@@ -1318,7 +1320,7 @@ verify_catches_invalid_rpc_arg_type_test() ->
           ["enum e1 { a=1; }",
            "message m1 { required uint32 x = 1; }",
            "service s1 { rpc req(e1) returns (m1); }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["s1", "req", "e1", "arg"]).
 
 verify_catches_invalid_rpc_arg_ref_test() ->
@@ -1326,7 +1328,7 @@ verify_catches_invalid_rpc_arg_ref_test() ->
         do_parse_verify_defs(
           ["message m1 { required uint32 x = 1; }",
            "service s1 { rpc req(m2) returns (m1); }"]),
-    Msg = verify_flat_string(gpb_parse:format_post_process_error(Error)),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["s1", "req", "m2", "arg"]).
 
 do_parse_verify_defs(Lines) ->
@@ -1363,12 +1365,12 @@ parse_several_file_lines(ProtoLines, Opts) ->
                     {ok, Defs1} = parse_lines(
                                     filter_away_import_lines(
                                       Lines, AllProtoBases)),
-                    {ok, Defs2} = gpb_parse:post_process_one_file(
+                    {ok, Defs2} = gpb_defs:post_process_one_file(
                                     FName, Defs1, Opts),
                     Defs2
                 end
                 || {FName, Lines} <- ProtoLines],
-    {ok, AllDefs2} = gpb_parse:post_process_all_files(
+    {ok, AllDefs2} = gpb_defs:post_process_all_files(
                        lists:append(AllDefs1),
                        Opts),
     AllDefs2.
@@ -1416,8 +1418,8 @@ do_process_sort_defs(Defs, Opts) ->
     lists:sort(Defs2).
 
 post_process(Elems, Opts) ->
-    {ok, Elems2} = gpb_parse:post_process_one_file("y", Elems, Opts),
-    gpb_parse:post_process_all_files(Elems2, Opts).
+    {ok, Elems2} = gpb_defs:post_process_one_file("y", Elems, Opts),
+    gpb_defs:post_process_all_files(Elems2, Opts).
 
 do_process_sort_several_defs(ListOfDefs) ->
     do_process_sort_several_defs(ListOfDefs, []).
@@ -1430,10 +1432,10 @@ do_process_several_defs(ListOfDefs, Opts) ->
         lists:append(
           [begin
                Filename = "z" ++ integer_to_list(I),
-               {ok, Elems2} = gpb_parse:post_process_one_file(
+               {ok, Elems2} = gpb_defs:post_process_one_file(
                                 Filename, Elems, Opts),
                Elems2
            end
            || {I, Elems} <- gpb_lib:index_seq(ListOfDefs)]),
-    {ok, Defs2} = gpb_parse:post_process_all_files(AllElems, Opts),
+    {ok, Defs2} = gpb_defs:post_process_all_files(AllElems, Opts),
     Defs2.

@@ -546,12 +546,12 @@ parse_sort_several_file_lines(ProtoLines, Opts) ->
                     {ok, Defs1} = parse_lines(
                                     filter_away_import_lines(
                                       Lines, AllProtoBases)),
-                    {ok, Defs2} = gpb_parse:post_process_one_file(
+                    {ok, Defs2} = gpb_defs:post_process_one_file(
                                     FName, Defs1, Opts),
                     Defs2
                 end
                 || {FName, Lines} <- ProtoLines],
-    {ok, AllDefs2} = gpb_parse:post_process_all_files(
+    {ok, AllDefs2} = gpb_defs:post_process_all_files(
                        lists:append(AllDefs1),
                        Opts),
     lists:sort(AllDefs2).

@@ -238,12 +238,12 @@
 -type mod_ret() :: ok | {ok, [warning()]}.
 -type bin_ret() :: {ok, module(), code()} |
                    {ok, module(), code(), [warning()]}.
--type defs_ret() :: {ok, gpb_parse:defs()} |
-                    {ok, gpb_parse:defs(), [warning()]}.
+-type defs_ret() :: {ok, gpb_defs:defs()} |
+                    {ok, gpb_defs:defs(), [warning()]}.
 -type error_ret() :: error | {error, reason()} | {error, reason(), [warning()]}.
 -type warning() :: term().
 -type reason() :: term().
--type code() :: binary() | gpb_parse:defs() | [code_item()].
+-type code() :: binary() | gpb_defs:defs() | [code_item()].
 -type code_item() :: {erl, ErlCode :: binary()} |
                      {nif, NifCcText :: string()}.
 -export_type([opts/0, opt/0]).
@@ -973,14 +973,14 @@ find_default_out_dir({_Mod, _S}) -> ".";
 find_default_out_dir(File) -> filename:dirname(File).
 
 %% @equiv proto_defs(Mod, Defs, [])
--spec proto_defs(module(), gpb_parse:defs()) -> comp_ret().
+-spec proto_defs(module(), gpb_defs:defs()) -> comp_ret().
 proto_defs(Mod, Defs) ->
     proto_defs(Mod, Defs, []).
 
 %% @doc
 %% Compile a list of pre-parsed definitions to file or to a binary.
 %% See {@link file/2} for information on options and return values.
--spec proto_defs(module(), gpb_parse:defs(), opts()) -> comp_ret().
+-spec proto_defs(module(), gpb_defs:defs(), opts()) -> comp_ret().
 proto_defs(Mod, Defs, Opts) ->
     Sources = [lists:concat([Mod, ".proto"])],
     Opts1 = normalize_opts(Opts),
@@ -1081,14 +1081,14 @@ check_maps_flat_oneof_may_fail_on_compilation(Opts) ->
 
 %% @equiv msg_defs(Mod, Defs, [])
 %% @doc Deprecated, use proto_defs/2 instead.
--spec msg_defs(module(), gpb_parse:defs()) -> comp_ret().
+-spec msg_defs(module(), gpb_defs:defs()) -> comp_ret().
 msg_defs(Mod, Defs) ->
     msg_defs(Mod, Defs, []).
 
 %% @spec msg_defs(Mod, Defs, Opts) -> CompRet
 %% @equiv proto_defs(Mod, Defs, Opts)
 %% @doc Deprecated, use proto_defs/2 instead.
--spec msg_defs(module(), gpb_parse:defs(), opts()) -> comp_ret().
+-spec msg_defs(module(), gpb_defs:defs(), opts()) -> comp_ret().
 msg_defs(Mod, Defs, Opts) ->
     proto_defs(Mod, Defs, Opts).
 
@@ -1254,7 +1254,7 @@ fmt_err({fetcher_issue, File, Reason}) ->
 fmt_err({read_failed, File, Reason}) ->
     ?f("failed to read ~p: ~s (~p)", [File, file:format_error(Reason), Reason]);
 fmt_err({post_process, Reasons}) ->
-    gpb_parse:format_post_process_error({error, Reasons});
+    gpb_defs:format_post_process_error({error, Reasons});
 fmt_err({write_failed, File, Reason}) ->
     ?f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
 fmt_err({invalid_options, translation, nif}) ->
@@ -2157,7 +2157,7 @@ parse_file_or_string(In, Opts) ->
     Opts1 = add_curr_dir_as_include_if_needed(Opts),
     case parse_file_and_imports(In, Opts1) of
         {ok, {Defs1, AllImported}} ->
-            case gpb_parse:post_process_all_files(Defs1, Opts1) of
+            case gpb_defs:post_process_all_files(Defs1, Opts1) of
                 {ok, Defs2} ->
                     {ok, Defs2, AllImported};
                 {error, Reasons} ->
@@ -2191,7 +2191,7 @@ parse_file_and_imports(In, AlreadyImported, Opts) ->
             AlreadyImported2 = append_unique(AlreadyImported, [FName]),
             case scan_and_parse_string(Contents, FName, Opts) of
                 {ok, Defs} ->
-                    Imports = gpb_parse:fetch_imports(Defs),
+                    Imports = gpb_defs:fetch_imports(Defs),
                     Opts2 = ensure_include_path_to_wellknown_types(Opts),
                     read_and_parse_imports(Imports, AlreadyImported2,
                                            Defs, Opts2);
@@ -2207,7 +2207,7 @@ scan_and_parse_string(S, FName, Opts) ->
         {ok, Tokens, _} ->
             case gpb_parse:parse(Tokens++[{'$end', 999}]) of
                 {ok, PTree} ->
-                    case gpb_parse:post_process_one_file(FName, PTree, Opts) of
+                    case gpb_defs:post_process_one_file(FName, PTree, Opts) of
                         {ok, Result} ->
                             {ok, Result};
                         {error, Reason} ->

@@ -95,8 +95,8 @@ possibly_suffix_mod(BaseNameNoExt, Opts) ->
 %%
 %% This effectively invokes {@link apply_renamings/2} with the
 %% result from {@link compute_renamings/2}.
--spec rename_defs(gpb_parse:defs(), gpb_compile:opts()) ->
-                         {ok, gpb_parse:defs()} |
+-spec rename_defs(gpb_defs:defs(), gpb_compile:opts()) ->
+                         {ok, gpb_defs:defs()} |
                          {error, Reason::term()}.
 rename_defs(Defs, Opts) ->
     case compute_renamings(Defs, Opts) of
@@ -107,7 +107,7 @@ rename_defs(Defs, Opts) ->
     end.
 
 %% @doc Compute any renamings to be applied.
--spec compute_renamings(gpb_parse:defs(), gpb_compile:opts()) ->
+-spec compute_renamings(gpb_defs:defs(), gpb_compile:opts()) ->
                                {ok, renamings()} |
                                {error, Reason::term()}.
 compute_renamings(Defs, Opts) ->
@@ -126,7 +126,7 @@ compute_renamings(Defs, Opts) ->
 
 %% @doc Apply any renamings.
 -spec apply_renamings(Defs, renamings()) -> Defs when
-      Defs :: gpb_parse:defs().
+      Defs :: gpb_defs:defs().
 apply_renamings(Defs, no_renamings) ->
     Defs;
 apply_renamings(Defs, Renamings) ->

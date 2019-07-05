@@ -201,7 +201,7 @@ v2l2("-"++T, Acc)                   -> [v_acc_to_int(Acc), T].
 v_acc_to_int(Acc) ->
     list_to_integer(lists:reverse(Acc)).
 
--spec decode_msg(binary(), atom(), gpb_parse:defs()) -> tuple().
+-spec decode_msg(binary(), atom(), gpb_defs:defs()) -> tuple().
 decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
     Msg    = new_initial_msg(MsgKey, MsgDefs),
@@ -582,7 +582,7 @@ append_to_map(RNum, {Key, _Value}=NewItem, Record) ->
     NewElems = lists:keystore(Key, 1, PrevElems, NewItem),
     setelement(RNum, Record, NewElems).
 
--spec merge_msgs(tuple(), tuple(), gpb_parse:defs()) -> tuple().
+-spec merge_msgs(tuple(), tuple(), gpb_defs:defs()) -> tuple().
 merge_msgs(PrevMsg, NewMsg, MsgDefs)
   when element(1,PrevMsg) == element(1,NewMsg) ->
     Key = {msg,element(1,PrevMsg)},
@@ -673,7 +673,7 @@ merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs) ->
       MsgDef).
 
 
--spec encode_msg(tuple(), gpb_parse:defs()) -> binary().
+-spec encode_msg(tuple(), gpb_defs:defs()) -> binary().
 encode_msg(Msg, MsgDefs) ->
     MsgName = element(1, Msg),
     MsgDef = keyfetch({msg, MsgName}, MsgDefs),
@@ -898,7 +898,7 @@ encode_zigzag(N) when N >= 0 -> N * 2;
 encode_zigzag(N) when N <  0 -> N * -2 - 1.
 
 
--spec verify_msg(tuple() | term(), gpb_parse:defs()) -> ok.
+-spec verify_msg(tuple() | term(), gpb_defs:defs()) -> ok.
 verify_msg(Msg, MsgDefs) when is_tuple(Msg), tuple_size(Msg) >= 1 ->
     MsgName = element(1, Msg),
     case lists:keysearch({msg,MsgName}, 1, MsgDefs) of
@@ -1094,7 +1094,7 @@ mk_type_error(Error, ValueSeen, Path) ->
 %% Conversion functions between various forms of #?gpb_field{} and a proplist
 %% with keys being the #?gpb_field{} record's field names.
 
--spec defs_records_to_proplists(gpb_parse:defs()) -> proplist_defs().
+-spec defs_records_to_proplists(gpb_defs:defs()) -> proplist_defs().
 defs_records_to_proplists(Defs) ->
     [case Def of
          {{msg,Msg}, Fields} ->
@@ -1104,7 +1104,7 @@ defs_records_to_proplists(Defs) ->
      end
      || Def <- Defs].
 
--spec proplists_to_defs_records(proplist_defs()) -> gpb_parse:defs().
+-spec proplists_to_defs_records(proplist_defs()) -> gpb_defs:defs().
 proplists_to_defs_records(Defs) ->
     [case Def of
          {{msg,Msg}, PropList} ->
@@ -1230,7 +1230,7 @@ is_type_packable({map,_,_}) -> false.
 is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
 
--spec is_msg_proto3(atom(), gpb_parse:defs()) -> boolean().
+-spec is_msg_proto3(atom(), gpb_defs:defs()) -> boolean().
 is_msg_proto3(Name, MsgDefs) ->
     case lists:keyfind(proto3_msgs, 1, MsgDefs) of
         {proto3_msgs, Names} ->
@@ -1259,7 +1259,7 @@ map_msg_defs_for_decoding(KeyType, ValueType, MsgDefs) ->
             [{proto3_msgs, [TmpName]}, TmpMsg | MsgDefs]
     end.
 
--spec proto2_type_default(gpb_field_type(), gpb_parse:defs()) -> term().
+-spec proto2_type_default(gpb_field_type(), gpb_defs:defs()) -> term().
 proto2_type_default(Type, MsgDefs) ->
     %% Type-specific defaults for proto2 are the same as for proto3,
     %% with one slight exception, for enums. In both proto2 and
@@ -1271,7 +1271,7 @@ proto2_type_default(Type, MsgDefs) ->
     %% some odd corner case.
     proto3_type_default(Type, MsgDefs).
 
--spec proto3_type_default(gpb_field_type(), gpb_parse:defs()) -> term().
+-spec proto3_type_default(gpb_field_type(), gpb_defs:defs()) -> term().
 proto3_type_default(Type, MsgDefs) ->
     case Type of
         sint32   -> 0;
