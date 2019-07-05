@@ -1495,6 +1495,25 @@ verify_error_for_enum_already_defined_test() ->
     Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["e1"]).
 
+verify_error_for_rpc_name_defined_twice_test() ->
+    ProtoLines =
+        ["message m1 { required uint32 f1 = 1; }",
+         "service s1 {"
+         "  rpc req1(m1) returns (m1);",
+         "  rpc req1(m1) returns (m1);",
+         "}"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["s1", "req1"]).
+
+verify_error_for_services_already_defined_test() ->
+    ProtoLines = ["message m1 { required uint32 f = 1; }",
+                  "service s1 { rpc req1(m1) returns (m1); }",
+                  "service s1 { rpc req2(m1) returns (m1); }"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["s1"]).
+
 verify_multiple_errors_caught_test() ->
     ProtoLines = ["message m1 {"
                   "  required uint32 f1 = -77;",

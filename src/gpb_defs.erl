@@ -572,9 +572,10 @@ verify_defs(Defs) ->
                                fun verify_field_names/2,
                                fun verify_field_numbers/2]},
                     {extend,  [fun verify_extend/2]},
-                    {service, [fun verify_service/2]},
+                    {service, [fun verify_service_rpc_names/2]},
                     {all,     [fun verify_msg_names_unique/1,
-                               fun verify_enum_names_unique/1]}]).
+                               fun verify_enum_names_unique/1,
+                               fun verify_service_names_unique/1]}]).
 
 collect_errors(Defs, VerifiersList) ->
     collect_errors(Defs, Defs, VerifiersList, ok).
@@ -705,9 +706,16 @@ verify_extend(_, _AllDefs) ->
     %% FIXME
     ok.
 
-verify_service(_, _AllDefs) ->
-    %% FIXME
-    ok.
+verify_service_rpc_names({{service,ServiceName}, Rpcs}, _AllDefs) ->
+    RpcNames = [RpcName || #?gpb_rpc{name=RpcName} <- Rpcs],
+    case RpcNames -- lists:usort(RpcNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error,
+             [{rpc_multiply_defined, {name_to_dstr(ServiceName), RpcName}}
+              || RpcName <- Dups]}
+    end.
 
 verify_msg_names_unique(AllDefs) ->
     MsgNames = [MsgName || {{msg, MsgName}, _Fields} <- AllDefs],
@@ -727,6 +735,16 @@ verify_enum_names_unique(AllDefs) ->
         Dups ->
             {error, [{enum_multiply_defined, name_to_dstr(EnumName)}
                      || EnumName <- Dups]}
+    end.
+
+verify_service_names_unique(AllDefs) ->
+    SvcNames = [SvcName || {{service, SvcName}, _} <- AllDefs],
+    case SvcNames -- lists:usort(SvcNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error, [{service_multiply_defined, name_to_dstr(SvcName)}
+                     || SvcName <- Dups]}
     end.
 
 name_to_absdstr(['.' | Name]) -> "." ++ name_to_dstr(Name);
@@ -804,7 +822,12 @@ fmt_err({field_number_must_be_positive, {MsgName, FNum, FNames}}) ->
 fmt_err({msg_multiply_defined, MsgName}) ->
     ?f("message name ~s defined more than once", [MsgName]);
 fmt_err({enum_multiply_defined, EnumName}) ->
-    ?f("enum ~s defined more than once", [EnumName]).
+    ?f("enum ~s defined more than once", [EnumName]);
+fmt_err({service_multiply_defined, ServiceName}) ->
+    ?f("service ~s defined more than once", [ServiceName]);
+fmt_err({rpc_multiply_defined, {ServiceName, RpcName}}) ->
+    ?f("rpc ~s in service ~s defined more than once", [RpcName, ServiceName]).
+
 
 list_to_text([Item1, Item2]) ->
     ?f("~s and ~s", [Item1, Item2]);
