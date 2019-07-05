@@ -565,11 +565,16 @@ is_scalar_numeric(_)        -> false. % not: string | bytes | msg | map
 %% `Defs' is expected to be flattened and may or may not be reformatted.
 verify_defs(Defs) ->
     collect_errors(Defs,
-                   [{msg,     [fun verify_field_defaults/2]},
-                    {group,   [fun verify_field_defaults/2]},
+                   [{msg,     [fun verify_field_defaults/2,
+                               fun verify_field_names/2,
+                               fun verify_field_numbers/2]},
+                    {group,   [fun verify_field_defaults/2,
+                               fun verify_field_names/2,
+                               fun verify_field_numbers/2]},
                     {extend,  [fun verify_extend/2]},
                     {service, [fun verify_service/2]},
-                    {'_',     [fun(_Def, _AllDefs) -> ok end]}]).
+                    {all,     [fun verify_msg_names_unique/1,
+                               fun verify_enum_names_unique/1]}]).
 
 collect_errors(Defs, VerifiersList) ->
     collect_errors(Defs, Defs, VerifiersList, ok).
@@ -583,8 +588,12 @@ collect_errors([{{ElemType,_},_}=Def | Rest], AllDefs, VerifiersList, Acc) ->
 collect_errors([_OtherDef | Rest], AllDefs, VerifiersList, Acc) ->
     %% Example: import, package, ...
     collect_errors(Rest, AllDefs, VerifiersList, Acc);
-collect_errors([], _AllRefs, _VerifiersList, Acc) ->
-    case Acc of
+collect_errors([], AllDefs, VerifiersList, Acc) ->
+    Acc2 = lists:foldl(
+             fun(Verifier, A) -> add_acc(A, Verifier(AllDefs)) end,
+             Acc,
+             find_verifiers(all, VerifiersList)),
+    case Acc2 of
         ok                       -> ok;
         {error, ReasonsReversed} -> {error, lists:reverse(ReasonsReversed)}
     end.
@@ -599,8 +608,8 @@ add_reason(Reasons, MoreReasons) when is_list(MoreReasons) ->
     lists:reverse(MoreReasons, Reasons).
 
 find_verifiers(Type,  [{Type, Verifiers} | _]) -> Verifiers;
-find_verifiers(_Type, [{'_', Verifiers} | _])  -> Verifiers;
-find_verifiers(Type,  [_Other | Rest])         -> find_verifiers(Type, Rest).
+find_verifiers(Type,  [_Other | Rest])         -> find_verifiers(Type, Rest);
+find_verifiers(_Type, [])                      -> [].
 
 verify_field_defaults({{msg,M}, Fields}, AllDefs) ->
     lists:foldl(fun(#?gpb_field{name=Name, type=Type, opts=FOpts}, Acc) ->
@@ -648,6 +657,50 @@ verify_scalar_default_if_present(MsgName, FieldName, Type, Default, AllDefs) ->
             end
     end.
 
+verify_field_names({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
+    FNames = all_field_names(Fields),
+    case FNames -- lists:usort(FNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error,
+             [{field_name_used_more_than_once, {name_to_dstr(MsgName), FName}}
+              || FName <- Dups]}
+    end.
+
+all_field_names(Fields) ->
+    lists:flatten(all_field_names2(Fields)).
+
+all_field_names2([#?gpb_field{name=FName} | Rest]) ->
+    [FName | all_field_names2(Rest)];
+all_field_names2([#gpb_oneof{name=FName, fields=OFields} | Rest]) ->
+    [FName, all_field_names2(OFields) | all_field_names(Rest)];
+all_field_names2([]) ->
+    [].
+
+verify_field_numbers({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
+    %% For each number, store the names associated to it
+    D = gpb_lib:fold_msgdef_fields(
+          fun(#?gpb_field{name=Name, fnum=Num}, D) ->
+                  dict:append(Num, Name, D)
+          end,
+          dict:new(),
+          Fields),
+    %% Filter for numbers with more than one name
+    D2 = dict:filter(fun(_Num, Names) -> length(Names) > 1 end, D),
+    Errs2 = [{field_number_used_more_than_once,
+              {name_to_dstr(MsgName), Num, FNames}}
+             || {Num, FNames} <- dict:to_list(D2)],
+    %% Check for field numbers not positive
+    D3 = dict:filter(fun(Num, _Names) -> Num =< 0 end, D),
+    Errs3 = [{field_number_must_be_positive,
+              {name_to_dstr(MsgName), Num, FNames}}
+             || {Num, FNames} <- dict:to_list(D3)],
+    case Errs2 ++ Errs3 of
+        [] -> ok;
+        Errs -> {error, Errs}
+    end.
+
 verify_extend(_, _AllDefs) ->
     %% FIXME
     ok.
@@ -655,6 +708,26 @@ verify_extend(_, _AllDefs) ->
 verify_service(_, _AllDefs) ->
     %% FIXME
     ok.
+
+verify_msg_names_unique(AllDefs) ->
+    MsgNames = [MsgName || {{msg, MsgName}, _Fields} <- AllDefs],
+    case MsgNames -- lists:usort(MsgNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error, [{msg_multiply_defined, name_to_dstr(MsgName)}
+                     || MsgName <- Dups]}
+    end.
+
+verify_enum_names_unique(AllDefs) ->
+    EnumNames = [EnumName || {{enum, EnumName}, _} <- AllDefs],
+    case EnumNames -- lists:usort(EnumNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error, [{enum_multiply_defined, name_to_dstr(EnumName)}
+                     || EnumName <- Dups]}
+    end.
 
 name_to_absdstr(['.' | Name]) -> "." ++ name_to_dstr(Name);
 name_to_absdstr(Name) -> name_to_dstr(Name).
@@ -719,7 +792,26 @@ fmt_err({{bad_unicode_string, Default}, {Msg, Field}}) ->
        [Msg, Field, Default]);
 fmt_err({{bad_binary_value, Default}, {Msg, Field}}) ->
     ?f("in msg ~s, field ~s: bad default value ~p for bytes",
-       [Msg, Field, Default]).
+       [Msg, Field, Default]);
+fmt_err({field_name_used_more_than_once, {MsgName, FName}}) ->
+    ?f("field ~s defined more than once in message ~s", [FName, MsgName]);
+fmt_err({field_number_used_more_than_once, {MsgName, FNum, FNames}}) ->
+    ?f("field number ~w used more than once in message ~s: for fields ~s",
+       [FNum, MsgName, list_to_text(FNames)]);
+fmt_err({field_number_must_be_positive, {MsgName, FNum, FNames}}) ->
+    ?f("in message ~s, field number must be positive for ~s, but is ~w",
+       [MsgName, list_to_text(FNames), FNum]);
+fmt_err({msg_multiply_defined, MsgName}) ->
+    ?f("message name ~s defined more than once", [MsgName]);
+fmt_err({enum_multiply_defined, EnumName}) ->
+    ?f("enum ~s defined more than once", [EnumName]).
+
+list_to_text([Item1, Item2]) ->
+    ?f("~s and ~s", [Item1, Item2]);
+list_to_text([Item | Rest]=L) when length(L) > 2->
+    ?f("~s, ~s", [Item, list_to_text(Rest)]);
+list_to_text([Item]) ->
+    ?f("~s", [Item]).
 
 %% Rewrites for instance ['.','m1','.',m2] into 'm1.m2'
 %% Example: {{msg,['.','m1','.',m2]}, [#field{type={msg,['.','m1','.',m3]}}]}

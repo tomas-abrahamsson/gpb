@@ -1388,6 +1388,122 @@ verify_hints_about_use_packages_option_test() ->
     Msg3 = verify_flat_string(gpb_parse:format_post_process_error(Error3)),
     verify_strings_not_present(Msg3, ["use_packages"]).
 
+verify_error_for_field_name_defined_twice_test() ->
+    lists:foreach(
+      fun({Id, ProtoLines, ErrorStringsToExpect}) ->
+              io:format("Id=~p~n", [Id]),
+              {error, _} = Error = do_parse_verify_defs(ProtoLines),
+              Msg = gpb_defs:format_post_process_error(Error),
+              verify_flat_string(Msg),
+              if ErrorStringsToExpect /= [] ->
+                      verify_strings_present(Msg, ErrorStringsToExpect);
+                 true ->
+                      ok
+              end
+      end,
+      [{direct_field,
+        ["message m1 {",
+         "  required uint32 f1 = 1;",
+         "  required uint32 f1 = 2;", % f1 used again
+         "}"],
+        ["m1", "f1"]},
+       {defined_trice,
+        ["message m1 {",
+         "  required uint32 f1 = 1;",
+         "  required uint32 f1 = 1;",
+         "  required uint32 f1 = 1;",
+         "}"],
+        ["m1", "f1"]},
+       {oneof_name_vs_simple_name,
+        ["message m1 {",
+         "  required uint32 f1 = 1;",
+         "  oneof f1 {uint32 f2 = 2;}", % the oneof name, f1, used again
+         "}"],
+        ["m1", "f1"]},
+       {oneof_names,
+        ["message m1 {",
+         "  oneof f1 {uint32 f2 = 1;}",
+         "  oneof f1 {uint32 f3 = 2;}", % the oneof name, f1, used again
+         "}"],
+        ["m1", "f1"]},
+       {oneof_field_names,
+        ["message m1 {",
+         "  oneof o1 {uint32 f1 = 1;}",
+         "  oneof o2 {uint32 f1 = 2;}", % the oneof field, f1, used again
+         "}"],
+        ["m1", "f1"]}]).
+
+verify_error_for_field_number_defined_twice_test() ->
+    lists:foreach(
+      fun({Id, ProtoLines, ErrorStringsToExpect}) ->
+              io:format("Id=~p~n", [Id]),
+              {error, _} = Error = do_parse_verify_defs(ProtoLines),
+              Msg = gpb_defs:format_post_process_error(Error),
+              verify_flat_string(Msg),
+              if ErrorStringsToExpect /= [] ->
+                      verify_strings_present(Msg, ErrorStringsToExpect);
+                 true ->
+                      ok
+              end
+      end,
+      [{direct_field,
+        ["message m1 {",
+         "  required uint32 f1 = 77;",
+         "  required uint32 f2 = 77;", % 1 used again
+         "}"],
+        ["m1", "f1", "f2", "77"]},
+       {defined_trice,
+        ["message m1 {",
+         "  required uint32 f1 = 77;",
+         "  required uint32 f2 = 77;",
+         "  required uint32 f3 = 77;",
+         "}"],
+        ["m1", "f1", "f2", "f3", "77"]},
+       {oneof_field_vs_direct_field,
+        ["message m1 {",
+         "  required uint32 f1 = 77;",
+         "  oneof f1 {uint32 f2 = 77;}",
+         "}"],
+        ["m1", "f1", "f2", "77"]},
+       {oneof_fields,
+        ["message m1 {",
+         "  oneof o1 {uint32 f1 = 77;}",
+         "  oneof o2 {uint32 f2 = 77;}",
+         "}"],
+        ["m1", "f1", "f2", "77"]}]).
+
+verify_error_for_non_positive_field_number_test() ->
+    ProtoLines = ["message m1 {"
+                  "  required uint32 f1 = 0;",
+                  "  required uint32 f2 = -1;",
+                  "}"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "f2"]).
+
+verify_error_for_message_already_defined_test() ->
+    ProtoLines = ["message m1 { required uint32 f1 = 1; }",
+                  "message m1 { required uint32 f2 = 2; }"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1"]).
+
+verify_error_for_enum_already_defined_test() ->
+    ProtoLines = ["enum e1 { a=0; }",
+                  "enum e1 { b=1; }"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["e1"]).
+
+verify_multiple_errors_caught_test() ->
+    ProtoLines = ["message m1 {"
+                  "  required uint32 f1 = -77;",
+                  "  required uint32 f1 = -77;",
+                  "}"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "-77"]).
+
 do_parse_verify_defs(Lines) ->
     {ok, Elems} = parse_lines(Lines),
     case post_process(Elems, []) of
