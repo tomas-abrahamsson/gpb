@@ -98,11 +98,11 @@ package_def -> package name ';':        {package, '$2'}.
 name -> '.' identifiers:                ['.' | '$2'].
 name -> identifiers:                    '$1'.
 
-option_name_ident -> identifier:        [identifier_name('$1')].
-option_name_ident -> '(' name ')':      '$2'.
+option_name_ident -> identifier:        identifier_name('$1').
+option_name_ident -> '(' name ')':      ensure_list('$2').
 
 option_name -> option_name_ident:           '$1'.
-option_name -> option_name_ident '.' name:  '$1' ++ '$3'.
+option_name -> option_name_ident '.' name:  ensure_list('$1') ++ '$3'.
 
 identifiers -> identifier '.' identifiers:      [identifier_name('$1'), '.'
                                                  | '$3'].
@@ -427,3 +427,6 @@ kw_to_identifier({Kw, Line}) ->
     {identifier, Line, atom_to_list(Kw)}.
 
 literal_value({_TokenType, _Line, Value}) -> Value.
+
+ensure_list(L) when is_list(L) -> L;
+ensure_list(Elem) -> [Elem].

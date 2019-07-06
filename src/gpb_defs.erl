@@ -790,7 +790,8 @@ reformat_enum_opt_names(Def) ->
      end
      || Item <- Def].
 
-reformat_name(Name) ->
+reformat_name(Name) when is_atom(Name) -> Name;
+reformat_name(Name) when is_list(Name) -> % dotted name components:
     list_to_atom(gpb_lib:dot_join([atom_to_list(P) || P <- Name, P /= '.'])).
 
 reformat_rpcs(RPCs) ->
