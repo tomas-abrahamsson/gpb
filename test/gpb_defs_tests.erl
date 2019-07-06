@@ -295,6 +295,24 @@ parses_custom_option_test() ->
      {{pkg_containment, "x"}, x}] =
         AllDefs.
 
+json_name_field_option_test() ->
+    {ok, Elems} = parse_lines(
+                    ["message m1 {",
+                     "  required uint32 foo_bar = 1 [json_name='someName'];",
+                     "  required uint32 g = 2 [json_name='something' 'Else'];",
+                     "  required uint32 foo_bar_gazonk = 3;",
+                     "}"]),
+    [{file, _},
+     {{enum_containment, _}, []},
+     {{msg,m1},[#?gpb_field{opts=[{json_name, "someName"}]}=F1,
+                #?gpb_field{opts=[{json_name, "somethingElse"}]},
+                #?gpb_field{opts=[]}=F3]},
+     {{msg_containment,_}, [_]}] =
+        do_process_sort_defs(Elems),
+    "someName" = gpb_lib:get_field_json_name(F1),
+    "fooBarGazonk" = gpb_lib:get_field_json_name(F3).
+
+
 generates_correct_absolute_names_test() ->
     {ok, Elems} = parse_lines(["message m1 {"
                                "  message m2 { required uint32 x = 1; }",

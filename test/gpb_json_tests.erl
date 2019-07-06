@@ -759,6 +759,22 @@ bypass_wrappers_maps_test() ->
     unload_code(M1).
 -endif. % -ifndef(NO_HAVE_MAPS).
 
+json_name_proto() ->
+    "
+         syntax='proto2';
+         message Msg {
+           optional uint32 foo_bar = 1 [json_name='x_y_z'];
+         }
+    ".
+
+json_name_test() ->
+    Proto = json_name_proto(),
+    M1 = compile_iolist(Proto, [json]),
+    [{<<"x_y_z">>, 17}] = M1:to_json({'Msg', 17}),
+    {'Msg', 17} = M1:from_json([{<<"x_y_z">>, 17}], 'Msg'),
+    {'Msg', 17} = M1:from_json([{<<"foo_bar">>, 17}], 'Msg'),
+    unload_code(M1).
+
 cmdline_json_opt_test() ->
     {ok, {[json],
           ["x.proto"]}} =
@@ -848,7 +864,8 @@ nif_test_() ->
        ?nif_if_supported(nif_type_defaults),
        ?nif_if_supported(nif_oneof_rec),
        ?nif_if_supported(nif_mapfields_rec),
-       ?nif_if_supported(nif_bypass_wrappers)]).
+       ?nif_if_supported(nif_bypass_wrappers),
+       ?nif_if_supported(nif_json_name)]).
 
 
 -ifndef(NO_HAVE_MAPS).
@@ -1123,6 +1140,19 @@ nif_to_from_json_aux(SaveOrNot, Proto, TestF, ExtraOpts) ->
                         TestF(NifM, ErlM)
                 end)
       end).
+
+nif_json_name(features) -> [json | guess_features(json_name_proto())];
+nif_json_name(title) -> "json_name field option".
+nif_json_name() ->
+    nif_to_from_json_aux(
+      dont_save,
+      json_name_proto(),
+      fun(NifM, _ErlM) ->
+              [{<<"x_y_z">>, 17}] = json_decode(NifM:to_json({'Msg', 17})),
+              {'Msg', 17} = NifM:from_json(<<"{\"x_y_z\": 17}">>, 'Msg'),
+              {'Msg', 17} = NifM:from_json(<<"{\"foo_bar\": 17}">>, 'Msg')
+      end,
+      [json]).
 
 -compile({nowarn_unused_function, with_tmpdir/1}).
 with_tmpdir(F) ->

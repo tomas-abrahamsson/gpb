@@ -253,7 +253,7 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
     #?gpb_field{occurrence=Occurrence, type=Type, name=FName}=Field,
     TrFVar = gpb_lib:prefix_var("Tr", FVar),
     FEncoderExpr = fun(Var) -> type_to_json_expr(Var, Field, TrUserDataVar) end,
-    JFName = json_field_name(FName, Opts),
+    JFName = json_field_name(Field, Opts),
     Transforms = [replace_term('fieldname', FName),
                   replace_tree('jfieldname', JFName),
                   replace_tree('F', FVar),
@@ -853,10 +853,10 @@ format_json_type_helpers(#anres{used_types=UsedTypes,
 
 %% -- misc --
 
-json_field_name(FName, Opts) ->
+json_field_name(#?gpb_field{name=FName}=Field, Opts) ->
     JFName = case proplists:get_bool(json_preserve_proto_field_names, Opts) of
                  true  -> atom_to_list(FName);
-                 false -> gpb_lib:lower_camel_case(atom_to_list(FName))
+                 false -> gpb_lib:get_field_json_name(Field)
              end,
     case gpb_lib:json_key_format_by_opts(Opts) of
         atom ->

@@ -267,8 +267,8 @@ calc_decodings(MsgName, MsgDef, JValueExpr, EMsgVar, TrUserDataVar,
     KeyFormat = gpb_lib:json_key_format_by_opts(Opts),
     lists:reverse(
       gpb_lib:fold_msgdef_fields_o(
-        fun(#?gpb_field{name=FName}=Field, IsOneof, Acc)->
-                KeyPatterns = key_patterns(FName, KeyFormat),
+        fun(#?gpb_field{}=Field, IsOneof, Acc)->
+                KeyPatterns = key_patterns(Field, KeyFormat),
                 DecExpr = mk_check_null_decode_value_update_field_expr(
                             MsgName, Field, IsOneof,
                             JValueExpr, EMsgVar, TrUserDataVar,
@@ -278,9 +278,9 @@ calc_decodings(MsgName, MsgDef, JValueExpr, EMsgVar, TrUserDataVar,
         [],
         MsgDef)).
 
-key_patterns(FName, KeyFormat) ->
+key_patterns(#?gpb_field{name=FName}=Field, KeyFormat) ->
     FNameS = atom_to_list(FName),
-    LowerCamelCase = gpb_lib:lower_camel_case(FNameS),
+    LowerCamelCase = gpb_lib:get_field_json_name(Field),
     Strs = lists:usort([FNameS, LowerCamelCase]),
     case KeyFormat of
         atom ->
