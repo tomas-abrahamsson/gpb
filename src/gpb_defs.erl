@@ -80,12 +80,17 @@ post_process_one_file(FileName, Defs, Opts) ->
 post_process_all_files(Defs, Opts) ->
     case resolve_names(Defs) of
         {ok, Defs2} ->
-            {ok, normalize_msg_field_options(
-                   handle_proto_syntax_version_all_files(
-                     enumerate_msg_fields(
-                       shorten_file_paths(
-                         reformat_names(
-                           extend_msgs(Defs2))))))};
+            case verify_defs(Defs2, Opts) of
+                ok ->
+                    {ok, normalize_msg_field_options(
+                           handle_proto_syntax_version_all_files(
+                             enumerate_msg_fields(
+                               shorten_file_paths(
+                                 reformat_names(
+                                   extend_msgs(Defs2))))))};
+                {error, Reasons} ->
+                    {error, Reasons}
+            end;
         {error, Reasons} ->
             Reasons2 = possibly_hint_use_packages_opt(Reasons, Defs, Opts),
             {error, Reasons2}
@@ -94,13 +99,8 @@ post_process_all_files(Defs, Opts) ->
 %% -> {ok, Defs} | {error, [Reason]}
 resolve_names(Defs) ->
     case resolve_refs(Defs) of
-        {ok, RDefs} ->
-            case verify_defs(RDefs) of
-                ok ->
-                    {ok, RDefs};
-                {error, Reasons} ->
-                    {error, Reasons}
-            end;
+        {ok, ResolvedDefs} ->
+            {ok, ResolvedDefs};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -563,14 +563,16 @@ is_scalar_numeric(_)        -> false. % not: string | bytes | msg | map
 %%
 %% Prerequisites:
 %% `Defs' is expected to be flattened and may or may not be reformatted.
-verify_defs(Defs) ->
+verify_defs(Defs, Opts) ->
+    DoJson = gpb_lib:json_by_opts(Opts),
+    MsgVerifiers = lists:flatten(
+                     [fun verify_field_defaults/2,
+                      fun verify_field_names/2,
+                      fun verify_field_numbers/2,
+                      [fun verify_json_field_names/2 || DoJson]]),
     collect_errors(Defs,
-                   [{msg,     [fun verify_field_defaults/2,
-                               fun verify_field_names/2,
-                               fun verify_field_numbers/2]},
-                    {group,   [fun verify_field_defaults/2,
-                               fun verify_field_names/2,
-                               fun verify_field_numbers/2]},
+                   [{msg,     MsgVerifiers},
+                    {group,   MsgVerifiers},
                     {extend,  [fun verify_extend/2]},
                     {service, [fun verify_service_rpc_names/2]},
                     {all,     [fun verify_msg_names_unique/1,
@@ -667,6 +669,44 @@ verify_field_names({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
             {error,
              [{field_name_used_more_than_once, {name_to_dstr(MsgName), FName}}
               || FName <- Dups]}
+    end.
+
+verify_json_field_names({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
+    %% Collect all fields, also those inside oneof
+    AllFields = lists:reverse(
+                  gpb_lib:fold_msgdef_fields(
+                    fun(#?gpb_field{}=Field, Acc) ->
+                            [Field | Acc]
+                    end,
+                    [],
+                    Fields)),
+    D = lists:foldl(
+          fun(#?gpb_field{name=FName}=Field, D) ->
+                  %% Store info both for collisions between json field names
+                  %% (normally lowerCamelCase) and json field names and
+                  %% ordinary field names, since decoding must accept both.
+                  FNameStr = atom_to_list(FName),
+                  D1 = dict:append(FNameStr, FName, D),
+                  %% Take precautions not to crash on bad values
+                  %% for the json_name option
+                  try gpb_lib:get_field_json_name(Field) of
+                      FNameStr  -> D1; % json name same as field name; ignore
+                      JsonFName -> dict:append(JsonFName, FName, D1)
+                  catch error:_ -> D1
+                  end
+          end,
+          dict:new(),
+          AllFields),
+    %% Dict of field names that collide when converted to lowerCamelCase.
+    D1 = dict:filter(fun(_K, FNames) -> length(FNames) >= 2 end, D),
+    case dict:to_list(D1) of
+        [] ->
+            ok;
+        Dups ->
+            {error,
+             [{json_lower_camel_case_field_name_collision,
+               {name_to_dstr(MsgName), LowerCamelCasedFName, FNames}}
+              || {LowerCamelCasedFName, FNames} <- Dups]}
     end.
 
 all_field_names(Fields) ->
@@ -819,6 +859,10 @@ fmt_err({field_number_used_more_than_once, {MsgName, FNum, FNames}}) ->
 fmt_err({field_number_must_be_positive, {MsgName, FNum, FNames}}) ->
     ?f("in message ~s, field number must be positive for ~s, but is ~w",
        [MsgName, list_to_text(FNames), FNum]);
+fmt_err({json_lower_camel_case_field_name_collision,
+               {MsgName, _LowerCamelCasedFName, FNames}}) ->
+    ?f("with json, field names as lowerCamelCase collide in message ~s: ~s",
+       [MsgName, list_to_text(FNames)]);
 fmt_err({msg_multiply_defined, MsgName}) ->
     ?f("message name ~s defined more than once", [MsgName]);
 fmt_err({enum_multiply_defined, EnumName}) ->

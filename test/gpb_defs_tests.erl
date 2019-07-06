@@ -1433,6 +1433,35 @@ verify_error_for_field_name_defined_twice_test() ->
          "}"],
         ["m1", "f1"]}]).
 
+verify_error_for_json_lowerCamelCased_field_name_defined_twice_test() ->
+    ProtoLines =
+        ["message m1 {",
+         "  required uint32 some_name = 1;",
+         "  required uint32 SomeName = 2;",
+         "}"],
+    Opts = [json],
+    %% Should succeed if option json in not specified
+    ok = do_parse_verify_defs(ProtoLines, []),
+    %% Should fail  with the json option
+    {error, _} = Error = do_parse_verify_defs(ProtoLines, Opts),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1", "some_name", "SomeName"]),
+    %% Check also the json_name option
+    ProtoLines2 =
+        ["message m1 {",
+         "  required uint32 some_name = 1;",
+         "  required uint32 foo = 2 [json_name='some_name'];",
+         "}"],
+    {error, _} = Error2 = do_parse_verify_defs(ProtoLines2, Opts),
+    Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
+    verify_strings_present(Msg2, ["m1", "some_name", "foo"]),
+    %% No error when json name and field name for a field coincides
+    ProtoLines3 =
+        ["message m1 {",
+         "  required uint32 foo = 1;",
+         "}"],
+    ok = do_parse_verify_defs(ProtoLines3, Opts).
+
 verify_error_for_field_number_defined_twice_test() ->
     lists:foreach(
       fun({Id, ProtoLines, ErrorStringsToExpect}) ->
@@ -1524,8 +1553,11 @@ verify_multiple_errors_caught_test() ->
     verify_strings_present(Msg, ["m1", "f1", "-77"]).
 
 do_parse_verify_defs(Lines) ->
+    do_parse_verify_defs(Lines, []).
+
+do_parse_verify_defs(Lines, Opts) ->
     {ok, Elems} = parse_lines(Lines),
-    case post_process(Elems, []) of
+    case post_process(Elems, Opts) of
         {ok, _} ->
             ok;
         {error, Reasons} ->
