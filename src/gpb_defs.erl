@@ -33,6 +33,8 @@
 
 -include("../include/gpb.hrl").
 
+-define(is_non_empty_string(Str), (is_list(Str) andalso is_integer(hd(Str)))).
+
 -type defs() :: [def()].
 -type def() :: {{msg, Name::atom()}, [field()]} |
                {{group, Name::atom()}, [field()]} |
@@ -569,6 +571,7 @@ verify_defs(Defs, Opts) ->
                      [fun verify_field_defaults/2,
                       fun verify_field_names/2,
                       fun verify_field_numbers/2,
+                      [fun verify_json_name_options/2 || DoJson],
                       [fun verify_json_field_names/2 || DoJson]]),
     collect_errors(Defs,
                    [{msg,     MsgVerifiers},
@@ -670,6 +673,31 @@ verify_field_names({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
              [{field_name_used_more_than_once, {name_to_dstr(MsgName), FName}}
               || FName <- Dups]}
     end.
+
+verify_json_name_options({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
+    BadFields = lists:reverse(
+                  gpb_lib:fold_msgdef_fields(
+                    fun(#?gpb_field{name=FName, opts=Opts}, Acc) ->
+                            case proplists:get_value(json_name, Opts) of
+                                undefined ->
+                                    Acc;
+                                Str when ?is_non_empty_string(Str) ->
+                                    Acc;
+                                X ->
+                                    [{FName, X} | Acc]
+                            end
+                    end,
+                    [],
+                    Fields)),
+    if BadFields == [] ->
+            ok;
+       true ->
+            {error, [{json_name_must_be_string,
+                      {name_to_dstr(MsgName), FName, InvalidValue}}
+                     || {FName, InvalidValue} <- BadFields]}
+    end.
+
+
 
 verify_json_field_names({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
     %% Collect all fields, also those inside oneof
@@ -863,6 +891,9 @@ fmt_err({json_lower_camel_case_field_name_collision,
                {MsgName, _LowerCamelCasedFName, FNames}}) ->
     ?f("with json, field names as lowerCamelCase collide in message ~s: ~s",
        [MsgName, list_to_text(FNames)]);
+fmt_err({json_name_must_be_string,{MsgName, FName, InnvalidJsonNameValue}}) ->
+    ?f("for field ~s in message ~s: json_name value must be string, found ~w",
+       [MsgName, FName, InnvalidJsonNameValue]);
 fmt_err({msg_multiply_defined, MsgName}) ->
     ?f("message name ~s defined more than once", [MsgName]);
 fmt_err({enum_multiply_defined, EnumName}) ->

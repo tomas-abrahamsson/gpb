@@ -1462,6 +1462,22 @@ verify_error_for_json_lowerCamelCased_field_name_defined_twice_test() ->
          "}"],
     ok = do_parse_verify_defs(ProtoLines3, Opts).
 
+verify_valid_json_name_field_option_value_test() ->
+    ProtoLines1 = ["message m1 {",
+                   "  required uint32 f1 = 1 [json_name=10];",
+                   "}"],
+    Opts = [json],
+    {error, _} = Error1 = do_parse_verify_defs(ProtoLines1, Opts),
+    Msg1 = verify_flat_string(gpb_defs:format_post_process_error(Error1)),
+    verify_strings_present(Msg1, ["m1", "f1"]),
+
+    ProtoLines2 = ["message m1 {",
+                   "  required uint32 f2 = 2 [json_name=false];",
+                   "}"],
+    {error, _} = Error2 = do_parse_verify_defs(ProtoLines2, Opts),
+    Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
+    verify_strings_present(Msg2, ["m1", "f2"]).
+
 verify_error_for_field_number_defined_twice_test() ->
     lists:foreach(
       fun({Id, ProtoLines, ErrorStringsToExpect}) ->
