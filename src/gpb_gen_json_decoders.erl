@@ -731,11 +731,10 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
          end)]
       || NeedBoolType],
      [begin
-          {Syms, Ints} = lists:unzip(Enums),
-          IntStrs = [integer_to_list(I) || I <- Ints],
-          CanonicalSymStrs = [enum_canonical_str(Sym, Opts) || Sym <- Syms],
-          StrSyms = (lists:zip(CanonicalSymStrs, Syms)
-                     ++ lists:zip(IntStrs, Syms)),
+          JSymStrsToSyms = canonify_enum_jstrs(unalias_enum_syms(Enums), Opts),
+          IntStrsToSyms = enum_ints_to_syms(Enums),
+          [{_, Sym1} | _] = JSymStrsToSyms,
+          StrSyms = JSymStrsToSyms ++ IntStrsToSyms,
           gpb_codegen:format_fn(
             gpb_lib:mk_fn(fj_enum_, EnumName),
             fun(S) when is_binary(S) ->
@@ -756,7 +755,7 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
                  replace_term('<EnumSym>', Sym)]
                 || {Str, Sym} <- StrSyms])])
       end
-      || {{enum,EnumName}, [{Sym1,_} | _]=Enums} <- Defs,
+      || {{enum,EnumName}, Enums} <- Defs,
          NeedEnumType],
      [%% Extra enum helper(s)
       case proplists:get_bool(json_case_insensitive_enum_parsing, Opts) of
@@ -889,5 +888,24 @@ bstr(S) when is_list(S) ->
     %% so make a text node
     erl_syntax:text(?ff("<<~p>>", [S])).
 
-enum_canonical_str(A, _Opts) when is_atom(A) ->
-    gpb_lib:uppercase(atom_to_list(A)).
+canonify_enum_jstrs(JStrsToSyms, _Opts) ->
+    [{gpb_lib:uppercase(JStr), Sym} || {JStr, Sym} <- JStrsToSyms].
+
+unalias_enum_syms(Enums) ->
+    %% Enum can also have {option, allow_alias, true} elements.
+    Enums1 = [Enum || {_Sym,_Num}=Enum <- Enums],
+    %% In case of aliases: make a mapping:
+    %%   If .proto is:           Then resulting mapping is:
+    %%   enum E { E_0 = 0;       [{"E_0", 'E_0'},
+    %%            E_1a = 1;       {"E_1a", 'E_1a'},
+    %%            E_1b = 1; }     {"E_1b", 'E_1a'}]
+    [{atom_to_list(Sym), ensure_sym_unaliased(Sym, Enums1)}
+     || {Sym, _Num} <- Enums1].
+
+ensure_sym_unaliased(Sym, Enums) ->
+    {Sym, Num} = lists:keyfind(Sym, 1, Enums),
+    {Sym1, Num} = lists:keyfind(Num, 2, Enums),
+    Sym1.
+
+enum_ints_to_syms(Enums) ->
+    [{integer_to_list(Num), Sym} || {Sym,Num} <- gpb_lib:unalias_enum(Enums)].

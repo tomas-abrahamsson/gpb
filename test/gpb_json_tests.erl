@@ -759,6 +759,30 @@ bypass_wrappers_maps_test() ->
     unload_code(M1).
 -endif. % -ifndef(NO_HAVE_MAPS).
 
+aliased_enums_test() ->
+    Proto = "
+         syntax='proto2';
+         message Msg {
+           optional ee f = 1;
+         }
+         enum ee {
+           option allow_alias = true;
+           E0 = 0;
+           E1_A = 1;
+           E1_B = 1;
+         }
+    ",
+    M1 = compile_iolist(Proto, [json]),
+    [{<<"f">>, <<"E0">>}] = M1:to_json({'Msg', 'E0'}),
+    [{<<"f">>, <<"E1_A">>}] = M1:to_json({'Msg', 'E1_A'}),
+    [{<<"f">>, <<"E1_B">>}] = M1:to_json({'Msg', 'E1_B'}),
+    {'Msg', 'E0'} = M1:from_json([{<<"f">>, <<"E0">>}], 'Msg'),
+    {'Msg', 'E1_A'} = M1:from_json([{<<"f">>, <<"E1_A">>}], 'Msg'),
+    {'Msg', 'E1_A'} = M1:from_json([{<<"f">>, <<"E1_B">>}], 'Msg'),
+    {'Msg', 'E0'}   = M1:from_json([{<<"f">>, <<"0">>}], 'Msg'),
+    {'Msg', 'E1_A'} = M1:from_json([{<<"f">>, <<"1">>}], 'Msg'),
+    unload_code(M1).
+
 cmdline_json_opt_test() ->
     {ok, {[json],
           ["x.proto"]}} =
