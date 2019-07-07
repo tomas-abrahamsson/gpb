@@ -398,7 +398,7 @@ various_types_maps_test() ->
 enums_proto() ->
     "
      syntax=\"proto3\";
-     message EnumMsg   { optional EE f = 1; };
+     message EnumMsg   { EE f = 1; };
      enum EE { EE_A=0; EE_B=1; };
     ".
 
@@ -431,7 +431,7 @@ decoding_enums_case_insensitively_test() ->
 
 types_defaults_proto() ->
     "syntax=\"proto3\";\n"
-        ++ various_types_proto().
+        ++ strip_occurrence(various_types_proto()).
 
 type_defaults_test() ->
     M1 = compile_iolist(types_defaults_proto(), [json]),
@@ -1277,3 +1277,8 @@ pl_to_map(L) when is_list(L) ->
 pl_to_map(X) ->
     X.
 -endif. % -ifndef(NO_HAVE_MAPS).
+
+strip_occurrence("optional" ++ Rest) -> strip_occurrence(Rest);
+strip_occurrence("required" ++ Rest) -> strip_occurrence(Rest);
+strip_occurrence([C | Rest])         -> [C | strip_occurrence(Rest)];
+strip_occurrence("")                 -> "".
