@@ -41,7 +41,8 @@
 -import(gpb_lib, [replace_term/2]).
 
 -record(cc_enum, {type  :: string(),
-                  enums :: [{atom(), string()}]}).
+                  enums :: [{atom(), string()}],
+                  unaliased_enums :: [{atom(), string()}]}).
 -record(cc_msg, {type :: string()}).
 
 format_load_nif(Mod, Opts) ->
@@ -217,11 +218,18 @@ calc_cc_mapping(Defs, _AnRes, Opts) ->
                                 false -> "";
                                 true  -> dot_replace_s(EnumPart, "_") ++ "_"
                             end,
-                  CCEnums = [{Sym, ?ff("~s::~s~s",
-                                       [CPkg, EPrefix, 'sym_to_c++'(Sym)])}
-                             || {Sym, _Val} <- Enums],
+                  MkCCSym = fun(Sym) ->
+                                    ?ff("~s::~s~s",
+                                        [CPkg, EPrefix, 'sym_to_c++'(Sym)])
+                            end,
+                  CCEnums =
+                      [{Sym, MkCCSym(Sym)} || {Sym, _Val} <- Enums],
+                  UnaliasedEnums = gpb_lib:unalias_enum(Enums),
+                  UnaliasedCCEnums =
+                      [{Sym, MkCCSym(Sym)} || {Sym, _Val} <- UnaliasedEnums],
                   Info = #cc_enum{type=CCType,
-                                  enums=CCEnums},
+                                  enums=CCEnums,
+                                  unaliased_enums=UnaliasedCCEnums},
                   {[{EnumName, Info} | Acc], Pkg, CPrefix};
              (_Other, {Acc, Pkg, CPrefix}) ->
                   {Acc, Pkg, CPrefix}
@@ -1757,7 +1765,8 @@ format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType,
              ?f("else\n"),
              ?f("    ~s = gpb_aa_false;\n", [DestVar])];
         {enum, EnumName} ->
-            #cc_enum{enums=CCEnums} = dict:fetch(EnumName, CCMapping),
+            #cc_enum{unaliased_enums=CCEnums} =
+                dict:fetch(EnumName, CCMapping),
             [] ++
                 [?f("switch (~s) {\n", [SrcExpr])] ++
                 [?f("    case ~s: ~s = ~s; break;\n",
