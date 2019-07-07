@@ -1540,6 +1540,12 @@ verify_error_for_enum_already_defined_test() ->
     Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["e1"]).
 
+verify_enum_must_have_at_least_one_value_test() ->
+    ProtoLines = ["enum e1 { }"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["e1"]).
+
 verify_error_for_rpc_name_defined_twice_test() ->
     ProtoLines =
         ["message m1 { required uint32 f1 = 1; }",

@@ -576,6 +576,7 @@ verify_defs(Defs, Opts) ->
     collect_errors(Defs,
                    [{msg,     MsgVerifiers},
                     {group,   MsgVerifiers},
+                    {enum,    [fun verify_at_least_one_member/2]},
                     {extend,  [fun verify_extend/2]},
                     {service, [fun verify_service_rpc_names/2]},
                     {all,     [fun verify_msg_names_unique/1,
@@ -770,6 +771,15 @@ verify_field_numbers({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
         Errs -> {error, Errs}
     end.
 
+verify_at_least_one_member({{enum,EnumName},Enums}, _AllDefs) ->
+    case gpb_lib:unalias_enum(Enums) of
+        [] ->
+            {error,
+             {enum_must_have_at_least_one_value, name_to_dstr(EnumName)}};
+        _ ->
+            ok
+    end.
+
 verify_extend(_, _AllDefs) ->
     %% FIXME
     ok.
@@ -901,8 +911,9 @@ fmt_err({enum_multiply_defined, EnumName}) ->
 fmt_err({service_multiply_defined, ServiceName}) ->
     ?f("service ~s defined more than once", [ServiceName]);
 fmt_err({rpc_multiply_defined, {ServiceName, RpcName}}) ->
-    ?f("rpc ~s in service ~s defined more than once", [RpcName, ServiceName]).
-
+    ?f("rpc ~s in service ~s defined more than once", [RpcName, ServiceName]);
+fmt_err({enum_must_have_at_least_one_value, EnumName}) ->
+    ?f("enum ~s must have at least one value", [EnumName]).
 
 list_to_text([Item1, Item2]) ->
     ?f("~s and ~s", [Item1, Item2]);
