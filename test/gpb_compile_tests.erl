@@ -39,6 +39,7 @@
 -export([with_tmpdir/1, with_tmpdir/2]).
 -export([in_separate_vm/4]).
 -export([compile_nif_msg_defs/3, compile_nif_msg_defs/4]).
+-export([compile_nif_several_msg_defs/4]).
 -export([check_protoc_can_do_oneof/0]).
 -export([check_protoc_can_do_mapfields/0]).
 -export([check_protoc_can_do_proto3/0]).
@@ -2711,7 +2712,8 @@ nif_code_test_() ->
        ?nif_if_supported(nif_with_list_indata_for_bytes),
        ?nif_if_supported(nif_with_non_normal_floats),
        ?nif_if_supported(error_if_both_translations_and_nif),
-       ?nif_if_supported(bypass_wrappers_records_nif)]).
+       ?nif_if_supported(bypass_wrappers_records_nif),
+       ?nif_if_supported(nif_with_packages_and_enums)]).
 
 increase_timeouts({Descr, Tests}) ->
     %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
@@ -3324,6 +3326,42 @@ bypass_wrappers_records_nif() ->
                 end)
       end).
 
+nif_with_packages_and_enums(features) -> [];
+nif_with_packages_and_enums(title) -> "Nif with packages and enums".
+nif_with_packages_and_enums() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_pkg_a,
+              ProtoTexts =
+                  [{"gpb_pkg_a.proto", % must match variable M
+                    "
+                      syntax='proto2';
+                      import 'gpb_pkg_b.proto';
+                      package pkg.a;
+                      message MsgA {
+                        required pkg.b.MsgB submsg = 1;
+                        required ee1        e1 = 2;
+                        required ee2        e2 = 3;
+                        enum ee2 { ba = 0; bb = 1; }
+                      }
+                      enum ee1 { aa = 0; ab = 1; }
+                    "},
+                   {"gpb_pkg_b.proto",
+                    "
+                      syntax='proto2';
+                      package pkg.b;
+                      message MsgB { required uint32 f = 1; }
+                    "}],
+              {ok, Code} = compile_nif_several_msg_defs(M, ProtoTexts, TmpDir,
+                                                        [use_packages]),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {'pkg.a.MsgA', {'pkg.b.MsgB', 17}, ab, ba},
+                        Encoded = M:encode_msg(OrigMsg),
+                        OrigMsg = M:decode_msg(Encoded, 'pkg.a.MsgA')
+                end)
+      end).
 
 compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
     compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, []).
@@ -3334,10 +3372,34 @@ compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, Opts) ->
             true -> {parse_to_proto_defs(MsgDefsOrIoList,Opts), MsgDefsOrIoList};
             false -> {MsgDefsOrIoList, msg_defs_to_proto(MsgDefsOrIoList)}
         end,
-    [NifCcPath, PbCcPath, NifOPath, PbOPath, NifSoPath, ProtoPath] = Files  =
+    ProtoFile = lists:concat([M, ".proto"]),
+    compile_nif_several_msg_defs_aux(M, [{ProtoFile, ProtoTxt}], MsgDefs,
+                                     TmpDir, Opts).
+
+compile_nif_several_msg_defs(M, [{Proto1,Text1}|_]=ProtoTexts, TmpDir, Opts) ->
+    ?assertEqual(Proto1, atom_to_list(M)++".proto"),
+    FNames = [FName || {FName, _Text} <- ProtoTexts],
+    ImportFetcher = fun(FName) ->
+                            case lists:keyfind(FName, 1, ProtoTexts) of
+                                {_Base, Text} ->
+                                    {ok, Text};
+                                false ->
+                                    {error, {enoent, {FName, FNames}}}
+                            end
+                    end,
+    MoreOpts = [to_proto_defs, report_warnings,
+                {import_fetcher, ImportFetcher}],
+    AllOpts = Opts ++ MoreOpts,
+    {ok, MsgDefs} = gpb_compile:string(M, Text1, AllOpts),
+    compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts).
+
+compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts) ->
+    ProtoPaths = [filename:join(TmpDir, Proto) || {Proto, _Txt} <- ProtoTexts],
+    PbCcPaths = [change_ext(Path, ".proto", ".pb.cc") || Path <- ProtoPaths],
+    PbOPaths  = [change_ext(Path, ".proto", ".pb.o") || Path <- ProtoPaths],
+    [NifCcPath, NifOPath, NifSoPath] = NifFiles =
         [filename:join(TmpDir, lists:concat([M, Ext]))
-         || Ext <- [".nif.cc", ".pb.cc", ".nif.o", ".pb.o", ".nif.so",
-                    ".proto"]],
+         || Ext <- [".nif.cc", ".nif.o", ".nif.so"]],
     LoadNif = f("load_nif() -> erlang:load_nif(\"~s\", {{loadinfo}}).\n",
                 [filename:join(TmpDir, lists:concat([M,".nif"]))]),
     LoadNifOpt = {load_nif, LoadNif},
@@ -3347,38 +3409,44 @@ compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, Opts) ->
     NifTxt = proplists:get_value(nif, Codes),
     %%
     ok = file:write_file(NifCcPath, NifTxt),
-    ok = file:write_file(ProtoPath, ProtoTxt),
+    [ok = file:write_file(ProtoPath, ProtoTxt)
+     || {ProtoPath, {_Base, ProtoTxt}} <- lists:zip(ProtoPaths, ProtoTexts)],
     %%
     CC = find_cplusplus_compiler(),
     Protoc = find_protoc(),
     CFlags = get_cflags(),
     LdFlags = get_ldflags(),
-    CompileProto = f("'~s' --proto_path '~s' --cpp_out='~s' '~s'",
-                     [Protoc, TmpDir, TmpDir, ProtoPath]),
+    CompileProtos = [f("'~s' --proto_path '~s' --cpp_out='~s' '~s'",
+                       [Protoc, TmpDir, TmpDir, ProtoPath])
+                     || ProtoPath <- ProtoPaths],
     CompileNif = f("'~s' -g -fPIC -Wall -O0 '-I~s' ~s -c -o '~s' '~s'",
                    [CC, TmpDir, CFlags, NifOPath, NifCcPath]),
-    CompilePb = f("'~s' -g -fPIC -Wall -O0 '-I~s' ~s -c -o '~s' '~s'",
-                  [CC, TmpDir, CFlags, PbOPath, PbCcPath]),
+    CompilePbs = [f("'~s' -g -fPIC -Wall -O0 '-I~s' ~s -c -o '~s' '~s'",
+                    [CC, TmpDir, CFlags, PbOPath, PbCcPath])
+                  || {PbOPath, PbCcPath} <- lists:zip(PbOPaths, PbCcPaths)],
     CompileSo = f("'~s' -g -fPIC -shared -Wall -O0 ~s"
-                  "    -o '~s' '~s' '~s' -lprotobuf",
-                  [CC, LdFlags, NifSoPath, NifOPath, PbOPath]),
+                  "    -o '~s' '~s' ~s -lprotobuf",
+                  [CC, LdFlags, NifSoPath, NifOPath,
+                   [[" '", PbOPath, "'"] || PbOPath <- PbOPaths]]),
+    CompileLines =
+        lists:append(
+          [[CompileProto || CompileProto <- CompileProtos],
+           [CompileNif],
+           [CompilePb || CompilePb <- CompilePbs],
+           [CompileSo]]),
     %% Useful if debugging the nif code, see also with_tmpdir(save, Fun)
-    ToClean = [filename:basename(F) || F <- Files, F /= ProtoPath],
-    file:write_file(filename:join(TmpDir, "Makefile"),
-                    iolist_to_binary(
-                      ["all:\n",
-                       "\t", CompileProto, "\n",
-                       "\t", CompileNif, "\n",
-                       "\t", CompilePb, "\n",
-                       "\t", CompileSo, "\n",
-                       "\n",
-                       "clean:\n",
-                       "\t", "$(RM)", [[" ",F] || F <- ToClean], "\n"])),
-    ok = ccompile("~s", ["set -evx\n"
-                         ++ CompileProto ++ "\n"
-                         ++ CompileNif ++ "\n"
-                         ++ CompilePb ++ "\n"
-                         ++ CompileSo]),
+    Files = PbCcPaths ++ PbOPaths ++ NifFiles,
+    ToClean = [filename:basename(F) || F <- Files,
+                                       not lists:member(F, ProtoPaths)],
+    file:write_file(
+      filename:join(TmpDir, "Makefile"),
+      iolist_to_binary(
+        ["all:\n",
+         [["\t", Line, "\n"] || Line <- CompileLines],
+         "\n",
+         "clean:\n",
+         "\t", "$(RM)", [[" ",F] || F <- ToClean], "\n"])),
+    ok = ccompile("~s", [["set -evx\n", gpb_lib:nl_join(CompileLines)]]),
     {ok, Code}.
 
 lf_lines(Lines) ->
@@ -3388,6 +3456,10 @@ is_iolist(X) ->
     try iolist_to_binary(X), true
     catch error:badarg -> false
     end.
+
+change_ext(Path, OldExt, NewExt) ->
+    filename:join(filename:dirname(Path),
+                  filename:basename(Path, OldExt) ++ NewExt).
 
 parse_to_proto_defs(Iolist) ->
     parse_to_proto_defs(Iolist, []).
