@@ -803,6 +803,68 @@ string_to_int(S) -> list_to_integer(S).
 
 int_to_string(I) -> integer_to_list(I).
 
+p3wellknown_timestamp_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/timestamp.proto';
+        message T {
+           google.protobuf.Timestamp f = 1;
+        }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    F = <<"f">>,
+    Timestamp = 'google.protobuf.Timestamp',
+    [{F, <<"1970-01-01T00:00:00Z">>}] = M1:to_json({'T', {Timestamp, 0, 0}}),
+    [{F, <<"1969-12-31T23:59:50Z">>}] = M1:to_json({'T', {Timestamp, -10, 0}}),
+    %% with 3 6 or 9 decimals as appropriate
+    [[{F, <<"1970-01-01T00:00:01.000000123Z">>}],
+     [{F, <<"1970-01-01T00:00:01.000123Z">>}],
+     [{F, <<"1970-01-01T00:00:01.123Z">>}]] =
+        [M1:to_json({'T', {Timestamp, 1, 123}}),
+         M1:to_json({'T', {Timestamp, 1, 123000}}),
+         M1:to_json({'T', {Timestamp, 1, 123000000}})],
+    %% with optionals omitted
+    [[{F, <<"1970-01-01T00:00:00Z">>}],
+     [{F, <<"1970-01-01T00:00:01Z">>}],
+     [{F, <<"1970-01-01T00:00:00.000000123Z">>}]] =
+        [M1:to_json({'T', {Timestamp, undefined, undefined}}),
+         M1:to_json({'T', {Timestamp, 1, undefined}}),
+         M1:to_json({'T', {Timestamp, undefined, 123}})],
+    %% too large
+    ?assertError(_, M1:to_json({'T', {Timestamp, 0, 2111222333}})),
+    ?assertError(_, M1:to_json({'T', {Timestamp, 0, 1000000000}})),
+    %% Decoding ---
+    {'T', {Timestamp, 0, 0}} =
+        M1:from_json([{F, <<"1970-01-01T00:00:00Z">>}], 'T'),
+    {'T', {Timestamp, 482196050, 520000000}} =
+        M1:from_json([{F, <<"1985-04-12T23:20:50.52Z">>}], 'T'),
+    %% with offset
+    [{'T',{'google.protobuf.Timestamp',851042397,0}},
+     {'T',{'google.protobuf.Timestamp',851042397,0}}] =
+        [M1:from_json([{F, <<"1996-12-19T16:39:57-08:00">>}], 'T'),
+         M1:from_json([{F, <<"1996-12-20T00:39:57Z">>}], 'T')],
+    %% with nano seconds and offset
+    {'T',{'google.protobuf.Timestamp',851042397,520000000}} =
+        M1:from_json([{F, <<"1996-12-19T16:39:57.52-08:00">>}], 'T'),
+    %% with 3 6 or 9 decimals as appropriate
+    [{'T', {Timestamp, 1, 123}},
+     {'T', {Timestamp, 1, 123000}},
+     {'T', {Timestamp, 1, 123000000}}] =
+        [M1:from_json([{F, <<"1970-01-01T00:00:01.000000123Z">>}], 'T'),
+         M1:from_json([{F, <<"1970-01-01T00:00:01.000123Z">>}], 'T'),
+         M1:from_json([{F, <<"1970-01-01T00:00:01.123Z">>}], 'T')],
+    %% "Accepted are any fractional digits (also none) as long as they fit
+    %% into nano-seconds"
+    [{'T', {Timestamp, 1, 1230}},
+     {'T', {Timestamp, 1, 12300}},
+     {'T', {Timestamp, 1, 12300000}}] =
+        [M1:from_json([{F, <<"1970-01-01T00:00:01.00000123Z">>}], 'T'),
+         M1:from_json([{F, <<"1970-01-01T00:00:01.0000123Z">>}], 'T'),
+         M1:from_json([{F, <<"1970-01-01T00:00:01.0123Z">>}], 'T')],
+    %% done
+    unload_code(M1).
+
 lower_camel_case_test() ->
     %% "Message field names are mapped to lowerCamelCase ..."
     Proto = "

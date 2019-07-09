@@ -687,6 +687,8 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
     case MsgName of
         'google.protobuf.Duration' ->
             {true, fun format_p3wellknown_duration_decoder/5};
+        'google.protobuf.Timestamp' ->
+            {true, fun format_p3wellknown_timestamp_decoder/5};
         _ ->
             false
     end.
@@ -755,6 +757,124 @@ format_p3wellknown_duration_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                call_self(Rest, Sign, Seconds, [D | Acc])
        end,
        []),
+     ""].
+
+format_p3wellknown_timestamp_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    %% Example: "1972-01-01T10:00:20.021Z"
+    %%
+    %% '0, 3, 6, or 9 fractional digits.', 'Offsets other than "Z" are also
+    %% accepted.'
+    %%
+    %% The Google protobuf seems to only accept upper case T and Z.  Seems to
+    %% assume 2-digit years are actually 2-digit years ie in the first
+    %% century AD, ie century is not guessed.
+    FnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Str, TrUserData) ->
+               {YYYY, M, D, HH, MM, SS, Nanos, Offset} =
+                   fj_parse_timestamp(fj_ensure_list(Str)),
+               S1 = calendar:datetime_to_gregorian_seconds(
+                      {{YYYY, M, D}, {HH, MM, SS}}),
+               %% calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}})
+               %% -> 62167219200
+               Gs1970 = 62167219200, % the epoch
+               Seconds = S1 - Gs1970 - Offset,
+               fj_mk_msg([Seconds, Nanos],
+                         'google.protobuf.Timestamp',
+                         'field-infos',
+                         TrUserData)
+       end,
+       [replace_tree('field-infos', FieldInfos)]),
+     gpb_codegen:format_fn(
+       fj_parse_timestamp,
+       fun(S) ->
+               fj_parse_timestamp_1(S)
+       end),
+     gpb_codegen:format_fn(
+       fj_parse_timestamp_1,
+       fun(S) ->
+               {YYYY, S1} = fj_read_int_until(S, $-),
+               {M, S2} = fj_read_int_until(S1, $-),
+               {D, S3} = fj_read_int_until(S2, $T),
+               {HH, S4} = fj_read_int_until(S3, $:),
+               {MM, S5} = fj_read_int_until(S4, $:),
+               {SS, S6} = fj_read_int_until_any_of(S5, "Z.+-"),
+               case S6 of
+                   "Z" ->
+                       {YYYY,M,D, HH,MM,SS,0, 0};
+                   "."++S7 ->
+                       {Nanos, S8} = fj_read_nanos_until_any_of(S7, "Z+-"),
+                       case S8 of
+                           "Z" ->
+                               {YYYY,M,D, HH,MM,SS,Nanos, 0};
+                           "+"++S9 ->
+                               Offset = fj_read_timestamp_offs(S9),
+                               {YYYY,M,D, HH,MM,SS,Nanos, Offset};
+                           "-"++S9 ->
+                               Offset = fj_read_timestamp_offs(S9),
+                               {YYYY,M,D, HH,MM,SS,Nanos, -Offset}
+                       end;
+                   "+"++S7 ->
+                       Offset = fj_read_timestamp_offs(S7),
+                       {YYYY,M,D, HH,MM,SS,0, Offset};
+                   "-"++S7 ->
+                       Offset = fj_read_timestamp_offs(S7),
+                       {YYYY,M,D, HH,MM,SS,0, -Offset}
+               end
+       end),
+     gpb_codegen:format_fn(
+       fj_read_timestamp_offs,
+       fun(S) ->
+               {OffsHH, OffsMMStr} = fj_read_int_until(S, $:),
+               OffsMM = list_to_integer(OffsMMStr),
+               OffsHH * 3600 + OffsMM
+       end),
+     gpb_codegen:format_fn(
+       fj_read_int_until,
+       fun(S, Delim) ->
+               {S1, Rest} = fj_read_str_until(S, Delim, ""),
+               {list_to_integer(S1), Rest}
+       end),
+     gpb_codegen:format_fn(
+       fj_read_int_until_any_of,
+       fun(S, Delims) ->
+               {S1, Rest} = fj_read_str_until_any_of(S, Delims, ""),
+               {list_to_integer(S1), Rest}
+       end),
+     gpb_codegen:format_fn(
+       fj_read_nanos_until_any_of,
+       fun(S, Delims) ->
+               {NanosStr, Rest} = fj_read_str_until_any_of(S, Delims, ""),
+               LFactor = case length(NanosStr) of
+                             9 -> 1;
+                             8 -> 10;
+                             7 -> 100;
+                             6 -> 1000;
+                             5 -> 10000;
+                             4 -> 100000;
+                             3 -> 1000000;
+                             2 -> 10000000;
+                             1 -> 100000000;
+                             _ -> error({badnanos, NanosStr})
+                         end,
+               Nanos = list_to_integer(NanosStr) * LFactor,
+               {Nanos, Rest}
+       end),
+     gpb_codegen:format_fn(
+       fj_read_str_until,
+       fun([Delim | Rest], Delim, Acc) -> {lists:reverse(Acc), Rest};
+          ([C | Rest], Delim, Acc) -> call_self(Rest, Delim, [C | Acc])
+       end),
+     gpb_codegen:format_fn(
+       fj_read_str_until_any_of,
+       fun([C | Rest]=S, Delims, Acc) ->
+               case lists:member(C, Delims) of
+                   true  -> {lists:reverse(Acc), S};
+                   false -> call_self(Rest, Delims, [C | Acc])
+               end
+       end),
      ""].
 
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
@@ -971,8 +1091,9 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
 
 format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
     UsesP3Duration = uses_msg('google.protobuf.Duration', AnRes),
-    UsesP3Wellknown = UsesP3Duration,
-    NeedsEnsureList = UsesP3Duration,
+    UsesP3Timestamp = uses_msg('google.protobuf.Timestamp', AnRes),
+    UsesP3Wellknown = UsesP3Duration or UsesP3Timestamp,
+    NeedsEnsureList = UsesP3Duration or UsesP3Timestamp,
     [if not UsesP3Wellknown ->
              "";
         UsesP3Wellknown ->

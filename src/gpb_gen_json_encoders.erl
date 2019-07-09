@@ -631,6 +631,8 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
     case MsgName of
         'google.protobuf.Duration' ->
             {true, fun format_to_json_p3wellknown_duration/5};
+        'google.protobuf.Timestamp' ->
+            {true, fun format_to_json_p3wellknown_timestamp/5};
         _ ->
             false
     end.
@@ -654,6 +656,37 @@ format_to_json_p3wellknown_duration(MsgName, MsgDef, Defs, AnRes, Opts) ->
                             true ->
                                  [SecondsStr, NanosStr, "s"]
                          end)
+       end,
+       [replace_tree('field-infos', FieldInfos)])].
+
+format_to_json_p3wellknown_timestamp(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    %% Example: "1972-01-01T10:00:20.021Z"
+    %%
+    %% "Uses RFC 3339, where generated output will always be Z-normalized and
+    %% uses 0, 3, 6 or 9 fractional digits"
+    %%
+    %% Seconds == 0 for Jan 1, 1970, 00:00:00.
+    %% Leap seconds are assumed to be smeared so all minutes have 60 seconds.
+    %%
+    %% Should we use calendar:system_time_to_rfc3339? Maybe if on OTP >= 21
+    %% and the system time at run-time has the same epoch.
+    FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Msg, TrUserData) ->
+               [Seconds, Nanos] = tj_get_fields(Msg, 'field-infos',
+                                                TrUserData),
+               %% calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}})
+               %% -> 62167219200
+               Gs1970 = 62167219200, % the epoch
+               {{YYYY, M, D}, {HH, MM, SS}} =
+                   calendar:gregorian_seconds_to_datetime(Seconds + Gs1970),
+               DateStr =
+                   io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0w",
+                                 [YYYY, M, D, HH, MM, SS]),
+               NanosStr = tj_dot_nanos(Nanos),
+               tj_string([DateStr, NanosStr, "Z"])
        end,
        [replace_tree('field-infos', FieldInfos)])].
 
@@ -880,8 +913,9 @@ format_tagged_list_array_helpers(Tag) ->
 
 format_json_p3wellknowns_helpers(AnRes, Opts) ->
     UsesP3Duration = uses_msg('google.protobuf.Duration', AnRes),
-    UsesP3Wellknown = UsesP3Duration,
-    NeedsDotNanos = UsesP3Duration,
+    UsesP3Timestamp = uses_msg('google.protobuf.Timestamp', AnRes),
+    UsesP3Wellknown = UsesP3Duration or UsesP3Timestamp,
+    NeedsDotNanos = UsesP3Duration or UsesP3Timestamp,
     [if not UsesP3Wellknown ->
              "";
         UsesP3Wellknown ->
@@ -967,11 +1001,13 @@ format_json_type_helpers(#anres{used_types=UsedTypes,
     %% map<_,_> keys are strings
     %% int64 types and enums also encode to strings
     UsesP3WellknownDuration = uses_msg('google.protobuf.Duration', AnRes),
+    UsesP3WellknownTimestamp = uses_msg('google.protobuf.Timestamp', AnRes),
     NeedStringType = (gpb_lib:smember(string, UsedTypes)
                       orelse HaveMapfields
                       orelse HaveInt64
                       orelse HaveEnum
-                      orelse UsesP3WellknownDuration),
+                      orelse UsesP3WellknownDuration
+                      orelse UsesP3WellknownTimestamp),
     NeedBytesType = gpb_lib:smember(bytes, UsedTypes),
 
     [[gpb_codegen:format_fn(
