@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.9.3
+2019-Jul-10
+
+        * Find and report more errors. Previously these often resulted
+        in compilation errors for generated code, but now more errors
+        get caught and reported.
+
 Version 4.9.2
 2019-Jul-09
 
