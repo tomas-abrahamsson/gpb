@@ -483,7 +483,7 @@ field_opt_normalization_test() ->
                              "  required uint32 f3=3 [packed,default=2];",
                              "  required uint32 f4=4 [deprecated=true];",
                              "  required uint32 f5=5 [deprecated=false];",
-                             "  required uint32 f6=5 [deprecated];",
+                             "  required uint32 f6=6 [deprecated];",
                              "  required bool   f7=7 [packed,default=true];",
                              "}"]),
     [{file, _},
@@ -878,9 +878,9 @@ parses_rpc_streams_and_options_test() ->
                              "  rpc r2(stream m1) returns (m2);",
                              "  rpc r3(m1)        returns (stream m2);",
                              "  rpc r4(stream m1) returns (stream m2);",
-                             "  rpc ro(m1) returns (m2) { option a=1; };",
-                             "  rpc ro(m1) returns (m2) { option (a).b=1; };",
-                             "  rpc ro(m1) returns (m2) { option (a.b).c=1; };",
+                             "  rpc r5(m1) returns (m2) { option a=1; };",
+                             "  rpc r6(m1) returns (m2) { option (a).b=1; };",
+                             "  rpc r7(m1) returns (m2) { option (a.b).c=1; };",
                              "}"]),
     [{file, _},
      {{enum_containment, _}, _},
@@ -893,9 +893,9 @@ parses_rpc_streams_and_options_test() ->
        #?gpb_rpc{name=r2, input_stream=true, output_stream=false},
        #?gpb_rpc{name=r3, input_stream=false, output_stream=true},
        #?gpb_rpc{name=r4, input_stream=true, output_stream=true},
-       #?gpb_rpc{name=ro, opts=[{'a',1}]},
-       #?gpb_rpc{name=ro, opts=[{'a.b',1}]},
-       #?gpb_rpc{name=ro, opts=[{'a.b.c',1}]}]=Rpcs},
+       #?gpb_rpc{name=r5, opts=[{'a',1}]},
+       #?gpb_rpc{name=r6, opts=[{'a.b',1}]},
+       #?gpb_rpc{name=r7, opts=[{'a.b.c',1}]}]=Rpcs},
      {{service_containment, _}, _}] =
         do_process_sort_defs(Defs),
     %% Check all input(arg)/output(return) messages too
@@ -1349,9 +1349,237 @@ verify_catches_invalid_rpc_arg_ref_test() ->
     Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["s1", "req", "m2", "arg"]).
 
+verify_hints_about_use_packages_option_test() ->
+    {error, _} = Error1 =
+        parse_several_file_lines(
+          [{"a.proto", ["import \"b.proto\";",
+                        "message MsgA { optional pkg.b.MsgB f1 = 1; }"]},
+           {"b.proto", ["package pkg.b;",
+                        "message MsgB { optional uint32 g = 1; }"]}],
+          [],
+          expect_error,
+          verify_imports),
+    Msg1 = verify_flat_string(gpb_parse:format_post_process_error(Error1)),
+    verify_strings_present(Msg1, ["use_packages"]),
+    %% Part of the heuristics for the hinting is that there are different
+    %% package. Try two files, one imported, but with the same package.
+    {error, _} = Error2 =
+        parse_several_file_lines(
+          [{"a.proto", ["import \"b.proto\";",
+                        "package pkg.ab;",
+                        "message MsgA { optional pkg.ab.BadMsgRef f1 = 1; }"]},
+           {"b.proto", ["package pkg.ab;",
+                        "message MsgB { optional uint32 g = 1; }"]}],
+          [],
+          expect_error,
+          verify_imports),
+    Msg2 = verify_flat_string(gpb_parse:format_post_process_error(Error2)),
+    verify_strings_not_present(Msg2, ["use_packages"]),
+    %% no hint about the option when it is already included
+    {error, _} = Error3 =
+        parse_several_file_lines(
+          [{"a.proto", ["import \"b.proto\";",
+                        "message MsgA { optional pkg.b.BadMsgRef f1 = 1; }"]},
+           {"b.proto", ["package pkg.b;",
+                        "message MsgB { optional uint32 g = 1; }"]}],
+          [use_packages],
+          expect_error,
+          verify_imports),
+    Msg3 = verify_flat_string(gpb_parse:format_post_process_error(Error3)),
+    verify_strings_not_present(Msg3, ["use_packages"]).
+
+verify_error_for_field_name_defined_twice_test() ->
+    lists:foreach(
+      fun({Id, ProtoLines, ErrorStringsToExpect}) ->
+              io:format("Id=~p~n", [Id]),
+              {error, _} = Error = do_parse_verify_defs(ProtoLines),
+              Msg = gpb_defs:format_post_process_error(Error),
+              verify_flat_string(Msg),
+              if ErrorStringsToExpect /= [] ->
+                      verify_strings_present(Msg, ErrorStringsToExpect);
+                 true ->
+                      ok
+              end
+      end,
+      [{direct_field,
+        ["message m1 {",
+         "  required uint32 f1 = 1;",
+         "  required uint32 f1 = 2;", % f1 used again
+         "}"],
+        ["m1", "f1"]},
+       {defined_trice,
+        ["message m1 {",
+         "  required uint32 f1 = 1;",
+         "  required uint32 f1 = 1;",
+         "  required uint32 f1 = 1;",
+         "}"],
+        ["m1", "f1"]},
+       {oneof_name_vs_simple_name,
+        ["message m1 {",
+         "  required uint32 f1 = 1;",
+         "  oneof f1 {uint32 f2 = 2;}", % the oneof name, f1, used again
+         "}"],
+        ["m1", "f1"]},
+       {oneof_names,
+        ["message m1 {",
+         "  oneof f1 {uint32 f2 = 1;}",
+         "  oneof f1 {uint32 f3 = 2;}", % the oneof name, f1, used again
+         "}"],
+        ["m1", "f1"]},
+       {oneof_field_names,
+        ["message m1 {",
+         "  oneof o1 {uint32 f1 = 1;}",
+         "  oneof o2 {uint32 f1 = 2;}", % the oneof field, f1, used again
+         "}"],
+        ["m1", "f1"]}]).
+
+verify_error_for_json_lowerCamelCased_field_name_defined_twice_test() ->
+    ProtoLines =
+        ["message m1 {",
+         "  required uint32 some_name = 1;",
+         "  required uint32 SomeName = 2;",
+         "}"],
+    Opts = [json],
+    %% Should succeed if option json in not specified
+    ok = do_parse_verify_defs(ProtoLines, []),
+    %% Should fail  with the json option
+    {error, _} = Error = do_parse_verify_defs(ProtoLines, Opts),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1", "some_name", "SomeName"]),
+    %% Check also the json_name option
+    ProtoLines2 =
+        ["message m1 {",
+         "  required uint32 some_name = 1;",
+         "  required uint32 foo = 2 [json_name='some_name'];",
+         "}"],
+    {error, _} = Error2 = do_parse_verify_defs(ProtoLines2, Opts),
+    Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
+    verify_strings_present(Msg2, ["m1", "some_name", "foo"]),
+    %% No error when json name and field name for a field coincides
+    ProtoLines3 =
+        ["message m1 {",
+         "  required uint32 foo = 1;",
+         "}"],
+    ok = do_parse_verify_defs(ProtoLines3, Opts).
+
+verify_valid_json_name_field_option_value_test() ->
+    ProtoLines1 = ["message m1 {",
+                   "  required uint32 f1 = 1 [json_name=10];",
+                   "}"],
+    Opts = [json],
+    {error, _} = Error1 = do_parse_verify_defs(ProtoLines1, Opts),
+    Msg1 = verify_flat_string(gpb_defs:format_post_process_error(Error1)),
+    verify_strings_present(Msg1, ["m1", "f1"]),
+
+    ProtoLines2 = ["message m1 {",
+                   "  required uint32 f2 = 2 [json_name=false];",
+                   "}"],
+    {error, _} = Error2 = do_parse_verify_defs(ProtoLines2, Opts),
+    Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
+    verify_strings_present(Msg2, ["m1", "f2"]).
+
+verify_error_for_field_number_defined_twice_test() ->
+    lists:foreach(
+      fun({Id, ProtoLines, ErrorStringsToExpect}) ->
+              io:format("Id=~p~n", [Id]),
+              {error, _} = Error = do_parse_verify_defs(ProtoLines),
+              Msg = gpb_defs:format_post_process_error(Error),
+              verify_flat_string(Msg),
+              if ErrorStringsToExpect /= [] ->
+                      verify_strings_present(Msg, ErrorStringsToExpect);
+                 true ->
+                      ok
+              end
+      end,
+      [{direct_field,
+        ["message m1 {",
+         "  required uint32 f1 = 77;",
+         "  required uint32 f2 = 77;", % 1 used again
+         "}"],
+        ["m1", "f1", "f2", "77"]},
+       {defined_trice,
+        ["message m1 {",
+         "  required uint32 f1 = 77;",
+         "  required uint32 f2 = 77;",
+         "  required uint32 f3 = 77;",
+         "}"],
+        ["m1", "f1", "f2", "f3", "77"]},
+       {oneof_field_vs_direct_field,
+        ["message m1 {",
+         "  required uint32 f1 = 77;",
+         "  oneof f1 {uint32 f2 = 77;}",
+         "}"],
+        ["m1", "f1", "f2", "77"]},
+       {oneof_fields,
+        ["message m1 {",
+         "  oneof o1 {uint32 f1 = 77;}",
+         "  oneof o2 {uint32 f2 = 77;}",
+         "}"],
+        ["m1", "f1", "f2", "77"]}]).
+
+verify_error_for_non_positive_field_number_test() ->
+    ProtoLines = ["message m1 {"
+                  "  required uint32 f1 = 0;",
+                  "  required uint32 f2 = -1;",
+                  "}"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "f2"]).
+
+verify_error_for_message_already_defined_test() ->
+    ProtoLines = ["message m1 { required uint32 f1 = 1; }",
+                  "message m1 { required uint32 f2 = 2; }"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1"]).
+
+verify_error_for_enum_already_defined_test() ->
+    ProtoLines = ["enum e1 { a=0; }",
+                  "enum e1 { b=1; }"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["e1"]).
+
+verify_enum_must_have_at_least_one_value_test() ->
+    ProtoLines = ["enum e1 { }"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["e1"]).
+
+verify_error_for_rpc_name_defined_twice_test() ->
+    ProtoLines =
+        ["message m1 { required uint32 f1 = 1; }",
+         "service s1 {"
+         "  rpc req1(m1) returns (m1);",
+         "  rpc req1(m1) returns (m1);",
+         "}"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["s1", "req1"]).
+
+verify_error_for_services_already_defined_test() ->
+    ProtoLines = ["message m1 { required uint32 f = 1; }",
+                  "service s1 { rpc req1(m1) returns (m1); }",
+                  "service s1 { rpc req2(m1) returns (m1); }"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["s1"]).
+
+verify_multiple_errors_caught_test() ->
+    ProtoLines = ["message m1 {"
+                  "  required uint32 f1 = -77;",
+                  "  required uint32 f1 = -77;",
+                  "}"],
+    {error, _} = Error = do_parse_verify_defs(ProtoLines),
+    Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
+    verify_strings_present(Msg, ["m1", "f1", "-77"]).
+
 do_parse_verify_defs(Lines) ->
+    do_parse_verify_defs(Lines, []).
+
+do_parse_verify_defs(Lines, Opts) ->
     {ok, Elems} = parse_lines(Lines),
-    case post_process(Elems, []) of
+    case post_process(Elems, Opts) of
         {ok, _} ->
             ok;
         {error, Reasons} ->
@@ -1370,6 +1598,12 @@ verify_strings_present(Str, StringsToTestFor) ->
         Missing -> erlang:error(missing_substring, [Missing, Str])
     end.
 
+verify_strings_not_present(Str, StringsToTestFor) ->
+    case [ToTest || ToTest <- StringsToTestFor, is_present(Str, ToTest)] of
+        []      -> ok;
+        Present -> erlang:error(unexpectedly_found, [Present, Str])
+    end.
+
 is_present(Str, ToTest) -> gpb_lib:is_substr(ToTest, Str).
 
 %% test helpers
@@ -1377,30 +1611,64 @@ parse_sort_several_file_lines(ProtoLines, Opts) ->
     lists:sort(parse_several_file_lines(ProtoLines, Opts)).
 
 parse_several_file_lines(ProtoLines, Opts) ->
+    parse_several_file_lines(ProtoLines, Opts,
+                             expect_success, filter_away_import_lines).
+
+parse_several_file_lines(ProtoLines, Opts,
+                         ExpectedResult, ImportLineHandling) ->
     {AllProtoNames, _AllLines} = lists:unzip(ProtoLines),
     AllProtoBases = lists:map(fun filename:basename/1, AllProtoNames),
     AllDefs1 = [begin
-                    {ok, Defs1} = parse_lines(
-                                    filter_away_import_lines(
-                                      Lines, AllProtoBases)),
+                    Lines1 = case ImportLineHandling of
+                                 filter_away_import_lines ->
+                                     filter_away_import_lines(Lines,
+                                                              AllProtoBases);
+                                 verify_imports ->
+                                     verify_imports(Lines, AllProtoBases)
+                             end,
+                    {ok, Defs1} = parse_lines(Lines1),
                     {ok, Defs2} = gpb_defs:post_process_one_file(
                                     FName, Defs1, Opts),
                     Defs2
                 end
                 || {FName, Lines} <- ProtoLines],
-    {ok, AllDefs2} = gpb_defs:post_process_all_files(
-                       lists:append(AllDefs1),
-                       Opts),
-    AllDefs2.
+    case ExpectedResult of
+        expect_success ->
+            {ok, AllDefs2} = gpb_parse:post_process_all_files(
+                               lists:append(AllDefs1),
+                               Opts),
+            AllDefs2;
+        expect_error ->
+            {error, Reasons} = gpb_parse:post_process_all_files(
+                                 lists:append(AllDefs1),
+                                 Opts),
+            {error, Reasons}
+    end.
 
 filter_away_import_lines(Lines, AllProtoNames) ->
+    case extract_check_imports(Lines, AllProtoNames) of
+        {ok, RestLines} ->
+            RestLines;
+        {error, Reason} ->
+            error({bad_test, Reason})
+    end.
+
+verify_imports(Lines, AllProtoNames) ->
+    case extract_check_imports(Lines, AllProtoNames) of
+        {ok, _RestLines} ->
+            Lines;
+        {error, Reason} ->
+            error({bad_test, Reason})
+    end.
+
+extract_check_imports(Lines, AllProtoNames) ->
     {ImportLines, RestLines} = lists:partition(fun is_import_line/1, Lines),
     Imports = lists:map(fun protobase_by_importline/1, ImportLines),
     StrayImports = lists:filter(
                      fun(I) -> not lists:member(I, AllProtoNames) end,
                      Imports),
-    if StrayImports == [] -> RestLines;
-       true -> error({bad_test, stray_import_of_missing_proto, Imports, Lines})
+    if StrayImports == [] -> {ok, RestLines};
+       true -> {error, {stray_import_of_missing_proto, Imports, Lines}}
     end.
 
 is_import_line("import \""++_) -> true;

@@ -33,6 +33,8 @@
 
 -include("../include/gpb.hrl").
 
+-define(is_non_empty_string(Str), (is_list(Str) andalso is_integer(hd(Str)))).
+
 -type defs() :: [def()].
 -type def() :: {{msg, Name::atom()}, [field()]} |
                {{group, Name::atom()}, [field()]} |
@@ -77,29 +79,30 @@ post_process_one_file(FileName, Defs, Opts) ->
 %% @hidden
 %% @doc Post-process definitions once the file and all its imports
 %% each have been parsed and processed.
-post_process_all_files(Defs, _Opts) ->
+post_process_all_files(Defs, Opts) ->
     case resolve_names(Defs) of
         {ok, Defs2} ->
-            {ok, normalize_msg_field_options(
-                   handle_proto_syntax_version_all_files(
-                     enumerate_msg_fields(
-                       shorten_file_paths(
-                         reformat_names(
-                           extend_msgs(Defs2))))))};
+            case verify_defs(Defs2, Opts) of
+                ok ->
+                    {ok, normalize_msg_field_options(
+                           handle_proto_syntax_version_all_files(
+                             enumerate_msg_fields(
+                               shorten_file_paths(
+                                 reformat_names(
+                                   extend_msgs(Defs2))))))};
+                {error, Reasons} ->
+                    {error, Reasons}
+            end;
         {error, Reasons} ->
-            {error, Reasons}
+            Reasons2 = possibly_hint_use_packages_opt(Reasons, Defs, Opts),
+            {error, Reasons2}
     end.
 
 %% -> {ok, Defs} | {error, [Reason]}
 resolve_names(Defs) ->
     case resolve_refs(Defs) of
-        {ok, RDefs} ->
-            case verify_defs(RDefs) of
-                ok ->
-                    {ok, RDefs};
-                {error, Reasons} ->
-                    {error, Reasons}
-            end;
+        {ok, ResolvedDefs} ->
+            {ok, ResolvedDefs};
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -562,13 +565,23 @@ is_scalar_numeric(_)        -> false. % not: string | bytes | msg | map
 %%
 %% Prerequisites:
 %% `Defs' is expected to be flattened and may or may not be reformatted.
-verify_defs(Defs) ->
+verify_defs(Defs, Opts) ->
+    DoJson = gpb_lib:json_by_opts(Opts),
+    MsgVerifiers = lists:flatten(
+                     [fun verify_field_defaults/2,
+                      fun verify_field_names/2,
+                      fun verify_field_numbers/2,
+                      [fun verify_json_name_options/2 || DoJson],
+                      [fun verify_json_field_names/2 || DoJson]]),
     collect_errors(Defs,
-                   [{msg,     [fun verify_field_defaults/2]},
-                    {group,   [fun verify_field_defaults/2]},
+                   [{msg,     MsgVerifiers},
+                    {group,   MsgVerifiers},
+                    {enum,    [fun verify_at_least_one_member/2]},
                     {extend,  [fun verify_extend/2]},
-                    {service, [fun verify_service/2]},
-                    {'_',     [fun(_Def, _AllDefs) -> ok end]}]).
+                    {service, [fun verify_service_rpc_names/2]},
+                    {all,     [fun verify_msg_names_unique/1,
+                               fun verify_enum_names_unique/1,
+                               fun verify_service_names_unique/1]}]).
 
 collect_errors(Defs, VerifiersList) ->
     collect_errors(Defs, Defs, VerifiersList, ok).
@@ -582,8 +595,12 @@ collect_errors([{{ElemType,_},_}=Def | Rest], AllDefs, VerifiersList, Acc) ->
 collect_errors([_OtherDef | Rest], AllDefs, VerifiersList, Acc) ->
     %% Example: import, package, ...
     collect_errors(Rest, AllDefs, VerifiersList, Acc);
-collect_errors([], _AllRefs, _VerifiersList, Acc) ->
-    case Acc of
+collect_errors([], AllDefs, VerifiersList, Acc) ->
+    Acc2 = lists:foldl(
+             fun(Verifier, A) -> add_acc(A, Verifier(AllDefs)) end,
+             Acc,
+             find_verifiers(all, VerifiersList)),
+    case Acc2 of
         ok                       -> ok;
         {error, ReasonsReversed} -> {error, lists:reverse(ReasonsReversed)}
     end.
@@ -598,8 +615,8 @@ add_reason(Reasons, MoreReasons) when is_list(MoreReasons) ->
     lists:reverse(MoreReasons, Reasons).
 
 find_verifiers(Type,  [{Type, Verifiers} | _]) -> Verifiers;
-find_verifiers(_Type, [{'_', Verifiers} | _])  -> Verifiers;
-find_verifiers(Type,  [_Other | Rest])         -> find_verifiers(Type, Rest).
+find_verifiers(Type,  [_Other | Rest])         -> find_verifiers(Type, Rest);
+find_verifiers(_Type, [])                      -> [].
 
 verify_field_defaults({{msg,M}, Fields}, AllDefs) ->
     lists:foldl(fun(#?gpb_field{name=Name, type=Type, opts=FOpts}, Acc) ->
@@ -647,13 +664,166 @@ verify_scalar_default_if_present(MsgName, FieldName, Type, Default, AllDefs) ->
             end
     end.
 
+verify_field_names({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
+    FNames = all_field_names(Fields),
+    case FNames -- lists:usort(FNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error,
+             [{field_name_used_more_than_once, {name_to_dstr(MsgName), FName}}
+              || FName <- Dups]}
+    end.
+
+verify_json_name_options({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
+    BadFields = lists:reverse(
+                  gpb_lib:fold_msgdef_fields(
+                    fun(#?gpb_field{name=FName, opts=Opts}, Acc) ->
+                            case proplists:get_value(json_name, Opts) of
+                                undefined ->
+                                    Acc;
+                                Str when ?is_non_empty_string(Str) ->
+                                    Acc;
+                                X ->
+                                    [{FName, X} | Acc]
+                            end
+                    end,
+                    [],
+                    Fields)),
+    if BadFields == [] ->
+            ok;
+       true ->
+            {error, [{json_name_must_be_string,
+                      {name_to_dstr(MsgName), FName, InvalidValue}}
+                     || {FName, InvalidValue} <- BadFields]}
+    end.
+
+
+
+verify_json_field_names({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
+    %% Collect all fields, also those inside oneof
+    AllFields = lists:reverse(
+                  gpb_lib:fold_msgdef_fields(
+                    fun(#?gpb_field{}=Field, Acc) ->
+                            [Field | Acc]
+                    end,
+                    [],
+                    Fields)),
+    D = lists:foldl(
+          fun(#?gpb_field{name=FName}=Field, D) ->
+                  %% Store info both for collisions between json field names
+                  %% (normally lowerCamelCase) and json field names and
+                  %% ordinary field names, since decoding must accept both.
+                  FNameStr = atom_to_list(FName),
+                  D1 = dict:append(FNameStr, FName, D),
+                  %% Take precautions not to crash on bad values
+                  %% for the json_name option
+                  try gpb_lib:get_field_json_name(Field) of
+                      FNameStr  -> D1; % json name same as field name; ignore
+                      JsonFName -> dict:append(JsonFName, FName, D1)
+                  catch error:_ -> D1
+                  end
+          end,
+          dict:new(),
+          AllFields),
+    %% Dict of field names that collide when converted to lowerCamelCase.
+    D1 = dict:filter(fun(_K, FNames) -> length(FNames) >= 2 end, D),
+    case dict:to_list(D1) of
+        [] ->
+            ok;
+        Dups ->
+            {error,
+             [{json_lower_camel_case_field_name_collision,
+               {name_to_dstr(MsgName), LowerCamelCasedFName, FNames}}
+              || {LowerCamelCasedFName, FNames} <- Dups]}
+    end.
+
+all_field_names(Fields) ->
+    lists:flatten(all_field_names2(Fields)).
+
+all_field_names2([#?gpb_field{name=FName} | Rest]) ->
+    [FName | all_field_names2(Rest)];
+all_field_names2([#gpb_oneof{name=FName, fields=OFields} | Rest]) ->
+    [FName, all_field_names2(OFields) | all_field_names(Rest)];
+all_field_names2([]) ->
+    [].
+
+verify_field_numbers({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
+    %% For each number, store the names associated to it
+    D = gpb_lib:fold_msgdef_fields(
+          fun(#?gpb_field{name=Name, fnum=Num}, D) ->
+                  dict:append(Num, Name, D)
+          end,
+          dict:new(),
+          Fields),
+    %% Filter for numbers with more than one name
+    D2 = dict:filter(fun(_Num, Names) -> length(Names) > 1 end, D),
+    Errs2 = [{field_number_used_more_than_once,
+              {name_to_dstr(MsgName), Num, FNames}}
+             || {Num, FNames} <- dict:to_list(D2)],
+    %% Check for field numbers not positive
+    D3 = dict:filter(fun(Num, _Names) -> Num =< 0 end, D),
+    Errs3 = [{field_number_must_be_positive,
+              {name_to_dstr(MsgName), Num, FNames}}
+             || {Num, FNames} <- dict:to_list(D3)],
+    case Errs2 ++ Errs3 of
+        [] -> ok;
+        Errs -> {error, Errs}
+    end.
+
+verify_at_least_one_member({{enum,EnumName},Enums}, _AllDefs) ->
+    case gpb_lib:unalias_enum(Enums) of
+        [] ->
+            {error,
+             {enum_must_have_at_least_one_value, name_to_dstr(EnumName)}};
+        _ ->
+            ok
+    end.
+
 verify_extend(_, _AllDefs) ->
     %% FIXME
     ok.
 
-verify_service(_, _AllDefs) ->
-    %% FIXME
-    ok.
+verify_service_rpc_names({{service,ServiceName}, Rpcs}, _AllDefs) ->
+    RpcNames = [RpcName || #?gpb_rpc{name=RpcName} <- Rpcs],
+    case RpcNames -- lists:usort(RpcNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error,
+             [{rpc_multiply_defined, {name_to_dstr(ServiceName), RpcName}}
+              || RpcName <- Dups]}
+    end.
+
+verify_msg_names_unique(AllDefs) ->
+    MsgNames = [MsgName || {{msg, MsgName}, _Fields} <- AllDefs],
+    case MsgNames -- lists:usort(MsgNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error, [{msg_multiply_defined, name_to_dstr(MsgName)}
+                     || MsgName <- Dups]}
+    end.
+
+verify_enum_names_unique(AllDefs) ->
+    EnumNames = [EnumName || {{enum, EnumName}, _} <- AllDefs],
+    case EnumNames -- lists:usort(EnumNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error, [{enum_multiply_defined, name_to_dstr(EnumName)}
+                     || EnumName <- Dups]}
+    end.
+
+verify_service_names_unique(AllDefs) ->
+    SvcNames = [SvcName || {{service, SvcName}, _} <- AllDefs],
+    case SvcNames -- lists:usort(SvcNames) of
+        [] ->
+            ok;
+        Dups ->
+            {error, [{service_multiply_defined, name_to_dstr(SvcName)}
+                     || SvcName <- Dups]}
+    end.
 
 name_to_absdstr(['.' | Name]) -> "." ++ name_to_dstr(Name);
 name_to_absdstr(Name) -> name_to_dstr(Name).
@@ -673,6 +843,9 @@ format_post_process_error({error, Reasons}) ->
 fmt_err({multiple_pkg_specifiers, Pkgs}) ->
     ?f("package specified more than once: ~s~n",
        [gpb_lib:comma_join([atom_to_list(Pkg) || Pkg <- Pkgs])]);
+fmt_err({hint,{{use_packages,option}, unresolved_references}}) ->
+    ?f("hint: use the option use_packages (-pkgs) "
+       "to use messages or enums in other packages", []);
 fmt_err({ref_to_undefined_msg_or_enum, {{Msg, Field}, To}}) ->
     ?f("in msg ~s, field ~s: undefined reference  ~s",
        [name_to_dstr(Msg), name_to_dstr(Field), name_to_absdstr(To)]);
@@ -715,7 +888,39 @@ fmt_err({{bad_unicode_string, Default}, {Msg, Field}}) ->
        [Msg, Field, Default]);
 fmt_err({{bad_binary_value, Default}, {Msg, Field}}) ->
     ?f("in msg ~s, field ~s: bad default value ~p for bytes",
-       [Msg, Field, Default]).
+       [Msg, Field, Default]);
+fmt_err({field_name_used_more_than_once, {MsgName, FName}}) ->
+    ?f("field ~s defined more than once in message ~s", [FName, MsgName]);
+fmt_err({field_number_used_more_than_once, {MsgName, FNum, FNames}}) ->
+    ?f("field number ~w used more than once in message ~s: for fields ~s",
+       [FNum, MsgName, list_to_text(FNames)]);
+fmt_err({field_number_must_be_positive, {MsgName, FNum, FNames}}) ->
+    ?f("in message ~s, field number must be positive for ~s, but is ~w",
+       [MsgName, list_to_text(FNames), FNum]);
+fmt_err({json_lower_camel_case_field_name_collision,
+               {MsgName, _LowerCamelCasedFName, FNames}}) ->
+    ?f("with json, field names as lowerCamelCase collide in message ~s: ~s",
+       [MsgName, list_to_text(FNames)]);
+fmt_err({json_name_must_be_string,{MsgName, FName, InnvalidJsonNameValue}}) ->
+    ?f("for field ~s in message ~s: json_name value must be string, found ~w",
+       [MsgName, FName, InnvalidJsonNameValue]);
+fmt_err({msg_multiply_defined, MsgName}) ->
+    ?f("message name ~s defined more than once", [MsgName]);
+fmt_err({enum_multiply_defined, EnumName}) ->
+    ?f("enum ~s defined more than once", [EnumName]);
+fmt_err({service_multiply_defined, ServiceName}) ->
+    ?f("service ~s defined more than once", [ServiceName]);
+fmt_err({rpc_multiply_defined, {ServiceName, RpcName}}) ->
+    ?f("rpc ~s in service ~s defined more than once", [RpcName, ServiceName]);
+fmt_err({enum_must_have_at_least_one_value, EnumName}) ->
+    ?f("enum ~s must have at least one value", [EnumName]).
+
+list_to_text([Item1, Item2]) ->
+    ?f("~s and ~s", [Item1, Item2]);
+list_to_text([Item | Rest]=L) when length(L) > 2->
+    ?f("~s, ~s", [Item, list_to_text(Rest)]);
+list_to_text([Item]) ->
+    ?f("~s", [Item]).
 
 %% Rewrites for instance ['.','m1','.',m2] into 'm1.m2'
 %% Example: {{msg,['.','m1','.',m2]}, [#field{type={msg,['.','m1','.',m3]}}]}
@@ -941,3 +1146,53 @@ shorten_meta_info(Mapping, Defs) ->
               Other
       end,
       Defs).
+
+possibly_hint_use_packages_opt(Reasons, Defs, Opts) ->
+    UsePackagesOptPresent = case proplists:get_value(use_packages, Opts) of
+                                undefined -> false;
+                                _ -> true
+                            end,
+    UnresolvedRefs = lists:any(fun is_unresolved_ref_reason/1, Reasons),
+    Imports = lists:any(fun is_import_item/1, Defs),
+    DifferentPackages = length(lists:usort(find_pkgs(Defs))) =/= 1,
+    if not UsePackagesOptPresent,
+       UnresolvedRefs,
+       Imports,
+       DifferentPackages ->
+            Hint = {hint, {{use_packages, option}, unresolved_references}},
+            [Hint | Reasons];
+       true ->
+            Reasons
+    end.
+
+%% Check whether the the files in Defs are in different packages.
+%% A {package, _} tuple indicates a package, but a file could also
+%% be void of such an indicator.
+find_pkgs(Defs) ->
+    [proplists:get_value(package, FileChunk)
+     || FileChunk <- file_chunks(Defs)].
+
+%% Split to chunks separated by {file,_} items
+file_chunks(Defs) ->
+    %% Skip anything before first {file,_} item.
+    %% There should not be any such chunks, but if there would be,
+    %% they would not contain any package declaratins in any case.
+    Defs1 = lists:dropwhile(fun is_not_file_item/1, Defs),
+    file_chunks2(Defs1, []).
+
+file_chunks2([{file, _}=FileItem | _]=Defs, Acc) ->
+    {Chunk, Rest} = lists:splitwith(fun is_not_file_item/1, tl(Defs)),
+    file_chunks2(Rest, [[FileItem | Chunk] | Acc]);
+file_chunks2([], Acc) ->
+    lists:reverse(Acc).
+
+is_not_file_item(X) -> not is_file_item(X).
+
+is_file_item({file, _}) -> true;
+is_file_item(_) -> false.
+
+is_import_item({import, _}) -> true;
+is_import_item(_) -> false.
+
+is_unresolved_ref_reason({ref_to_undefined_msg_or_enum,_}) -> true;
+is_unresolved_ref_reason(_) -> false.
