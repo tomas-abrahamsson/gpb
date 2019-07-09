@@ -316,7 +316,6 @@ Features of gpb
    - rpc
    - JSON limitations:
      - does not handle google/protobuf/* wellknowns
-     - does not handle the json_name option
 
 *  Characteristics of gpb:
    - Skipping over unknown message fields or groups, when decoding,
