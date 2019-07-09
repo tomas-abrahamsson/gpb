@@ -202,7 +202,7 @@ TEST_MODULES := \
 # Run eunit on these modules:
 # - If module M and M_tests exist, only include M (M_tests is then implicit)
 # - If M_tests exists, but no M, include M_tests (eg gpb_compile_maps_tests)
-# sorting it also removes duplicates (gpb_parse)
+# sorting it also removes any duplicates
 EUNIT_MODULES := \
 	$(MODULES) \
 	$(filter-out $(patsubst %,%_tests,$(MODULES)),$(TEST_MODULES))
@@ -321,17 +321,18 @@ $(ebin)/gpb_gen_nif.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_lib.beam: $(ebin)/gpb_codegen.beam
 $(ebin)/gpb_codemorpher.beam: $(ebin)/gpb_codegen.beam
 
+$(ebin)/gpb.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_analyzer.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_analyzer.beam: $(src)/gpb_compile.hrl
 $(ebin)/gpb_codemorpher.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_compile.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_compile.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_compile.beam: $(src)/gpb_compile.hrl
-$(ebin)/gpb.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_decoders_lib.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_decoders_lib.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_decoders_lib.beam: $(src)/gpb_compile.hrl
 $(ebin)/gpb_decoders_lib.beam: $(src)/gpb_decoders_lib.hrl
+$(ebin)/gpb_defs.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_gen_decoders.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_gen_decoders.beam: $(src)/gpb_codegen.hrl
 $(ebin)/gpb_gen_decoders.beam: $(src)/gpb_compile.hrl

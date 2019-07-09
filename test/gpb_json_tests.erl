@@ -398,7 +398,7 @@ various_types_maps_test() ->
 enums_proto() ->
     "
      syntax=\"proto3\";
-     message EnumMsg   { optional EE f = 1; };
+     message EnumMsg   { EE f = 1; };
      enum EE { EE_A=0; EE_B=1; };
     ".
 
@@ -431,7 +431,7 @@ decoding_enums_case_insensitively_test() ->
 
 types_defaults_proto() ->
     "syntax=\"proto3\";\n"
-        ++ various_types_proto().
+        ++ strip_occurrence(various_types_proto()).
 
 type_defaults_test() ->
     M1 = compile_iolist(types_defaults_proto(), [json]),
@@ -759,6 +759,46 @@ bypass_wrappers_maps_test() ->
     unload_code(M1).
 -endif. % -ifndef(NO_HAVE_MAPS).
 
+json_name_proto() ->
+    "
+         syntax='proto2';
+         message Msg {
+           optional uint32 foo_bar = 1 [json_name='x_y_z'];
+         }
+    ".
+
+json_name_test() ->
+    Proto = json_name_proto(),
+    M1 = compile_iolist(Proto, [json]),
+    [{<<"x_y_z">>, 17}] = M1:to_json({'Msg', 17}),
+    {'Msg', 17} = M1:from_json([{<<"x_y_z">>, 17}], 'Msg'),
+    {'Msg', 17} = M1:from_json([{<<"foo_bar">>, 17}], 'Msg'),
+    unload_code(M1).
+
+aliased_enums_test() ->
+    Proto = "
+         syntax='proto2';
+         message Msg {
+           optional ee f = 1;
+         }
+         enum ee {
+           option allow_alias = true;
+           E0 = 0;
+           E1_A = 1;
+           E1_B = 1;
+         }
+    ",
+    M1 = compile_iolist(Proto, [json]),
+    [{<<"f">>, <<"E0">>}] = M1:to_json({'Msg', 'E0'}),
+    [{<<"f">>, <<"E1_A">>}] = M1:to_json({'Msg', 'E1_A'}),
+    [{<<"f">>, <<"E1_B">>}] = M1:to_json({'Msg', 'E1_B'}),
+    {'Msg', 'E0'} = M1:from_json([{<<"f">>, <<"E0">>}], 'Msg'),
+    {'Msg', 'E1_A'} = M1:from_json([{<<"f">>, <<"E1_A">>}], 'Msg'),
+    {'Msg', 'E1_A'} = M1:from_json([{<<"f">>, <<"E1_B">>}], 'Msg'),
+    {'Msg', 'E0'}   = M1:from_json([{<<"f">>, <<"0">>}], 'Msg'),
+    {'Msg', 'E1_A'} = M1:from_json([{<<"f">>, <<"1">>}], 'Msg'),
+    unload_code(M1).
+
 cmdline_json_opt_test() ->
     {ok, {[json],
           ["x.proto"]}} =
@@ -848,7 +888,8 @@ nif_test_() ->
        ?nif_if_supported(nif_type_defaults),
        ?nif_if_supported(nif_oneof_rec),
        ?nif_if_supported(nif_mapfields_rec),
-       ?nif_if_supported(nif_bypass_wrappers)]).
+       ?nif_if_supported(nif_bypass_wrappers),
+       ?nif_if_supported(nif_json_name)]).
 
 
 -ifndef(NO_HAVE_MAPS).
@@ -1124,6 +1165,19 @@ nif_to_from_json_aux(SaveOrNot, Proto, TestF, ExtraOpts) ->
                 end)
       end).
 
+nif_json_name(features) -> [json | guess_features(json_name_proto())];
+nif_json_name(title) -> "json_name field option".
+nif_json_name() ->
+    nif_to_from_json_aux(
+      dont_save,
+      json_name_proto(),
+      fun(NifM, _ErlM) ->
+              [{<<"x_y_z">>, 17}] = json_decode(NifM:to_json({'Msg', 17})),
+              {'Msg', 17} = NifM:from_json(<<"{\"x_y_z\": 17}">>, 'Msg'),
+              {'Msg', 17} = NifM:from_json(<<"{\"foo_bar\": 17}">>, 'Msg')
+      end,
+      [json]).
+
 -compile({nowarn_unused_function, with_tmpdir/1}).
 with_tmpdir(F) ->
     with_tmpdir(dont_save, F). % -import()ed from gpb_compile_tests
@@ -1277,3 +1331,8 @@ pl_to_map(L) when is_list(L) ->
 pl_to_map(X) ->
     X.
 -endif. % -ifndef(NO_HAVE_MAPS).
+
+strip_occurrence("optional" ++ Rest) -> strip_occurrence(Rest);
+strip_occurrence("required" ++ Rest) -> strip_occurrence(Rest);
+strip_occurrence([C | Rest])         -> [C | strip_occurrence(Rest)];
+strip_occurrence("")                 -> "".

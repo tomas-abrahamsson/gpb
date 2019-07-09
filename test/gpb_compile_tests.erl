@@ -2706,6 +2706,7 @@ nif_code_test_() ->
        ?nif_if_supported(nif_enum_in_msg),
        ?nif_if_supported(nif_enum_with_pkgs),
        ?nif_if_supported(nif_enum_from_integers),
+       ?nif_if_supported(nif_aliased_enums),
        ?nif_if_supported(nif_with_groups),
        ?nif_if_supported(nif_with_strbin),
        ?nif_if_supported(nif_with_booleans),
@@ -2779,6 +2780,7 @@ needed_vsn_to_text(Vsn) ->
     gpb_lib:dot_join([integer_to_list(N) || N <- Vsn3]).
 
 protoc_feature_version_appearance(oneof)        -> [2,6];
+protoc_feature_version_appearance(allow_alias)  -> [2,6];
 protoc_feature_version_appearance(cxx_keywords) -> [3,0];
 protoc_feature_version_appearance(mapfields)    -> [3,0];
 protoc_feature_version_appearance(proto3)       -> [3,0];
@@ -2798,6 +2800,8 @@ check_extras([], _) ->
 guess_features(S) ->
     S2 = binary_to_list(iolist_to_binary(S)),
     [Feat || {Substr, Feat} <- [{"syntax=\"proto3\"", proto3},
+                                {"syntax='proto3'", proto3},
+                                {"allow_alias", allow_alias}, % in enums
                                 {"oneof", oneof},
                                 {"map<", mapfields}],
              gpb_lib:is_substr(Substr, S2)].
@@ -3084,6 +3088,40 @@ nif_enum_from_integers() ->
                         GEncoded  = gpb:encode_msg(OrigMsg, Defs),
                         ?assertEqual(ExpectedEncoded, MEncoded),
                         ?assertEqual(ExpectedEncoded, GEncoded)
+                end)
+      end).
+
+nif_aliased_enums(features) -> [allow_alias];
+nif_aliased_enums(title) -> "Nif with aliased enums".
+nif_aliased_enums() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_bypass_wrappers_records,
+              DefsTxt = "message m1 {
+                             required ee f = 1;
+                         }
+                         enum ee {
+                           option allow_alias = true;
+                           E0 = 0;
+                           E1_A = 1;
+                           E1_B = 1;
+                         }
+                        ",
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir, []),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg1 = {m1,'E0'},
+                        Encoded1 = M:encode_msg(OrigMsg1),
+                        OrigMsg1 = M:decode_msg(Encoded1, m1),
+
+                        OrigMsg2 = {m1,'E1_A'},
+                        Encoded2 = M:encode_msg(OrigMsg2),
+                        OrigMsg2 = M:decode_msg(Encoded2, m1),
+
+                        OrigMsg3 = {m1,'E1_B'},
+                        Encoded3 = M:encode_msg(OrigMsg3),
+                        {m1,'E1_A'} = M:decode_msg(Encoded3, m1)
                 end)
       end).
 

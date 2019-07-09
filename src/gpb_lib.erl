@@ -24,6 +24,7 @@
 
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
+-include("../include/gpb.hrl").
 
 -export([mk_fn/2, mk_fn/3]).
 -export([replace_term/2]).
@@ -53,6 +54,7 @@
 -export([key_partition_on_optionality/2, key_partition_on_optionality/3]).
 -export([classify_field_merge_action/1]).
 -export([flatten_oneof_fields/1]).
+-export([get_field_json_name/1]).
 
 -export([fold_msg_fields/3]).
 -export([fold_msg_or_group_fields/3]).
@@ -312,6 +314,14 @@ flatten_oneof_fields([#gpb_oneof{fields=OFields} | Rest]) ->
     OFields ++ flatten_oneof_fields(Rest);
 flatten_oneof_fields([]) ->
     [].
+
+get_field_json_name(#?gpb_field{name=FName, opts=Opts}) ->
+    case proplists:get_value(json_name, Opts) of
+        undefined ->
+            lower_camel_case(atom_to_list(FName));
+        Name when is_list(Name) ->
+            Name
+    end.
 
 %% Msg iteration --------
 
