@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.9.2
+2019-Jul-09
+
+        * Add support for the json_name field option
+        * Add json support for aliased enums (option allow_alias=true)
+        * A few bugfixes and refactorizations
+
 Version 4.9.1
 2019-Jul-09
 
