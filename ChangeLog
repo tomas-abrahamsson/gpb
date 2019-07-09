@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.9.1
+2019-Jul-09
+
+        * Fix bug in nif generation for imports with different
+        packages. (#168)
+
 Version 4.9.0
 2019-Jul-02
 
