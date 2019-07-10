@@ -32,6 +32,9 @@
 
 -export([format_error/1]).
 
+-export([is_renaming_opt/1]).
+-export([is_not_renaming_opt/1]).
+
 -export([original_pkg_name/2]).
 -export([original_msg_name/2]).
 -export([original_group_name/2]).
@@ -154,6 +157,17 @@ apply_msg_type_renaming(MsgName, no_renamings) ->
 apply_msg_type_renaming(MsgName, Renamings) ->
     do_rename_type(MsgName, msg_types, Renamings).
 
+%% @doc Check whether an option is a renaming option or not.
+is_renaming_opt(Opt) ->
+    case Opt of
+        {rename, _} -> true;
+        _ -> is_legacy_renaming_opt(Opt)
+    end.
+
+%% @doc The opposite of {@link is_renaming_opt/1}
+is_not_renaming_opt(Opt) ->
+    not is_renaming_opt(Opt).
+
 %% @hidden
 original_pkg_name(PkgName, no_renamings) -> PkgName;
 original_pkg_name(PkgName, Renamings) ->
@@ -220,6 +234,8 @@ convert_legacy_opts([Opt | Opts]) ->
 convert_legacy_opts([]) ->
     [].
 
+is_legacy_renaming_opt(Opt) ->
+    convert_legacy_opts([Opt]) /= [Opt].
 
 drop_opt(Opt, [Opt | Rest])      -> drop_opt(Opt, Rest);
 drop_opt(Opt, [{Opt, _} | Rest]) -> drop_opt(Opt, Rest);
