@@ -90,7 +90,7 @@
 %-compile(export_all).
 -export([file/1, file/2]).
 -export([string/2, string/3]).
--export([proto_defs/2, proto_defs/3]).
+-export([proto_defs/2, proto_defs/3, proto_defs/5]).
 -export([msg_defs/2, msg_defs/3]).
 -export([format_error/1, format_warning/1]).
 -export([c/0, c/1, c/2]). % Cmd line interface, halts vm---don't use from shell!
@@ -982,9 +982,21 @@ proto_defs(Mod, Defs) ->
 %% See {@link file/2} for information on options and return values.
 -spec proto_defs(module(), gpb_defs:defs(), opts()) -> comp_ret().
 proto_defs(Mod, Defs, Opts) ->
+    proto_defs(Mod, Defs, Defs, no_renamings, Opts).
+
+%% @doc
+%% Compile a list of pre-parsed definitions to file or to a binary.
+%% This is useful when there are renamings, and one nifs or descriptors
+%% are to be generated, since these need the original definitions before
+%% any renamings. The renaming must be applied separately, see
+%% {@link gpb_names:compute_renamings/2} and
+%% {@link gpb_names:apply_renamings/2}. See
+%% {@link gpb_names:is_renaming_opt/1} for how to filter options.
+%% See {@link file/2} for information on options and return values.
+proto_defs(Mod, Defs, DefsNoRenamings, Renamings, Opts) ->
     Sources = [lists:concat([Mod, ".proto"])],
     Opts1 = normalize_opts(Opts),
-    do_proto_defs_aux1(Mod, Defs, Defs, Sources, no_renamings, Opts1).
+    do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts1).
 
 do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
     possibly_probe_defs(Defs, Opts),

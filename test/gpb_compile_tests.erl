@@ -3428,7 +3428,8 @@ compile_nif_several_msg_defs(M, [{Proto1,Text1}|_]=ProtoTexts, TmpDir, Opts) ->
     MoreOpts = [to_proto_defs, report_warnings,
                 {import_fetcher, ImportFetcher}],
     AllOpts = Opts ++ MoreOpts,
-    {ok, MsgDefs} = gpb_compile:string(M, Text1, AllOpts),
+    AllOpts2 = strip_renaming_opts(AllOpts),
+    {ok, MsgDefs} = gpb_compile:string(M, Text1, AllOpts2),
     compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts).
 
 compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts) ->
@@ -3442,7 +3443,10 @@ compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts) ->
                 [filename:join(TmpDir, lists:concat([M,".nif"]))]),
     LoadNifOpt = {load_nif, LoadNif},
     Opts2 = [binary, nif, LoadNifOpt] ++ Opts,
-    {ok, M, Codes} = gpb_compile:proto_defs(M, MsgDefs, Opts2),
+    {ok, Renamings} = gpb_names:compute_renamings(MsgDefs, Opts2),
+    MsgDefs2 = gpb_names:apply_renamings(MsgDefs, Renamings),
+    {ok, M, Codes} = gpb_compile:proto_defs(M, MsgDefs2, MsgDefs, Renamings,
+                                            Opts2),
     Code = proplists:get_value(erl, Codes),
     NifTxt = proplists:get_value(nif, Codes),
     %%
@@ -3503,13 +3507,17 @@ parse_to_proto_defs(Iolist) ->
     parse_to_proto_defs(Iolist, []).
 
 parse_to_proto_defs(Iolist, Opts) ->
+    Opts2 = strip_renaming_opts(Opts),
     B = iolist_to_binary(Iolist),
     {ok, ProtoDefs} = gpb_compile:file(
                         "X.proto",
                         [mk_fileop_opt([{read_file, fun(_) -> {ok, B} end}]),
                          {i,"."},
-                         to_proto_defs, report_warnings] ++ Opts),
+                         to_proto_defs, report_warnings] ++ Opts2),
     ProtoDefs.
+
+strip_renaming_opts(Opts) ->
+    lists:filter(fun gpb_names:is_not_renaming_opt/1, Opts).
 
 %% Option to run with `save' for debugging nifs
 with_tmpdir(Fun) ->
