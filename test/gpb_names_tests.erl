@@ -538,6 +538,47 @@ no_error_for_same_rpc_name_in_different_services_test() ->
                         [{rename,{rpc_name,lowercase}},
                          {rename,{service_name,lowercase}}]))).
 
+original_names_test() ->
+    Protos = [{"x.proto",
+               "package TopPkg.SubPkg;
+                message MsgName1 {
+                  required EE_a   f1 = 1;
+                  required EE_b   f2 = 2;
+                  required group G = 3 {
+                    required uint32 f3 = 1;
+                  }
+                  enum EE_b { AA = 0; }
+                }
+                enum EE_a { BB = 0; }"}],
+    RenameOpts = [{rename, {pkg_name, lowercase}},
+                  {rename, {group_fqname, {suffix, '_gsuf'}}},
+                  {rename, {msg_fqname, base_name}},
+                  {rename, {msg_fqname, snake_case}}],
+
+    %%% Test without use_packages option
+    Defs1 = parse_sort_several_file_lines(Protos, []),
+    {ok, Rs11} = gpb_names:compute_renamings(Defs1, []),
+    'TopPkg.SubPkg' = gpb_names:original_pkg_name('TopPkg.SubPkg', Rs11),
+    {ok, Rs12} = gpb_names:compute_renamings(Defs1, RenameOpts),
+    '' = gpb_names:original_pkg_name('TopPkg.SubPkg', Rs12),
+
+    %%% With the use_packages option
+    ParseOpts = [use_packages],
+    Defs2 = parse_sort_several_file_lines(Protos, ParseOpts),
+    %% Test no_renamings
+    {ok, Rs2} = gpb_names:compute_renamings(Defs2, ParseOpts), % no renamings
+    'TopPkg.SubPkg' = gpb_names:original_pkg_name('TopPkg.SubPkg', Rs2),
+    {ok, Rs3} = gpb_names:compute_renamings(Defs2, ParseOpts ++ RenameOpts),
+    'TopPkg.SubPkg' = gpb_names:original_pkg_name('toppkg.subpkg', Rs3),
+    'TopPkg.SubPkg.MsgName1' = gpb_names:original_msg_name(msg_name_1, Rs3),
+    'TopPkg.SubPkg.MsgName1.G' = gpb_names:original_group_name(
+                                   'toppkg.subpkg.MsgName1.G_gsuf', Rs3),
+    'TopPkg.SubPkg.MsgName1.EE_b' = gpb_names:original_enum_name(
+                                      'msg_name_1.EE_b', Rs3),
+    'TopPkg.SubPkg.EE_a' = gpb_names:original_enum_name(
+                             'toppkg.subpkg.EE_a', Rs3),
+    ok.
+
 %% test helpers
 parse_sort_several_file_lines(ProtoLines, Opts) ->
     {AllProtoNames, _AllLines} = lists:unzip(ProtoLines),
@@ -557,7 +598,8 @@ parse_sort_several_file_lines(ProtoLines, Opts) ->
     lists:sort(AllDefs2).
 
 filter_away_import_lines(Lines, AllProtoNames) ->
-    {ImportLines, RestLines} = lists:partition(fun is_import_line/1, Lines),
+    Lines1 = ensure_list_of_lines(Lines),
+    {ImportLines, RestLines} = lists:partition(fun is_import_line/1, Lines1),
     Imports = lists:map(fun protobase_by_importline/1, ImportLines),
     StrayImports = lists:filter(
                      fun(I) -> not lists:member(I, AllProtoNames) end,
@@ -565,6 +607,29 @@ filter_away_import_lines(Lines, AllProtoNames) ->
     if StrayImports == [] -> RestLines;
        true -> error({bad_test, stray_import_of_missing_proto, Imports, Lines})
     end.
+
+ensure_list_of_lines(X) ->
+    case is_flat_string(X) of
+        true ->
+            split_to_line_strip_leading_space(X);
+        false ->
+            X % already list of lines
+    end.
+
+is_flat_string(S) when is_list(S) -> lists:all(fun is_integer/1, S);
+is_flat_string(_) -> false.
+
+split_to_line_strip_leading_space(S) ->
+    Lines = gpb_lib:string_lexemes(S, "\n"),
+    Indent = count_indent(lists:last(Lines), 0),
+    [strip_indent(Indent, Line) || Line <- Lines].
+
+count_indent(" "++Rest, N) -> count_indent(Rest, N+1);
+count_indent(_, N)         -> N.
+
+strip_indent(N, " "++Rest) when N >= 1 -> strip_indent(N-1, Rest);
+strip_indent(0, Rest) -> Rest;
+strip_indent(_, Rest) -> Rest. % fewer indent spaces, possibly for first line
 
 is_import_line("import \""++_) -> true;
 is_import_line(_) -> false.

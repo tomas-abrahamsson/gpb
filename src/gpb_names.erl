@@ -32,6 +32,11 @@
 
 -export([format_error/1]).
 
+-export([original_pkg_name/2]).
+-export([original_msg_name/2]).
+-export([original_group_name/2]).
+-export([original_enum_name/2]).
+
 -export_type([renamings/0]).
 
 -include("../include/gpb.hrl").
@@ -46,7 +51,11 @@
                      services |
                      rpcs |
                      msg_types |
-                     enum_types.
+                     enum_types |
+                     inverse_pkgs |
+                     inverse_msgs |
+                     inverse_groups |
+                     invert_enums.
 
 -define(f(Fmt, Args), io_lib:format(Fmt, Args)).
 
@@ -144,6 +153,28 @@ apply_msg_type_renaming(MsgName, no_renamings) ->
     MsgName;
 apply_msg_type_renaming(MsgName, Renamings) ->
     do_rename_type(MsgName, msg_types, Renamings).
+
+%% @hidden
+original_pkg_name(PkgName, no_renamings) -> PkgName;
+original_pkg_name(PkgName, Renamings) ->
+    InversePkgRenamings =
+        proplists:get_value(inverse_pkgs, Renamings, dict:new()),
+    dict_fetch_or_default(PkgName, InversePkgRenamings, '').
+
+%% @hidden
+original_msg_name(MsgName, no_renamings) -> MsgName;
+original_msg_name(MsgName, Renamings) ->
+    dict_fetch(MsgName, proplists:get_value(inverse_msgs, Renamings)).
+
+%% @hidden
+original_group_name(GName, no_renamings) -> GName;
+original_group_name(GName, Renamings) ->
+    dict_fetch(GName, proplists:get_value(inverse_groups, Renamings)).
+
+%% @hidden
+original_enum_name(EnumName, no_renamings) -> EnumName;
+original_enum_name(EnumName, Renamings) ->
+    dict_fetch(EnumName, proplists:get_value(inverse_enums, Renamings)).
 
 format_error({error, {rename_defs, Reason}}) -> fmt_err(Reason);
 format_error({rename_defs, Reason}) -> fmt_err(Reason);
@@ -309,6 +340,10 @@ mk_renamings(RenameOps, Defs, Opts) ->
     EnumTypeRenamings = enum_type_renamings(EnumRenamings, RenameOps),
     case check_no_dups(MostRenamings, RpcRenamings) of
         ok ->
+            InversePkgRenamings = invert_renaming(PkgRenamings),
+            InverseMsgRenamings = invert_renaming(MsgRenamings),
+            InverseGroupRenamings = invert_renaming(GroupRenamings),
+            InverseEnumRenamings = invert_renaming(EnumRenamings),
             Renamings = lists:append(
                           [[%% No pkg_containment items present in Defs
                             %% when the use_packages option is not set.
@@ -319,7 +354,13 @@ mk_renamings(RenameOps, Defs, Opts) ->
                             {services, ServiceRenamings},
                             {rpcs, RpcRenamings},
                             {msg_types, MsgTypeRenamings},
-                            {enum_types, EnumTypeRenamings}]]),
+                            {enum_types, EnumTypeRenamings}],
+                            %% Reverse renamings:
+                           [{inverse_pkgs, InversePkgRenamings}
+                            || UsePackages],
+                           [{inverse_msgs, InverseMsgRenamings},
+                            {inverse_groups, InverseGroupRenamings},
+                            {inverse_enums, InverseEnumRenamings}]]),
             {ok, Renamings};
         {error, Reason}  ->
             {error, Reason}
@@ -583,6 +624,12 @@ renaming_rpc_dups(Dict, Errs) ->
                 Errs,
                 [D || {_Service,D} <- dict:to_list(Ds)]).
 
+
+invert_renaming(Renaming) ->
+    dict:from_list(invert_pairs(dict:to_list(Renaming))).
+
+invert_pairs(L) ->
+    [{B, A} || {A, B} <- L].
 
 %% -- Traversing defs, doing rename ----------
 
