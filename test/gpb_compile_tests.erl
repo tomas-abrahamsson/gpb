@@ -4249,19 +4249,13 @@ opt_test() ->
            "-type",
            "-descr",
            "x.proto"]),
-    {ok, {[{msg_name_prefix,    "msg_prefix_"},
-           {module_name_prefix, "mod_prefix_"},
-           {msg_name_suffix,    "_msg_suffix"},
+    {ok, {[{module_name_prefix, "mod_prefix_"},
            {module_name_suffix, "_mod_suffix"},
-           msg_name_to_lower,
            {module_name, "abc"}],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
-          ["-msgprefix", "msg_prefix_",
-           "-modprefix", "mod_prefix_",
-           "-msgsuffix", "_msg_suffix",
+          ["-modprefix", "mod_prefix_",
            "-modsuffix", "_mod_suffix",
-           "-msgtolower",
            "-modname", "abc",
            "x.proto"]),
     {ok, {[defs_as_proplists,
@@ -4344,6 +4338,67 @@ any_translation_options_test() ->
         gpb_compile:parse_opts_and_args(
           ["-any_translate", "e=me:fe,d=md:fd,v=mv:fv",
            "x.proto"]).
+
+renaming_options_test() ->
+    %% Legacy renamings
+    {ok, {[{msg_name_prefix,    "msg_prefix_"},
+           {msg_name_suffix,    "_msg_suffix"},
+           msg_name_to_lower],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-msgprefix", "msg_prefix_",
+           "-msgsuffix", "_msg_suffix",
+           "-msgtolower",
+           "x.proto"]),
+    %% Misc `What' renaming option values
+    {ok, {[{rename,{pkg_name,{prefix,"pkg_prefix_"}}},
+           {rename,{msg_name,{prefix,"msg_prefix_"}}},
+           {rename,{msg_fqname,{prefix,"msg_prefix_"}}},
+           {rename,{group_name,{prefix,"group_prefix_"}}},
+           {rename,{group_fqname,{prefix,"group_prefix_"}}},
+           {rename,{service_name,{prefix,"service_prefix_"}}},
+           {rename,{service_fqname,{prefix,"serice_prefix_"}}},
+           {rename,{rpc_name,{prefix,"rpc_prefix_"}}},
+           {rename,{msg_typename,{prefix,"msgtype_"}}},
+           {rename,{enum_typename,{prefix,"enumtype_"}}}] = WhatOpts,
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-rename", "pkg_name:prefix=pkg_prefix_",
+           "-rename", "msg_name:prefix=msg_prefix_",
+           "-rename", "msg_fqname:prefix=msg_prefix_",
+           "-rename", "group_name:prefix=group_prefix_",
+           "-rename", "group_fqname:prefix=group_prefix_",
+           "-rename", "service_name:prefix=service_prefix_",
+           "-rename", "service_fqname:prefix=serice_prefix_",
+           "-rename", "rpc_name:prefix=rpc_prefix_",
+           "-rename", "msg_typename:prefix=msgtype_",
+           "-rename", "enum_typename:prefix=enumtype_",
+           "x.proto"]),
+    [] = lists:filter(fun gpb_names:is_not_renaming_opt/1, WhatOpts),
+
+    %% Misc `How' renaming option values
+    {ok, {[{rename,{msg_fqname,{suffix,"_msg_suffix"}}},
+           {rename,{msg_fqname,lower_case}},
+           {rename,{msg_fqname,snake_case}},
+           {rename,{msg_fqname,dots_to_underscores}},
+           {rename,{msg_fqname,base_name}},
+           {rename,{msg_fqname,{prefix,
+                                {by_proto, [{"myfile","myfile_prefix_"}]}}}},
+           {rename,{msg_fqname,{prefix,
+                                {by_proto, [{"f1","p1_"},{"f2","p2_"}]}}}}
+          ] = HowOpts,
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-rename", "msg_fqname:suffix=_msg_suffix",
+           "-rename", "msg_fqname:lower_case",
+           "-rename", "msg_fqname:snake_case",
+           "-rename", "msg_fqname:dots_to_underscores",
+           "-rename", "msg_fqname:base_name",
+           "-rename", "msg_fqname:proto=myfile:prefix=myfile_prefix_",
+           "-rename", "msg_fqname:proto=f1:prefix=p1_,proto=f2:prefix=p2_",
+           "x.proto"]),
+    [] = lists:filter(fun gpb_names:is_not_renaming_opt/1, HowOpts),
+    ok.
 
 type_translation_options_test() ->
     {ok, {[{translate_type, {{msg,m},

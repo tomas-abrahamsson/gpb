@@ -1480,6 +1480,53 @@ c() ->
 %%       `-msgtolower'</dt>
 %%   <dd>ToLower each message. Any prefixes/suffixes are added
 %%       after case modification.</dd>
+%%   <dt><a id="cmdline-option-rename"/>
+%%       `-rename What:How'</dt>
+%%   <dd>The following `What' values are available:
+%%       <dl>
+%%         <dt>`pkg_name'</dt>
+%%         <dd>Modify the package name. Useful with the `-pkgs' option.</dd>
+%%         <dt>`msg_name'</dt>
+%%         <dd>Modify message names, but not the package part of them</dd>
+%%         <dt>`msg_fqname'</dt>
+%%         <dd>Modify message names, including their package parts.
+%%             Useful with the `-pkgs' option.</dd>
+%%         <dt>`group_name'</dt>
+%%         <dd>Group names.</dd>
+%%         <dt>`group_fqname'</dt>
+%%         <dd>Group names including their package parts.</dd>
+%%         <dt>`service_name'</dt>
+%%         <dd>Service names.</dd>
+%%         <dt>`service_fqname'</dt>
+%%         <dd>Service names including their package parts.</dd>
+%%         <dt>`rpc_name'</dt>
+%%         <dd>The RPC name.</dd>
+%%         <dt>`msg_typename'</dt>
+%%         <dd>Erlang type names for messages and groups.</dd>
+%%         <dt>`enum_typename'</dt>
+%%         <dd>Erlang type names for enums.</dd>
+%%       </dl>
+%%       The following `How' values are available:
+%%       <dl>
+%%         <dt>`prefix=Prefix'</dt>
+%%         <dd>Prepend the Prefix to the beginning of the name.</dd>
+%%         <dt>`suffix=Suffix'</dt>
+%%         <dd>Append the Suffix to the end of the name.</dd>
+%%         <dt>`lower_case'</dt>
+%%         <dd>Example: from `MsgName' to `msgname'</dd>
+%%         <dt>`snake_case'</dt>
+%%         <dd>Example: from `MsgName' to `msg_name'</dd>
+%%         <dt>`dots_to_underscores'</dt>
+%%         <dd>Example: from `Msg.Sub' to `Msg_Sub'</dd>
+%%         <dt>`base_name'</dt>
+%%         <dd>Example: from `Domain.Pkg.Msg' to `Msg'</dd>
+%%         <dt>`proto=Proto:prefix=Prefix[,...]'</dt>
+%%         <dd>For each message belonging the the .proto Proto, without the
+%%             `.proto' suffix, prepend `Prefix' to the beginning of the name.
+%%             This only works for `msg_name' and `msg_fqname'.</dd>
+%%       </dl>
+%%       It is possible to specify more than one -rename option,
+%%       and they are applied in the order specified.</dd>
 %%   <dt><a id="cmdline-option-il"/>
 %%       `-il'</dt>
 %%   <dd>Generate code that include gpb.hrl using `-include_lib'
@@ -1847,6 +1894,35 @@ opt_specs() ->
      {"msgtolower", undefined, msg_name_to_lower, "ToLower\n"
       "       ToLower each message.  Any prefixes/suffixes are added\n"
       "       after case modification.\n"},
+     {"rename", fun opt_rename/2, rename, " What:How\n"
+      "       What:\n"
+      "         pkg_name       Modify the package name. Useful\n"
+      "                        with the -pkgs option.\n"
+      "         msg_name       Modify message names, but not the package\n"
+      "                        partof them\n"
+      "         msg_fqname     Modify message names, including their\n"
+      "                        package part. Useful with the -pkgs option.\n"
+      "         group_name     Group names.\n"
+      "         group_fqname   Group names including their package parts.\n"
+      "         service_name   Service names.\n"
+      "         service_fqname Service names including their package parts.\n"
+      "         rpc_name       The RPC name.\n"
+      "         msg_typename   Erlang type names for messages and groups.\n"
+      "         enum_typename  Erlang type names for enums.\n"
+      "       How:\n"
+      "          prefix=Prefix        Prepend the Prefix.\n"
+      "          suffix=Suffix        Append the Suffix.\n"
+      "          lower_case           Example: from MsgName to msgname\n"
+      "          snake_case           Example: from MsgName to msg_name\n"
+      "          dots_to_underscores  Example: from Msg.Sub to Msg_Sub\n"
+      "          base_name            Example: from Domain.Pkg.Msg to Msg\n"
+      "          proto=Proto:prefix=Prefix[,...]\n"
+      "                               For each message belonging the the\n"
+      "                               proto Proto, without the `.proto'\n"
+      "                               suffix, prepend Prefix. This only\n"
+      "                               works for msg_name and msg_fqname.\n"
+      "       It is possible to specify more than one -rename option,\n"
+      "       and they are applied in the order specified.\n"},
      {"modsuffix", 'string()', module_name_suffix, "Suffix\n"
       "       Suffix the module name with Suffix.\n"},
      {"modname", 'string()', module_name, "Name\n"
@@ -1990,6 +2066,62 @@ opt_specs() ->
                 []
         end.
 
+
+opt_rename(OptTag, [S | Rest]) ->
+    try
+        {What, S2} =opt_rename_what(S),
+        How = opt_rename_how(What, S2),
+        Opt = {OptTag, {What, How}},
+        {ok, {Opt, Rest}}
+    catch throw:{badopt,ErrText} ->
+            {error, ErrText}
+    end.
+
+opt_rename_what(S) ->
+    case S of
+        "pkg_name:"++S2       -> {pkg_name, S2};
+        "msg_name:"++S2       -> {msg_name, S2};
+        "msg_fqname:"++S2     -> {msg_fqname, S2};
+        "group_name:"++S2     -> {group_name, S2};
+        "group_fqname:"++S2   -> {group_fqname, S2};
+        "service_name:"++S2   -> {service_name, S2};
+        "service_fqname:"++S2 -> {service_fqname, S2};
+        "rpc_name:"++S2       -> {rpc_name, S2};
+        "msg_typename:"++S2   -> {msg_typename, S2};
+        "enum_typename:"++S2  -> {enum_typename, S2};
+        _ -> throw({badopt, "Invalid thing to rename: "++S})
+    end.
+
+opt_rename_how(What, S) ->
+    case S of
+        "prefix="++Prefix -> {prefix, Prefix};
+        "suffix="++Suffix -> {suffix, Suffix};
+        "lower_case" -> lower_case;
+        "snake_case" -> snake_case;
+        "dots_to_underscores" -> dots_to_underscores;
+        "base_name" -> base_name;
+        "proto="++_ when What == msg_name;
+                         What == msg_fqname ->
+            {prefix, {by_proto, opt_rename_how_proto_prefix(S)}};
+        "proto="++_ ->
+            throw({badopt, "Expected proto= only allowed for msg_name and "
+                   "msg_fqname: " ++ ?ff("~p", [What])});
+        _ ->
+            throw({badopt, "Invalid renaming " ++ S})
+    end.
+
+opt_rename_how_proto_prefix("proto="++S) ->
+    case read_s(S, $:, "") of
+        {Proto, "prefix="++S2} ->
+            try read_s(S2, $,, "") of
+                {Prefix, Rest} ->
+                    [{Proto, Prefix} | opt_rename_how_proto_prefix(Rest)]
+            catch throw:{badopt, _} -> % no comma, end of list
+                    [{Proto, S2}]
+            end;
+        _ ->
+            throw({badopt, "Expected prefix= following proto="})
+    end.
 
 opt_no_type_specs(OptTag, Rest) ->
     Opt = {OptTag, false},
