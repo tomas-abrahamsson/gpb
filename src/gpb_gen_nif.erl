@@ -161,26 +161,29 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
 
 %% Create a mapping {msg,MsgName}   -> Info = #cc_msg{}
 %%                  {enum,EnumName} -> Info = #cc_enum{}
-calc_cc_mapping(Defs, _AnRes, Opts) ->
+calc_cc_mapping(Defs, #anres{renamings=Renamings}, Opts) ->
     UsesPackage = proplists:get_bool(use_packages, Opts),
     %% FIXME: take any renaming options into consideration as well
     {CCMapping, _Pkg, _Prefix} =
         lists:foldl(
           fun({package, Package}, {Acc, _Pkg, _PrevPkgPrefix}) ->
+                  Package1 = gpb_names:original_pkg_name(Package, Renamings),
                   if UsesPackage ->
                           %% Names are already prepended with package name,
                           %% on dotted form
-                          {Acc, atom_to_list(Package), ""};
+                          {Acc, atom_to_list(Package1), ""};
                      true ->
-                          CPkgPrefix = "::" ++ dot_replace_s(Package, "::"),
-                          {Acc, atom_to_list(Package), CPkgPrefix}
+                          CPkgPrefix = "::" ++ dot_replace_s(Package1, "::"),
+                          {Acc, atom_to_list(Package1), CPkgPrefix}
                   end;
              ({{msg, MsgName}, _Fields}, {Acc, Pkg, CPrefix}) ->
-                  CCType = CPrefix ++ "::" ++ dot_replace_s(MsgName, "::"),
+                  MsgName1 = gpb_names:original_msg_name(MsgName, Renamings),
+                  CCType = CPrefix ++ "::" ++ dot_replace_s(MsgName1, "::"),
                   Info = #cc_msg{type=CCType},
                   {[{MsgName, Info} | Acc], Pkg, CPrefix};
              ({{group, GName}, _Fields}, {Acc, Pkg, CPrefix}) ->
-                  CCType = CPrefix ++ "::" ++ dot_replace_s(GName, "::"),
+                  GName1 = gpb_names:original_group_name(GName, Renamings),
+                  CCType = CPrefix ++ "::" ++ dot_replace_s(GName1, "::"),
                   Info = #cc_msg{type=CCType},
                   {[{GName, Info} | Acc], Pkg, CPrefix};
              ({{enum, EnumName}, Enums}, {Acc, Pkg, CPrefix}) ->
@@ -205,9 +208,14 @@ calc_cc_mapping(Defs, _AnRes, Opts) ->
                   %% The C++ enums in .pb.h are declared in the namespace
                   %% but not inside any class.
                   %%
+                  EnumName1 = gpb_names:original_enum_name(EnumName,
+                                                           Renamings),
                   EnumPart = % eg: "top_level_enum" or "msg1.msg_level_enum"
-                      if UsesPackage -> split_enum_with_pkg(EnumName, Pkg);
-                         true -> atom_to_list(EnumName)
+                      if UsesPackage,
+                         Pkg /= '$undefined' ->
+                              split_enum_with_pkg(EnumName1, Pkg);
+                         true ->
+                              atom_to_list(EnumName1)
                       end,
                   CPkg = if Pkg /= '$undefined' ->
                                  "::" ++ dot_replace_s(Pkg, "::");

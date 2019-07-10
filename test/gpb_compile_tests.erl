@@ -2714,7 +2714,9 @@ nif_code_test_() ->
        ?nif_if_supported(nif_with_non_normal_floats),
        ?nif_if_supported(error_if_both_translations_and_nif),
        ?nif_if_supported(bypass_wrappers_records_nif),
-       ?nif_if_supported(nif_with_packages_and_enums)]).
+       ?nif_if_supported(nif_with_packages_and_enums),
+       ?nif_if_supported(nif_with_renamings),
+       ?nif_if_supported(nif_with_opt_but_no_package)]).
 
 increase_timeouts({Descr, Tests}) ->
     %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
@@ -3364,32 +3366,34 @@ bypass_wrappers_records_nif() ->
                 end)
       end).
 
+nif_with_packages_and_enums_protos() ->
+    [{"gpb_pkg_a.proto",
+      "
+        syntax='proto2';
+        import 'gpb_pkg_b.proto';
+        package pkg.a;
+        message MsgA {
+          required pkg.b.MsgB submsg = 1;
+          required ee1        e1 = 2;
+          required ee2        e2 = 3;
+          enum ee2 { ba = 0; bb = 1; }
+        }
+        enum ee1 { aa = 0; ab = 1; }
+      "},
+     {"gpb_pkg_b.proto",
+      "
+        syntax='proto2';
+        package pkg.b;
+        message MsgB { required uint32 f = 1; }
+      "}].
+
 nif_with_packages_and_enums(features) -> [];
 nif_with_packages_and_enums(title) -> "Nif with packages and enums".
 nif_with_packages_and_enums() ->
     with_tmpdir(
       fun(TmpDir) ->
-              M = gpb_pkg_a,
-              ProtoTexts =
-                  [{"gpb_pkg_a.proto", % must match variable M
-                    "
-                      syntax='proto2';
-                      import 'gpb_pkg_b.proto';
-                      package pkg.a;
-                      message MsgA {
-                        required pkg.b.MsgB submsg = 1;
-                        required ee1        e1 = 2;
-                        required ee2        e2 = 3;
-                        enum ee2 { ba = 0; bb = 1; }
-                      }
-                      enum ee1 { aa = 0; ab = 1; }
-                    "},
-                   {"gpb_pkg_b.proto",
-                    "
-                      syntax='proto2';
-                      package pkg.b;
-                      message MsgB { required uint32 f = 1; }
-                    "}],
+              ProtoTexts = nif_with_packages_and_enums_protos(),
+              M = gpb_pkg_a, % must match first ProtoText
               {ok, Code} = compile_nif_several_msg_defs(M, ProtoTexts, TmpDir,
                                                         [use_packages]),
               in_separate_vm(
@@ -3398,6 +3402,47 @@ nif_with_packages_and_enums() ->
                         OrigMsg = {'pkg.a.MsgA', {'pkg.b.MsgB', 17}, ab, ba},
                         Encoded = M:encode_msg(OrigMsg),
                         OrigMsg = M:decode_msg(Encoded, 'pkg.a.MsgA')
+                end)
+      end).
+
+nif_with_renamings(features) -> [];
+nif_with_renamings(title) -> "Nif with renamings".
+nif_with_renamings() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              ProtoTexts = nif_with_packages_and_enums_protos(),
+              M = gpb_pkg_a, % must match first ProtoText
+              RenamingOpts = [{rename, {msg_fqname, base_name}},
+                              {rename, {msg_fqname, snake_case}}],
+              {ok, Code} = compile_nif_several_msg_defs(
+                             M, ProtoTexts, TmpDir,
+                             [use_packages] ++ RenamingOpts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {msg_a, {msg_b, 17}, ab, ba},
+                        Encoded = M:encode_msg(OrigMsg),
+                        OrigMsg = M:decode_msg(Encoded, msg_a)
+                end)
+      end).
+
+nif_with_opt_but_no_package(features) -> [];
+nif_with_opt_but_no_package(title) -> "Nif with use_package option but no pkg".
+nif_with_opt_but_no_package() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_opt_but_no_pkgs,
+              DefsTxt = lf_lines(["message m1 {",
+                                  "    required uint32 f = 1;",
+                                  "}"]),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir,
+                                                [use_packages]),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {m1,4711},
+                        Encoded = M:encode_msg(OrigMsg),
+                        OrigMsg = M:decode_msg(Encoded, m1)
                 end)
       end).
 
