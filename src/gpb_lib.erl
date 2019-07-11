@@ -102,6 +102,7 @@
 -export([json_array_format_by_opts/1]).
 -export([json_string_format_by_opts/1]).
 -export([json_null/1]).
+-export([get_gen_mergers/1]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
@@ -804,6 +805,9 @@ json_string_format_by_opts(Opts) ->
 
 json_null(Opts) ->
     proplists:get_value(json_string_format, Opts, null).
+
+get_gen_mergers(Opts) ->
+    proplists:get_value(gen_mergers, Opts, true).
 
 %% Syntax tree stuff ----
 

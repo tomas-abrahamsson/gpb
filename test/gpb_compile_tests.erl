@@ -2716,7 +2716,8 @@ nif_code_test_() ->
        ?nif_if_supported(bypass_wrappers_records_nif),
        ?nif_if_supported(nif_with_packages_and_enums),
        ?nif_if_supported(nif_with_renamings),
-       ?nif_if_supported(nif_with_opt_but_no_package)]).
+       ?nif_if_supported(nif_with_opt_but_no_package),
+       ?nif_if_supported(nif_without_mergers)]).
 
 increase_timeouts({Descr, Tests}) ->
     %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
@@ -3443,6 +3444,27 @@ nif_with_opt_but_no_package() ->
                         OrigMsg = {m1,4711},
                         Encoded = M:encode_msg(OrigMsg),
                         OrigMsg = M:decode_msg(Encoded, m1)
+                end)
+      end).
+
+nif_without_mergers(features) -> [];
+nif_without_mergers(title) -> "Nif with no mergers".
+nif_without_mergers() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_no_mergers,
+              DefsTxt = lf_lines(["message m1 {",
+                                  "    required uint32 f = 1;",
+                                  "}"]),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir,
+                                                [{gen_mergers,false},nif]),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        OrigMsg = {m1,4711},
+                        Encoded = M:encode_msg(OrigMsg),
+                        OrigMsg = M:decode_msg(Encoded, m1),
+                        ?assertError(undef, M:merge_msgs(OrigMsg, OrigMsg))
                 end)
       end).
 
@@ -4461,6 +4483,11 @@ field_translation_options_test() ->
 no_type_specs_test() ->
     {ok, {[{type_specs, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-no_type", "x.proto"]).
+
+no_gen_mergers_test() ->
+    {ok, {[nif, {gen_mergers, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-nif", "-no-gen-mergers",
+                                         "x.proto"]).
 
 dashes_and_underscores_are_interchangeable_in_options_test() ->
     {ok, {[{target_erlang_version,18}, {target_erlang_version,18}],

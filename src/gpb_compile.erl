@@ -172,6 +172,7 @@
                {json_array_format, json_array_format()} |
                {json_string_format, json_string_format()} |
                {json_null, atom()} |
+               boolean_opt(gen_mergers) |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -820,7 +821,11 @@ file(File) ->
 %% <a id="option-json_null"/>
 %% The `{json_null,atom()}' option specifies the atom to use
 %% for the JSON `null' value. The default is to use the atom `null'.
-
+%%
+%% <a id="option-gen_mergers"/>
+%% The `{gen_mergers,false}' option will cause gpb to not generate code for
+%% merging of messages. This is only useful with the option `nif'. One
+%% rationale for this is option is to reduce the size of the generated code.
 
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
@@ -1018,7 +1023,8 @@ do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
 verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_translation_and_nif(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
-              fun() -> verify_opts_flat_oneof(Opts) end]).
+              fun() -> verify_opts_flat_oneof(Opts) end,
+              fun() -> verify_opts_no_gen_mergers(Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -1089,6 +1095,16 @@ check_maps_flat_oneof_may_fail_on_compilation(Opts) ->
             end;
         _ ->
             []
+    end.
+
+verify_opts_no_gen_mergers(Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    GenMergers = proplists:get_value(gen_mergers, Opts),
+    case {DoNif, GenMergers} of
+        {_,     undefined} -> ok; % default for gen_mergers is true
+        {_,     true} -> ok;
+        {true,  false} -> ok;
+        {false, false} -> {error, {invalid_options, nif, {gen_mergers,false}}}
     end.
 
 %% @equiv msg_defs(Mod, Defs, [])
@@ -1276,6 +1292,8 @@ fmt_err({unsupported_translation, _Type, non_msg_type}) ->
 fmt_err({invalid_options, epb_functions, maps}) ->
     "Option error: Not supported: both epb_compatibility (or epb_functions) "
         "and maps";
+fmt_err({invalid_options, nif, {gen_mergers, false}}) ->
+    "Option error: It is only possible to omit mergers with nif";
 fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
@@ -1655,6 +1673,10 @@ c() ->
 %%   <dd>Make case insignificant when parsing enums in JSON. Also allow
 %%       dash as alternative to undercore.
 %%       Default is that case <em>is</em> significant when parsing enums.</dd>
+%%   <dt><a id="cmdline-option-no-gen-mergers"/>
+%%       `-no-gen-mergers'</dt>
+%%   <dd>Do not generate code for merging of messages. This is only useful
+%%       with the option `-nif'.</dd>
 %%   <dt><a id="cmdline-option-W"/>
 %%       `-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
@@ -1932,7 +1954,7 @@ opt_specs() ->
       "       instead of -include, which is the default.\n"},
      {"type", undefined, type_specs, "\n"
       "       Enables `::Type()' annotations in the generated code.\n"},
-     {"no_type", fun opt_no_type_specs/2, type_specs, "\n"
+     {"no_type", fun opt_x_false/2, type_specs, "\n"
       "       Disbles `::Type()' annotations in the generated code.\n"},
      {"descr", undefined, descriptor, "\n"
       "       Generate self-description information.\n"},
@@ -2030,7 +2052,10 @@ opt_specs() ->
       json_case_insensitive_enum_parsing, "\n"
       "       Make case insignificant when parsing enums in JSON. Also allow\n"
       "       dash as alternative to undercore.\n"
-      "       Default is that case _is_ significant when parsing enums."},
+      "       Default is that case _is_ significant when parsing enums.\n"},
+     {"no-gen-mergers", fun opt_x_false/2, gen_mergers, "\n"
+      "       Do not generate code for merging of messages. This is only\n"
+      "       usefulwith the option -nif.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
@@ -2123,7 +2148,7 @@ opt_rename_how_proto_prefix("proto="++S) ->
             throw({badopt, "Expected prefix= following proto="})
     end.
 
-opt_no_type_specs(OptTag, Rest) ->
+opt_x_false(OptTag, Rest) ->
     Opt = {OptTag, false},
     {ok, {Opt, Rest}}.
 
@@ -2622,6 +2647,7 @@ format_erl(Mod, Defs, DefsNoRenamings,
     DoNif = proplists:get_bool(nif, Opts),
     AsLib = proplists:get_bool(include_as_lib, Opts),
     DoJson = gpb_lib:json_by_opts(Opts),
+    DoMergers = gpb_lib:get_gen_mergers(Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
       [?f("%% @private~n"
@@ -2636,7 +2662,7 @@ format_erl(Mod, Defs, DefsNoRenamings,
        "\n",
        gpb_gen_encoders:format_exports(Defs, Opts),
        gpb_gen_decoders:format_exports(Defs, Opts),
-       gpb_gen_mergers:format_exports(Defs, Opts),
+       [gpb_gen_mergers:format_exports(Defs, Opts) || DoMergers],
        gpb_gen_verifiers:format_exports(Defs, Opts),
        [[gpb_gen_json_encoders:format_exports(Defs, Opts),
          gpb_gen_json_decoders:format_exports(Defs, Opts)]
@@ -2719,7 +2745,8 @@ format_erl(Mod, Defs, DefsNoRenamings,
                 gpb_gen_decoders:format_aux_decoders(Defs, AnRes, Opts)]
        end,
        "\n",
-       gpb_gen_mergers:format_msg_merge_code(Defs, AnRes, Opts),
+       [gpb_gen_mergers:format_msg_merge_code(Defs, AnRes, Opts)
+        || DoMergers],
        "\n",
        gpb_gen_verifiers:format_verifiers_top_function(Defs, AnRes, Opts),
        "\n",
