@@ -1,5 +1,18 @@
 -*- coding: utf-8 -*-
 
+Version 4.10.0
+2019-Jul-11
+
+        * New options {gen_mergers,false} (-no-gen-mergers)
+        and {gen_introspect,false} (-no-gen-introspect)
+        mainly to reduce size of the generated code, especially with nif.
+        The first option even requires nif, since merging is an integral
+        part of decoding, generally.
+
+        * Make the rename option available also as a command line option.
+
+        * Make nif code generation handle renamings.
+
 Version 4.9.3
 2019-Jul-10
 
