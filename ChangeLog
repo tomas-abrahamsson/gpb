@@ -7,11 +7,12 @@ Version 4.10.0
         and {gen_introspect,false} (-no-gen-introspect)
         mainly to reduce size of the generated code, especially with nif.
         The first option even requires nif, since merging is an integral
-        part of decoding, generally.
+        part of decoding, generally. (#168)
 
-        * Make the rename option available also as a command line option.
+        * Make the rename option available also as a command line
+        option. (#168)
 
-        * Make nif code generation handle renamings.
+        * Make nif code generation handle renamings. (#168)
 
 Version 4.9.3
 2019-Jul-10
