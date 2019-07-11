@@ -349,6 +349,21 @@ bypassed_wrappers_records_test() ->
     _ = Mod3:module_info(),
     unload_code(Mod3).
 
+no_gen_introspect_test() ->
+    DefsM1 = "message m1 { required uint32 a = 1; }\n",
+
+    Mod1 = compile_iolist(DefsM1, [{gen_introspect,false}]),
+    M1 = #m1{a=1234},
+    B1 = Mod1:encode_msg(M1),
+    M1 = Mod1:decode_msg(B1, m1),
+    Fn = get_msg_names,
+    ?assertError(undef, Mod1:Fn()),
+    unload_code(Mod1),
+    %% verify function gets generated with no option (to verify test works)
+    Mod2 = compile_iolist(DefsM1, []),
+    [_] = Mod2:Fn(),
+    unload_code(Mod2).
+
 field_pass_as_params_test() ->
     {timeout,10,fun field_pass_as_params_test_aux/0}.
 
@@ -4488,6 +4503,10 @@ no_gen_mergers_test() ->
     {ok, {[nif, {gen_mergers, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-nif", "-no-gen-mergers",
                                          "x.proto"]).
+
+no_gen_intospections_test() ->
+    {ok, {[{gen_introspect, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]).
 
 dashes_and_underscores_are_interchangeable_in_options_test() ->
     {ok, {[{target_erlang_version,18}, {target_erlang_version,18}],

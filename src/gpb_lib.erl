@@ -103,6 +103,7 @@
 -export([json_string_format_by_opts/1]).
 -export([json_null/1]).
 -export([get_gen_mergers/1]).
+-export([get_gen_introspect/1]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
@@ -808,6 +809,9 @@ json_null(Opts) ->
 
 get_gen_mergers(Opts) ->
     proplists:get_value(gen_mergers, Opts, true).
+
+get_gen_introspect(Opts) ->
+    proplists:get_value(gen_introspect, Opts, true).
 
 %% Syntax tree stuff ----
 

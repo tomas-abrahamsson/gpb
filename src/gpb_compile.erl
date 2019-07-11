@@ -173,6 +173,7 @@
                {json_string_format, json_string_format()} |
                {json_null, atom()} |
                boolean_opt(gen_mergers) |
+               boolean_opt(gen_introspect) |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -826,6 +827,11 @@ file(File) ->
 %% The `{gen_mergers,false}' option will cause gpb to not generate code for
 %% merging of messages. This is only useful with the option `nif'. One
 %% rationale for this is option is to reduce the size of the generated code.
+%%
+%% <a id="option-gen_introspect"/>
+%% The `{gen_introspect,false}' option will cause gpb to not generate code
+%% for introspection. One rationale for this is option is to reduce the size of
+%% the generated code.
 
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
@@ -1677,6 +1683,9 @@ c() ->
 %%       `-no-gen-mergers'</dt>
 %%   <dd>Do not generate code for merging of messages. This is only useful
 %%       with the option `-nif'.</dd>
+%%   <dt><a id="cmdline-option-no-gen-introspect"/>
+%%       `-no-gen-introspect'</dt>
+%%   <dd>Do not generate code for introspection.</dd>
 %%   <dt><a id="cmdline-option-W"/>
 %%       `-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
@@ -2056,6 +2065,8 @@ opt_specs() ->
      {"no-gen-mergers", fun opt_x_false/2, gen_mergers, "\n"
       "       Do not generate code for merging of messages. This is only\n"
       "       usefulwith the option -nif.\n"},
+     {"no-gen-introspect", fun opt_x_false/2, gen_introspect, "\n"
+      "       Do not generate code for introspection.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
@@ -2648,6 +2659,7 @@ format_erl(Mod, Defs, DefsNoRenamings,
     AsLib = proplists:get_bool(include_as_lib, Opts),
     DoJson = gpb_lib:json_by_opts(Opts),
     DoMergers = gpb_lib:get_gen_mergers(Opts),
+    DoIntrospect = gpb_lib:get_gen_introspect(Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
       [?f("%% @private~n"
@@ -2667,7 +2679,7 @@ format_erl(Mod, Defs, DefsNoRenamings,
        [[gpb_gen_json_encoders:format_exports(Defs, Opts),
          gpb_gen_json_decoders:format_exports(Defs, Opts)]
         || DoJson],
-       gpb_gen_introspect:format_exports(Defs, AnRes, Opts),
+       [gpb_gen_introspect:format_exports(Defs, AnRes, Opts) || DoIntrospect],
        [?f("-export([descriptor/0, descriptor/1]).~n")
         || gpb_lib:get_gen_descriptor_by_opts(Opts)],
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
@@ -2777,7 +2789,8 @@ format_erl(Mod, Defs, DefsNoRenamings,
          end]
         || DoJson],
        "\n",
-       gpb_gen_introspect:format_introspection(Defs, AnRes, Opts),
+       [gpb_gen_introspect:format_introspection(Defs, AnRes, Opts)
+        || DoIntrospect],
        "\n",
        possibly_format_descriptor(DefsNoRenamings, Opts),
        "\n",
