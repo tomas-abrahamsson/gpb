@@ -297,9 +297,6 @@ mk_check_null_decode_value_update_field_expr(
   MsgName, #?gpb_field{type=Type, occurrence=Occurrence}=Field, IsOneof,
   JValueExpr, EMsgVar, TrUserDataVar,
   AnRes, Opts) ->
-    %% FIXME: handle repeated
-    %% FIXME: handle map<_,_>
-    %% FIXME: gpb_compile: remove transl gen workaround for no from_json calls
     JNull = gpb_lib:json_null(Opts),
     DecExpr =
         case occurrence_or_mapfield(Occurrence, Type) of
