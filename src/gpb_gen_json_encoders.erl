@@ -633,6 +633,24 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
             {true, fun format_to_json_p3wellknown_duration/5};
         'google.protobuf.Timestamp' ->
             {true, fun format_to_json_p3wellknown_timestamp/5};
+        'google.protobuf.DoubleValue' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.FloatValue' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.Int64Value' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.UInt64Value' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.Int32Value' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.UInt32Value' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.BoolValue' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.StringValue' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.BytesValue' ->
+            {true, fun format_to_json_p3wellknown_wrapper/5};
         _ ->
             false
     end.
@@ -689,6 +707,21 @@ format_to_json_p3wellknown_timestamp(MsgName, MsgDef, Defs, AnRes, Opts) ->
                tj_string([DateStr, NanosStr, "Z"])
        end,
        [replace_tree('field-infos', FieldInfos)])].
+
+format_to_json_p3wellknown_wrapper(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+    ToJsonExpr = type_to_json_expr(?expr(Value), hd(MsgDef),
+                                   ?expr(_TrUserData)),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Msg, TrUserData) ->
+               [Value] = tj_get_fields(Msg, 'field-infos', TrUserData),
+               'to_json_expr(Value)'
+       end,
+       [replace_tree('field-infos', FieldInfos),
+        replace_tree('to_json_expr(Value)', ToJsonExpr)])].
+
 
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
     KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
@@ -914,7 +947,19 @@ format_tagged_list_array_helpers(Tag) ->
 format_json_p3wellknowns_helpers(AnRes, Opts) ->
     UsesP3Duration = uses_msg('google.protobuf.Duration', AnRes),
     UsesP3Timestamp = uses_msg('google.protobuf.Timestamp', AnRes),
-    UsesP3Wellknown = UsesP3Duration or UsesP3Timestamp,
+    UsesP3Float = uses_msg('google.protobuf.FloatValue', AnRes),
+    UsesP3Double = uses_msg('google.protobuf.DoubleValue', AnRes),
+    UsesP3Int64 = uses_msg('google.protobuf.Int64Value', AnRes),
+    UsesP3UInt64 = uses_msg('google.protobuf.UInt64Value', AnRes),
+    UsesP3Int32 = uses_msg('google.protobuf.Int32Value', AnRes),
+    UsesP3UInt32 = uses_msg('google.protobuf.UInt32Value', AnRes),
+    UsesP3Bool = uses_msg('google.protobuf.BoolValue', AnRes),
+    UsesP3String = uses_msg('google.protobuf.StringValue', AnRes),
+    UsesP3Bytes = uses_msg('google.protobuf.BytesValue', AnRes),
+    UsesP3Wellknown = UsesP3Duration or UsesP3Timestamp
+        or UsesP3Float or UsesP3Double or UsesP3Int64 or UsesP3UInt64
+        or UsesP3Int32 or UsesP3UInt32 or UsesP3Bool or UsesP3String
+        or UsesP3Bytes,
     NeedsDotNanos = UsesP3Duration or UsesP3Timestamp,
     [if not UsesP3Wellknown ->
              "";
@@ -1002,12 +1047,15 @@ format_json_type_helpers(#anres{used_types=UsedTypes,
     %% int64 types and enums also encode to strings
     UsesP3WellknownDuration = uses_msg('google.protobuf.Duration', AnRes),
     UsesP3WellknownTimestamp = uses_msg('google.protobuf.Timestamp', AnRes),
+    UsesP3WellknownStringValue = uses_msg('google.protobuf.StringValue',
+                                          AnRes),
     NeedStringType = (gpb_lib:smember(string, UsedTypes)
                       orelse HaveMapfields
                       orelse HaveInt64
                       orelse HaveEnum
                       orelse UsesP3WellknownDuration
-                      orelse UsesP3WellknownTimestamp),
+                      orelse UsesP3WellknownTimestamp
+                      orelse UsesP3WellknownStringValue),
     NeedBytesType = gpb_lib:smember(bytes, UsedTypes),
 
     [[gpb_codegen:format_fn(

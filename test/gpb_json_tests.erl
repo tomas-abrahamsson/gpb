@@ -865,6 +865,83 @@ p3wellknown_timestamp_test() ->
     %% done
     unload_code(M1).
 
+p3wellknown_wrappers_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/wrappers.proto';
+        message Double { google.protobuf.DoubleValue f = 1; }
+        message Float  { google.protobuf.FloatValue f = 1; }
+        message I64    { google.protobuf.Int64Value f = 1; }
+        message U64    { google.protobuf.UInt64Value f = 1; }
+        message I32    { google.protobuf.Int32Value f = 1; }
+        message U32    { google.protobuf.UInt32Value f = 1; }
+        message Bool   { google.protobuf.BoolValue f = 1; }
+        message String { google.protobuf.StringValue f = 1; }
+        message Bytes  { google.protobuf.BytesValue f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    F = <<"f">>,
+    DoubleValue = 'google.protobuf.DoubleValue',
+    FloatValue = 'google.protobuf.FloatValue',
+    [{F, 0.125}] = M1:to_json({'Double', {DoubleValue, 0.125}}),
+    [{}]         = M1:to_json({'Double', undefined}),
+    [{F, 0.125}] = M1:to_json({'Float', {FloatValue, 0.125}}),
+    [{}]         = M1:to_json({'Float', undefined}),
+    I64Value = 'google.protobuf.Int64Value',
+    U64Value = 'google.protobuf.UInt64Value',
+    I32Value = 'google.protobuf.Int32Value',
+    U32Value = 'google.protobuf.UInt32Value',
+    [{F, <<"123">>}] = M1:to_json({'I64', {I64Value, 123}}),
+    [{}]             = M1:to_json({'I64', undefined}),
+    [{F, <<"123">>}] = M1:to_json({'U64', {U64Value, 123}}),
+    [{}]             = M1:to_json({'U64', undefined}),
+    [{F, 123}]       = M1:to_json({'I32', {I32Value, 123}}),
+    [{}]             = M1:to_json({'I32', undefined}),
+    [{F, 123}]       = M1:to_json({'U32', {U32Value, 123}}),
+    [{}]             = M1:to_json({'U32', undefined}),
+    BoolValue   = 'google.protobuf.BoolValue',
+    StringValue = 'google.protobuf.StringValue',
+    BytesValue  = 'google.protobuf.BytesValue',
+    [{F, true}]       = M1:to_json({'Bool', {BoolValue, true}}),
+    [{}]              = M1:to_json({'Bool', undefined}),
+    [{F, <<"abc">>}]  = M1:to_json({'String', {StringValue, <<"abc">>}}),
+    [{}]              = M1:to_json({'String', undefined}),
+    [{F, <<"YQA=">>}] = M1:to_json({'Bytes', {BytesValue, <<"a",0>>}}),
+    [{}]              = M1:to_json({'Bytes', undefined}),
+    %% Decoding ---
+    {'Double', {DoubleValue, 0.0}}   = M1:from_json([{}],         'Double'),
+    {'Double', {DoubleValue, 0.0}}   = M1:from_json([{F, null}],  'Double'),
+    {'Double', {DoubleValue, 0.125}} = M1:from_json([{F, 0.125}], 'Double'),
+    {'Float', {FloatValue, 0.0}}   = M1:from_json([{}],         'Float'),
+    {'Float', {FloatValue, 0.0}}   = M1:from_json([{F, null}],  'Float'),
+    {'Float', {FloatValue, 0.125}} = M1:from_json([{F, 0.125}], 'Float'),
+    {'I64', {I64Value, 0}}  = M1:from_json([{}],            'I64'),
+    {'I64', {I64Value, 0}}  = M1:from_json([{F, null}],     'I64'),
+    {'I64', {I64Value, 17}} = M1:from_json([{F, <<"17">>}], 'I64'),
+    {'U64', {U64Value, 0}}  = M1:from_json([{}],            'U64'),
+    {'U64', {U64Value, 0}}  = M1:from_json([{F, null}],     'U64'),
+    {'U64', {U64Value, 17}} = M1:from_json([{F, <<"17">>}], 'U64'),
+    {'I32', {I32Value, 0}}  = M1:from_json([{}],        'I32'),
+    {'I32', {I32Value, 0}}  = M1:from_json([{F, null}], 'I32'),
+    {'I32', {I32Value, 17}} = M1:from_json([{F, 17}],   'I32'),
+    {'U32', {U32Value, 0}}  = M1:from_json([{}],        'U32'),
+    {'U32', {U32Value, 0}}  = M1:from_json([{F, null}], 'U32'),
+    {'U32', {U32Value, 17}} = M1:from_json([{F, 17}],   'U32'),
+    {'Bool', {BoolValue, false}} = M1:from_json([{}],         'Bool'),
+    {'Bool', {BoolValue, false}} = M1:from_json([{F, null}],  'Bool'),
+    {'Bool', {BoolValue, false}} = M1:from_json([{F, false}], 'Bool'),
+    {'Bool', {BoolValue, true}}  = M1:from_json([{F, true}],  'Bool'),
+    {'String', {StringValue, ""}}  = M1:from_json([{}],           'String'),
+    {'String', {StringValue, ""}}  = M1:from_json([{F, null}],    'String'),
+    {'String', {StringValue, "a"}} = M1:from_json([{F, <<"a">>}], 'String'),
+    {'Bytes', {BytesValue, <<>>}}  = M1:from_json([{}],           'Bytes'),
+    {'Bytes', {BytesValue, <<>>}}  = M1:from_json([{F, null}],    'Bytes'),
+    {'Bytes', {BytesValue, <<"a",0>>}} = M1:from_json([{F, <<"YQA=">>}],
+                                                      'Bytes'),
+    %% done
+    unload_code(M1).
+
 lower_camel_case_test() ->
     %% "Message field names are mapped to lowerCamelCase ..."
     Proto = "

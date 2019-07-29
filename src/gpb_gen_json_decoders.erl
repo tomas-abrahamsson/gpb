@@ -158,22 +158,29 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     %% - recursively merged if the field is another sub message.
     %% )
     %%
-    TrUserDataVar = ?expr(TrUserData),
-    InitExprs = gpb_decoders_lib:init_exprs(MsgName, MsgDef, Defs,
-                                            TrUserDataVar, AnRes, Opts),
+
+    %% Writing TrUserDataVar = ?expr(TrUserData) ought to be the same,
+    %% but dialyzer complains down in the mk_call function.
+    TrUserDataVar = erl_syntax:variable("TrUserData"),
+
+    InitExprs1 = gpb_decoders_lib:init_exprs(MsgName, MsgDef, Defs,
+                                             TrUserDataVar, AnRes, Opts),
     IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
-    FieldInfos = gpb_decoders_lib:calc_field_infos(MsgDef, IsProto3, Opts),
+    FieldInfos1 = gpb_decoders_lib:calc_field_infos(MsgDef, IsProto3, Opts),
+    {InitExprs2, FieldInfos2} = defaultify_p3wellknowns(InitExprs1, MsgDef,
+                                                        FieldInfos1,
+                                                        TrUserDataVar),
     if MsgDef == [] ->
             format_msg_decoder_no_fields(MsgName, Opts);
        MsgDef /= [] ->
-            [format_msg_init_decoder(MsgName, InitExprs, FieldInfos,
+            [format_msg_init_decoder(MsgName, InitExprs2, FieldInfos2,
                                      TrUserDataVar, Opts),
              format_msg_decoder_loop(MsgName, MsgDef,
                                      TrUserDataVar, AnRes, Opts)]
     end.
 
 format_msg_decoder_no_fields(MsgName, Opts) ->
-    InitExprs1 = calc_init_exprs(MsgName, [], [], Opts),
+    InitExprs1 = calc_init_msg_expr(MsgName, [], [], Opts),
     gpb_codegen:format_fn(
       gpb_lib:mk_fn(from_json_msg_, MsgName),
       fun(_Json, _TrUserData) ->
@@ -182,7 +189,7 @@ format_msg_decoder_no_fields(MsgName, Opts) ->
       [replace_tree('<init>', InitExprs1)]).
 
 format_msg_init_decoder(MsgName, InitExprs, FieldInfos, TrUserDataVar, Opts) ->
-    InitExprs1 = calc_init_exprs(MsgName, InitExprs, FieldInfos, Opts),
+    InitMsg = calc_init_msg_expr(MsgName, InitExprs, FieldInfos, Opts),
     FromJAuxFn = gpb_lib:mk_fn(fj_msg_, MsgName),
     gpb_codegen:format_fn(
       gpb_lib:mk_fn(from_json_msg_, MsgName),
@@ -190,10 +197,10 @@ format_msg_init_decoder(MsgName, InitExprs, FieldInfos, TrUserDataVar, Opts) ->
               '<fj_msg_MsgName>'(fj_next(fj_iter(Json)), '<init>', 'TrUserData')
       end,
       [replace_term('<fj_msg_MsgName>', FromJAuxFn),
-       replace_tree('<init>', InitExprs1),
+       replace_tree('<init>', InitMsg),
        replace_tree('TrUserData', TrUserDataVar)]).
 
-calc_init_exprs(MsgName, InitExprs, FieldInfos, Opts) ->
+calc_init_msg_expr(MsgName, InitExprs, FieldInfos, Opts) ->
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     case MappingUnset of
         records ->
@@ -201,21 +208,59 @@ calc_init_exprs(MsgName, InitExprs, FieldInfos, Opts) ->
         #maps{unset_optional=present_undefined} ->
             gpb_lib:map_create(InitExprs, Opts);
         #maps{unset_optional=omitted, oneof=tuples} ->
-            InitExprs1 = repeated_or_required_init_exprs(InitExprs, FieldInfos),
-            gpb_lib:map_create(InitExprs1, Opts);
+            InitExprs2 = repeated_or_required_or_needed_init_exprs(
+                           InitExprs, FieldInfos),
+            gpb_lib:map_create(InitExprs2, Opts);
         #maps{unset_optional=omitted, oneof=flat} ->
-            InitExprs1 = repeated_or_required_init_exprs(InitExprs, FieldInfos),
-            gpb_lib:map_create(InitExprs1, Opts)
+            InitExprs2 = repeated_or_required_or_needed_init_exprs(
+                           InitExprs, FieldInfos),
+            gpb_lib:map_create(InitExprs2, Opts)
     end.
 
-repeated_or_required_init_exprs(InitExprs, FieldInfos) ->
+repeated_or_required_or_needed_init_exprs(InitExprs, FieldInfos) ->
     [{FName, InitExpr}
      || {FName, InitExpr, Occ} <- kzip(InitExprs, FieldInfos),
-        Occ == required orelse Occ == repeated].
+        Occ == required orelse Occ == repeated orelse Occ == needed].
+
+kunzip(L12) ->
+    lists:unzip([{{K, V1}, {K, V2}} || {K, V1, V2} <- L12]).
 
 kzip(L1, L2) ->
     lists:map(fun({{K, V1}, {K, V2}}) -> {K, V1, V2} end,
               lists:zip(L1, L2)).
+
+defaultify_p3wellknowns(InitExprs, MsgDef, FieldInfos, TrUserDataVar) ->
+    %% Given this proto
+    %%   message Msg {
+    %%      SubMsg                      f1 = 1;
+    %%      uint32                      f2 = 2;
+    %%      google.protobuf.UInt32Value f3 = 3;
+    %%   }
+    %% and either of these JSONs to decode:
+    %%   {}
+    %%   {"f3": null}
+    %% Then the decoding is to be:
+    %%   #{f3 => #{value => 0}}
+    %% Ie for wrappers (at least), special handling for
+    %% omitted values is needed.
+    kunzip(
+      lists:map(
+        fun({{FName, InitExpr, Occ}, #?gpb_field{type={msg,MsgName}}}) ->
+                case lists:member(MsgName, p3wellknown_wrappers()) of
+                    true ->
+                        FnNameDefault = gpb_lib:mk_fn(fj_default_, MsgName),
+                        InitExpr2 = mk_call(FnNameDefault, [TrUserDataVar]),
+                        {FName, InitExpr2, needed};
+                    false ->
+                        {FName, InitExpr, Occ}
+                end;
+           ({{FName, InitExpr, Occ}, _Field}) ->
+                {FName, InitExpr, Occ}
+        end,
+        lists:zip(kzip(InitExprs, FieldInfos), MsgDef))).
+
+mk_call(FnName, Args) ->
+    erl_syntax:application(erl_syntax:atom(FnName), Args).
 
 format_msg_decoder_loop(MsgName, MsgDef, TrUserDataVar, AnRes, Opts) ->
     JValueExpr = ?expr(JValue),
@@ -689,6 +734,24 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
             {true, fun format_p3wellknown_duration_decoder/5};
         'google.protobuf.Timestamp' ->
             {true, fun format_p3wellknown_timestamp_decoder/5};
+        'google.protobuf.DoubleValue' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.FloatValue' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.Int64Value' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.UInt64Value' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.Int32Value' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.UInt32Value' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.BoolValue' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.StringValue' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.BytesValue' ->
+            {true, fun format_p3wellknown_wrapper_decoder/5};
         _ ->
             false
     end.
@@ -876,6 +939,23 @@ format_p3wellknown_timestamp_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                end
        end),
      ""].
+
+format_p3wellknown_wrapper_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+    [#?gpb_field{type=Type}] = MsgDef,
+    DecodeJExpr = type_decode_expr(Type, ?expr(Value), ?expr(_TrUserData)),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Value, TrUserData) ->
+               fj_mk_msg(['decode-json-expr'],
+                         'MsgName',
+                         'field-infos',
+                         TrUserData)
+       end,
+       [replace_tree('decode-json-expr', DecodeJExpr),
+        replace_term('MsgName', MsgName),
+        replace_tree('field-infos', FieldInfos)])].
 
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
     KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
@@ -1092,7 +1172,9 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
 format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
     UsesP3Duration = uses_msg('google.protobuf.Duration', AnRes),
     UsesP3Timestamp = uses_msg('google.protobuf.Timestamp', AnRes),
-    UsesP3Wellknown = UsesP3Duration or UsesP3Timestamp,
+    UsesP3Wrapper = lists:any(fun(W) -> uses_msg(W, AnRes) end,
+                              p3wellknown_wrappers()),
+    UsesP3Wellknown = UsesP3Duration or UsesP3Timestamp or UsesP3Wrapper,
     NeedsEnsureList = UsesP3Duration or UsesP3Timestamp,
     [if not UsesP3Wellknown ->
              "";
@@ -1104,7 +1186,38 @@ format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
         fun(B) when is_binary(B) -> binary_to_list(B);
            (S) when is_list(S) -> S
         end) || NeedsEnsureList],
+     [begin
+          FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+          gpb_codegen:format_fn(
+            gpb_lib:mk_fn(fj_default_, MsgName),
+            fun(TrUserData) ->
+                    fj_mk_msg(['value,...'], 'MsgName', 'field-infos',
+                              TrUserData)
+            end,
+            [splice_trees(
+               'value,...',
+               [begin
+                    Default = gpb_lib:proto3_type_default(Type, Defs, Opts),
+                    erl_syntax:abstract(Default)
+                end
+                || #?gpb_field{type=Type} <- MsgDef]),
+             replace_term('MsgName', MsgName),
+             replace_tree('field-infos', FieldInfos)])
+      end
+      || {{msg,MsgName},MsgDef} <- Defs,
+         lists:member(MsgName, p3wellknown_wrappers())],
      ""].
+
+p3wellknown_wrappers() ->
+    ['google.protobuf.FloatValue',
+     'google.protobuf.DoubleValue',
+     'google.protobuf.Int64Value',
+     'google.protobuf.UInt64Value',
+     'google.protobuf.Int32Value',
+     'google.protobuf.UInt32Value',
+     'google.protobuf.BoolValue',
+     'google.protobuf.StringValue',
+     'google.protobuf.BytesValue'].
 
 format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
     CanDoVarKeyUpdate = gpb_lib:target_has_variable_key_map_update(Opts),
