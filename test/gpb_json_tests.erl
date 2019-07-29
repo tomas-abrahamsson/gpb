@@ -25,6 +25,7 @@
 -include("gpb_nif_test_helpers.hrl"). % the `?nif_if_supported(FnName)' macro
 
 -import(gpb_compile_tests, [compile_iolist/2]).
+-import(gpb_compile_tests, [compile_protos/2]).
 -import(gpb_compile_tests, [unload_code/1]).
 
 -import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
@@ -36,6 +37,11 @@
 -import(gpb_compile_maps_tests, [flat_map_prerequisites/1]).
 
 -export([json_encode/1, json_decode/1]). % for debugging
+
+%% For testing translations
+-export([float_to_duration/1, duration_to_float/1]).
+-export([fraction_to_nanos/1, nanos_to_fraction/1]).
+-export([string_to_int/1, int_to_string/1]).
 
 -ifdef('OTP_RELEASE').
 %% ?assertEqual/3 appeared in Erlang 20 already,
@@ -660,6 +666,142 @@ mapfield_map_test() ->
                               'StrToSub')),
     unload_code(M1).
 -endif. % -ifndef(NO_HAVE_MAPS).
+
+p3wellknown_duration_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/duration.proto';
+        message D {
+           google.protobuf.Duration f = 1;
+        }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    F = <<"f">>,
+    Duration = 'google.protobuf.Duration',
+    [{F, <<"0s">>}] = M1:to_json({'D', {Duration, 0, 0}}),
+    [{F, <<"1s">>}] = M1:to_json({'D', {Duration, 1, 0}}),
+    %% Negative (also in range 0..1 where seconds cannot be negative)
+    [{F, <<"-1s">>}] = M1:to_json({'D', {Duration, -1, 0}}),
+    [{F, <<"-1.100s">>}] = M1:to_json({'D', {Duration, -1, -100000000}}),
+    [{F, <<"-0.100s">>}] = M1:to_json({'D', {Duration, 0, -100000000}}),
+    %% with 3 6 or 9 decimals as appropriate
+    [{F, <<"1.000000123s">>}] = M1:to_json({'D', {Duration, 1, 123}}),
+    [{F, <<"1.000123s">>}] = M1:to_json({'D', {Duration, 1, 123000}}),
+    [{F, <<"1.123s">>}] = M1:to_json({'D', {Duration, 1, 123000000}}),
+    %% with optionals omitted
+    [{F, <<"0s">>}] = M1:to_json({'D', {Duration, undefined, undefined}}),
+    [{F, <<"1s">>}] = M1:to_json({'D', {Duration, 1, undefined}}),
+    [{F, <<"0.000000123s">>}] = M1:to_json({'D', {Duration, undefined, 123}}),
+    %% too large
+    ?assertError(_, M1:to_json({'D', {Duration, 0, 2111222333}})),
+    ?assertError(_, M1:to_json({'D', {Duration, 0, 1000000000}})),
+    %% Decoding ---
+    {'D', {Duration, 0, 0}} = M1:from_json([{F, <<"0s">>}], 'D'),
+    %% negative: both nanos and seconds must be negative
+    {'D', {Duration, -1, -1}} = M1:from_json([{F, <<"-1.000000001s">>}], 'D'),
+    {'D', {Duration, 0, -1}}  = M1:from_json([{F, <<"-0.000000001s">>}], 'D'),
+    %% Only seconds, no nanos
+    {'D', {Duration, 1, 0}} = M1:from_json([{F, <<"1s">>}], 'D'),
+    %% with 3 6 or 9 decimals as appropriate
+    {'D', {Duration, 1, 123}} = M1:from_json([{F, <<"1.000000123s">>}], 'D'),
+    {'D', {Duration, 1, 123000}} = M1:from_json([{F, <<"1.000123s">>}], 'D'),
+    {'D', {Duration, 1, 123000000}} = M1:from_json([{F, <<"1.123s">>}], 'D'),
+    %% "Accepted are any fractional digits (also none) as long as they fit
+    %% into nano-seconds"
+    {'D', {Duration, 1, 1230}} = M1:from_json([{F, <<"1.00000123s">>}], 'D'),
+    {'D', {Duration, 1, 12300}} = M1:from_json([{F, <<"1.0000123s">>}], 'D'),
+    {'D', {Duration, 1, 12300000}} = M1:from_json([{F, <<"1.0123s">>}], 'D'),
+    %% invalid
+    ?assertError(_, M1:from_json([{F, <<"1.2111222333s">>}], 'D')), % overflow
+    ?assertError(_, M1:from_json([{F, <<".1s">>}], 'D')),
+    %% with Google protobuf, "1.s" seems valid (but ".1s" does not)
+    {'D', {Duration, 1, 0}} = M1:from_json([{F, <<"1.s">>}], 'D'),
+    %% done
+    unload_code(M1).
+
+-ifndef(NO_HAVE_MAPS).
+p3wellknown_duration_map_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/duration.proto';
+        message D {
+           google.protobuf.Duration f = 1;
+        }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, maps]),
+    ?assertEqual(#{<<"f">> => <<"1s">>},
+                 M1:to_json(#{f => #{seconds => 1, nanos => 0}}, 'D')),
+    ?assertEqual(#{<<"f">> => <<"1s">>},
+                 M1:to_json(#{f => #{seconds => 1}}, 'D')),
+    ?assertEqual(#{f => #{seconds => 1, nanos => 0}},
+                 M1:from_json(#{<<"f">> => <<"1s">>}, 'D')),
+    unload_code(M1),
+    M2 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json,
+                         maps, {maps_unset_optional, present_undefined}]),
+    ?assertEqual(#{<<"f">> => <<"1s">>},
+                 M2:to_json(#{f => #{seconds => 1, nanos => 0}}, 'D')),
+    ?assertEqual(#{<<"f">> => <<"1s">>},
+                 M2:to_json(#{f => #{seconds => 1, nanos => undefined}}, 'D')),
+    ?assertEqual(#{f => #{seconds => 1, nanos => 0}},
+                 M2:from_json(#{<<"f">> => <<"1s">>}, 'D')),
+    unload_code(M2).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+p3wellknown_duration_with_translations_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/duration.proto';
+        message D {
+           google.protobuf.Duration f = 1;
+        }
+        ",
+    TranslateDfOpt =
+        {translate_field,
+         {['D',f], [{encode, {?MODULE, float_to_duration,['$1']}},
+                    {decode, {?MODULE, duration_to_float,['$1']}}]}},
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, TranslateDfOpt]),
+    F = <<"f">>,
+    [{F, <<"1.125s">>}] = M1:to_json({'D', 1.125}),
+    {'D', 1.125} = M1:from_json([{F, <<"1.125s">>}], 'D'),
+    unload_code(M1),
+
+    Duration = 'google.protobuf.Duration',
+    TranslateDurationFieldOpts =
+        [{translate_field,
+          {[Duration,seconds],
+           [{encode, {?MODULE, string_to_int,['$1']}},
+            {decode, {?MODULE, int_to_string,['$1']}}]}},
+         {translate_field,
+          {[Duration,nanos],
+           [{encode, {?MODULE, fraction_to_nanos,['$1']}},
+            {decode, {?MODULE, nanos_to_fraction,['$1']}}]}}],
+    M2 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json | TranslateDurationFieldOpts]),
+    [{F, <<"1.125s">>}] = M2:to_json({'D', {Duration, "1", 0.125}}),
+    {'D', {Duration, "1", 0.125}} = M2:from_json([{F, <<"1.125s">>}], 'D'),
+    unload_code(M2).
+
+float_to_duration(Fl) ->
+    Seconds = trunc(Fl),
+    Nanos = fraction_to_nanos(Fl - Seconds),
+    {'google.protobuf.Duration', Seconds, Nanos}.
+
+duration_to_float({'google.protobuf.Duration', Seconds, Nanos}) ->
+    Seconds + nanos_to_fraction(Nanos).
+
+fraction_to_nanos(Fl) when 0.0 =< Fl, Fl < 1.0 ->
+    trunc(Fl * 1000000000).
+
+nanos_to_fraction(Nanos) when 0 =< Nanos, Nanos < 1000000000 ->
+    Nanos / 1000000000.
+
+string_to_int(S) -> list_to_integer(S).
+
+int_to_string(I) -> integer_to_list(I).
 
 lower_camel_case_test() ->
     %% "Message field names are mapped to lowerCamelCase ..."

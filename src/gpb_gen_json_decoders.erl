@@ -137,8 +137,13 @@ format_msg_decoders(Defs, AnRes, Opts) ->
          end)
        || {{msg,MsgName},_Fields} <- Defs]
       || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
-     [format_msg_decoder(Name, MsgDef, Defs, AnRes, Opts)
-      || {_Type, Name, MsgDef} <- gpb_lib:msgs_or_groups(Defs)],
+     [case {Type, test_proto3_wellknown(MsgName, MsgDef)} of
+          {msg, {true, FormatterFn}} ->
+              FormatterFn(MsgName, MsgDef, Defs, AnRes, Opts);
+          _ ->
+              format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts)
+      end
+      || {Type, MsgName, MsgDef} <- gpb_lib:msgs_or_groups(Defs)],
      format_helpers(Defs, AnRes, Opts)].
 
 format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
@@ -543,7 +548,8 @@ format_helpers(Defs, AnRes, Opts) ->
     [format_json_msg_iterator_helpers(Defs, Opts),
      format_json_array_helpers(Defs, AnRes, Opts),
      format_mapfield_helper(AnRes, Opts),
-     format_json_type_helpers(Defs, AnRes, Opts)].
+     format_json_type_helpers(Defs, AnRes, Opts),
+     format_json_p3wellknown_helpers(Defs, AnRes, Opts)].
 
 format_json_msg_iterator_helpers(Defs, Opts) ->
     HaveNonemptyMsgs = have_nonempty_msg(Defs),
@@ -676,6 +682,111 @@ format_mapfield_helper(#anres{map_types=MapTypes}, Opts) ->
                 [replace_tree('#{key => EKey, value => EValue}', MkMapExpr)])
       end] || HaveMapfields].
 
+%%% --- proto3 wellknowns ---
+test_proto3_wellknown(MsgName, _MsgDef) ->
+    case MsgName of
+        'google.protobuf.Duration' ->
+            {true, fun format_p3wellknown_duration_decoder/5};
+        _ ->
+            false
+    end.
+
+format_p3wellknown_duration_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    %% Examples: "1.000340012s", "1s"
+    %%
+    %% 'Generated output always contains 0, 3, 6, or 9 fractional digits,
+    %% depending on required precision, followed by the suffix "s".'
+    FnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Str, TrUserData) ->
+               {Seconds, Nanos} = fj_parse_duration_s1(fj_ensure_list(Str)),
+               fj_mk_msg([Seconds, Nanos],
+                         'google.protobuf.Duration',
+                         'field-infos',
+                         TrUserData)
+       end,
+       [replace_tree('field-infos', FieldInfos)]),
+     gpb_codegen:format_fn(
+       fj_parse_duration_s1,
+       fun("-" ++ Rest) -> fj_parse_duration_s2(Rest, neg, "");
+          (Rest)        -> fj_parse_duration_s2(Rest, pos, "")
+       end,
+       []),
+     gpb_codegen:format_fn(
+       fj_parse_duration_s2,
+       fun("." ++ Rest, Sign, Acc) ->
+               Seconds = list_to_integer(lists:reverse(Acc)),
+               fj_parse_duration_n(Rest, Sign, Seconds, "");
+          ("s", Sign, Acc) ->
+               Seconds = list_to_integer(lists:reverse(Acc)),
+               if Sign == pos -> {Seconds, 0};
+                  Sign == neg -> {-Seconds, 0}
+               end;
+          ([D|Rest], Sign, Acc) when $0 =< D,D =< $9 ->
+               call_self(Rest, Sign, [D | Acc])
+       end,
+       []),
+     gpb_codegen:format_fn(
+       fj_parse_duration_n,
+       fun("s", Sign, Seconds, Acc) ->
+               %% With Google protobuf, "1.s" seems valid (but ".1s" does not)
+               Acc1 = if Acc =:= "" -> "0";
+                         true -> Acc
+                      end,
+               LFactor = case length(Acc1) of
+                             9 -> 1;
+                             8 -> 10;
+                             7 -> 100;
+                             6 -> 1000;
+                             5 -> 10000;
+                             4 -> 100000;
+                             3 -> 1000000;
+                             2 -> 10000000;
+                             1 -> 100000000;
+                             _ -> error({badnanos, lists:reverse(Acc)})
+                         end,
+               Nanos = list_to_integer(lists:reverse(Acc1)),
+               if Sign == pos -> {Seconds, Nanos * LFactor};
+                  Sign == neg -> {-Seconds, -Nanos * LFactor}
+               end;
+          ([D|Rest], Sign, Seconds, Acc) when $0 =< D,D =< $9 ->
+               call_self(Rest, Sign, Seconds, [D | Acc])
+       end,
+       []),
+     ""].
+
+field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
+    KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
+    erl_syntax:list(
+      [begin
+           Default = gpb_lib:proto3_type_default(Type, Defs, Opts),
+           ElemPath = [MsgName, FName],
+           HasTransl = gpb_gen_translators:has_translation(
+                         ElemPath, decode, AnRes),
+           erl_syntax:tuple(
+             [case KeyType of
+                  atom ->
+                      erl_syntax:atom(FName);
+                  binary ->
+                      erl_syntax:binary(
+                        [erl_syntax:binary_field(
+                           erl_syntax:string(atom_to_list(FName)))])
+              end,
+              erl_syntax:integer(RNum),
+              erl_syntax:abstract(Default),
+              case HasTransl of
+                  {true, Transl} ->
+                      ?expr(fun 'Tr'/2,
+                            [replace_term('Tr', Transl)]);
+                  false ->
+                      ?expr(id)
+              end])
+       end
+       || #?gpb_field{name=FName, rnum=RNum, type=Type} <- Fields]).
+
+%%% -- other helpers --
 format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
     StrBin = gpb_lib:get_strings_as_binaries_by_opts(Opts),
     NeedIntType = lists:any(fun(T) -> gpb_lib:smember(T, UsedTypes) end,
@@ -692,7 +803,11 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
                               [float, double]),
     NeedStringType = gpb_lib:smember(string, UsedTypes),
     NeedBytesType = gpb_lib:smember(bytes, UsedTypes),
-    [[gpb_codegen:format_fn(
+    [[[%% If the only integer would be in eg google.protobuf.Duration,
+       %% which has a specialized string format, then this function may
+       %% turn out unused.
+       gpb_lib:nowarn_unused_function(fj_int, 1),
+       gpb_codegen:format_fn(
         fj_int,
         %% Leading zeros are not allowed according to RFC7159,
         %% so no octal representation decoding or anything such is needed.
@@ -702,7 +817,7 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
                 list_to_integer(binary_to_list(S));
            (S) when is_list(S) ->
                 list_to_integer(S)
-        end) || NeedIntType],
+        end)] || NeedIntType],
      [[%% The protobuf also accepts both boolean values as well as
        %% string representation of the same. It seems to also accepts
        %% string representations of 0 and 1, but oddly enough
@@ -853,6 +968,160 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
                 base64:decode(B64)
         end) || NeedBytesType]].
 
+
+format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
+    UsesP3Duration = uses_msg('google.protobuf.Duration', AnRes),
+    UsesP3Wellknown = UsesP3Duration,
+    NeedsEnsureList = UsesP3Duration,
+    [if not UsesP3Wellknown ->
+             "";
+        UsesP3Wellknown ->
+             format_json_p3wellknown_mk_msg(Defs, AnRes, Opts)
+     end,
+     [gpb_codegen:format_fn(
+        fj_ensure_list,
+        fun(B) when is_binary(B) -> binary_to_list(B);
+           (S) when is_list(S) -> S
+        end) || NeedsEnsureList],
+     ""].
+
+format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
+    CanDoVarKeyUpdate = gpb_lib:target_has_variable_key_map_update(Opts),
+    [case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+         records ->
+             [gpb_codegen:format_fn(
+                fj_mk_msg,
+                fun(Values, MsgName, FieldInfos, TrUserData) ->
+                        Defaults = [D || {_Key, _RNum, D, _Tr} <- FieldInfos],
+                        Msg0 = list_to_tuple([MsgName | Defaults]),
+                        fj_mk_msg2(Values, FieldInfos, Msg0, TrUserData)
+                end),
+              gpb_codegen:format_fn(
+                fj_mk_msg2,
+                fun([V | VRest], [{_Key, RNum, _D, Tr} | FRest], Msg0,
+                    TrUserData) ->
+                        V1 = if Tr =:= id -> V;
+                                true -> Tr(V, TrUserData)
+                             end,
+                        Msg1 = setelement(RNum, Msg0, V1),
+                        call_self(VRest, FRest, Msg1, TrUserData);
+                   ([], [{_Key, RNum, Default, Tr} | FRest], Msg0,
+                    TrUserData) -> % future update
+                        Default1 = if Tr =:= id -> Default;
+                                      true -> Tr(Default, TrUserData)
+                                   end,
+                        Msg1 = setelement(RNum, Msg0, Default1),
+                        call_self([], FRest, Msg1, TrUserData);
+                   ([], [], Msg, _TrUserData) ->
+                        Msg
+                end)];
+         #maps{unset_optional=present_undefined} when CanDoVarKeyUpdate ->
+             MapPutV1 = gpb_lib:map_set(?expr(Msg0),
+                                        [{?expr(Key), ?expr(V1)}],
+                                        Opts),
+             MapPutDefault1 = gpb_lib:map_set(?expr(Msg0),
+                                              [{?expr(Key), ?expr(Default1)}],
+                                              Opts),
+             [gpb_codegen:format_fn(
+                fj_mk_msg,
+                fun(Values, _MsgName, FieldInfos, TrUserData) ->
+                        fj_mk_msg2(Values, FieldInfos, '#{}', TrUserData)
+                end,
+                [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
+              gpb_codegen:format_fn(
+                fj_mk_msg2,
+                fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,
+                    TrUserData) ->
+                        V1 = if Tr =:= id -> V;
+                                true -> Tr(V, TrUserData)
+                             end,
+                        Msg1 = 'Msg0#{Key => V1}',
+                        call_self(VRest, FRest, Msg1, TrUserData);
+                   ([], [{Key, _RNum, Default, Tr} | FRest], Msg0,
+                    TrUserData) -> %future update
+                        Default1 = if Tr =:= id -> Default;
+                                      true -> Tr(Default, TrUserData)
+                                   end,
+                        Msg1 = 'Msg0#{Key => Default1}',
+                        call_self([], FRest, Msg1, TrUserData);
+                   ([], [], Msg, _TrUserData) ->
+                        Msg
+                end,
+                [replace_tree('Msg0#{Key => V1}', MapPutV1),
+                 replace_tree('Msg0#{Key => Default1}', MapPutDefault1)])];
+         #maps{unset_optional=omitted} when CanDoVarKeyUpdate ->
+             MapPut = gpb_lib:map_set(?expr(Msg0),
+                                      [{?expr(Key), ?expr(V1)}],
+                                      Opts),
+             [gpb_codegen:format_fn(
+                fj_mk_msg,
+                fun(Values, _MsgName, FieldInfos, TrUserData) ->
+                        fj_mk_msg2(Values, FieldInfos, '#{}', TrUserData)
+                end,
+                [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
+              gpb_codegen:format_fn(
+                fj_mk_msg2,
+                fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,
+                    TrUserData) ->
+                        V1 = if Tr =:= id -> V;
+                                true -> Tr(V, TrUserData)
+                             end,
+                        Msg1 = 'Msg0#{Key => V1}',
+                        call_self(VRest, FRest, Msg1, TrUserData);
+                   ([], _FRest, Msg, _TrUserData) ->
+                        Msg
+                end,
+                [replace_tree('Msg0#{Key => V1}', MapPut)])];
+         #maps{unset_optional=present_undefined} when not CanDoVarKeyUpdate ->
+             [gpb_codegen:format_fn(
+                fj_mk_msg,
+                fun(Values, _MsgName, FieldInfos, TrUserData) ->
+                        fj_mk_msg2(Values, FieldInfos, '#{}', TrUserData)
+                end,
+                [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
+              gpb_codegen:format_fn(
+                fj_mk_msg2,
+                fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,
+                    TrUserData) ->
+                        V1 = if Tr =:= id -> V;
+                                true -> Tr(V, TrUserData)
+                             end,
+                        Msg1 = maps:put(Key, V1, Msg0),
+                        call_self(VRest, FRest, Msg1, TrUserData);
+                   ([], [{Key, _RNum, Default, Tr} | FRest], Msg,
+                    TrUserData) -> % future update
+                        Default1 = if Tr =:= id -> Default;
+                                      true -> Tr(Default, TrUserData)
+                                   end,
+                        Msg1 = maps:put(Key, Default1, Msg),
+                        call_self([], FRest, Msg1, TrUserData);
+                   ([], [], Msg, _TrUserData) ->
+                        Msg
+                end)];
+         #maps{unset_optional=omitted} when not CanDoVarKeyUpdate ->
+             [gpb_codegen:format_fn(
+                fj_mk_msg,
+                fun(Values, _MsgName, FieldInfos, TrUserData) ->
+                        fj_mk_msg2(Values, FieldInfos, '#{}', TrUserData)
+                end,
+                [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
+              gpb_codegen:format_fn(
+                fj_mk_msg2,
+                fun([V | VRest], [{Key, _RNum, _Default, Tr} | FRest], Msg0,
+                    TrUserData) ->
+                        V1 = if Tr =:= id -> V;
+                                true -> Tr(V, TrUserData)
+                             end,
+                        Msg1 = maps:put(Key, V1, Msg0),
+                        call_self(VRest, FRest, Msg1, TrUserData);
+                   ([], _FRest, Msg, _TrUserData) ->
+                        Msg
+                end)]
+     end,
+     ""].
+
+uses_msg(MsgName, #anres{used_types=UsedTypes}) ->
+    sets:is_element({msg,MsgName}, UsedTypes).
 
 occurrence_or_mapfield(repeated, {map, _, _}) -> mapfield;
 occurrence_or_mapfield(Occurrence, _)         -> Occurrence.

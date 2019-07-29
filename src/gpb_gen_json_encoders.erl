@@ -163,20 +163,31 @@ format_top_function_aux(MsgDefs, AnRes, Opts) ->
            || {{msg,MsgName}, _Fields} <- MsgDefs])])].
 
 format_to_json_msgs(Defs, AnRes, Opts) ->
-    [format_to_json_msg(MsgName, MsgDef, Defs, AnRes, Opts)
-     || {_Type, MsgName, MsgDef} <- gpb_lib:msgs_or_groups(Defs)].
+    [case {Type, test_proto3_wellknown(MsgName, MsgDef)} of
+         {msg, {true, FormatterFn}} ->
+             FormatterFn(MsgName, MsgDef, Defs, AnRes, Opts);
+         _ ->
+             format_to_json_msg(MsgName, MsgDef, Defs, AnRes, Opts)
+     end
+     || {Type, MsgName, MsgDef} <- gpb_lib:msgs_or_groups(Defs)].
 
 format_to_json_msg(MsgName, MsgDef, Defs, AnRes, Opts) ->
     case gpb_lib:get_field_names(MsgDef) of
         [] ->
-            format_to_json_msg_no_fields(MsgName);
+            format_to_json_msg_no_fields(MsgName, Opts);
         FNames ->
             format_to_json_msg_aux(MsgName, MsgDef, FNames, Defs, AnRes, Opts)
     end.
 
-format_to_json_msg_no_fields(MsgName) ->
+format_to_json_msg_no_fields(MsgName, Opts) ->
     FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
-    [gpb_codegen:format_fn(
+    [[gpb_codegen:format_fn(
+        FnName,
+        fun(Msg) ->
+                %% The undefined is the default TrUserData
+                call_self(Msg, undefined)
+        end) || gpb_lib:get_bypass_wrappers_by_opts(Opts)],
+     gpb_codegen:format_fn(
        FnName,
        fun(_Msg, _TrUserData) ->
                tj_finalize_obj(tj_new_object())
@@ -615,6 +626,66 @@ type_to_json_expr(Var, #?gpb_field{type=Type}, TrUserDataVar) ->
                    replace_tree('TrUserData', TrUserDataVar)])
     end.
 
+%%% --- proto3 wellknowns ---
+test_proto3_wellknown(MsgName, _MsgDef) ->
+    case MsgName of
+        'google.protobuf.Duration' ->
+            {true, fun format_to_json_p3wellknown_duration/5};
+        _ ->
+            false
+    end.
+
+format_to_json_p3wellknown_duration(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    %% Examples: "1.000340012s", "1s"
+    %%
+    %% 'Generated output always contains 0, 3, 6, or 9 fractional digits,
+    %% depending on required precision, followed by the suffix "s".'
+    FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Msg, TrUserData) ->
+               [Seconds, Nanos] = tj_get_fields(Msg, 'field-infos',
+                                                TrUserData),
+               SecondsStr = integer_to_list(Seconds),
+               NanosStr = tj_dot_nanos(Nanos),
+               tj_string(if Seconds =:= 0, Nanos < 0 ->
+                                 ["-0", NanosStr, "s"];
+                            true ->
+                                 [SecondsStr, NanosStr, "s"]
+                         end)
+       end,
+       [replace_tree('field-infos', FieldInfos)])].
+
+field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
+    KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
+    erl_syntax:list(
+      [begin
+           ElemPath = [MsgName, FName],
+           HasTransl = gpb_gen_translators:has_translation(
+                         ElemPath, encode, AnRes),
+           Default = gpb_lib:proto3_type_default(Type, Defs, Opts),
+           erl_syntax:tuple(
+             [case KeyType of
+                  atom ->
+                      erl_syntax:atom(FName);
+                  binary ->
+                      erl_syntax:binary(
+                        [erl_syntax:binary_field(
+                           erl_syntax:string(atom_to_list(FName)))])
+              end,
+              erl_syntax:integer(RNum),
+              erl_syntax:abstract(Default),
+              case HasTransl of
+                  {true, Transl} ->
+                      ?expr(fun 'Tr'/2,
+                            [replace_term('Tr', Transl)]);
+                  false ->
+                      ?expr(id)
+              end])
+       end
+       || #?gpb_field{name=FName, rnum=RNum, type=Type} <- Fields]).
+
 %%% --- helpers ---
 
 format_json_helpers(_Defs, #anres{map_types=MapTypes}=AnRes, Opts) ->
@@ -642,6 +713,7 @@ format_json_helpers(_Defs, #anres{map_types=MapTypes}=AnRes, Opts) ->
                format_mapfield_map_helpers(Opts)
        end,
        format_mapfield_key_to_str_helpers()] || HaveMapfields],
+     format_json_p3wellknowns_helpers(AnRes, Opts),
      format_json_type_helpers(AnRes, Opts)].
 
 %% -- object helpers --
@@ -806,8 +878,83 @@ format_tagged_list_array_helpers(Tag) ->
 
 %% -- other helpers --
 
+format_json_p3wellknowns_helpers(AnRes, Opts) ->
+    UsesP3Duration = uses_msg('google.protobuf.Duration', AnRes),
+    UsesP3Wellknown = UsesP3Duration,
+    NeedsDotNanos = UsesP3Duration,
+    [if not UsesP3Wellknown ->
+             "";
+        UsesP3Wellknown ->
+             [case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                  records ->
+                      gpb_codegen:format_fn(
+                        tj_get_fields,
+                        fun(Msg, Infos, TrUserData) ->
+                                [case element(N, Msg) of
+                                     undefined -> Default;
+                                     Value when Tr =:= id -> Value;
+                                     Value -> Tr(Value, TrUserData)
+                                 end
+                                 || {_, N, Default, Tr} <- Infos]
+                        end);
+                  #maps{unset_optional=present_undefined} ->
+                      gpb_codegen:format_fn(
+                        tj_get_fields,
+                        fun(Msg, Infos, TrUserData) ->
+                                [case maps:get(K, Msg) of
+                                     undefined -> Default;
+                                     Value when Tr =:= id -> Value;
+                                     Value -> Tr(Value, TrUserData)
+                                 end
+                                 || {K, _N, Default, Tr} <- Infos]
+                        end);
+                  #maps{unset_optional=omitted} ->
+                      gpb_codegen:format_fn(
+                        tj_get_fields,
+                        fun(Msg, Infos, TrUserData) ->
+                                [case maps:find(K, Msg) of
+                                     {ok, Value} when Tr =:= id -> Value;
+                                     {ok, Value} -> Tr(Value, TrUserData);
+                                     error -> Default
+                                 end
+                                 || {K, _N, Default, Tr} <- Infos]
+                        end)
+              end,
+              ""]
+     end,
+     [gpb_codegen:format_fn(
+        tj_dot_nanos,
+        fun(0) ->
+                "";
+           (Nanos) when Nanos >= 0 ->
+                NumZeros = if Nanos >= 1000000000 -> error(nanos_overflow);
+                              Nanos >= 100000000 -> 0;
+                              Nanos >= 10000000 -> 1;
+                              Nanos >= 1000000 -> 2;
+                              Nanos >= 100000 -> 3;
+                              Nanos >= 10000 -> 4;
+                              Nanos >= 1000 -> 5;
+                              Nanos >= 100 -> 6;
+                              Nanos >= 10 -> 7;
+                              Nanos >= 0 -> 8
+                           end,
+                NanosStr = if Nanos rem 1000000 =:= 0 ->
+                                   integer_to_list(Nanos div 1000000);
+                              Nanos rem 1000 =:= 0 ->
+                                   integer_to_list(Nanos div 1000);
+                              true ->
+                                   integer_to_list(Nanos)
+                           end,
+                Zeros = lists:duplicate(NumZeros, $0),
+                [".", Zeros, NanosStr];
+           (Nanos) when Nanos < 0 ->
+                call_self(-Nanos)
+        end)
+      || NeedsDotNanos],
+     ""].
+
 format_json_type_helpers(#anres{used_types=UsedTypes,
-                                map_types=MapTypes}, Opts) ->
+                                map_types=MapTypes}=AnRes, Opts) ->
     HaveMapfields = sets:size(MapTypes) > 0,
     HaveInt64 = lists:any(fun(T) -> gpb_lib:smember(T, UsedTypes) end,
                           [sint64, int64, uint64, fixed64, sfixed64]),
@@ -819,10 +966,12 @@ format_json_type_helpers(#anres{used_types=UsedTypes,
                               [float, double]),
     %% map<_,_> keys are strings
     %% int64 types and enums also encode to strings
+    UsesP3WellknownDuration = uses_msg('google.protobuf.Duration', AnRes),
     NeedStringType = (gpb_lib:smember(string, UsedTypes)
                       orelse HaveMapfields
                       orelse HaveInt64
-                      orelse HaveEnum),
+                      orelse HaveEnum
+                      orelse UsesP3WellknownDuration),
     NeedBytesType = gpb_lib:smember(bytes, UsedTypes),
 
     [[gpb_codegen:format_fn(
@@ -849,6 +998,9 @@ format_json_type_helpers(#anres{used_types=UsedTypes,
         tj_bytes,
         fun(Value) -> base64:encode(iolist_to_binary(Value))
         end) || NeedBytesType]].
+
+uses_msg(MsgName, #anres{used_types=UsedTypes}) ->
+    sets:is_element({msg,MsgName}, UsedTypes).
 
 %% -- misc --
 
