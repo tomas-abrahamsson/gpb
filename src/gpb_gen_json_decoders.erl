@@ -682,6 +682,25 @@ format_json_msg_iterator_helpers(Defs, Opts) ->
                  end)]
       end] || HaveNonemptyMsgs].
 
+mk_is_jobject_guard(Var, Opts) ->
+    case gpb_lib:json_object_format_by_opts(Opts) of
+        eep18 ->
+            ?expr(is_list('X') andalso is_tuple(hd('X')),
+                  [replace_tree('X', Var)]);
+        {proplist} ->
+            ?expr((tuple_size('X') =:= 1 andalso is_list(element(1,'X'))),
+                  [replace_tree('X', Var)]);
+        {Tag, proplist} ->
+            ?expr((tuple_size('X') =:= 2
+                   andalso (element(1,'X') =:= 'Tag')
+                   andalso is_list(element(2,'X'))),
+                  [replace_tree('X', Var),
+                   replace_term('Tag', Tag)]);
+        map ->
+            ?expr(is_map('X'),
+                  [replace_tree('X', Var)])
+    end.
+
 format_json_array_helpers(Defs, #anres{map_types=MapTypes}, Opts) ->
     HaveMapfields = sets:size(MapTypes) > 0,
     HaveRepeated = have_repeated_fields(Defs) orelse HaveMapfields,
@@ -698,6 +717,19 @@ format_json_array_helpers(Defs, #anres{map_types=MapTypes}, Opts) ->
                  fun({array, L}) -> L end,
                  [replace_term(array, Tag)])]
       end] || HaveRepeated].
+
+
+mk_is_jarray_guard(Var, Opts) ->
+    case gpb_lib:json_array_format_by_opts(Opts)of
+        list ->
+            ?expr(is_list('X'),
+                  [replace_tree('X', Var)]);
+        {Tag, list} ->
+            ?expr((tuple_size('X') =:= 2 andalso
+                   element(1,'X') =:= 'Tag' andalso is_list(2,'X')),
+                  [replace_tree('X', Var),
+                   replace_term('Tag', Tag)])
+    end.
 
 format_mapfield_helper(#anres{map_types=MapTypes}, Opts) ->
     HaveMapfields = sets:size(MapTypes) > 0,
@@ -781,6 +813,12 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
             {true, fun format_p3wellknown_wrapper_decoder/5};
         'google.protobuf.BytesValue' ->
             {true, fun format_p3wellknown_wrapper_decoder/5};
+        'google.protobuf.Struct' ->
+            {true, fun format_p3wellknown_struct_decoder/5};
+        'google.protobuf.Value' ->
+            {true, fun format_p3wellknown_value_decoder/5};
+        'google.protobuf.ListValue' ->
+            {true, fun format_p3wellknown_list_value_decoder/5};
         _ ->
             false
     end.
@@ -986,34 +1024,235 @@ format_p3wellknown_wrapper_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
         replace_term('MsgName', MsgName),
         replace_tree('field-infos', FieldInfos)])].
 
+format_p3wellknown_struct_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+    [#?gpb_field{type={map,_,_}}=Field] = MsgDef,
+    %% Decoding of map fields is special in that it automatically
+    %% gets assigned translation functions, that are already called,
+    %% mapfield_decode_expr makes sure of that.
+    %% So use a field-infos with no translation.
+    DecodeJExpr = mapfield_decode_expr(MsgName, Field, ?expr(JValue),
+                                       ?expr(TrUserData), AnRes),
+    FieldInfos = field_info_trees_no_tr(MsgDef, Defs, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(JValue, TrUserData) ->
+               fj_mk_msg(['decode-json-expr'],
+                         'MsgName',
+                         'field-infos',
+                         TrUserData)
+       end,
+       [replace_tree('decode-json-expr', DecodeJExpr),
+        replace_term('MsgName', MsgName),
+        replace_tree('field-infos', FieldInfos)])].
+
+format_p3wellknown_value_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+    TypeNull = {enum, 'google.protobuf.NullValue'},
+    TypeStruct = {msg, 'google.protobuf.Struct'},
+    TypeList = {msg, 'google.protobuf.ListValue'},
+    %% Be quite explcit in the matching below, so we won'd accidentally
+    %% mis-decode a field at run-time, if the wellknown would change
+    %% in some future import or update.
+    [#gpb_oneof{name=kind=FName, rnum=RNum, fields=OFields}] = MsgDef,
+    [#?gpb_field{name=null_value,   type=TypeNull},
+     #?gpb_field{name=number_value, type=double},
+     #?gpb_field{name=string_value, type=string},
+     #?gpb_field{name=bool_value,   type=bool},
+     #?gpb_field{name=struct_value, type=TypeStruct},
+     #?gpb_field{name=list_value,   type=TypeList}] = OFields,
+    OFDecInfos =
+        [begin
+             MkGuard = value_guard_maker(OFName, OFType, Opts),
+             ElemPath = [MsgName, FName, OFName],
+             Transl = gpb_gen_translators:find_translation(
+                        ElemPath, decode, AnRes),
+             MkDecodeExpr =
+                 fun(JVar) ->
+                         type_decode_expr(OFType, JVar, ?expr(TrUserData))
+                 end,
+             {OFName, MkGuard, Transl, MkDecodeExpr}
+         end
+         || #?gpb_field{name=OFName, type=OFType} <- OFields],
+    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+        #maps{unset_optional=omitted, oneof=flat} ->
+            JValue = ?expr(JValue),
+            gpb_codegen:format_fn(
+              FnName,
+              fun(JValue, TrUserData) ->
+                      if 'is_x(JValue)' ->
+                              fj_mk_msg(['<decode-expr>'], 'MsgName',
+                                        [{'OFName', 0, undefined, fun 'Tr'/2}],
+                                        TrUserData)
+                      end
+              end,
+              [repeat_clauses(
+                 'is_x(JValue)',
+                 [begin
+                      [replace_tree('is_x(JValue)', MkGuard(JValue)),
+                       replace_tree('OFName', map_key(OFName, Opts)),
+                       replace_term('Tr', Transl),
+                       replace_tree('<decode-expr>', MkDecodeExpr(JValue)),
+                       replace_term('MsgName', MsgName)]
+                  end
+                  || {OFName, MkGuard, Transl, MkDecodeExpr} <- OFDecInfos])]);
+        _ ->
+            DummyType = {msg,MsgName},
+            PF = #?gpb_field{name=FName, type=DummyType, rnum=RNum,
+                             occurrence=required},
+            PFieldInfos = field_info_trees(MsgName, [PF], Defs, AnRes, Opts),
+            JValue = ?expr(JValue),
+            gpb_codegen:format_fn(
+              FnName,
+              fun(JValue, TrUserData) ->
+                      if 'is_x(JValue)' ->
+                              X = {'Tag', 'Tr'('<decode-expr>', TrUserData)},
+                              fj_mk_msg([X], 'MsgName',
+                                        'pseudo-field-infos',
+                                        TrUserData)
+                      end
+              end,
+              [repeat_clauses(
+                 'is_x(JValue)',
+                 [[replace_tree('is_x(JValue)', MkGuard(JValue)),
+                   replace_term('Tr', Transl),
+                   replace_term('Tag', OFName),
+                   replace_tree('<decode-expr>', MkDecodeExpr(JValue)),
+                   replace_term('MsgName', MsgName),
+                   replace_tree('pseudo-field-infos', PFieldInfos)]
+                  || {OFName, MkGuard, Transl, MkDecodeExpr} <- OFDecInfos])])
+    end.
+
+value_guard_maker(null_value, {enum,'google.protobuf.NullValue'}, Opts) ->
+    JNull = gpb_lib:json_null(Opts),
+    fun(JVar) ->
+            ?expr('JVar' =:= null,
+                  [replace_tree('JVar', JVar),
+                   replace_term(null, JNull)])
+    end;
+value_guard_maker(number_value, double, _Opts) ->
+    fun(JVar) -> ?expr(is_number('JVar'), [replace_tree('JVar', JVar)]) end;
+value_guard_maker(string_value, string, Opts) ->
+    fun(JVar) -> mk_is_jstring_guard(JVar, Opts) end;
+value_guard_maker(bool_value, bool, _Opts) ->
+    fun(JVar) -> ?expr(is_boolean('JVar'), [replace_tree('JVar', JVar)]) end;
+value_guard_maker(struct_value, {msg,'google.protobuf.Struct'}, Opts) ->
+    fun(JVar) -> mk_is_jobject_guard(JVar, Opts) end;
+value_guard_maker(list_value, {msg,'google.protobuf.ListValue'}, Opts) ->
+    fun(JVar) -> mk_is_jarray_guard(JVar, Opts) end.
+
+format_p3wellknown_list_value_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+    [#?gpb_field{type=Type}] = MsgDef,
+    DecodeJExpr = type_decode_expr(Type, ?expr(Elem), ?expr(TrUserData)),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(JList, TrUserData) ->
+               fj_mk_msg([['decode-json-expr' || Elem <- JList]],
+                         'MsgName',
+                         'field-infos',
+                         TrUserData)
+       end,
+       [replace_tree('decode-json-expr', DecodeJExpr),
+        replace_term('MsgName', MsgName),
+        replace_tree('field-infos', FieldInfos)])].
+
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
-    KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
     erl_syntax:list(
       [begin
            Default = gpb_lib:proto3_type_default(Type, Defs, Opts),
-           ElemPath = [MsgName, FName],
-           HasTransl = gpb_gen_translators:has_translation(
-                         ElemPath, decode, AnRes),
            erl_syntax:tuple(
-             [case KeyType of
-                  atom ->
-                      erl_syntax:atom(FName);
-                  binary ->
-                      erl_syntax:binary(
-                        [erl_syntax:binary_field(
-                           erl_syntax:string(atom_to_list(FName)))])
-              end,
+             [map_key(FName, Opts),
               erl_syntax:integer(RNum),
               erl_syntax:abstract(Default),
-              case HasTransl of
-                  {true, Transl} ->
-                      ?expr(fun 'Tr'/2,
-                            [replace_term('Tr', Transl)]);
-                  false ->
-                      ?expr(id)
-              end])
+              calc_transl_info(MsgName, Field, AnRes)])
+       end
+       || #?gpb_field{name=FName, rnum=RNum, type=Type}=Field <- Fields]).
+
+field_info_trees_no_tr(Fields, Defs, Opts) ->
+    erl_syntax:list(
+      [begin
+           Default = gpb_lib:proto3_type_default(Type, Defs, Opts),
+           erl_syntax:tuple(
+             [map_key(FName, Opts),
+              erl_syntax:integer(RNum),
+              erl_syntax:abstract(Default),
+              ?expr(id)])
        end
        || #?gpb_field{name=FName, rnum=RNum, type=Type} <- Fields]).
+
+map_key(FName, Opts) ->
+    KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
+    case KeyType of
+        atom ->
+            erl_syntax:atom(FName);
+        binary ->
+            erl_syntax:binary(
+              [erl_syntax:binary_field(
+                 erl_syntax:string(atom_to_list(FName)))])
+    end.
+
+calc_transl_info(MsgName, #?gpb_field{occurrence=Occurrence}=Field, AnRes) ->
+    case Occurrence of
+        required ->
+            calc_non_repeated_transl_info(MsgName, Field, AnRes);
+        optional ->
+            calc_non_repeated_transl_info(MsgName, Field, AnRes);
+        repeated ->
+            calc_repeated_transl_info(MsgName, Field, AnRes)
+    end.
+
+calc_non_repeated_transl_info(MsgName, #?gpb_field{name=FName}, AnRes) ->
+    ElemPath = [MsgName, FName],
+    case gpb_gen_translators:has_translation(ElemPath, decode, AnRes) of
+        {true, Transl} ->
+            ?expr(fun 'Tr'/2,
+                  [replace_term('Tr', Transl)]);
+        false ->
+            ?expr(id)
+    end.
+
+calc_repeated_transl_info(MsgName, #?gpb_field{name=FName}, AnRes) ->
+    ElemPathsOps = [{[MsgName, FName], decode_init_default, 2},
+                    {[MsgName, FName], decode_repeated_add_elem, 3},
+                    {[MsgName, FName], decode_repeated_finalize, 2},
+                    {[MsgName, FName, []], decode, 2}],
+    Arities = [Arity || {_ElemPath, _Op, Arity} <- ElemPathsOps],
+    %% If at least one has a translation, find the translation function
+    %% for all, use it, else if none has a translation, use id.
+    HasTransls = [gpb_gen_translators:has_translation(ElemPath, Op, AnRes)
+                  || {ElemPath, Op, _Arity} <- ElemPathsOps],
+    case lists:any(fun has_transl/1, HasTransls) of
+        true ->
+            Transls = find_transls_for_all(ElemPathsOps, HasTransls, AnRes),
+            erl_syntax:tuple(
+              [erl_syntax:atom(r_tr)
+               | [fun_expr(Transl, Arity)
+                  || {Transl, Arity} <- lists:zip(Transls, Arities)]]);
+        false ->
+            ?expr(id)
+    end.
+
+has_transl({true, _Tr}) -> true;
+has_transl(false) -> false.
+
+find_transls_for_all([{ElemPath, Op, _Arity} | RestEOs],
+                     [HasTransl | RestHasTransls],
+                     AnRes) ->
+    case HasTransl of
+        {true, Transl} ->
+            [Transl | find_transls_for_all(RestEOs, RestHasTransls, AnRes)];
+        false ->
+            Transl = gpb_gen_translators:find_translation(ElemPath, Op, AnRes),
+            [Transl | find_transls_for_all(RestEOs, RestHasTransls, AnRes)]
+    end;
+find_transls_for_all([], [], _AnRes) ->
+    [].
+
+fun_expr(FnName, Arity) ->
+    erl_syntax:implicit_fun(erl_syntax:atom(FnName),
+                            erl_syntax:integer(Arity)).
 
 %%% -- other helpers --
 format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
@@ -1047,7 +1286,10 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
            (S) when is_list(S) ->
                 list_to_integer(S)
         end)] || NeedIntType],
-     [[%% The protobuf also accepts both boolean values as well as
+     [[%% Avoid warning when messages contain only eg google.protobuf.Value,
+       %% which is decoded specially.
+       gpb_lib:nowarn_unused_function(fj_bool,1),
+       %% The protobuf also accepts both boolean values as well as
        %% string representation of the same. It seems to also accepts
        %% string representations of 0 and 1, but oddly enough
        %% not the integers 0 and 1.  (protobuf 3.8.0-rc1)
@@ -1064,6 +1306,7 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
             (S) when is_list(S) ->
                  call_self(list_to_binary(S))
          end),
+       gpb_lib:nowarn_unused_function(fj_bool_bin_casecanon,2),
        gpb_codegen:format_fn(
          fj_bool_bin_casecanon, % to lowercase
          fun(<<C, Rest/binary>>, Acc) when $A =< C, C =< $Z ->
@@ -1139,6 +1382,7 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
       end
       || NeedEnumType],
      [[%% float with helper
+       gpb_lib:nowarn_unused_function(fj_float, 1),
        gpb_codegen:format_fn(
          fj_float,
          fun(N) when is_integer(N) -> float(N);
@@ -1153,6 +1397,7 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
                      {float, S2}   -> list_to_float(S2)
                  end
          end),
+       gpb_lib:nowarn_unused_function(fj_d_num2e, 3),
        gpb_codegen:format_fn(
          fj_d_num2e,
          fun("-"++Rest, St, Acc) ->
@@ -1211,16 +1456,38 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
         end) || NeedBytesType]].
 
 
+mk_is_jstring_guard(Var, Opts) ->
+    case gpb_lib:json_string_format_by_opts(Opts) of
+        binary ->
+            ?expr(is_binary('X'),
+                  [replace_tree('X', Var)]);
+        list ->
+            ?expr(is_list('X'),
+                  [replace_tree('X', Var)])
+    end.
+
 format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
     UsesP3Duration = uses_msg('google.protobuf.Duration', AnRes),
     UsesP3Timestamp = uses_msg('google.protobuf.Timestamp', AnRes),
     UsesP3Wrapper = lists:any(fun(W) -> uses_msg(W, AnRes) end,
                               p3wellknown_wrappers()),
-    UsesP3Wellknown = UsesP3Duration or UsesP3Timestamp or UsesP3Wrapper,
+    UsesP3Struct = uses_msg('google.protobuf.Struct', AnRes),
+    UsesP3Value = uses_msg('google.protobuf.Value', AnRes),
+    UsesP3ListValue = uses_msg('google.protobuf.ListValue', AnRes),
+
+    FlatMaps = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                   #maps{unset_optional=omitted, oneof=flat} ->
+                       true;
+                   _ ->
+                       false
+               end,
+    NonFlatMaps = not FlatMaps,
+    NeedsMkMsg = UsesP3Duration or UsesP3Timestamp or UsesP3Wrapper
+        or UsesP3Struct or (UsesP3Value and NonFlatMaps) or UsesP3ListValue,
     NeedsEnsureList = UsesP3Duration or UsesP3Timestamp,
-    [if not UsesP3Wellknown ->
+    [if not NeedsMkMsg ->
              "";
-        UsesP3Wellknown ->
+        NeedsMkMsg ->
              format_json_p3wellknown_mk_msg(Defs, AnRes, Opts)
      end,
      [gpb_codegen:format_fn(
@@ -1277,14 +1544,14 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                 fun([V | VRest], [{_Key, RNum, _D, Tr} | FRest], Msg0,
                     TrUserData) ->
                         V1 = if Tr =:= id -> V;
-                                true -> Tr(V, TrUserData)
+                                true -> fj_tr(Tr, V, TrUserData)
                              end,
                         Msg1 = setelement(RNum, Msg0, V1),
                         call_self(VRest, FRest, Msg1, TrUserData);
                    ([], [{_Key, RNum, Default, Tr} | FRest], Msg0,
                     TrUserData) -> % future update
                         Default1 = if Tr =:= id -> Default;
-                                      true -> Tr(Default, TrUserData)
+                                      true -> fj_tr(Tr, Default, TrUserData)
                                    end,
                         Msg1 = setelement(RNum, Msg0, Default1),
                         call_self([], FRest, Msg1, TrUserData);
@@ -1309,14 +1576,14 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                 fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,
                     TrUserData) ->
                         V1 = if Tr =:= id -> V;
-                                true -> Tr(V, TrUserData)
+                                true -> fj_tr(Tr, V, TrUserData)
                              end,
                         Msg1 = 'Msg0#{Key => V1}',
                         call_self(VRest, FRest, Msg1, TrUserData);
                    ([], [{Key, _RNum, Default, Tr} | FRest], Msg0,
                     TrUserData) -> %future update
                         Default1 = if Tr =:= id -> Default;
-                                      true -> Tr(Default, TrUserData)
+                                      true -> fj_tr(Tr, Default, TrUserData)
                                    end,
                         Msg1 = 'Msg0#{Key => Default1}',
                         call_self([], FRest, Msg1, TrUserData);
@@ -1340,7 +1607,7 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                 fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,
                     TrUserData) ->
                         V1 = if Tr =:= id -> V;
-                                true -> Tr(V, TrUserData)
+                                true -> fj_tr(Tr, V, TrUserData)
                              end,
                         Msg1 = 'Msg0#{Key => V1}',
                         call_self(VRest, FRest, Msg1, TrUserData);
@@ -1360,14 +1627,14 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                 fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,
                     TrUserData) ->
                         V1 = if Tr =:= id -> V;
-                                true -> Tr(V, TrUserData)
+                                true -> fj_tr(Tr, V, TrUserData)
                              end,
                         Msg1 = maps:put(Key, V1, Msg0),
                         call_self(VRest, FRest, Msg1, TrUserData);
                    ([], [{Key, _RNum, Default, Tr} | FRest], Msg,
                     TrUserData) -> % future update
                         Default1 = if Tr =:= id -> Default;
-                                      true -> Tr(Default, TrUserData)
+                                      true -> fj_tr(Tr, Default, TrUserData)
                                    end,
                         Msg1 = maps:put(Key, Default1, Msg),
                         call_self([], FRest, Msg1, TrUserData);
@@ -1386,7 +1653,7 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                 fun([V | VRest], [{Key, _RNum, _Default, Tr} | FRest], Msg0,
                     TrUserData) ->
                         V1 = if Tr =:= id -> V;
-                                true -> Tr(V, TrUserData)
+                                true -> fj_tr(Tr, V, TrUserData)
                              end,
                         Msg1 = maps:put(Key, V1, Msg0),
                         call_self(VRest, FRest, Msg1, TrUserData);
@@ -1394,6 +1661,24 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                         Msg
                 end)]
      end,
+     gpb_codegen:format_fn(
+       fj_tr,
+       fun(Tr, V, TrUserData) when is_function(Tr) ->
+               Tr(V, TrUserData);
+          ({r_tr, InitTr, AddElemTr, FinalizeTr, ElemTr}, L, TrUserData) ->
+               InitAcc = InitTr([], TrUserData),
+               FinalizeTr(fj_r_tr(L, InitAcc, AddElemTr, ElemTr, TrUserData),
+                          TrUserData)
+       end),
+     gpb_codegen:format_fn(
+       fj_r_tr,
+       fun([Elem | Rest], Acc, AddElemTr, ElemTr, TrUserData) ->
+               Elem1 = ElemTr(Elem, TrUserData),
+               Acc1 = AddElemTr(Elem1, Acc, TrUserData),
+               fj_r_tr(Rest, Acc1, AddElemTr, ElemTr, TrUserData);
+          ([], Acc, _AddElemTr, _ElemTr, _TrUserData) ->
+               Acc
+       end),
      ""].
 
 uses_msg(MsgName, #anres{used_types=UsedTypes}) ->

@@ -671,6 +671,12 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
             {true, fun format_to_json_p3wellknown_wrapper/5};
         'google.protobuf.BytesValue' ->
             {true, fun format_to_json_p3wellknown_wrapper/5};
+        'google.protobuf.Struct' ->
+            {true, fun format_to_json_p3wellknown_struct/5};
+        'google.protobuf.Value' ->
+            {true, fun format_to_json_p3wellknown_value/5};
+        'google.protobuf.ListValue' ->
+            {true, fun format_to_json_p3wellknown_list_value/5};
         _ ->
             false
     end.
@@ -731,7 +737,7 @@ format_to_json_p3wellknown_timestamp(MsgName, MsgDef, Defs, AnRes, Opts) ->
 format_to_json_p3wellknown_wrapper(MsgName, MsgDef, Defs, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
     ToJsonExpr = type_to_json_expr(?expr(Value), hd(MsgDef),
-                                   ?expr(_TrUserData), Opts),
+                                   ?expr(TrUserData), Opts),
     FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
     [gpb_codegen:format_fn(
        FnName,
@@ -741,6 +747,124 @@ format_to_json_p3wellknown_wrapper(MsgName, MsgDef, Defs, AnRes, Opts) ->
        end,
        [replace_tree('field-infos', FieldInfos),
         replace_tree('to_json_expr(Value)', ToJsonExpr)])].
+
+format_to_json_p3wellknown_struct(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+    [#?gpb_field{name=FName}] = MsgDef,
+    ElemPath = [MsgName, FName, []],
+    ElemTransl = gpb_gen_translators:find_translation(ElemPath, encode, AnRes),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Msg, TrUserData) ->
+               [Fields] = tj_get_fields(Msg, 'field-infos', TrUserData),
+               tj_mapfield_fold(
+                 fun(Elem) -> 'MapElemTr'(Elem, TrUserData) end,
+                 fun(V) -> 'to_json_msg_google.protobuf.Value'(V, TrUserData)
+                 end,
+                 Fields)
+       end,
+       [replace_tree('field-infos', FieldInfos),
+        replace_term('MapElemTr', ElemTransl)]),
+     ""].
+
+format_to_json_p3wellknown_value(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+    TypeNull = {enum, 'google.protobuf.NullValue'},
+    TypeStruct = {msg, 'google.protobuf.Struct'},
+    TypeList = {msg, 'google.protobuf.ListValue'},
+    %% Be quite explcit in the matching below, so we won'd accidentally
+    %% mis-encode a field at run-time, if the wellknown would change
+    %% in some future import or update.
+    [#gpb_oneof{name=kind=FName, rnum=RNum, fields=OFields}] = MsgDef,
+    [#?gpb_field{name=null_value,   type=TypeNull},
+     #?gpb_field{name=number_value, type=double},
+     #?gpb_field{name=string_value, type=string},
+     #?gpb_field{name=bool_value,   type=bool},
+     #?gpb_field{name=struct_value, type=TypeStruct},
+     #?gpb_field{name=list_value,   type=TypeList}] = OFields,
+    OFEncInfos =
+        [begin
+             ElemPath = [MsgName, FName, OFName],
+             Transl = gpb_gen_translators:find_translation(
+                        ElemPath, encode, AnRes),
+             MkEncodeExpr =
+                 fun(JVar) ->
+                         type_to_json_expr(JVar, OField, ?expr(TrUserData),
+                                           Opts)
+                 end,
+             {OFName, Transl, MkEncodeExpr}
+         end
+         || #?gpb_field{name=OFName}=OField <- OFields],
+    Value2 = ?expr(Value2),
+    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+        #maps{unset_optional=omitted, oneof=flat} ->
+            gpb_codegen:format_fn(
+              FnName,
+              fun(Msg, TrUserData) ->
+                      case Msg of
+                          '#{<Tag> := Value}' ->
+                              Value2 = 'Tr'(Value, TrUserData),
+                              '<enc-expr(Value2)>'
+                      end
+              end,
+              [repeat_clauses(
+                '#{<Tag> := Value}',
+                 [begin
+                      TagValue = gpb_lib:map_match([{OFName, ?expr(Value)}],
+                                                   Opts),
+                      [replace_tree('#{<Tag> := Value}', TagValue),
+                       replace_term('Tr', Transl),
+                       replace_tree('<enc-expr(Value2)>',
+                                    MkEncodeExpr(Value2))]
+                  end
+                  || {OFName, Transl, MkEncodeExpr} <- OFEncInfos])]);
+        _ ->
+            DummyType = {msg,MsgName},
+            PF = #?gpb_field{name=FName, type=DummyType, rnum=RNum},
+            PFieldInfos = field_info_trees(MsgName, [PF], Defs, AnRes, Opts),
+            gpb_codegen:format_fn(
+              FnName,
+              fun(Msg, TrUserData) ->
+                      [Kind] = tj_get_fields(Msg, 'field-infos', TrUserData),
+                      case Kind of
+                          '{<Tag>, Value}' ->
+                              Value2 = 'Tr'(Value, TrUserData),
+                              '<enc-expr(Value2)>'
+                      end
+              end,
+              [repeat_clauses(
+                '{<Tag>, Value}',
+                 [begin
+                      TagValue = erl_syntax:tuple([erl_syntax:atom(OFName),
+                                                   ?expr(Value)]),
+                      [replace_tree('{<Tag>, Value}', TagValue),
+                       replace_term('Tr', Transl),
+                       replace_tree('<enc-expr(Value2)>',
+                                    MkEncodeExpr(Value2))]
+                  end
+                  || {OFName, Transl, MkEncodeExpr} <- OFEncInfos]),
+              replace_tree('field-infos', PFieldInfos)])
+    end.
+
+format_to_json_p3wellknown_list_value(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    [#?gpb_field{name=FName}=Field] = MsgDef,
+    ElemPath = [MsgName, FName, []],
+    ElemTransl = gpb_gen_translators:find_translation(ElemPath, encode, AnRes),
+    EncoderExpr = type_to_json_expr(?expr(Elem), Field, ?expr(TrUserData),
+                                    Opts),
+    FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Msg, TrUserData) ->
+               [L] = tj_get_fields(Msg, 'field-infos', TrUserData),
+               tj_array(['ElemTr'('<enc>', TrUserData) || Elem <- L])
+       end,
+       [replace_tree('field-infos', FieldInfos),
+        replace_term('ElemTr', ElemTransl),
+        replace_tree('<enc>', EncoderExpr)]),
+     ""].
 
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
     KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
@@ -964,6 +1088,10 @@ format_tagged_list_array_helpers(Tag) ->
 %% -- other helpers --
 
 format_json_p3wellknowns_helpers(AnRes, Opts) ->
+    FlatMaps = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                   #maps{oneof=flat} -> true;
+                   _ -> false
+               end,
     UsesP3Duration = uses_msg('google.protobuf.Duration', AnRes),
     UsesP3Timestamp = uses_msg('google.protobuf.Timestamp', AnRes),
     UsesP3Float = uses_msg('google.protobuf.FloatValue', AnRes),
@@ -975,14 +1103,18 @@ format_json_p3wellknowns_helpers(AnRes, Opts) ->
     UsesP3Bool = uses_msg('google.protobuf.BoolValue', AnRes),
     UsesP3String = uses_msg('google.protobuf.StringValue', AnRes),
     UsesP3Bytes = uses_msg('google.protobuf.BytesValue', AnRes),
-    UsesP3Wellknown = UsesP3Duration or UsesP3Timestamp
+    UsesP3Struct = uses_msg('google.protobuf.Struct', AnRes),
+    UsesP3Value = uses_msg('google.protobuf.Value', AnRes),
+    UsesP3ListValue = uses_msg('google.protobuf.ListValue', AnRes),
+    NeedsGetFields = UsesP3Duration or UsesP3Timestamp
         or UsesP3Float or UsesP3Double or UsesP3Int64 or UsesP3UInt64
         or UsesP3Int32 or UsesP3UInt32 or UsesP3Bool or UsesP3String
-        or UsesP3Bytes,
+        or UsesP3Bytes
+        or UsesP3Struct or (UsesP3Value and not FlatMaps) or UsesP3ListValue,
     NeedsDotNanos = UsesP3Duration or UsesP3Timestamp,
-    [if not UsesP3Wellknown ->
+    [if not NeedsGetFields ->
              "";
-        UsesP3Wellknown ->
+        NeedsGetFields ->
              [case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                   records ->
                       gpb_codegen:format_fn(

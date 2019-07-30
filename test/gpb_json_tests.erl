@@ -42,6 +42,7 @@
 -export([float_to_duration/1, duration_to_float/1]).
 -export([fraction_to_nanos/1, nanos_to_fraction/1]).
 -export([string_to_int/1, int_to_string/1]).
+-export([id/1]).
 
 -ifdef('OTP_RELEASE').
 %% ?assertEqual/3 appeared in Erlang 20 already,
@@ -959,6 +960,162 @@ p3wellknown_null_value_test() ->
     E1 = M1:from_json([{F, 0.0}], 'N'),
     E1 = M1:from_json([{F, <<>>}], 'N'),
     unload_code(M1).
+
+p3wellknown_struct_list_value_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message L { google.protobuf.ListValue f = 1; }
+        message V { google.protobuf.Value f = 1; }
+        message S { google.protobuf.Struct f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    ListValue = 'google.protobuf.ListValue',
+    Value = 'google.protobuf.Value',
+    Struct = 'google.protobuf.Struct',
+    E1 = {ListValue, [{Value, {null_value, 'NULL_VALUE'}},
+                                {Value, {number_value, 12}},
+                                {Value, {number_value, 1.25e3}},
+                                {Value, {string_value, "abc"}},
+                                {Value, {bool_value, true}},
+                                {Value, {struct_value, {Struct, []}}},
+                                {Value, {list_value, {ListValue,[]}}}]},
+    J1 = [null, 12, 1.25e3, <<"abc">>, true, [{}], []],
+    J1 = M1:to_json(E1),
+    E1 = change_term(M1:from_json(J1, ListValue),
+                     {number_value,12.0}, % double decodes to float, fix cmp
+                     {number_value,12}),
+
+    F = <<"f">>,
+    J2 = [{F, [{<<"s">>, <<"abc">>},
+          {<<"b">>, true},
+          {<<"n">>, null}]}],
+    E2 = {'S', {Struct, M21=[{"s", {Value, {string_value, "abc"}}},
+                             {"b", {Value, {bool_value, true}}},
+                             {"n", {Value, {null_value, 'NULL_VALUE'}}}]}},
+    J2 = M1:to_json(E2),
+    {'S', {Struct, M22}} = M1:from_json(J2, 'S'),
+    ?assertEqual(lists:sort(M21),
+                 lists:sort(M22)),
+    unload_code(M1).
+
+p3wellknown_listvalue_with_translation_test() ->
+    %% Test mk_msg with translations for repeated fields.
+    %% This the google.protobuf.ListValue is a repeated field.
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message L { google.protobuf.ListValue f = 1; }
+        ",
+    ListValue = 'google.protobuf.ListValue',
+    TranslateOpt =
+        {translate_field,
+         {[ListValue,values],
+          %% Internal format for the list is a set in this test,
+          %% so translate to/from a set.
+          [{encode, {sets, to_list, ['$1']}},
+           {decode_init_default, {sets, new, []}},
+           {decode_repeated_add_elem, {sets, add_element,['$1', '$2']}},
+           {decode_repeated_finalize, {?MODULE, id, ['$1']}}]}},
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, TranslateOpt]),
+    %% true occurs twice in the input, but will be only once in the set
+    {ListValue, S} = M1:from_json([null, <<"abc">>, true, true], ListValue),
+    [{'google.protobuf.Value',{bool_value,true}},
+     {'google.protobuf.Value',{null_value,'NULL_VALUE'}},
+     {'google.protobuf.Value',{string_value,"abc"}}] =
+        lists:sort(sets:to_list(S)),
+    unload_code(M1).
+
+-ifndef(NO_HAVE_MAPS).
+p3wellknown_struct_list_value_map_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message L { google.protobuf.ListValue f = 1; }
+        message V { google.protobuf.Value f = 1; }
+        message S { google.protobuf.Struct f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, maps]),
+    E1 = #{values => [#{kind => {null_value, 'NULL_VALUE'}},
+                      #{kind => {number_value, 12}},
+                      #{kind => {number_value, 1.25e3}},
+                      #{kind => {string_value, "abc"}},
+                      #{kind => {bool_value, true}},
+                      #{kind => {struct_value, #{fields => #{}}}},
+                      #{kind => {list_value, #{values => []}}}]},
+    J1 = [null, 12, 1.25e3, <<"abc">>, true, #{}, []],
+    ?assertEqual(J1, M1:to_json(E1, 'google.protobuf.ListValue')),
+    ?assertEqual(E1, change_term(M1:from_json(J1, 'google.protobuf.ListValue'),
+                                 {number_value,12.0},
+                                 {number_value,12})),
+    E2 = #{f => #{fields => #{"s" => #{kind => {string_value, "abc"}},
+                              "b" => #{kind => {bool_value, true}},
+                              "n" => #{kind => {null_value, 'NULL_VALUE'}}}}},
+    J2 = #{<<"f">> => #{<<"s">> => <<"abc">>,
+                        <<"b">> => true,
+                        <<"n">> => null}},
+    ?assertEqual(J2, M1:to_json(E2, 'S')),
+    ?assertEqual(E2, M1:from_json(J2, 'S')),
+    unload_code(M1).
+
+p3wellknown_struct_list_value_flat_map_test_() ->
+    flat_map_prerequisites(
+      [{"flat oneof", fun p3wellknown_struct_list_value_flat_map_aux/0}]).
+
+p3wellknown_struct_list_value_flat_map_aux() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message L { google.protobuf.ListValue f = 1; }
+        message V { google.protobuf.Value f = 1; }
+        message S { google.protobuf.Struct f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, maps, {maps_oneof, flat}]),
+    E1 = #{values => [#{null_value => 'NULL_VALUE'},
+                      #{number_value => 12},
+                      #{number_value => 1.25e3},
+                      #{string_value => "abc"},
+                      #{bool_value => true},
+                      #{struct_value => #{fields => #{}}},
+                      #{list_value => #{values => []}}]},
+    J1 = [null, 12, 1.25e3, <<"abc">>, true, #{}, []],
+    ?assertEqual(J1, M1:to_json(E1, 'google.protobuf.ListValue')),
+    ?assertEqual(E1, change_term(M1:from_json(J1, 'google.protobuf.ListValue'),
+                                 #{number_value => 12.0},
+                                 #{number_value => 12})),
+    E2 = #{f => #{fields => #{"s" => #{string_value => "abc"},
+                              "b" => #{bool_value => true},
+                              "n" => #{null_value => 'NULL_VALUE'}}}},
+    J2 = #{<<"f">> => #{<<"s">> => <<"abc">>,
+                        <<"b">> => true,
+                        <<"n">> => null}},
+    ?assertEqual(J2, M1:to_json(E2, 'S')),
+    ?assertEqual(E2, M1:from_json(J2, 'S')),
+    unload_code(M1).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+change_term(Old, Old, New) -> New;
+change_term([H | T], Old, New) ->
+    [change_term(H, Old, New) | change_term(T, Old, New)];
+change_term(T, Old, New) when is_tuple(T) ->
+    list_to_tuple(change_term(tuple_to_list(T), Old, New));
+change_term(X, Old, New) ->
+    maybe_change_map_term(X, Old, New).
+
+-ifndef(NO_HAVE_MAPS).
+maybe_change_map_term(M, Old, New) when is_map(M) ->
+    maps:from_list([{change_term(K, Old, New), change_term(V, Old, New)}
+                    || {K, V} <- maps:to_list(M)]);
+maybe_change_map_term(X, _Old, _New) -> % simple/scalar term, no change
+    X.
+-else. % -ifndef(NO_HAVE_MAPS).
+maybe_change_map_term(X, _Old, _New) -> % simple/scalar term, no change
+    X.
+-endif. % -ifndef(NO_HAVE_MAPS).
 
 lower_camel_case_test() ->
     %% "Message field names are mapped to lowerCamelCase ..."
