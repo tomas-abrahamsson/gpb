@@ -360,19 +360,48 @@ mk_check_null_decode_value_update_field_expr(
             mapfield -> mapfield_decode_expr(MsgName, Field, JValueExpr,
                                              TrUserDataVar, AnRes)
         end,
-    ?expr(if 'JValueExpr' =:= null ->
-                  'EMsgVar';
-             true ->
-                  '<update-field-expr>'
-          end,
-          [replace_tree('JValueExpr', JValueExpr),
-           replace_term(null, JNull),
-           replace_tree('EMsgVar', EMsgVar),
-           replace_tree('<update-field-expr>',
-                        mk_decode_value_update_field_expr(
-                          MsgName, Field, IsOneof,
-                          EMsgVar, DecExpr, TrUserDataVar,
-                          AnRes, Opts))]).
+    if Type =:= {enum,'google.protobuf.NullValue'} ->
+            %% libprotobuf decodes to the enum for null, 0, 0.0 and for
+            %% any string, but neither for booleans nor arrays nor the empty
+            %% object. For other numbers, it is treated as if the field
+            %% is omitted, for other values (arrays, booleans, objects)
+            %% it is a decoding failure.
+            IsJStringGuard = case gpb_lib:json_string_format_by_opts(Opts) of
+                                 binary -> is_binary;
+                                 list   -> is_list
+                             end,
+            ?expr(if 'JValueExpr' =:= null;
+                     'JValueExpr' =:= 0;
+                     'JValueExpr' =:= 0.0;
+                     is_jstring('JValueExpr') ->
+                          '<update-field-expr>';
+                     is_number('JValueExpr') ->
+                          'EMsgVar'
+                  end,
+                  [replace_tree('JValueExpr', JValueExpr),
+                   replace_term(null, JNull),
+                   replace_term('is_jstring', IsJStringGuard),
+                   replace_tree('EMsgVar', EMsgVar),
+                   replace_tree('<update-field-expr>',
+                                mk_decode_value_update_field_expr(
+                                  MsgName, Field, IsOneof,
+                                  EMsgVar, DecExpr, TrUserDataVar,
+                                  AnRes, Opts))]);
+       true ->
+            ?expr(if 'JValueExpr' =:= null ->
+                          'EMsgVar';
+                     true ->
+                          '<update-field-expr>'
+                  end,
+                  [replace_tree('JValueExpr', JValueExpr),
+                   replace_term(null, JNull),
+                   replace_tree('EMsgVar', EMsgVar),
+                   replace_tree('<update-field-expr>',
+                                mk_decode_value_update_field_expr(
+                                  MsgName, Field, IsOneof,
+                                  EMsgVar, DecExpr, TrUserDataVar,
+                                  AnRes, Opts))])
+    end.
 
 mk_decode_value_update_field_expr(MsgName, #?gpb_field{name=FName}, IsOneof,
                                   EMsgVar, DecExpr, TrUserDataVar,
@@ -1045,43 +1074,55 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
                  Acc
          end)]
       || NeedBoolType],
-     [begin
-          JSymStrsToSyms = canonify_enum_jstrs(unalias_enum_syms(Enums), Opts),
-          IntStrsToSyms = enum_ints_to_syms(Enums),
-          [{_, Sym1} | _] = JSymStrsToSyms,
-          StrSyms = JSymStrsToSyms ++ IntStrsToSyms,
-          gpb_codegen:format_fn(
-            gpb_lib:mk_fn(fj_enum_, EnumName),
-            fun(S) when is_binary(S) ->
-                    case  fj_casecanon_enum(S, <<>>) of
-                        '<<"Str">>' -> '<EnumSym>';
-                        _ -> 'FirstSym'
-                    end;
-               (N) when is_integer(N) ->
-                    'd_enum_<EName>'(N);
-               (S) when is_list(S) ->
-                    call_self(list_to_binary(S))
-            end,
-            [replace_term('d_enum_<EName>', gpb_lib:mk_fn(d_enum_, EnumName)),
-             replace_term('FirstSym', Sym1),
-             repeat_clauses(
-               '<<"Str">>',
-               [[replace_tree('<<"Str">>', bstr(Str)),
-                 replace_term('<EnumSym>', Sym)]
-                || {Str, Sym} <- StrSyms])])
+     [if EnumName =:= 'google.protobuf.NullValue' ->
+              FnName = gpb_lib:mk_fn(fj_enum_, EnumName),
+              [gpb_lib:nowarn_unused_function(FnName,1),
+               gpb_codegen:format_fn(
+                 FnName,
+                 fun(_) -> 'NULL_VALUE' end)];
+         true ->
+              JSymStrsToSyms = canonify_enum_jstrs(unalias_enum_syms(Enums),
+                                                   Opts),
+              IntStrsToSyms = enum_ints_to_syms(Enums),
+              [{_, Sym1} | _] = JSymStrsToSyms,
+              StrSyms = JSymStrsToSyms ++ IntStrsToSyms,
+              FnName = gpb_lib:mk_fn(fj_enum_, EnumName),
+              EnumDecoder = gpb_lib:mk_fn(d_enum_, EnumName),
+              [gpb_lib:nowarn_unused_function(FnName,1),
+               gpb_codegen:format_fn(
+                 FnName,
+                 fun(S) when is_binary(S) ->
+                         case  fj_casecanon_enum(S, <<>>) of
+                             '<<"Str">>' -> '<EnumSym>';
+                             _ -> 'FirstSym'
+                         end;
+                    (N) when is_integer(N) ->
+                         'd_enum_<EName>'(N);
+                    (S) when is_list(S) ->
+                         call_self(list_to_binary(S))
+                 end,
+                 [replace_term('d_enum_<EName>', EnumDecoder),
+                  replace_term('FirstSym', Sym1),
+                  repeat_clauses(
+                    '<<"Str">>',
+                    [[replace_tree('<<"Str">>', bstr(Str)),
+                      replace_term('<EnumSym>', Sym)]
+                     || {Str, Sym} <- StrSyms])])]
       end
       || {{enum,EnumName}, Enums} <- Defs,
          NeedEnumType],
      [%% Extra enum helper(s)
       case proplists:get_bool(json_case_insensitive_enum_parsing, Opts) of
           true ->
-              [gpb_codegen:format_fn(
+              [gpb_lib:nowarn_unused_function(fj_casecanon_enum,2),
+               gpb_codegen:format_fn(
                  fj_casecanon_enum,
                  fun(<<C, Tl/binary>>, Acc) ->
                          call_self(Tl, <<Acc/binary, (fj_casecanon_char(C))>>);
                     (<<>>, Acc) ->
                          Acc
                  end),
+               gpb_lib:nowarn_unused_function(fj_casecanon_char,1),
                gpb_codegen:format_fn(
                  fj_casecanon_char, % to uppercase
                  fun(C) when $a =< C, C =< $z -> C - 32; % $a - $A == 32
@@ -1089,7 +1130,8 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
                     (C) -> C
                  end)];
           false ->
-              [gpb_codegen:format_fn(
+              [gpb_lib:nowarn_unused_function(fj_casecanon_enum,2),
+               gpb_codegen:format_fn(
                  fj_casecanon_enum,
                  fun(B, _Acc) ->
                          B

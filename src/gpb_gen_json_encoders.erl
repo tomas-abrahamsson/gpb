@@ -263,7 +263,9 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                    FVar, PrevJVar, TrUserDataVar, Defs, Tr, AnRes, Opts)->
     #?gpb_field{occurrence=Occurrence, type=Type, name=FName}=Field,
     TrFVar = gpb_lib:prefix_var("Tr", FVar),
-    FEncoderExpr = fun(Var) -> type_to_json_expr(Var, Field, TrUserDataVar) end,
+    FEncoderExpr = fun(Var) ->
+                           type_to_json_expr(Var, Field, TrUserDataVar, Opts)
+                   end,
     JFName = json_field_name(Field, Opts),
     Transforms = [replace_term('fieldname', FName),
                   replace_tree('jfieldname', JFName),
@@ -276,10 +278,15 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                  {enum,_} -> true;
                  _ -> false
              end,
+    IsNullValueEnum = case Type of
+                          {enum,'google.protobuf.NullValue'} -> true;
+                          _ -> false
+                      end,
     %% Shoult EmitTypeDefaults be a run-time option?
     %% or alternatively a run-time option?
     EmitTypeDefaults =
-        proplists:get_bool(json_always_print_primitive_fields, Opts),
+        proplists:get_bool(json_always_print_primitive_fields, Opts)
+        or IsNullValueEnum,
 
     case Occurrence of
         optional ->
@@ -396,7 +403,8 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 case Type of
                     {map, KT, VT} ->
                         [_KField, VField] = gpb:map_item_pseudo_fields(KT, VT),
-                        VF = type_to_json_expr(?expr(V), VField, TrUserDataVar),
+                        VF = type_to_json_expr(?expr(V), VField, TrUserDataVar,
+                                               Opts),
                         ?expr(tj_mapfield_fold(
                                 fun(Elem) -> 'MapElemTr'(Elem, 'TrUserData')
                                 end,
@@ -569,7 +577,7 @@ field_encode_oneof_flat(ClauseMarker, MsgName, MsgVar, FVar, OFields,
      end
      || #?gpb_field{name=Name}=OField <- OFields].
 
-type_to_json_expr(Var, #?gpb_field{type=Type}, TrUserDataVar) ->
+type_to_json_expr(Var, #?gpb_field{type=Type}, TrUserDataVar, Opts) ->
     case Type of
         Int32 when Int32 == sint32;
                    Int32 == int32;
@@ -582,11 +590,23 @@ type_to_json_expr(Var, #?gpb_field{type=Type}, TrUserDataVar) ->
                   [replace_tree('Value', Var)]);
         bool ->
             Var;
-        {enum,_EnumName} ->
-            ?expr(if is_integer('Value') -> 'Value';
-                     is_atom('Value') -> tj_string(atom_to_list('Value'))
-                  end,
-                  [replace_tree('Value', Var)]);
+        {enum,EnumName} ->
+            if EnumName =:= 'google.protobuf.NullValue' ->
+                    %% use of guards also avoids unused variable warnings,
+                    %% for better or worse...
+                    ?expr(if is_integer('Value') -> null;
+                             is_atom('Value') -> null
+                          end,
+                          [replace_tree('Value', Var),
+                           replace_term(null, gpb_lib:json_null(Opts))]);
+               true ->
+                    ?expr(if is_integer('Value') ->
+                                  'Value';
+                             is_atom('Value') ->
+                                  tj_string(atom_to_list('Value'))
+                          end,
+                          [replace_tree('Value', Var)])
+            end;
         Int32 when Int32 == fixed32;
                    Int32 == sfixed32 ->
             Var;
@@ -711,7 +731,7 @@ format_to_json_p3wellknown_timestamp(MsgName, MsgDef, Defs, AnRes, Opts) ->
 format_to_json_p3wellknown_wrapper(MsgName, MsgDef, Defs, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
     ToJsonExpr = type_to_json_expr(?expr(Value), hd(MsgDef),
-                                   ?expr(_TrUserData)),
+                                   ?expr(_TrUserData), Opts),
     FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
     [gpb_codegen:format_fn(
        FnName,
@@ -721,7 +741,6 @@ format_to_json_p3wellknown_wrapper(MsgName, MsgDef, Defs, AnRes, Opts) ->
        end,
        [replace_tree('field-infos', FieldInfos),
         replace_tree('to_json_expr(Value)', ToJsonExpr)])].
-
 
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
     KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),

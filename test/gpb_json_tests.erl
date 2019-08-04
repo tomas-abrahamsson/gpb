@@ -942,6 +942,24 @@ p3wellknown_wrappers_test() ->
     %% done
     unload_code(M1).
 
+p3wellknown_null_value_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message N { google.protobuf.NullValue f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    F = <<"f">>,
+    E1 = {'N', 'NULL_VALUE'},
+    J1 = [{F, null}],
+    J1 = M1:to_json(E1),
+    E1 = M1:from_json(J1, 'N'),
+    E1 = M1:from_json([{F, 0}], 'N'),
+    E1 = M1:from_json([{F, 0.0}], 'N'),
+    E1 = M1:from_json([{F, <<>>}], 'N'),
+    unload_code(M1).
+
 lower_camel_case_test() ->
     %% "Message field names are mapped to lowerCamelCase ..."
     Proto = "
