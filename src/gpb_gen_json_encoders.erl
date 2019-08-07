@@ -587,7 +587,6 @@ type_to_json_expr(Var, #?gpb_field{type=Type}, TrUserDataVar) ->
                    Float == double ->
             ?expr(if is_integer('Value') -> 'Value';
                      is_float('Value') -> tj_float('Value');
-                     'Value';
                      'Value' == infinity -> <<"Infinity">>;
                      'Value' == '-infinity' -> <<"-Infinity">>;
                      'Value' == nan -> <<"NaN">>
