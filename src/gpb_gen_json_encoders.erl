@@ -677,6 +677,8 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
             {true, fun format_to_json_p3wellknown_value/5};
         'google.protobuf.ListValue' ->
             {true, fun format_to_json_p3wellknown_list_value/5};
+        'google.protobuf.Empty' ->
+            {true, fun format_to_json_p3wellknown_empty/5};
         _ ->
             false
     end.
@@ -864,6 +866,15 @@ format_to_json_p3wellknown_list_value(MsgName, MsgDef, Defs, AnRes, Opts) ->
        [replace_tree('field-infos', FieldInfos),
         replace_term('ElemTr', ElemTransl),
         replace_tree('<enc>', EncoderExpr)]),
+     ""].
+
+format_to_json_p3wellknown_empty(MsgName, _MsgDef, _Defs, _AnRes, _Opts) ->
+    FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(_Msg, _TrUserData) ->
+               tj_finalize_obj(tj_new_object())
+       end),
      ""].
 
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->

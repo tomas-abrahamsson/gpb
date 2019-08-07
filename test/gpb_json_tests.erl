@@ -1117,6 +1117,20 @@ maybe_change_map_term(X, _Old, _New) -> % simple/scalar term, no change
     X.
 -endif. % -ifndef(NO_HAVE_MAPS).
 
+p3wellknown_empty_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/empty.proto';
+        message E { google.protobuf.Empty f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    E1 = {'E', {'google.protobuf.Empty'}},
+    J1 = [{<<"f">>, [{}]}],
+    J1 = M1:to_json(E1),
+    E1 = M1:from_json(J1, 'E'),
+    unload_code(M1).
+
 lower_camel_case_test() ->
     %% "Message field names are mapped to lowerCamelCase ..."
     Proto = "

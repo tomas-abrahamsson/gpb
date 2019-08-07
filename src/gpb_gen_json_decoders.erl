@@ -819,6 +819,8 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
             {true, fun format_p3wellknown_value_decoder/5};
         'google.protobuf.ListValue' ->
             {true, fun format_p3wellknown_list_value_decoder/5};
+        'google.protobuf.Empty' ->
+            {true, fun format_p3wellknown_empty_decoder/5};
         _ ->
             false
     end.
@@ -1158,6 +1160,15 @@ format_p3wellknown_list_value_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
         replace_term('MsgName', MsgName),
         replace_tree('field-infos', FieldInfos)])].
 
+format_p3wellknown_empty_decoder(MsgName, _MsgDef, _Defs, _AnRes, _Opts) ->
+    FnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(_JMsg, _TrUserData) ->
+               fj_mk_msg([], 'MsgName', [], _TrUserData)
+       end,
+       [replace_term('MsgName', MsgName)])].
+
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
     erl_syntax:list(
       [begin
@@ -1474,6 +1485,7 @@ format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
     UsesP3Struct = uses_msg('google.protobuf.Struct', AnRes),
     UsesP3Value = uses_msg('google.protobuf.Value', AnRes),
     UsesP3ListValue = uses_msg('google.protobuf.ListValue', AnRes),
+    UsesP3Empty = uses_msg('google.protobuf.Empty', AnRes),
 
     FlatMaps = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                    #maps{unset_optional=omitted, oneof=flat} ->
@@ -1483,7 +1495,8 @@ format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
                end,
     NonFlatMaps = not FlatMaps,
     NeedsMkMsg = UsesP3Duration or UsesP3Timestamp or UsesP3Wrapper
-        or UsesP3Struct or (UsesP3Value and NonFlatMaps) or UsesP3ListValue,
+        or UsesP3Struct or (UsesP3Value and NonFlatMaps) or UsesP3ListValue
+        or UsesP3Empty,
     NeedsEnsureList = UsesP3Duration or UsesP3Timestamp,
     [if not NeedsMkMsg ->
              "";
