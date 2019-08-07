@@ -1131,6 +1131,47 @@ p3wellknown_empty_test() ->
     E1 = M1:from_json(J1, 'E'),
     unload_code(M1).
 
+p3wellknown_field_mask_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/field_mask.proto';
+        message F { google.protobuf.FieldMask f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    FieldMask = 'google.protobuf.FieldMask',
+    F = <<"f">>,
+    E1 = {'F', {FieldMask, ["user.display_name", "photo"]}},
+    J1 = [{F, <<"user.displayName,photo">>}],
+    J1 = M1:to_json(E1),
+    E1 = M1:from_json(J1, 'F'),
+    %% spurious commas
+    {FieldMask, ["f", "g"]} = M1:from_json(<<"f,g">>, FieldMask),
+    {FieldMask, ["f", "g"]} = M1:from_json(<<"f,,,g">>, FieldMask),
+    {FieldMask, ["f", "g"]} = M1:from_json(<<",,f,g">>, FieldMask),
+    {FieldMask, ["f", "g"]} = M1:from_json(<<"f,g,,">>, FieldMask),
+    %% spurious dots preserved
+    {FieldMask, ["f...g"]} = M1:from_json(<<"f...g">>, FieldMask),
+    %% unlowercase handling
+    {FieldMask, ["d_name"]} = M1:from_json(<<"dName">>, FieldMask),
+    {FieldMask, ["d1_name"]} = M1:from_json(<<"d1Name">>, FieldMask),
+    {FieldMask, ["d1name"]}  = M1:from_json(<<"d1name">>, FieldMask),
+    {FieldMask, ["d_n_name"]} = M1:from_json(<<"dNName">>, FieldMask),
+    {FieldMask, ["d_abc_name"]} = M1:from_json(<<"dABCName">>, FieldMask),
+    {FieldMask, ["d_name"]} = M1:from_json(<<"dNAME">>, FieldMask),
+    {FieldMask, ["dname"]} = M1:from_json(<<"DNAME">>, FieldMask),
+    unload_code(M1),
+
+    %% Even with the option json_preserve_proto_field_names,
+    %% field_mask names are still to be lowerCamelCased,
+    %% at least in google's libprotoc (3.6.1)
+    M2 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, json_preserve_proto_field_names]),
+    J1 = M2:to_json(E1),
+    J1 = [{F, <<"user.displayName,photo">>}],
+    unload_code(M2).
+
+
 lower_camel_case_test() ->
     %% "Message field names are mapped to lowerCamelCase ..."
     Proto = "

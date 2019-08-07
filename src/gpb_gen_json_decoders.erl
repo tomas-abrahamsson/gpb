@@ -821,6 +821,8 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
             {true, fun format_p3wellknown_list_value_decoder/5};
         'google.protobuf.Empty' ->
             {true, fun format_p3wellknown_empty_decoder/5};
+        'google.protobuf.FieldMask' ->
+            {true, fun format_p3wellknown_field_mask_decoder/5};
         _ ->
             false
     end.
@@ -1169,6 +1171,123 @@ format_p3wellknown_empty_decoder(MsgName, _MsgDef, _Defs, _AnRes, _Opts) ->
        end,
        [replace_term('MsgName', MsgName)])].
 
+format_p3wellknown_field_mask_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(from_json_msg_, MsgName),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(JStr, TrUserData) ->
+               fj_mk_msg([fj_field_names(JStr)],
+                         'MsgName',
+                         'field-infos',
+                         TrUserData)
+       end,
+       [replace_term('MsgName', MsgName),
+        replace_tree('field-infos', FieldInfos)]),
+
+     gpb_codegen:format_fn(
+       %% "user.displayName,photo"  -> ["user.display_name", "photo"]
+       %% "user.displayName,,photo" -> ["user.display_name", "photo"]
+       %% "user.displayName,"       -> ["user.display_name"]
+       %% ",user.displayName,"      -> ["user.display_name"]
+       fj_field_names,
+       fun(JStr) ->
+               Str = fj_ensure_list(JStr),
+               Paths = fj_strsplit_nonempty($,, Str),
+               [fj_string(fj_unlower_camel_case_path(Path)) || Path <- Paths]
+       end),
+
+     gpb_codegen:format_fn(
+       %% "user.displayNName"       -> ["user.display_n_name"]
+       %% "user.display3Name"       -> ["user.display3_name"]
+       %% "user.display33name"      -> ["user.display33name"]
+       %% "user.DISPALYNAME"        -> ["user.dispalyname"]
+       %% "user.displayNAME"        -> ["user.display_name"]
+       %% "user.displayABCName"     -> ["user.display_abc_name"]
+       %%
+       %% Algorithm: (a) lowercase each uppercase letter
+       %% (b) non-uppercase followed by uppercase: precede by underscore
+       %% (c) uppercase followed by non-uppercase: precede by underscore
+       fj_unlower_camel_case_path,
+       fun(S) ->
+               fj_strjoin($., [fj_unlower_camel_case(Comp)
+                               || Comp <- fj_strsplit($., S)])
+       end),
+     gpb_codegen:format_fn(
+       fj_strjoin,
+       fun(_Sep, []) -> "";
+          (Sep, [Hd | Tl]) -> [Hd | [[Sep, Elem] || Elem <- Tl]]
+       end),
+     gpb_codegen:format_fn(
+       fj_strsplit,
+       fun(Sep, Str) ->
+               fj_strsplit_2(Sep, Str, "", [])
+       end),
+     gpb_codegen:format_fn(
+       fj_strsplit_2,
+       fun(Sep, [Sep | Tl], Curr, Acc) ->
+               call_self(Sep, Tl, "", [lists:reverse(Curr) | Acc]);
+          (Sep, [C | Tl], Curr, Acc) ->
+               call_self(Sep, Tl, [C | Curr], Acc);
+          (_Sep, [], Curr, Acc) ->
+               if Curr =:= "" -> lists:reverse(Acc);
+                  Curr =/= "" -> lists:reverse([lists:reverse(Curr) | Acc])
+               end
+       end),
+     gpb_codegen:format_fn(
+       fj_strsplit_nonempty,
+       fun(Sep, Str) ->
+               fj_strsplit_nonempty_2(Sep, Str, none, [])
+       end),
+     gpb_codegen:format_fn(
+       fj_strsplit_nonempty_2,
+       fun(Sep, [Sep | Tl], Curr, Acc) ->
+               call_self(Sep, Tl, none, fj_strsplit_add_to_acc(Curr, Acc));
+          (Sep, [C | Tl], Curr, Acc) ->
+               call_self(Sep, Tl, fj_strsplit_add_to_curr(C, Curr), Acc);
+          (_Sep, [], Curr, Acc) ->
+               lists:reverse(fj_strsplit_add_to_acc(Curr, Acc))
+       end),
+     gpb_codegen:format_fn(
+       fj_strsplit_add_to_acc,
+       fun(none, Acc) -> Acc;
+          (Curr, Acc) -> [lists:reverse(Curr) | Acc]
+       end),
+     gpb_codegen:format_fn(
+       fj_strsplit_add_to_curr,
+       fun(C, none) -> [C];
+          (C, Curr) -> [C | Curr]
+       end),
+     gpb_codegen:format_fn(
+       fj_unlower_camel_case,
+       fun(S) ->
+               fj_unlcc(S, i, "")
+       end),
+     gpb_codegen:format_fn(
+       fj_unlcc,
+       fun([U | Tl], State, Acc) when $A =< U, U =< $Z ->
+               if State =:= l, hd(Acc) =/= $_ ->
+                       call_self(Tl, u, [fj_lowercase(U), $_ | Acc]);
+                  true ->
+                       call_self(Tl, u, [fj_lowercase(U) | Acc])
+               end;
+          ([NonU | Tl], State, Acc) ->
+               if State =:= u, tl(Acc) =/= "", hd(tl(Acc)) =/= $_ ->
+                       [C | Acc1] = Acc,
+                       call_self(Tl, l, [NonU, C, $_ | Acc1]);
+                  true ->
+                       call_self(Tl, l, [NonU | Acc])
+               end;
+          ("", _State, Acc) ->
+               lists:reverse(Acc)
+       end),
+     gpb_codegen:format_fn(
+       fj_lowercase,
+       fun(C) when $A =< C, C =< $Z -> C - ($A - $a);
+          (C) -> C
+       end),
+     ""].
+
 field_info_trees(MsgName, Fields, Defs, AnRes, Opts) ->
     erl_syntax:list(
       [begin
@@ -1486,6 +1605,7 @@ format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
     UsesP3Value = uses_msg('google.protobuf.Value', AnRes),
     UsesP3ListValue = uses_msg('google.protobuf.ListValue', AnRes),
     UsesP3Empty = uses_msg('google.protobuf.Empty', AnRes),
+    UsesP3FieldMask = uses_msg('google.protobuf.FieldMask', AnRes),
 
     FlatMaps = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                    #maps{unset_optional=omitted, oneof=flat} ->
@@ -1496,8 +1616,8 @@ format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
     NonFlatMaps = not FlatMaps,
     NeedsMkMsg = UsesP3Duration or UsesP3Timestamp or UsesP3Wrapper
         or UsesP3Struct or (UsesP3Value and NonFlatMaps) or UsesP3ListValue
-        or UsesP3Empty,
-    NeedsEnsureList = UsesP3Duration or UsesP3Timestamp,
+        or UsesP3Empty or UsesP3FieldMask,
+    NeedsEnsureList = UsesP3Duration or UsesP3Timestamp or UsesP3FieldMask,
     [if not NeedsMkMsg ->
              "";
         NeedsMkMsg ->

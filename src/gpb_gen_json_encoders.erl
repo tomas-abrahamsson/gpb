@@ -679,6 +679,8 @@ test_proto3_wellknown(MsgName, _MsgDef) ->
             {true, fun format_to_json_p3wellknown_list_value/5};
         'google.protobuf.Empty' ->
             {true, fun format_to_json_p3wellknown_empty/5};
+        'google.protobuf.FieldMask' ->
+            {true, fun format_to_json_p3wellknown_field_mask/5};
         _ ->
             false
     end.
@@ -874,6 +876,82 @@ format_to_json_p3wellknown_empty(MsgName, _MsgDef, _Defs, _AnRes, _Opts) ->
        FnName,
        fun(_Msg, _TrUserData) ->
                tj_finalize_obj(tj_new_object())
+       end),
+     ""].
+
+format_to_json_p3wellknown_field_mask(MsgName, MsgDef, Defs, AnRes, Opts) ->
+    FnName = gpb_lib:mk_fn(to_json_msg_, MsgName),
+    FieldInfos = field_info_trees(MsgName, MsgDef, Defs, AnRes, Opts),
+    [gpb_codegen:format_fn(
+       FnName,
+       fun(Msg, TrUserData) ->
+               [Paths] = tj_get_fields(Msg, 'field-infos', TrUserData),
+               tj_string(tj_comma_join_lower_camel_case(Paths))
+       end,
+       [replace_tree('field-infos', FieldInfos)]),
+     gpb_codegen:format_fn(
+       tj_comma_join_lower_camel_case,
+       fun(Paths) ->
+               tj_strjoin(",", [tj_lower_camel_case_path(P) || P <- Paths])
+       end),
+     gpb_codegen:format_fn(
+       tj_lower_camel_case_path,
+       fun(S) ->
+               tj_strjoin($., [tj_lower_camel_case(Comp)
+                               || Comp <- tj_strsplit($., S)])
+       end),
+     gpb_codegen:format_fn(
+       tj_strjoin,
+       fun(_Sep, []) -> "";
+          (Sep, [Hd | Tl]) -> [Hd | [[Sep, Elem] || Elem <- Tl]]
+       end),
+     gpb_codegen:format_fn(
+       tj_strsplit,
+       fun(Sep, Str) ->
+               tj_strsplit_2(Sep, Str, "", [])
+       end),
+     gpb_codegen:format_fn(
+       tj_strsplit_2,
+       fun(Sep, [Sep | Tl], Curr, Acc) ->
+               call_self(Sep, Tl, "", [lists:reverse(Curr) | Acc]);
+          (Sep, [C | Tl], Curr, Acc) ->
+               call_self(Sep, Tl, [C | Curr], Acc);
+          (_Sep, [], Curr, Acc) ->
+               if Curr =:= "" -> lists:reverse(Acc);
+                  Curr =/= "" -> lists:reverse([lists:reverse(Curr) | Acc])
+               end
+       end),
+     gpb_codegen:format_fn(
+       tj_lower_camel_case, %% Like CamelCase, but first letter is lower case
+       fun(S) ->
+               [C1 | Rest] = tj_camel_case(S, true),
+               [tj_lower_case_letter(C1) | Rest]
+       end),
+     gpb_codegen:format_fn(
+       tj_camel_case,
+       fun([C | Tl], CapNextLetter) when $a =< C, C =< $z -> % is lower-case
+               if CapNextLetter ->
+                       [tj_capitalize_letter(C) | call_self(Tl, false)];
+                  not CapNextLetter ->
+                       [C | call_self(Tl, false)]
+               end;
+          ([C | Tl], _) when $A =< C, C =< $Z -> % is upper-case
+               [C | call_self(Tl, false)];
+          ([D | Tl], _) when $0 =< D, D =< $9 -> % is digit
+               [D | call_self(Tl, true)];
+          ([_ | Tl], _) -> %% underscore and possibly more
+               call_self(Tl, true);
+          ([], _) ->
+               []
+       end),
+     gpb_codegen:format_fn(
+       tj_capitalize_letter,
+       fun(C) -> C + ($A - $a)
+       end),
+     gpb_codegen:format_fn(
+       tj_lower_case_letter,
+       fun(C) when $A =< C, C =< $Z -> C - ($A - $a);
+          (C) -> C
        end),
      ""].
 
@@ -1117,11 +1195,13 @@ format_json_p3wellknowns_helpers(AnRes, Opts) ->
     UsesP3Struct = uses_msg('google.protobuf.Struct', AnRes),
     UsesP3Value = uses_msg('google.protobuf.Value', AnRes),
     UsesP3ListValue = uses_msg('google.protobuf.ListValue', AnRes),
+    UsesP3FieldMask = uses_msg('google.protobuf.FieldMask', AnRes),
     NeedsGetFields = UsesP3Duration or UsesP3Timestamp
         or UsesP3Float or UsesP3Double or UsesP3Int64 or UsesP3UInt64
         or UsesP3Int32 or UsesP3UInt32 or UsesP3Bool or UsesP3String
         or UsesP3Bytes
-        or UsesP3Struct or (UsesP3Value and not FlatMaps) or UsesP3ListValue,
+        or UsesP3Struct or (UsesP3Value and not FlatMaps) or UsesP3ListValue
+        or UsesP3FieldMask,
     NeedsDotNanos = UsesP3Duration or UsesP3Timestamp,
     [if not NeedsGetFields ->
              "";
@@ -1211,13 +1291,15 @@ format_json_type_helpers(#anres{used_types=UsedTypes,
     UsesP3WellknownTimestamp = uses_msg('google.protobuf.Timestamp', AnRes),
     UsesP3WellknownStringValue = uses_msg('google.protobuf.StringValue',
                                           AnRes),
+    UsesP3WellknownFieldMask = uses_msg('google.protobuf.FieldMask', AnRes),
     NeedStringType = (gpb_lib:smember(string, UsedTypes)
                       orelse HaveMapfields
                       orelse HaveInt64
                       orelse HaveEnum
                       orelse UsesP3WellknownDuration
                       orelse UsesP3WellknownTimestamp
-                      orelse UsesP3WellknownStringValue),
+                      orelse UsesP3WellknownStringValue
+                      orelse UsesP3WellknownFieldMask),
     NeedBytesType = gpb_lib:smember(bytes, UsedTypes),
 
     [[gpb_codegen:format_fn(
