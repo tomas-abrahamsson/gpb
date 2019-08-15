@@ -495,6 +495,14 @@ speed. The Python implementation cannot optimize for speed.
     HW: Intel Core i7 5820k, 3.3GHz, 6x256 kB L2 cache, 15MB L3 cache
         (CPU frequency pinned to 3.3 GHz)
 
+*NB:* Optimizations landed in Erlang 22, but the performance figures
+have not yet been updated.  The way the benchmarks are implemented is
+causing more GC than normal, and just running the benchmarks will
+produce pessimistic values.  I have yet to figure out a better way
+of benchmarking, before I can update the figures..
+See https://github.com/erlang/otp/commit/7d941c529d#commitcomment-31091771
+for more info.
+
 The benchmarks are all done with the exact same messages files and
 proto files.  The source of the benchmarks was found in the Google
 protobuf's svn repository.  The gpb originally did not support groups,

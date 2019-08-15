@@ -46,7 +46,7 @@ run_tests([MsgModuleStr, MsgNameStr | MsgFileAndRest]) ->
     Decoder = fun() -> decode_bins(MsgBins, MsgModule, MsgName) end,
     Msgs = [MsgModule:decode_msg(Bin, MsgName) || Bin <- MsgBins],
     Encoder = fun() -> encode_msgs(Msgs, MsgModule, EMsgName) end,
-
+    maybe_warn_skewed_results(),
     io:format("Benchmarking ~s ~s with file ~s~n",
               [MsgModule, MsgName, string:join(MsgFiles, ",")]),
     run_test("Serialize to binary", DataSize, Encoder),
@@ -86,6 +86,27 @@ encode_msgs([Msg | Rest], MsgModule, MsgName) ->
     encode_msgs(Rest, MsgModule, MsgName);
 encode_msgs([], _, _) ->
     ok.
+
+
+maybe_warn_skewed_results() ->
+    try list_to_integer(erlang:system_info(otp_release)) of
+        N when N >= 22 ->
+            io:format(
+              "\n"
+              "NB: The results are currently skewed on Erlang 22 and later.\n"
+              "    Optimizations in Erlang 22 and the way the benchmarks\n"
+              "    are implemented cause more GC than normal.\n"
+              "    The benchmarking code is not yet adapted. It will show\n"
+              "    pessimistic values.\n"
+              "    See https://github.com/erlang/otp/commit/7d941c529d#commitcomment-31091771\n"
+              "    for more info.\n"
+              "\n");
+        _ ->
+            ok
+    catch _:_ ->
+            ok
+    end.
+
 
 
 run_test(Description, DataSize, Action) ->
