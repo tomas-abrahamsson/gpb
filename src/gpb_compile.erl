@@ -2742,9 +2742,9 @@ format_erl(Mod, Defs, DefsNoRenamings,
                                                      true),
                 gpb_gen_encoders:format_map_encoders(MapsAsMsgs, AnRes, Opts,
                                                      false),
-                gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts)]
+                gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts),
+                gpb_gen_encoders:format_aux_common_encoders(Defs, AnRes, Opts)]
        end,
-       gpb_gen_encoders:format_aux_common_encoders(Defs, AnRes, Opts),
        "\n",
        gpb_gen_decoders:format_decoders_top_function(Defs, AnRes, Opts),
        "\n\n",
