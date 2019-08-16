@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.10.1
+2019-Aug-16
+
+        * Handle the special JSON mapping of proto3 wellknowns, such as
+        google.protobuf.Duration, google.protobuf.Struct, wrapper types etc.
+        Only the google.protobuf.Any is not yet handled.
+
 Version 4.10.0
 2019-Jul-11
 
