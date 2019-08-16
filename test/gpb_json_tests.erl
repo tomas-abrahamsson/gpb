@@ -25,6 +25,7 @@
 -include("gpb_nif_test_helpers.hrl"). % the `?nif_if_supported(FnName)' macro
 
 -import(gpb_compile_tests, [compile_iolist/2]).
+-import(gpb_compile_tests, [compile_protos/2]).
 -import(gpb_compile_tests, [unload_code/1]).
 
 -import(gpb_compile_tests, [nif_tests_check_prerequisites/1]).
@@ -36,6 +37,12 @@
 -import(gpb_compile_maps_tests, [flat_map_prerequisites/1]).
 
 -export([json_encode/1, json_decode/1]). % for debugging
+
+%% For testing translations
+-export([float_to_duration/1, duration_to_float/1]).
+-export([fraction_to_nanos/1, nanos_to_fraction/1]).
+-export([string_to_int/1, int_to_string/1]).
+-export([id/1]).
 
 -ifdef('OTP_RELEASE').
 %% ?assertEqual/3 appeared in Erlang 20 already,
@@ -660,6 +667,510 @@ mapfield_map_test() ->
                               'StrToSub')),
     unload_code(M1).
 -endif. % -ifndef(NO_HAVE_MAPS).
+
+p3wellknown_duration_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/duration.proto';
+        message D {
+           google.protobuf.Duration f = 1;
+        }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    F = <<"f">>,
+    Duration = 'google.protobuf.Duration',
+    [{F, <<"0s">>}] = M1:to_json({'D', {Duration, 0, 0}}),
+    [{F, <<"1s">>}] = M1:to_json({'D', {Duration, 1, 0}}),
+    %% Negative (also in range 0..1 where seconds cannot be negative)
+    [{F, <<"-1s">>}] = M1:to_json({'D', {Duration, -1, 0}}),
+    [{F, <<"-1.100s">>}] = M1:to_json({'D', {Duration, -1, -100000000}}),
+    [{F, <<"-0.100s">>}] = M1:to_json({'D', {Duration, 0, -100000000}}),
+    %% with 3 6 or 9 decimals as appropriate
+    [{F, <<"1.000000123s">>}] = M1:to_json({'D', {Duration, 1, 123}}),
+    [{F, <<"1.000123s">>}] = M1:to_json({'D', {Duration, 1, 123000}}),
+    [{F, <<"1.123s">>}] = M1:to_json({'D', {Duration, 1, 123000000}}),
+    %% with optionals omitted
+    [{F, <<"0s">>}] = M1:to_json({'D', {Duration, undefined, undefined}}),
+    [{F, <<"1s">>}] = M1:to_json({'D', {Duration, 1, undefined}}),
+    [{F, <<"0.000000123s">>}] = M1:to_json({'D', {Duration, undefined, 123}}),
+    %% too large
+    ?assertError(_, M1:to_json({'D', {Duration, 0, 2111222333}})),
+    ?assertError(_, M1:to_json({'D', {Duration, 0, 1000000000}})),
+    %% Decoding ---
+    {'D', {Duration, 0, 0}} = M1:from_json([{F, <<"0s">>}], 'D'),
+    %% negative: both nanos and seconds must be negative
+    {'D', {Duration, -1, -1}} = M1:from_json([{F, <<"-1.000000001s">>}], 'D'),
+    {'D', {Duration, 0, -1}}  = M1:from_json([{F, <<"-0.000000001s">>}], 'D'),
+    %% Only seconds, no nanos
+    {'D', {Duration, 1, 0}} = M1:from_json([{F, <<"1s">>}], 'D'),
+    %% with 3 6 or 9 decimals as appropriate
+    {'D', {Duration, 1, 123}} = M1:from_json([{F, <<"1.000000123s">>}], 'D'),
+    {'D', {Duration, 1, 123000}} = M1:from_json([{F, <<"1.000123s">>}], 'D'),
+    {'D', {Duration, 1, 123000000}} = M1:from_json([{F, <<"1.123s">>}], 'D'),
+    %% "Accepted are any fractional digits (also none) as long as they fit
+    %% into nano-seconds"
+    {'D', {Duration, 1, 1230}} = M1:from_json([{F, <<"1.00000123s">>}], 'D'),
+    {'D', {Duration, 1, 12300}} = M1:from_json([{F, <<"1.0000123s">>}], 'D'),
+    {'D', {Duration, 1, 12300000}} = M1:from_json([{F, <<"1.0123s">>}], 'D'),
+    %% invalid
+    ?assertError(_, M1:from_json([{F, <<"1.2111222333s">>}], 'D')), % overflow
+    ?assertError(_, M1:from_json([{F, <<".1s">>}], 'D')),
+    %% with Google protobuf, "1.s" seems valid (but ".1s" does not)
+    {'D', {Duration, 1, 0}} = M1:from_json([{F, <<"1.s">>}], 'D'),
+    %% done
+    unload_code(M1).
+
+-ifndef(NO_HAVE_MAPS).
+p3wellknown_duration_map_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/duration.proto';
+        message D {
+           google.protobuf.Duration f = 1;
+        }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, maps]),
+    ?assertEqual(#{<<"f">> => <<"1s">>},
+                 M1:to_json(#{f => #{seconds => 1, nanos => 0}}, 'D')),
+    ?assertEqual(#{<<"f">> => <<"1s">>},
+                 M1:to_json(#{f => #{seconds => 1}}, 'D')),
+    ?assertEqual(#{f => #{seconds => 1, nanos => 0}},
+                 M1:from_json(#{<<"f">> => <<"1s">>}, 'D')),
+    unload_code(M1),
+    M2 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json,
+                         maps, {maps_unset_optional, present_undefined}]),
+    ?assertEqual(#{<<"f">> => <<"1s">>},
+                 M2:to_json(#{f => #{seconds => 1, nanos => 0}}, 'D')),
+    ?assertEqual(#{<<"f">> => <<"1s">>},
+                 M2:to_json(#{f => #{seconds => 1, nanos => undefined}}, 'D')),
+    ?assertEqual(#{f => #{seconds => 1, nanos => 0}},
+                 M2:from_json(#{<<"f">> => <<"1s">>}, 'D')),
+    unload_code(M2).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+p3wellknown_duration_with_translations_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/duration.proto';
+        message D {
+           google.protobuf.Duration f = 1;
+        }
+        ",
+    TranslateDfOpt =
+        {translate_field,
+         {['D',f], [{encode, {?MODULE, float_to_duration,['$1']}},
+                    {decode, {?MODULE, duration_to_float,['$1']}}]}},
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, TranslateDfOpt]),
+    F = <<"f">>,
+    [{F, <<"1.125s">>}] = M1:to_json({'D', 1.125}),
+    {'D', 1.125} = M1:from_json([{F, <<"1.125s">>}], 'D'),
+    unload_code(M1),
+
+    Duration = 'google.protobuf.Duration',
+    TranslateDurationFieldOpts =
+        [{translate_field,
+          {[Duration,seconds],
+           [{encode, {?MODULE, string_to_int,['$1']}},
+            {decode, {?MODULE, int_to_string,['$1']}}]}},
+         {translate_field,
+          {[Duration,nanos],
+           [{encode, {?MODULE, fraction_to_nanos,['$1']}},
+            {decode, {?MODULE, nanos_to_fraction,['$1']}}]}}],
+    M2 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json | TranslateDurationFieldOpts]),
+    [{F, <<"1.125s">>}] = M2:to_json({'D', {Duration, "1", 0.125}}),
+    {'D', {Duration, "1", 0.125}} = M2:from_json([{F, <<"1.125s">>}], 'D'),
+    unload_code(M2).
+
+float_to_duration(Fl) ->
+    Seconds = trunc(Fl),
+    Nanos = fraction_to_nanos(Fl - Seconds),
+    {'google.protobuf.Duration', Seconds, Nanos}.
+
+duration_to_float({'google.protobuf.Duration', Seconds, Nanos}) ->
+    Seconds + nanos_to_fraction(Nanos).
+
+fraction_to_nanos(Fl) when 0.0 =< Fl, Fl < 1.0 ->
+    trunc(Fl * 1000000000).
+
+nanos_to_fraction(Nanos) when 0 =< Nanos, Nanos < 1000000000 ->
+    Nanos / 1000000000.
+
+string_to_int(S) -> list_to_integer(S).
+
+int_to_string(I) -> integer_to_list(I).
+
+p3wellknown_timestamp_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/timestamp.proto';
+        message T {
+           google.protobuf.Timestamp f = 1;
+        }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    F = <<"f">>,
+    Timestamp = 'google.protobuf.Timestamp',
+    [{F, <<"1970-01-01T00:00:00Z">>}] = M1:to_json({'T', {Timestamp, 0, 0}}),
+    [{F, <<"1969-12-31T23:59:50Z">>}] = M1:to_json({'T', {Timestamp, -10, 0}}),
+    %% with 3 6 or 9 decimals as appropriate
+    [[{F, <<"1970-01-01T00:00:01.000000123Z">>}],
+     [{F, <<"1970-01-01T00:00:01.000123Z">>}],
+     [{F, <<"1970-01-01T00:00:01.123Z">>}]] =
+        [M1:to_json({'T', {Timestamp, 1, 123}}),
+         M1:to_json({'T', {Timestamp, 1, 123000}}),
+         M1:to_json({'T', {Timestamp, 1, 123000000}})],
+    %% with optionals omitted
+    [[{F, <<"1970-01-01T00:00:00Z">>}],
+     [{F, <<"1970-01-01T00:00:01Z">>}],
+     [{F, <<"1970-01-01T00:00:00.000000123Z">>}]] =
+        [M1:to_json({'T', {Timestamp, undefined, undefined}}),
+         M1:to_json({'T', {Timestamp, 1, undefined}}),
+         M1:to_json({'T', {Timestamp, undefined, 123}})],
+    %% too large
+    ?assertError(_, M1:to_json({'T', {Timestamp, 0, 2111222333}})),
+    ?assertError(_, M1:to_json({'T', {Timestamp, 0, 1000000000}})),
+    %% Decoding ---
+    {'T', {Timestamp, 0, 0}} =
+        M1:from_json([{F, <<"1970-01-01T00:00:00Z">>}], 'T'),
+    {'T', {Timestamp, 482196050, 520000000}} =
+        M1:from_json([{F, <<"1985-04-12T23:20:50.52Z">>}], 'T'),
+    %% with offset
+    [{'T',{'google.protobuf.Timestamp',851042397,0}},
+     {'T',{'google.protobuf.Timestamp',851042397,0}}] =
+        [M1:from_json([{F, <<"1996-12-19T16:39:57-08:00">>}], 'T'),
+         M1:from_json([{F, <<"1996-12-20T00:39:57Z">>}], 'T')],
+    %% with nano seconds and offset
+    {'T',{'google.protobuf.Timestamp',851042397,520000000}} =
+        M1:from_json([{F, <<"1996-12-19T16:39:57.52-08:00">>}], 'T'),
+    %% with 3 6 or 9 decimals as appropriate
+    [{'T', {Timestamp, 1, 123}},
+     {'T', {Timestamp, 1, 123000}},
+     {'T', {Timestamp, 1, 123000000}}] =
+        [M1:from_json([{F, <<"1970-01-01T00:00:01.000000123Z">>}], 'T'),
+         M1:from_json([{F, <<"1970-01-01T00:00:01.000123Z">>}], 'T'),
+         M1:from_json([{F, <<"1970-01-01T00:00:01.123Z">>}], 'T')],
+    %% "Accepted are any fractional digits (also none) as long as they fit
+    %% into nano-seconds"
+    [{'T', {Timestamp, 1, 1230}},
+     {'T', {Timestamp, 1, 12300}},
+     {'T', {Timestamp, 1, 12300000}}] =
+        [M1:from_json([{F, <<"1970-01-01T00:00:01.00000123Z">>}], 'T'),
+         M1:from_json([{F, <<"1970-01-01T00:00:01.0000123Z">>}], 'T'),
+         M1:from_json([{F, <<"1970-01-01T00:00:01.0123Z">>}], 'T')],
+    %% done
+    unload_code(M1).
+
+p3wellknown_wrappers_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/wrappers.proto';
+        message Double { google.protobuf.DoubleValue f = 1; }
+        message Float  { google.protobuf.FloatValue f = 1; }
+        message I64    { google.protobuf.Int64Value f = 1; }
+        message U64    { google.protobuf.UInt64Value f = 1; }
+        message I32    { google.protobuf.Int32Value f = 1; }
+        message U32    { google.protobuf.UInt32Value f = 1; }
+        message Bool   { google.protobuf.BoolValue f = 1; }
+        message String { google.protobuf.StringValue f = 1; }
+        message Bytes  { google.protobuf.BytesValue f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    F = <<"f">>,
+    DoubleValue = 'google.protobuf.DoubleValue',
+    FloatValue = 'google.protobuf.FloatValue',
+    [{F, 0.125}] = M1:to_json({'Double', {DoubleValue, 0.125}}),
+    [{}]         = M1:to_json({'Double', undefined}),
+    [{F, 0.125}] = M1:to_json({'Float', {FloatValue, 0.125}}),
+    [{}]         = M1:to_json({'Float', undefined}),
+    I64Value = 'google.protobuf.Int64Value',
+    U64Value = 'google.protobuf.UInt64Value',
+    I32Value = 'google.protobuf.Int32Value',
+    U32Value = 'google.protobuf.UInt32Value',
+    [{F, <<"123">>}] = M1:to_json({'I64', {I64Value, 123}}),
+    [{}]             = M1:to_json({'I64', undefined}),
+    [{F, <<"123">>}] = M1:to_json({'U64', {U64Value, 123}}),
+    [{}]             = M1:to_json({'U64', undefined}),
+    [{F, 123}]       = M1:to_json({'I32', {I32Value, 123}}),
+    [{}]             = M1:to_json({'I32', undefined}),
+    [{F, 123}]       = M1:to_json({'U32', {U32Value, 123}}),
+    [{}]             = M1:to_json({'U32', undefined}),
+    BoolValue   = 'google.protobuf.BoolValue',
+    StringValue = 'google.protobuf.StringValue',
+    BytesValue  = 'google.protobuf.BytesValue',
+    [{F, true}]       = M1:to_json({'Bool', {BoolValue, true}}),
+    [{}]              = M1:to_json({'Bool', undefined}),
+    [{F, <<"abc">>}]  = M1:to_json({'String', {StringValue, <<"abc">>}}),
+    [{}]              = M1:to_json({'String', undefined}),
+    [{F, <<"YQA=">>}] = M1:to_json({'Bytes', {BytesValue, <<"a",0>>}}),
+    [{}]              = M1:to_json({'Bytes', undefined}),
+    %% Decoding ---
+    {'Double', {DoubleValue, 0.0}}   = M1:from_json([{}],         'Double'),
+    {'Double', {DoubleValue, 0.0}}   = M1:from_json([{F, null}],  'Double'),
+    {'Double', {DoubleValue, 0.125}} = M1:from_json([{F, 0.125}], 'Double'),
+    {'Float', {FloatValue, 0.0}}   = M1:from_json([{}],         'Float'),
+    {'Float', {FloatValue, 0.0}}   = M1:from_json([{F, null}],  'Float'),
+    {'Float', {FloatValue, 0.125}} = M1:from_json([{F, 0.125}], 'Float'),
+    {'I64', {I64Value, 0}}  = M1:from_json([{}],            'I64'),
+    {'I64', {I64Value, 0}}  = M1:from_json([{F, null}],     'I64'),
+    {'I64', {I64Value, 17}} = M1:from_json([{F, <<"17">>}], 'I64'),
+    {'U64', {U64Value, 0}}  = M1:from_json([{}],            'U64'),
+    {'U64', {U64Value, 0}}  = M1:from_json([{F, null}],     'U64'),
+    {'U64', {U64Value, 17}} = M1:from_json([{F, <<"17">>}], 'U64'),
+    {'I32', {I32Value, 0}}  = M1:from_json([{}],        'I32'),
+    {'I32', {I32Value, 0}}  = M1:from_json([{F, null}], 'I32'),
+    {'I32', {I32Value, 17}} = M1:from_json([{F, 17}],   'I32'),
+    {'U32', {U32Value, 0}}  = M1:from_json([{}],        'U32'),
+    {'U32', {U32Value, 0}}  = M1:from_json([{F, null}], 'U32'),
+    {'U32', {U32Value, 17}} = M1:from_json([{F, 17}],   'U32'),
+    {'Bool', {BoolValue, false}} = M1:from_json([{}],         'Bool'),
+    {'Bool', {BoolValue, false}} = M1:from_json([{F, null}],  'Bool'),
+    {'Bool', {BoolValue, false}} = M1:from_json([{F, false}], 'Bool'),
+    {'Bool', {BoolValue, true}}  = M1:from_json([{F, true}],  'Bool'),
+    {'String', {StringValue, ""}}  = M1:from_json([{}],           'String'),
+    {'String', {StringValue, ""}}  = M1:from_json([{F, null}],    'String'),
+    {'String', {StringValue, "a"}} = M1:from_json([{F, <<"a">>}], 'String'),
+    {'Bytes', {BytesValue, <<>>}}  = M1:from_json([{}],           'Bytes'),
+    {'Bytes', {BytesValue, <<>>}}  = M1:from_json([{F, null}],    'Bytes'),
+    {'Bytes', {BytesValue, <<"a",0>>}} = M1:from_json([{F, <<"YQA=">>}],
+                                                      'Bytes'),
+    %% done
+    unload_code(M1).
+
+p3wellknown_null_value_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message N { google.protobuf.NullValue f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    F = <<"f">>,
+    E1 = {'N', 'NULL_VALUE'},
+    J1 = [{F, null}],
+    J1 = M1:to_json(E1),
+    E1 = M1:from_json(J1, 'N'),
+    E1 = M1:from_json([{F, 0}], 'N'),
+    E1 = M1:from_json([{F, 0.0}], 'N'),
+    E1 = M1:from_json([{F, <<>>}], 'N'),
+    unload_code(M1).
+
+p3wellknown_struct_list_value_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message L { google.protobuf.ListValue f = 1; }
+        message V { google.protobuf.Value f = 1; }
+        message S { google.protobuf.Struct f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    ListValue = 'google.protobuf.ListValue',
+    Value = 'google.protobuf.Value',
+    Struct = 'google.protobuf.Struct',
+    E1 = {ListValue, [{Value, {null_value, 'NULL_VALUE'}},
+                                {Value, {number_value, 12}},
+                                {Value, {number_value, 1.25e3}},
+                                {Value, {string_value, "abc"}},
+                                {Value, {bool_value, true}},
+                                {Value, {struct_value, {Struct, []}}},
+                                {Value, {list_value, {ListValue,[]}}}]},
+    J1 = [null, 12, 1.25e3, <<"abc">>, true, [{}], []],
+    J1 = M1:to_json(E1),
+    E1 = change_term(M1:from_json(J1, ListValue),
+                     {number_value,12.0}, % double decodes to float, fix cmp
+                     {number_value,12}),
+
+    F = <<"f">>,
+    J2 = [{F, [{<<"s">>, <<"abc">>},
+          {<<"b">>, true},
+          {<<"n">>, null}]}],
+    E2 = {'S', {Struct, M21=[{"s", {Value, {string_value, "abc"}}},
+                             {"b", {Value, {bool_value, true}}},
+                             {"n", {Value, {null_value, 'NULL_VALUE'}}}]}},
+    J2 = M1:to_json(E2),
+    {'S', {Struct, M22}} = M1:from_json(J2, 'S'),
+    ?assertEqual(lists:sort(M21),
+                 lists:sort(M22)),
+    unload_code(M1).
+
+p3wellknown_listvalue_with_translation_test() ->
+    %% Test mk_msg with translations for repeated fields.
+    %% This the google.protobuf.ListValue is a repeated field.
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message L { google.protobuf.ListValue f = 1; }
+        ",
+    ListValue = 'google.protobuf.ListValue',
+    TranslateOpt =
+        {translate_field,
+         {[ListValue,values],
+          %% Internal format for the list is a set in this test,
+          %% so translate to/from a set.
+          [{encode, {sets, to_list, ['$1']}},
+           {decode_init_default, {sets, new, []}},
+           {decode_repeated_add_elem, {sets, add_element,['$1', '$2']}},
+           {decode_repeated_finalize, {?MODULE, id, ['$1']}}]}},
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, TranslateOpt]),
+    %% true occurs twice in the input, but will be only once in the set
+    {ListValue, S} = M1:from_json([null, <<"abc">>, true, true], ListValue),
+    [{'google.protobuf.Value',{bool_value,true}},
+     {'google.protobuf.Value',{null_value,'NULL_VALUE'}},
+     {'google.protobuf.Value',{string_value,"abc"}}] =
+        lists:sort(sets:to_list(S)),
+    unload_code(M1).
+
+-ifndef(NO_HAVE_MAPS).
+p3wellknown_struct_list_value_map_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message L { google.protobuf.ListValue f = 1; }
+        message V { google.protobuf.Value f = 1; }
+        message S { google.protobuf.Struct f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, maps]),
+    E1 = #{values => [#{kind => {null_value, 'NULL_VALUE'}},
+                      #{kind => {number_value, 12}},
+                      #{kind => {number_value, 1.25e3}},
+                      #{kind => {string_value, "abc"}},
+                      #{kind => {bool_value, true}},
+                      #{kind => {struct_value, #{fields => #{}}}},
+                      #{kind => {list_value, #{values => []}}}]},
+    J1 = [null, 12, 1.25e3, <<"abc">>, true, #{}, []],
+    ?assertEqual(J1, M1:to_json(E1, 'google.protobuf.ListValue')),
+    ?assertEqual(E1, change_term(M1:from_json(J1, 'google.protobuf.ListValue'),
+                                 {number_value,12.0},
+                                 {number_value,12})),
+    E2 = #{f => #{fields => #{"s" => #{kind => {string_value, "abc"}},
+                              "b" => #{kind => {bool_value, true}},
+                              "n" => #{kind => {null_value, 'NULL_VALUE'}}}}},
+    J2 = #{<<"f">> => #{<<"s">> => <<"abc">>,
+                        <<"b">> => true,
+                        <<"n">> => null}},
+    ?assertEqual(J2, M1:to_json(E2, 'S')),
+    ?assertEqual(E2, M1:from_json(J2, 'S')),
+    unload_code(M1).
+
+p3wellknown_struct_list_value_flat_map_test_() ->
+    flat_map_prerequisites(
+      [{"flat oneof", fun p3wellknown_struct_list_value_flat_map_aux/0}]).
+
+p3wellknown_struct_list_value_flat_map_aux() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/struct.proto';
+        message L { google.protobuf.ListValue f = 1; }
+        message V { google.protobuf.Value f = 1; }
+        message S { google.protobuf.Struct f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, maps, {maps_oneof, flat}]),
+    E1 = #{values => [#{null_value => 'NULL_VALUE'},
+                      #{number_value => 12},
+                      #{number_value => 1.25e3},
+                      #{string_value => "abc"},
+                      #{bool_value => true},
+                      #{struct_value => #{fields => #{}}},
+                      #{list_value => #{values => []}}]},
+    J1 = [null, 12, 1.25e3, <<"abc">>, true, #{}, []],
+    ?assertEqual(J1, M1:to_json(E1, 'google.protobuf.ListValue')),
+    ?assertEqual(E1, change_term(M1:from_json(J1, 'google.protobuf.ListValue'),
+                                 #{number_value => 12.0},
+                                 #{number_value => 12})),
+    E2 = #{f => #{fields => #{"s" => #{string_value => "abc"},
+                              "b" => #{bool_value => true},
+                              "n" => #{null_value => 'NULL_VALUE'}}}},
+    J2 = #{<<"f">> => #{<<"s">> => <<"abc">>,
+                        <<"b">> => true,
+                        <<"n">> => null}},
+    ?assertEqual(J2, M1:to_json(E2, 'S')),
+    ?assertEqual(E2, M1:from_json(J2, 'S')),
+    unload_code(M1).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+change_term(Old, Old, New) -> New;
+change_term([H | T], Old, New) ->
+    [change_term(H, Old, New) | change_term(T, Old, New)];
+change_term(T, Old, New) when is_tuple(T) ->
+    list_to_tuple(change_term(tuple_to_list(T), Old, New));
+change_term(X, Old, New) ->
+    maybe_change_map_term(X, Old, New).
+
+-ifndef(NO_HAVE_MAPS).
+maybe_change_map_term(M, Old, New) when is_map(M) ->
+    maps:from_list([{change_term(K, Old, New), change_term(V, Old, New)}
+                    || {K, V} <- maps:to_list(M)]);
+maybe_change_map_term(X, _Old, _New) -> % simple/scalar term, no change
+    X.
+-else. % -ifndef(NO_HAVE_MAPS).
+maybe_change_map_term(X, _Old, _New) -> % simple/scalar term, no change
+    X.
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+p3wellknown_empty_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/empty.proto';
+        message E { google.protobuf.Empty f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    E1 = {'E', {'google.protobuf.Empty'}},
+    J1 = [{<<"f">>, [{}]}],
+    J1 = M1:to_json(E1),
+    E1 = M1:from_json(J1, 'E'),
+    unload_code(M1).
+
+p3wellknown_field_mask_test() ->
+    Proto = "
+        syntax='proto3';
+        import 'google/protobuf/field_mask.proto';
+        message F { google.protobuf.FieldMask f = 1; }
+        ",
+    M1 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json]),
+    FieldMask = 'google.protobuf.FieldMask',
+    F = <<"f">>,
+    E1 = {'F', {FieldMask, ["user.display_name", "photo"]}},
+    J1 = [{F, <<"user.displayName,photo">>}],
+    J1 = M1:to_json(E1),
+    E1 = M1:from_json(J1, 'F'),
+    %% spurious commas
+    {FieldMask, ["f", "g"]} = M1:from_json(<<"f,g">>, FieldMask),
+    {FieldMask, ["f", "g"]} = M1:from_json(<<"f,,,g">>, FieldMask),
+    {FieldMask, ["f", "g"]} = M1:from_json(<<",,f,g">>, FieldMask),
+    {FieldMask, ["f", "g"]} = M1:from_json(<<"f,g,,">>, FieldMask),
+    %% spurious dots preserved
+    {FieldMask, ["f...g"]} = M1:from_json(<<"f...g">>, FieldMask),
+    %% unlowercase handling
+    {FieldMask, ["d_name"]} = M1:from_json(<<"dName">>, FieldMask),
+    {FieldMask, ["d1_name"]} = M1:from_json(<<"d1Name">>, FieldMask),
+    {FieldMask, ["d1name"]}  = M1:from_json(<<"d1name">>, FieldMask),
+    {FieldMask, ["d_n_name"]} = M1:from_json(<<"dNName">>, FieldMask),
+    {FieldMask, ["d_abc_name"]} = M1:from_json(<<"dABCName">>, FieldMask),
+    {FieldMask, ["d_name"]} = M1:from_json(<<"dNAME">>, FieldMask),
+    {FieldMask, ["dname"]} = M1:from_json(<<"DNAME">>, FieldMask),
+    unload_code(M1),
+
+    %% Even with the option json_preserve_proto_field_names,
+    %% field_mask names are still to be lowerCamelCased,
+    %% at least in google's libprotoc (3.6.1)
+    M2 = compile_protos([{"<gen>.proto", Proto}],
+                        [use_packages, json, json_preserve_proto_field_names]),
+    J1 = M2:to_json(E1),
+    J1 = [{F, <<"user.displayName,photo">>}],
+    unload_code(M2).
+
 
 lower_camel_case_test() ->
     %% "Message field names are mapped to lowerCamelCase ..."
