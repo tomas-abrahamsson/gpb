@@ -315,7 +315,8 @@ Features of gpb
    - aggregate custom options introduced in protobuf 2.4.0
    - rpc
    - JSON limitations:
-     - does not handle google/protobuf/* wellknowns
+     - does not handle the special JSON mapping of
+       the google.protobuf.Any wellknown
 
 *  Characteristics of gpb:
    - Skipping over unknown message fields or groups, when decoding,
