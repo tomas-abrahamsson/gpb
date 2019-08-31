@@ -1195,4 +1195,7 @@ is_import_item({import, _}) -> true;
 is_import_item(_) -> false.
 
 is_unresolved_ref_reason({ref_to_undefined_msg_or_enum,_}) -> true;
+is_unresolved_ref_reason({rpc_arg_ref_to_undefined_msg, _}) -> true;
+is_unresolved_ref_reason({rpc_return_ref_to_undefined_msg, _}) -> true;
+is_unresolved_ref_reason({extend_ref_to_undefined_msg, _}) -> true;
 is_unresolved_ref_reason(_) -> false.

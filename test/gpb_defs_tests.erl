@@ -1361,9 +1361,37 @@ verify_hints_about_use_packages_option_test() ->
           verify_imports),
     Msg1 = verify_flat_string(gpb_parse:format_post_process_error(Error1)),
     verify_strings_present(Msg1, ["use_packages"]),
+    %% Check when there are only refs from rpcs (different error values)
+    {error, _} = Error2 =
+        parse_several_file_lines(
+          [{"a.proto", ["import \"b.proto\";",
+                        "service S {",
+                        "  rpc R(pkg.b.MsgB) returns (pkg.b.MsgB);",
+                        "}"]},
+           {"b.proto", ["package pkg.b;",
+                        "message MsgB { optional uint32 g = 1; }"]}],
+          [],
+          expect_error,
+          verify_imports),
+    Msg2 = verify_flat_string(gpb_parse:format_post_process_error(Error2)),
+    verify_strings_present(Msg2, ["use_packages"]),
+    %% Check when there are only refs from extend (different error value)
+    {error, _} = Error3 =
+        parse_several_file_lines(
+          [{"a.proto", ["import \"b.proto\";",
+                        "extend pkg.b.msgB {",
+                        "  optional uint32 f  = 4711;",
+                        "}"]},
+           {"b.proto", ["package pkg.b;",
+                        "message MsgB { optional uint32 g = 1; }"]}],
+          [],
+          expect_error,
+          verify_imports),
+    Msg3 = verify_flat_string(gpb_parse:format_post_process_error(Error3)),
+    verify_strings_present(Msg3, ["use_packages"]),
     %% Part of the heuristics for the hinting is that there are different
     %% package. Try two files, one imported, but with the same package.
-    {error, _} = Error2 =
+    {error, _} = Error4 =
         parse_several_file_lines(
           [{"a.proto", ["import \"b.proto\";",
                         "package pkg.ab;",
@@ -1373,10 +1401,10 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg2 = verify_flat_string(gpb_parse:format_post_process_error(Error2)),
-    verify_strings_not_present(Msg2, ["use_packages"]),
+    Msg4 = verify_flat_string(gpb_parse:format_post_process_error(Error4)),
+    verify_strings_not_present(Msg4, ["use_packages"]),
     %% no hint about the option when it is already included
-    {error, _} = Error3 =
+    {error, _} = Error5 =
         parse_several_file_lines(
           [{"a.proto", ["import \"b.proto\";",
                         "message MsgA { optional pkg.b.BadMsgRef f1 = 1; }"]},
@@ -1385,8 +1413,8 @@ verify_hints_about_use_packages_option_test() ->
           [use_packages],
           expect_error,
           verify_imports),
-    Msg3 = verify_flat_string(gpb_parse:format_post_process_error(Error3)),
-    verify_strings_not_present(Msg3, ["use_packages"]).
+    Msg5 = verify_flat_string(gpb_parse:format_post_process_error(Error5)),
+    verify_strings_not_present(Msg5, ["use_packages"]).
 
 verify_error_for_field_name_defined_twice_test() ->
     lists:foreach(
