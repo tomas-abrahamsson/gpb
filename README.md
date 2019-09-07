@@ -331,6 +331,8 @@ Features of gpb
    - Gpb can optionally make use of the `package` attribute by prepending
      the name of the package to every contained message type (if defined),
      which is useful to avoid name clashes of message types across packages.
+     See the [`use_packages` option](https://hexdocs.pm/gpb/gpb_compile.html#option-use_packages)
+     or the [`-pkgs` command line option](https://hexdocs.pm/gpb/gpb_compile.html#cmdline-option-pkgs).
    - The generated encode/decoder has no run-time dependency to gpb,
      but there is normally a compile-time dependency for the generated
      code: to the `#field{}` record in gpb.hrl for the `get_msg_defs`
