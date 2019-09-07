@@ -246,6 +246,21 @@ parses_enum_option_test() ->
      {{msg_containment,_}, []}] =
         do_process_sort_defs(Elems).
 
+parses_enum_with_custom_option_test() ->
+    {ok, Elems} = parse_lines(["enum e1 {",
+                               "  option (my_e1_option) = true;",
+                               "  option (my_e1_option).x = true;",
+                               "  ee1 = 1 [(my_e_option) = 12];",
+                               "  ee2 = 2 [(my_e_option).x = \"abc\"];",
+                               "}"]),
+    [{file, _},
+     {{enum,e1}, [{option, my_e1_option, true},
+                  {option, 'my_e1_option.x',true},
+                  {ee1,1},{ee2,2}]},
+     {{enum_containment, _}, [_]},
+     {{msg_containment,_}, []}] =
+        do_process_sort_defs(Elems).
+
 parses_custom_option_test() ->
     AllDefs = parse_sort_several_file_lines(
                 [{"descriptor.proto",
