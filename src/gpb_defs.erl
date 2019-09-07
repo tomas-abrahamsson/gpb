@@ -38,7 +38,8 @@
 -type defs() :: [def()].
 -type def() :: {{msg, Name::atom()}, [field()]} |
                {{group, Name::atom()}, [field()]} |
-               {{enum, Name::atom()}, [{Sym::atom(), Value::integer()}]} |
+               {{enum, Name::atom()}, [{Sym::atom(), Value::integer()} |
+                                       {option, Name::atom(), Val::term()}]} |
                {{service, Name::atom()}, [#?gpb_rpc{}]} |
                {package, Name::atom()} |
                {syntax, string()} | % "proto2" | "proto3"
