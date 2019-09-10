@@ -38,7 +38,7 @@ is_up_to_date descr_src/gpb_descriptor.erl \
         -I priv/proto3/google/protobuf -o descr_src \
     -modprefix gpb_ \
         -s gpb_compile c descriptor.proto ) || exit $?
-is_up_to_date "$EBIN/gpb_descriptor.beam descr_src/gpb_descriptor.erl" || \
+is_up_to_date "$EBIN/gpb_descriptor.beam" descr_src/gpb_descriptor.erl || \
     ( echo "Compiling gpb_descriptor.erl..."
     erlc -Idescr_src -Iinclude -o "$EBIN" +debug_info \
         descr_src/gpb_descriptor.erl ) || exit $?
