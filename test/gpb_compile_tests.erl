@@ -1200,84 +1200,110 @@ list_as_bytes_indata_test() ->
             ok
     end.
 
-copy_bytes_unconditionally_test() ->
-    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
-    if HasBinary ->
-            M = compile_iolist(["message m1 { required bytes f1 = 1; }"],
-                               [{copy_bytes, true}]),
-            Data = M:encode_msg({m1, <<"d">>}),
-            {m1, <<"d">>=Bs} = M:decode_msg(Data, m1),
-            %% If the Bs has not been copied, then it is a sub-binary
-            %% of a larger binary: of the message, ie of Data.
-            %% So verify copying by verifying size of referenced data.
-            ?assertEqual(byte_size(Bs), binary:referenced_byte_size(Bs)),
-            unload_code(M);
-       true ->
-            %% nothing to test
-            ok
+-define(btest(Fn, N), {atom_to_list(Fn), fun() -> Fn(N) end}).
+copy_bytes_test_() ->
+    %% From Erlang 22.1, matched sub-binaries =< 64 bytes gets copied
+    %% to heap-local binaries even though there's no call to
+    %% binary:copy(). Previously they didn't.
+    %%
+    %% Since we used binary:referenced_byte_size() as an indication to
+    %% check whether bytes were copied or not, we must stay over that
+    %% limit. But it is a bit fragile, limits can be upped etc, so check
+    %% if we can find such a limit. If not, skip the tests (don't fail).
+    case calc_lower_size_bound_when_sub_binaries_dont_get_copied() of
+        {found, {at_least, N}} ->
+            {"copy_bytes tests",
+             [?btest(copy_bytes_unconditionally_aux, N),
+              ?btest(copy_bytes_false_aux, N),
+              ?btest(copy_bytes_auto_aux, N),
+              ?btest(copy_bytes_fraction_aux, N)]};
+        not_found ->
+            {"skipping", _NoTests=[]}
     end.
 
-copy_bytes_false_test() ->
+calc_lower_size_bound_when_sub_binaries_dont_get_copied() ->
+    calc_byte_copy_lim_aux(32).
+
+calc_byte_copy_lim_aux(N) when N =< 8192 ->
+    N1 = N + 1,
+    C = binary:copy(<<"a">>, N + 11),
+    <<A:10/binary, B:N1/binary>> = C,
+    case {binary:referenced_byte_size(A), % better do something with A
+          binary:referenced_byte_size(B),
+          byte_size(C)} of
+        {_, Sz, Sz} ->
+            ?assertEqual(10, binary:referenced_byte_size(binary:copy(A))),
+            {found, {at_least, N1}};
+        _X ->
+            %% Maybe sub-binaries of larger size don't get copied?
+            io:format("_X=~p~n", [_X]),
+            calc_byte_copy_lim_aux(N * 2)
+    end;
+calc_byte_copy_lim_aux(_) ->
+    not_found.
+
+
+copy_bytes_unconditionally_aux(MinSize) ->
+    Bytes = binary:copy(<<"d">>, MinSize),
+    M = compile_iolist(["message m1 { required bytes f1 = 1; }"],
+                       [{copy_bytes, true}]),
+    Data = M:encode_msg({m1, Bytes}),
+    {m1, Bs} = M:decode_msg(Data, m1),
+    %% If the Bs has not been copied, then it is a sub-binary
+    %% of a larger binary: of the message, ie of Data.
+    %% So verify copying by verifying size of referenced data.
+    ?assertEqual(byte_size(Bs), binary:referenced_byte_size(Bs)),
+    unload_code(M).
+
+
+copy_bytes_false_aux(MinSize) ->
+    Bytes = binary:copy(<<"d">>, MinSize),
     M = compile_iolist(["message m1 { required bytes f1 = 1; }"],
                        [{copy_bytes, false}]),
-    Data = M:encode_msg({m1, <<"d">>}),
-    {m1, <<"d">>=Bs} = M:decode_msg(Data, m1),
-    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
-    if HasBinary ->
-            %% If the StrBin has not been copied, then it is a sub-binary
-            %% of a larger binary: of the message, ie of Data.
-            %% So verify copying by verifying size of referenced data.
-            ?assertEqual(byte_size(Data), binary:referenced_byte_size(Bs));
-       true ->
-            ok
-    end,
+    Data = M:encode_msg({m1, Bytes}),
+    {m1, Bs} = M:decode_msg(Data, m1),
+    %% If the StrBin has not been copied, then it is a sub-binary
+    %% of a larger binary: of the message, ie of Data.
+    %% So verify copying by verifying size of referenced data.
+    ?assertEqual(byte_size(Data), binary:referenced_byte_size(Bs)),
     unload_code(M).
 
-copy_bytes_auto_test() ->
+copy_bytes_auto_aux(MinSize) ->
+    Bytes = binary:copy(<<"d">>, MinSize),
     M = compile_iolist(["message m1 { required bytes f1 = 1; }"],
                        [{copy_bytes, auto}]),
-    Data = M:encode_msg({m1, <<"d">>}),
-    {m1, <<"d">>=Bs} = M:decode_msg(Data, m1),
-    HasBinary = (catch binary:copy(<<1>>)) == <<1>>,
-    if HasBinary ->
-            ?assertEqual(byte_size(Bs), binary:referenced_byte_size(Bs));
-       true ->
-            ok %% cannot test more if we don't have the binary module
-    end,
+    Data = M:encode_msg({m1, Bytes}),
+    {m1, Bs} = M:decode_msg(Data, m1),
+    ?assertEqual(byte_size(Bs), binary:referenced_byte_size(Bs)),
     unload_code(M).
 
-copy_bytes_fraction_test() ->
-    HasBinary = (catch binary:copy(<<1>>)) == <<1>>,
-    if HasBinary ->
-            Proto = ["message m1 {",
-                     "  required bytes f1 = 1;",
-                     "  required bytes f2 = 2;",
-                     "}"],
-            M1 = compile_iolist(Proto, [{copy_bytes, 2}]),   % fraction as int
-            M2 = compile_iolist(Proto, [{copy_bytes, 2.0}]), % fraction as float
-            D1 = <<"d">>, %% small
-            D2 = <<"dddddddddddddddddddddddddddd">>, %% large
-            Data = M1:encode_msg({m1, D1, D2}),
-            ?assert(byte_size(Data) > (2 * byte_size(D1))),
-            ?assert(byte_size(Data) < (2 * byte_size(D2))),
-            {m1, D1Bs, D2Bs} = M1:decode_msg(Data, m1),
-            ?assertEqual(D1, D1Bs),
-            ?assertEqual(D2, D2Bs),
-            %% The small data should have been copied, but not the larger
-            ?assertEqual(byte_size(D1Bs), binary:referenced_byte_size(D1Bs)),
-            ?assertEqual(byte_size(Data), binary:referenced_byte_size(D2Bs)),
+copy_bytes_fraction_aux(MinSize) ->
+    Proto = ["message m1 {",
+             "  required bytes f1 = 1;",
+             "  required bytes f2 = 2;",
+             "}"],
+    M1 = compile_iolist(Proto, [{copy_bytes, 2}]),   % fraction as int
+    M2 = compile_iolist(Proto, [{copy_bytes, 2.0}]), % fraction as float
+    D1 = binary:copy(<<"d">>, MinSize), %% small
+    D2 = binary:copy(<<"d">>, MinSize * 5), %% large
+    Data = M1:encode_msg({m1, D1, D2}),
+    ?assert(byte_size(Data) > (2 * byte_size(D1))),
+    ?assert(byte_size(Data) < (2 * byte_size(D2))),
+    {m1, D1Bs, D2Bs} = M1:decode_msg(Data, m1),
+    ?assertEqual(D1, D1Bs),
+    ?assertEqual(D2, D2Bs),
+    %% The small data should have been copied, but not the larger
+    ?assertEqual(byte_size(D1Bs), binary:referenced_byte_size(D1Bs)),
+    ?assertEqual(byte_size(Data), binary:referenced_byte_size(D2Bs)),
 
-            {m1, D3Bs, D4Bs} = M2:decode_msg(Data, m1),
-            ?assertEqual(D1, D3Bs),
-            ?assertEqual(D2, D4Bs),
-            ?assertEqual(byte_size(D3Bs), binary:referenced_byte_size(D3Bs)),
-            ?assertEqual(byte_size(Data), binary:referenced_byte_size(D4Bs)),
+    {m1, D3Bs, D4Bs} = M2:decode_msg(Data, m1),
+    ?assertEqual(D1, D3Bs),
+    ?assertEqual(D2, D4Bs),
+    ?assertEqual(byte_size(D3Bs), binary:referenced_byte_size(D3Bs)),
+    ?assertEqual(byte_size(Data), binary:referenced_byte_size(D4Bs)),
 
-            unload_code(M1),
-            unload_code(M2);
-       true ->
-            ok
-    end.
+    unload_code(M1),
+    unload_code(M2).
 
 %% --- strings ----------
 
