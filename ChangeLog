@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.10.3
+2019-Oct-03
+
+        * Avoid unnecessary recompilation
+        * Fix a eunit test error with Erlang 21.1
+
 Version 4.10.2
 2019-Sep-08
 
