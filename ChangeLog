@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.10.4
+2019-Oct-05
+
+        * Fix a dialyze issue for map<_,_> type fields
+        in generated code (#171).
+
 Version 4.10.3
 2019-Oct-03
 
