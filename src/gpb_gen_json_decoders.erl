@@ -163,8 +163,9 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     %% but dialyzer complains down in the mk_call function.
     TrUserDataVar = erl_syntax:variable("TrUserData"),
 
+    TmpAnRes = set_field_pass_as_params_for_all_msgs(AnRes),
     InitExprs1 = gpb_decoders_lib:init_exprs(MsgName, MsgDef, Defs,
-                                             TrUserDataVar, AnRes, Opts),
+                                             TrUserDataVar, TmpAnRes, Opts),
     IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
     FieldInfos1 = gpb_decoders_lib:calc_field_infos(MsgDef, IsProto3, Opts),
     {InitExprs2, FieldInfos2} = defaultify_p3wellknowns(InitExprs1, MsgDef,
@@ -178,6 +179,12 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
              format_msg_decoder_loop(MsgName, MsgDef,
                                      TrUserDataVar, AnRes, Opts)]
     end.
+
+set_field_pass_as_params_for_all_msgs(#anres{d_field_pass_method=FP}=AnRes) ->
+    FP1 = dict:fold(fun(K, _Pass, D) -> dict:store(K, pass_as_params, D) end,
+                    dict:new(),
+                    FP),
+    AnRes#anres{d_field_pass_method = FP1}.
 
 format_msg_decoder_no_fields(MsgName, Opts) ->
     InitExprs1 = calc_init_msg_expr(MsgName, [], [], Opts),

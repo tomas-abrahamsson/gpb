@@ -1220,6 +1220,26 @@ no_msg_fields_test() ->
     [{}] = M1:to_json({'Msg'}),
     unload_code(M1).
 
+field_pass_as_record_test() ->
+    %% Analysis may decide decoding should pass fields in a record
+    %% instead of as params for performance reasons,
+    %% but this could make json decoding get into trouble
+    %% due to the joint depencency on gpb_decoders_lib.
+    Proto = "
+       message Msg {
+          uint32 f1 = 1;
+          uint32 f2 = 2;
+          map<string,uint32> f3 = 3;
+       }
+       ",
+    M1 = compile_iolist(Proto,
+                        [json, {field_pass_method, pass_as_record}]),
+    [{<<"f1">>, 1},
+     {<<"f2">>, 2},
+     {<<"f3">>, [{<<"a">>, 1},{<<"b">>, 2}]}] =
+         M1:to_json({'Msg', 1, 2, [{"a", 1}, {"b", 2}]}),
+    unload_code(M1).
+
 msg_with_only_groups_test() ->
     Proto = "
        message Msg {
