@@ -395,25 +395,36 @@ format_default_map_translators(#anres{map_types=MapTypes,
                inline_attr(mt_empty_map_r,0),
                gpb_codegen:format_fn(
                  mt_empty_map_r,
-                 fun() -> dict:new() end),
+                 fun() -> [] end),
                [[inline_attr(mt_add_item_r,2),
                  gpb_codegen:format_fn(
                    mt_add_item_r,
-                   fun({_RName,K,V}, D) -> dict:store(K,V,D) end),
+                   fun({_RName,K,V}, Acc) -> [{K,V} | Acc] end),
                  "\n"]
                 || HaveMapNonSubmsgs],
                [[inline_attr(mt_add_item_r_verify_value,2),
                  gpb_codegen:format_fn(
                    mt_add_item_r_verify_value,
                    fun({_,_,undefined}, _) -> error({gpb_error, missing_value});
-                      ({_RName,K,V}, D) -> dict:store(K,V,D)
+                      ({_RName,K,V}, Acc) -> [{K,V} | Acc]
                    end),
                  "\n"]
                 || HaveMapSubmsgs],
                inline_attr(mt_finalize_items_r,1),
                gpb_codegen:format_fn(
                  mt_finalize_items_r,
-                 fun(D) -> dict:to_list(D) end),
+                 fun(Acc) ->
+                         %% Reverse to store the items in the dict
+                         %% in the same order they were decoded,
+                         %% in case a key occurs more than once.
+                         mt_finalize_items_r_aux(lists:reverse(Acc),
+                                                 dict:new())
+                 end),
+               gpb_codegen:format_fn(
+                 mt_finalize_items_r_aux,
+                 fun([{K,V} | Tl], D) -> call_self(Tl, dict:store(K, V, D));
+                    ([], D) -> dict:to_list(D)
+                 end),
                "\n"];
           maps ->
               {M,K,V} = {?expr(M), ?expr(K), ?expr(V)},
