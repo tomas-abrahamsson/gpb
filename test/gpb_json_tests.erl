@@ -1240,6 +1240,27 @@ field_pass_as_record_test() ->
          M1:to_json({'Msg', 1, 2, [{"a", 1}, {"b", 2}]}),
     unload_code(M1).
 
+-ifndef(NO_HAVE_MAPS).
+json_maps_and_records_with_mapfields_test() ->
+    Proto = "
+       message Msg {
+          uint32 f1 = 1;
+          uint32 f2 = 2;
+          map<string,uint32> f3 = 3;
+       }
+       ",
+    M1 = compile_iolist(Proto, [json, {json_format, maps}]),
+    Msg = {'Msg', 1, 2, [{"a", 1}, {"b", 2}]},
+    #{<<"f1">> := 1,
+      <<"f2">> := 2,
+      <<"f3">> := #{<<"a">> := 1, <<"b">> := 2}} = M1:to_json(Msg),
+    Msg2 = M1:decode_msg(M1:encode_msg(Msg, 'Msg'), 'Msg'),
+    %% order undefined, so compare after sort:
+    ?assertEqual(lists:sort(element(4, Msg)),
+                 lists:sort(element(4, Msg2))),
+    unload_code(M1).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
 msg_with_only_groups_test() ->
     Proto = "
        message Msg {
