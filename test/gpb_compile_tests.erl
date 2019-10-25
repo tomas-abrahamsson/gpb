@@ -2775,7 +2775,7 @@ nif_tests_check_prerequisites(Tests) ->
         ok ->
             increase_timeouts({"nif tests", lists:flatten(Tests)});
         {error, Text} ->
-            {Text, []}
+            {"Nif tests skipped: " ++ Text, []}
     end.
 
 nif_verify_prerequisites() ->
@@ -2783,8 +2783,44 @@ nif_verify_prerequisites() ->
         {false,_,_} -> {error, "Nif tests not wanted"};
         {_,false,_} -> {error, "Protoc not found, not trying to compile"};
         {_,_,false} -> {error, "No C++ compiler found, not trying to compile"};
-        {_,_,_}     -> ok
+        {_,_,_}     -> can_compile_simple_libproto_depending_program()
     end.
+
+can_compile_simple_libproto_depending_program() ->
+    %% The 'protoc' might be available, but not necessarily
+    %% any google/protobuf/*.h files, ie not the development
+    %% packages. Attempt to detect this, to avoid compilation
+    %% failure (and thus unit test failure) on such hosts.
+    with_tmpdir(
+      fun(TmpDir) ->
+              CxxLines = ["#include <stdio.h>",
+                          "#include <google/protobuf/message.h>",
+                          "",
+                          "::google::protobuf::Message *m;",
+                          "",
+                          "int main(int argc, char **argv)",
+                          "{",
+                          "    m = 0;",
+                          "    return 0;",
+                          "}"],
+              ProgramBase = "test-libproto",
+              Program = filename:join(TmpDir, ProgramBase),
+              CxxFile = filename:join(TmpDir, ProgramBase ++ ".cc"),
+              ok = file:write_file(CxxFile, [[L, "\n"] || L <- CxxLines]),
+              CC = find_cplusplus_compiler(),
+              CFlags = get_cflags(),
+              LdFlags = get_ldflags(),
+              Cmd = f("'~s' -g -O0 ~s ~s"
+                      "    -o '~s' '~s' -lprotobuf",
+                      [CC, LdFlags, CFlags,
+                       Program, CxxFile]),
+              case ccompile("~s", [Cmd], silent_on_compilation_error) of
+                  ok ->
+                      ok;
+                  {error, _} ->
+                      {error, "No libproto development files"}
+              end
+      end).
 
 check_nif_features_supported(NeededFeatures, ExtraChecks) ->
     case nif_verify_prerequisites() of
@@ -3958,13 +3994,21 @@ format_type(Type) ->
     Type.
 
 ccompile(F, A) ->
+    ccompile(F, A, verbose).
+
+ccompile(F, A, ErrorVerbosity) ->
     Cmd = f(F, A),
     Output = os:cmd("LC_ALL=C; export LC_ALL; " ++ Cmd ++ "; echo $?\n"),
     [LastLine | _Rest] = lists:reverse(gpb_lib:string_lexemes(Output, "\r\n")),
     try list_to_integer(string_trim(LastLine)) of
         0 -> ok;
-        _ -> ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~ts~n~n",
-                       [Cmd, Output]),
+        _ -> case ErrorVerbosity of
+                 verbose ->
+                     ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~ts~n~n",
+                               [Cmd, Output]);
+                 silent_on_compilation_error ->
+                     ok
+             end,
              {error, Output}
     catch error:badarg ->
             ?debugFmt("Compilation failed!~nCmd=~p~nOutput:~n~ts~n~n",
