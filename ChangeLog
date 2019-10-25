@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.10.5
+2019-Oct-25
+
+        * Fix a bug in the generated verifiers for option
+        map_key_type = binary: it would report any field
+        as extraneous. #174
+
 Version 4.10.4
 2019-Oct-05
 
