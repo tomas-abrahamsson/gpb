@@ -923,6 +923,22 @@ binary_map_keys_not_mixed_with_map_types_test() ->
 
     unload_code(M).
 
+verify_extraneous_keys_for_binary_map_keys_test() ->
+    M = compile_iolist(["message m {",
+                        "  required uint32 a = 1;",
+                        "  optional bool   b = 2;",
+                        "  repeated uint32 c = 3;",
+                        "}"],
+                       [maps, {maps_key_type, binary}]),
+    %% encode and decode
+    M1 = #{<<"a">> => 1, <<"b">> => true, <<"c">> => [3,4,5]},
+    ok = M:verify_msg(M1, m),
+    ?assert(is_binary(M:encode_msg(M1, m, [verify]))),
+    ?assertError({gpb_type_error,_}, M:verify_msg(M1#{<<"d">> => 4}, m)),
+    ?assertError({gpb_type_error,_}, M:encode_msg(M1#{<<"d">> => 4}, m,
+                                                  [verify])),
+    unload_code(M).
+
 bypassed_wrappers_maps_test() ->
     DefsM1 = "message m1 { required uint32 a = 1; }\n",
     DefsNoMsgs = "enum ee { a = 0; }\n",

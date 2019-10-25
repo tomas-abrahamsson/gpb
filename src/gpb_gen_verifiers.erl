@@ -169,12 +169,19 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
             #maps{unset_optional=present_undefined} ->
                 [];
             #maps{unset_optional=omitted}=Mapping ->
-                Names = case Mapping of
-                            #maps{oneof=tuples} ->
-                                FNames;
-                            #maps{oneof=flat} ->
-                                field_names_oneofs_expanded(MsgDef)
-                        end,
+                Names1 = case Mapping of
+                             #maps{oneof=tuples} ->
+                                 FNames;
+                             #maps{oneof=flat} ->
+                                 field_names_oneofs_expanded(MsgDef)
+                         end,
+                Names2 = case gpb_lib:get_maps_key_type_by_opts(Opts) of
+                             atom ->
+                                 Names1;
+                             binary ->
+                                 [atom_to_binary_string_stree(Name)
+                                  || Name <- Names1]
+                         end,
                 [?expr(lists:foreach(
                          fun('<Key>') ->
                                  ok;
@@ -183,9 +190,12 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                                'M', Path)
                          end,
                          maps:keys('M')),
-                       [repeat_clauses('<Key>',
-                                       [[replace_term('<Key>', Key)]
-                                         || Key <- Names]),
+                       [repeat_clauses(
+                          '<Key>',
+                          [[if is_atom(Key) -> replace_term('<Key>', Key);
+                               true         -> replace_tree('<Key>', Key)
+                            end]
+                           || Key <- Names2]),
                         replace_tree('M', MsgVar)])]
         end,
 
@@ -880,3 +890,8 @@ format_prettify_path_with_string_join() ->
                                                  lists:reverse(PathR)),
                                        "."))
       end).
+
+atom_to_binary_string_stree(Atom) ->
+    erl_syntax:binary(
+      [erl_syntax:binary_field(
+         erl_syntax:string(atom_to_list(Atom)))]).
