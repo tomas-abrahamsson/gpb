@@ -162,6 +162,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                         replace_tree('M', MsgVar)]),
                  [K || {K, _} <- FMap]}
         end,
+    NonOptKeys1 = erl_syntax:list(map_keys_to_strees(NonOptKeys, Opts)),
     ExtraneousFieldsChecks =
         case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
             records ->
@@ -175,13 +176,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                              #maps{oneof=flat} ->
                                  field_names_oneofs_expanded(MsgDef)
                          end,
-                Names2 = case gpb_lib:get_maps_key_type_by_opts(Opts) of
-                             atom ->
-                                 Names1;
-                             binary ->
-                                 [atom_to_binary_string_stree(Name)
-                                  || Name <- Names1]
-                         end,
+                Names2 = map_keys_to_strees(Names1, Opts),
                 [?expr(lists:foreach(
                          fun('<Key>') ->
                                  ok;
@@ -192,10 +187,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                          maps:keys('M')),
                        [repeat_clauses(
                           '<Key>',
-                          [[if is_atom(Key) -> replace_term('<Key>', Key);
-                               true         -> replace_tree('<Key>', Key)
-                            end]
-                           || Key <- Names2]),
+                          [[replace_tree('<Key>', Key)] || Key <- Names2]),
                         replace_tree('M', MsgVar)])]
         end,
 
@@ -237,7 +229,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                []; % omit this clause
                            maps ->
                                [[replace_tree('<M>', ?expr(M)),
-                                 replace_term('NonOptKeys', NonOptKeys)]]
+                                 replace_tree('NonOptKeys', NonOptKeys1)]]
                        end),
         replace_term('<MsgName>', MsgName)])].
 
@@ -890,6 +882,15 @@ format_prettify_path_with_string_join() ->
                                                  lists:reverse(PathR)),
                                        "."))
       end).
+
+map_keys_to_strees(Keys, Opts) ->
+    case gpb_lib:get_maps_key_type_by_opts(Opts) of
+        atom   -> [atom_to_stree(Key) || Key <- Keys];
+        binary -> [atom_to_binary_string_stree(Key) || Key <- Keys]
+    end.
+
+atom_to_stree(Atom) ->
+    erl_syntax:atom(Atom).
 
 atom_to_binary_string_stree(Atom) ->
     erl_syntax:binary(
