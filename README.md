@@ -268,16 +268,28 @@ possible, and implemented for completeness.
 
 #### For proto3 syntax
 
-For proto3, there is neither `required` nor `optional` nor
-`default=<x>` for fields. Instead all fields are implicitly optional,
-and if missing in the binary to decode, they always decode to the
-type-specific default value. Also, it is not possible to determine
-whether a value was present---with a type-specific value---or not; no
-`has_<field>()` methods are generated (at least for scalars). If you
-need detection of "missing" data, you must define `has_<field>`
-boolean fields and set them appropriately.
+For proto3, there is neither `required` nor `optional` nor `default=<x>`
+for fields. Instead all scalar fields, strings and bytes are implicitly
+optional. On decoding, if such a field is missing in the binary to
+decode, they always decode to the type-specific default value.
+On encoding, such fields are only included in the resulting encoded
+binary if they have a value different from the type-specific default
+value. Even though all fields are implicitly optional, one could also
+say that on a conceptual level, all such fields always have a value.
+At decoding, it is not possible to determine whether at encoding,
+a value was present---with a type-specific value---or not.
 
-This maps directly and naturally to Erlang.
+A recommendation I've seen for if you need detection of "missing" data,
+is to define `has_<field>` boolean fields and set them appropriately.
+Another alternative could be to use the well-known wrapper messages.
+
+Fields that are sub-messages and oneof fields, do not have any
+type-specific default. A sub-message field that was not set encodes
+differently from a sub-message field set to the sub-message, and it
+decodes differently. This holds even when the sub-message has no
+fields. It works a bit similarly for oneof fields. Either none of the
+alternative oneof fields is set, or one of them is. The encoded format
+is different, and on decoding it is possible to tell a difference.
 
 Features of gpb
 ---------------
