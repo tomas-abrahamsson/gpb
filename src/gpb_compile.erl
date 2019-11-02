@@ -391,7 +391,7 @@ file(File) ->
 %% For messages as maps, for optional fields, if not set, the
 %% `maps_unset_optional' option specifies the Erlang-internal
 %% representation; both how it is expected to be found at encoding,
-%% and how decoding will return it:
+%% and how decoding will return it, for `proto2' syntax:
 %% <dl>
 %%   <dt>`omitted'</dt>
 %%   <dd>This means it is not included in the map.
@@ -402,6 +402,14 @@ file(File) ->
 %%       This <em>was</em> the default before gpb version 4.0.0.
 %%   </dd>
 %% </dl>
+%% For `proto3' syntax, the scene is a bit different. In proto3 all
+%% fields are kind-of optional, but omitted scalar fields, strings and
+%% bytes decode to their type-default. On encoding with proto3, a field
+%% that has its type-default value is not included in the encoded
+%% binary, so one could say that even though all fields are optional,
+%% in a conceptual way, all scalars, strings and bytes always have a value.
+%% The exceptions are sub-messages and `oneof' fields, and for these
+%% fields, this option has the meaning as indicated above.
 %%
 %% <a id="option-maps_oneof"/>
 %% The `maps_oneof' option can be used for messages as maps, and can only
