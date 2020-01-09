@@ -174,6 +174,7 @@
                {json_null, atom()} |
                boolean_opt(gen_mergers) |
                boolean_opt(gen_introspect) |
+               boolean_opt(ignore_wellknown_types_directory) |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -840,6 +841,12 @@ file(File) ->
 %% The `{gen_introspect,false}' option will cause gpb to not generate code
 %% for introspection. One rationale for this is option is to reduce the size of
 %% the generated code.
+%%
+%% <a id="option-ignore_wellknown_types_directory"/>
+%% The `{ignore_wellknown_types_directory, true}' option will stop gpb from
+%% looking rom a well known types directory by trying to locate the `priv'
+%% directory of the `gpb' application. This can be used either when this
+%% directory is not available or to provide a custom set of well known types.
 
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
@@ -2526,10 +2533,15 @@ read_import(File, Opts) ->
     end.
 
 ensure_include_path_to_wellknown_types(Opts) ->
-    PrivDir = get_priv_dir(),
-    Wellknown = filename:join(PrivDir, "proto3"),
-    sanity_check_installation_wellknown_proto3(Wellknown),
-    add_opt_unless_present({i,Wellknown}, Opts).
+    case proplists:get_bool(ignore_wellknown_types_directory, Opts) of
+        true ->
+            Opts;
+        false ->
+            PrivDir = get_priv_dir(),
+            Wellknown = filename:join(PrivDir, "proto3"),
+            sanity_check_installation_wellknown_proto3(Wellknown),
+            add_opt_unless_present({i,Wellknown}, Opts)
+    end.
 
 add_opt_unless_present(Opt, [Opt | Rest]) ->
     [Opt | Rest];
