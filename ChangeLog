@@ -1,5 +1,12 @@
 -*- coding: utf-8 -*-
 
+Version 4.11.0
+2020-Jan-09
+
+        * Add an option, ignore_wellknown_types_directory, for not
+        trying to read and use the priv/proto3/google/protobuf directory
+        for wellknowns. Thanks to Nicolas Martyanoff. (#176, #177)
+
 Version 4.10.6
 2019-Nov-02
 
