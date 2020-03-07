@@ -132,12 +132,9 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
     MappingAndUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     TypespecsCanIndicateMapItemPresence =
         gpb_lib:target_can_specify_map_item_presence_in_typespecs(Opts),
-    Fields1 = case MappingAndUnset of
-                  #maps{unset_optional=omitted, oneof=flat} ->
-                      gpb_lib:flatten_oneof_fields(Fields);
-                  _ ->
-                      Fields
-              end,
+    FTCs = calc_zipped_fields_and_type_str_comments(MsgName, Fields,
+                                                    Defs, AnRes, Opts),
+    {Fields1, _TypeStrsComment} = lists:unzip(FTCs),
     LastIndex = case MappingAndUnset of
                     records ->
                         length(Fields1);
@@ -155,8 +152,9 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
     KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
     gpb_lib:nl_join(
       lists:map(
-        fun({I, #?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
-                            occurrence=Occur}=Field}) ->
+        fun({I, {#?gpb_field{name=Name, fnum=FNum, opts=FOpts, type=Type,
+                             occurrence=Occur}=Field,
+                 {TypeStr, TypeComment}}}) ->
                 TypeSpecifierSep = calc_field_type_sep(Field, Opts),
                 LineLead = case MappingAndUnset of
                                #maps{unset_optional=omitted} when
@@ -206,7 +204,6 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
                                     ""
                             end
                     end,
-                TypeStr = type_to_typestr(MsgName, Field, Defs, AnRes, Opts),
                 CommaSep = if I < LastIndex -> ",";
                               true          -> "" %% last entry
                            end,
@@ -224,11 +221,10 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
                                 not TypeSpecs -> 40
                              end,
                 LineUpStr2 = lineup(iolist_size(FieldTxt2), LineUpCol2),
-                TypeComment = type_to_comment(MsgName, Field, TypeSpecs, AnRes),
                 ?f("~s~s% = ~w~s~s",
                    [FieldTxt2, LineUpStr2, FNum,
                     [", " || TypeComment /= ""], TypeComment]);
-           ({I, #gpb_oneof{name=Name}=Field}) ->
+           ({I, {#gpb_oneof{name=Name}=Field, {TypeStr, TypeComment}}}) ->
                 TypeSpecifierSep = calc_field_type_sep(Field, Opts),
                 LineLead = case MappingAndUnset of
                                #maps{unset_optional=omitted} when
@@ -242,7 +238,6 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
                                _ ->
                                    ""
                            end,
-                TypeStr = type_to_typestr(MsgName, Field, Defs, AnRes, Opts),
                 CommaSep = if I < LastIndex -> ",";
                               true          -> "" %% last entry
                            end,
@@ -260,11 +255,26 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
                                 not TypeSpecs -> 40
                              end,
                 LineUpStr2 = lineup(iolist_size(FieldTxt2), LineUpCol2),
-                TypeComment = type_to_comment(MsgName, Field, TypeSpecs, AnRes),
                 ?f("~s~s% ~s",
                    [FieldTxt2, LineUpStr2, TypeComment])
         end,
-        gpb_lib:index_seq(Fields1))).
+        gpb_lib:index_seq(FTCs))).
+
+calc_zipped_fields_and_type_str_comments(MsgName, Fields, Defs, AnRes, Opts) ->
+    TypeSpecs = gpb_lib:get_type_specs_by_opts(Opts),
+    FTIs = [{Field, calc_type_str_infos(MsgName, Field, TypeSpecs,
+                                        Defs, AnRes, Opts)}
+            || Field <- Fields],
+    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+        records ->
+            [{Field, combine_type_str_comments(TI)}
+             || {Field, TI} <- FTIs];
+        #maps{oneof=tuples} ->
+            [{Field, combine_type_str_comments(TI)}
+             || {Field, TI} <- FTIs];
+        #maps{oneof=flat} ->
+            flatten_oneof_fields_and_type_strs_comments(FTIs)
+    end.
 
 find_last_nonopt_field_index(Fields) ->
     lists:foldl(fun({I, F}, Acc) ->
@@ -323,9 +333,56 @@ mandatory_map_item_type_sep(Opts) ->
         false -> "=>"
     end.
 
-type_to_typestr(MsgName,
-                #?gpb_field{name=FName, type=Type, occurrence=Occurrence},
-                Defs, AnRes, Opts) ->
+-record(field_type_str_info,
+        {type_str :: string(),
+         type_comment :: string()}).
+-record(oneof_type_str_info,
+        {type_strs :: [string()],
+         type_comments :: [string()]}).
+
+calc_type_str_infos(MsgName, #?gpb_field{}=Field, TypeSpecs,
+                    Defs, AnRes, Opts) ->
+    #field_type_str_info{
+       type_str = field_type_str(MsgName, Field, Defs, AnRes, Opts),
+       type_comment = field_type_comment(MsgName, Field, TypeSpecs, AnRes)};
+calc_type_str_infos(MsgName, #gpb_oneof{}=Field, TypeSpecs,
+                    Defs, AnRes, Opts) ->
+    #oneof_type_str_info{
+       type_strs = oneof_type_strs(MsgName, Field, Defs, AnRes, Opts),
+       type_comments = oneof_type_comments(MsgName, Field, TypeSpecs, AnRes)}.
+
+combine_type_str_comments(#field_type_str_info{type_str=TypeStr,
+                                               type_comment=TypeComment}) ->
+    {TypeStr, TypeComment};
+combine_type_str_comments(#oneof_type_str_info{type_strs=TypeStrs}) ->
+    {gpb_lib:or_join(TypeStrs), "oneof"}.
+
+flatten_oneof_fields_and_type_strs_comments(Fields) ->
+    flatten_oneof_ftcs(Fields).
+
+flatten_oneof_ftcs([F | Rest]) ->
+    case F of
+        {#?gpb_field{}=Field,
+         #field_type_str_info{type_str=TypeStr,
+                              type_comment=TypeComment}} ->
+            [{Field, {TypeStr, TypeComment}} | flatten_oneof_ftcs(Rest)];
+        {#gpb_oneof{fields=OFields},
+         #oneof_type_str_info{type_strs=TypeStrs,
+                              type_comments=TypeComments}} ->
+            %% TypeStrs can have a trailing "or undefined",
+            %% so take as many TypeStrs elements as we have OFields
+            TypeStrs1 = lists:sublist(TypeStrs, length(OFields)),
+            FTIs1 = [{Field, {TypeStr, TypeComment}}
+                     || {Field, TypeStr, TypeComment}
+                            <- lists:zip3(OFields, TypeStrs1, TypeComments)],
+            FTIs1 ++ flatten_oneof_ftcs(Rest)
+    end;
+flatten_oneof_ftcs([]) ->
+    [].
+
+field_type_str(MsgName,
+               #?gpb_field{name=FName, type=Type, occurrence=Occurrence},
+               Defs, AnRes, Opts) ->
     OrUndefined = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                       records ->
                           " | undefined";
@@ -365,10 +422,11 @@ type_to_typestr(MsgName,
                 optional ->
                     TypeStr ++ OrUndefined
             end
-    end;
-type_to_typestr(MsgName,
-                #gpb_oneof{name=FName, fields=OFields},
-                Defs, AnRes, Opts) ->
+    end.
+
+oneof_type_strs(MsgName,
+               #gpb_oneof{name=FName, fields=OFields},
+               Defs, AnRes, Opts) ->
     OrUndefinedElems = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                            records ->
                                ["undefined"];
@@ -381,25 +439,30 @@ type_to_typestr(MsgName,
                          [] -> "";
                          [U] -> " | " ++ U
                      end,
+    TagWrap = case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                  #maps{oneof=flat} ->
+                      fun(_Tag, TypeStr) -> TypeStr end;
+                  _ ->
+                      fun(Tag, TypeStr) -> ?f("{~p, ~s}", [Tag, TypeStr]) end
+              end,
     ElemPath = [MsgName, FName],
     case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
         {true, TypeStr} ->
-            TypeStr ++ OrUndefinedStr;
+            [TypeStr, OrUndefinedStr];
         false ->
-            gpb_lib:or_join(
-              [begin
-                   OElemPath = [MsgName, FName, Name],
-                   case gpb_gen_translators:has_type_spec_translation(
-                          OElemPath, AnRes) of
-                       {true, TypeStr} ->
-                           ?f("{~p, ~s}", [Name, TypeStr]);
-                       false ->
-                           TypeStr = type_to_typestr_2(Type, Defs, AnRes, Opts),
-                           ?f("{~p, ~s}", [Name, TypeStr])
-                   end
-               end
-               || #?gpb_field{name=Name, type=Type} <- OFields]
-              ++ OrUndefinedElems)
+            [begin
+                 OElemPath = [MsgName, FName, Name],
+                 case gpb_gen_translators:has_type_spec_translation(
+                        OElemPath, AnRes) of
+                     {true, TypeStr} ->
+                         TagWrap(Name, TypeStr);
+                     false ->
+                         TypeStr = type_to_typestr_2(Type, Defs, AnRes, Opts),
+                         TagWrap(Name, TypeStr)
+                 end
+             end
+             || #?gpb_field{name=Name, type=Type} <- OFields]
+                ++ OrUndefinedElems
     end.
 
 type_to_typestr_2(sint32, _Defs, _AnRes, _Opts)   -> "integer()";
@@ -456,16 +519,33 @@ enum_typestr(E, Defs, Opts) ->
       [?f("~p", [EName]) || {EName, _} <- Enumerations])
         ++ UnknownEnums.
 
-type_to_comment(MsgName, Field, TypeSpec, AnRes) ->
-    ElemPath = [MsgName, gpb_lib:get_field_name(Field)],
+field_type_comment(MsgName, #?gpb_field{name=FName}=Field, TypeSpec, AnRes) ->
+    ElemPath = [MsgName, FName],
+    field_type_comment_2(Field, ElemPath, TypeSpec, AnRes).
+
+oneof_type_comments(MsgName, #gpb_oneof{name=FName, fields=OFields},
+                    TypeSpec, AnRes) ->
+    ElemPath = [MsgName, FName],
     case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
         {true, _} ->
             "";
         false ->
-            type_to_comment_2(Field, TypeSpec)
+            [begin
+                 OElemPath = [MsgName, FName, OFName],
+                 field_type_comment_2(OField, OElemPath, TypeSpec, AnRes)
+             end
+             || #?gpb_field{name=OFName}=OField <- OFields]
     end.
 
-type_to_comment_2(#?gpb_field{type=Type}, true=_TypeSpec) ->
+field_type_comment_2(Field, ElemPath, TypeSpec, AnRes) ->
+    case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
+        {true, _} ->
+            "";
+        false ->
+            field_type_comment_3(Field, TypeSpec)
+    end.
+
+field_type_comment_3(#?gpb_field{type=Type}, true=_TypeSpec) ->
     case Type of
         sint32   -> "32 bits";
         sint64   -> "64 bits";
@@ -480,15 +560,12 @@ type_to_comment_2(#?gpb_field{type=Type}, true=_TypeSpec) ->
         {enum,E} -> "enum "++atom_to_list(E);
         _        -> ""
     end;
-type_to_comment_2(#?gpb_field{type=Type, occurrence=Occurrence}, false) ->
+field_type_comment_3(#?gpb_field{type=Type, occurrence=Occurrence}, false) ->
     case Occurrence of
         required -> ?f("~w", [Type]);
         repeated -> "[" ++ ?f("~w", [Type]) ++ "]";
         optional -> ?f("~w (optional)", [Type])
-    end;
-type_to_comment_2(#gpb_oneof{}, _) ->
-    "oneof".
-
+    end.
 
 lineup(CurrentCol, TargetCol) when CurrentCol < TargetCol ->
     lists:duplicate(TargetCol - CurrentCol, $\s);
