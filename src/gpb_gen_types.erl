@@ -392,7 +392,7 @@ type_to_typestr(MsgName,
                    case gpb_gen_translators:has_type_spec_translation(
                           OElemPath, AnRes) of
                        {true, TypeStr} ->
-                           TypeStr;
+                           ?f("{~p, ~s}", [Name, TypeStr]);
                        false ->
                            TypeStr = type_to_typestr_2(Type, Defs, AnRes, Opts),
                            ?f("{~p, ~s}", [Name, TypeStr])

@@ -2122,6 +2122,32 @@ verify_is_optional_for_translate_toplevel_messages_test() ->
     ok = M:verify_msg(bad_int_ok_since_no_verify_specified, m1),
     unload_code(M).
 
+%%- type spec for oneof
+oneof_with_translation_with_typespec_test() ->
+    Proto = ["message m1 {",
+             "  oneof c {",
+             "    fixed32 a1 = 1;",
+             "  }",
+             "}"],
+    Hrl = compile_to_string_get_hrl(
+            Proto,
+            [type_specs,
+             {translate_field,
+              {[m1,c,a1],
+               [{encode, {erlang, list_to_integer, ['$1', 16]}},
+                {decode, {erlang, integer_to_list, ['$1', 16]}},
+                {type_spec, "string()"}]}},
+             strip_preprocessor_lines % extra opt to compile_to_string_get_hrl
+            ]),
+    ?assert(gpb_lib:is_substr("c::{a1,string()}", strip_ws(Hrl))).
+
+strip_ws(B) when is_list(B) ->
+    binary_to_list(
+      binary:replace(iolist_to_binary(B),
+                     [<<" ">>, <<"\t">>, <<"\r">>, <<"\n">>],
+                     <<>>,
+                     [global])).
+
 %% --- misc ----------
 
 wellknows_found_also_for_syntax_proto2_test() ->
