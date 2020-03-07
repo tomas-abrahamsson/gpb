@@ -1785,6 +1785,31 @@ uuid_v(X) -> error({non_int_uuid,X}).
 uuid_m(Uuid1, Uuid2) when is_integer(Uuid1), is_integer(Uuid2) ->
     Uuid1 bxor Uuid2.
 
+proto3_translation_on_decode_with_submsg_with_all_defaults_test() ->
+    %% The wire-encoding for a message where all fields have the default values,
+    %% is the empty binary <<>>.  Verify that on decoding, such a field with
+    %% default value is still translated.
+    M = compile_iolist(
+          ["syntax='proto3';",
+           "message rr {",
+           "  bytes nmc = 1;",
+           "}"],
+          [{translate_field,
+            {[rr, nmc],
+             [{encode,{binary, copy, [<<1>>, '$1']}},
+              {decode,{erlang, byte_size, ['$1']}}
+             ]}}]),
+    M1 = {rr, 4},
+    <<10,4, 1,1,1,1>> = B1 = M:encode_msg(M1),
+    M1 = M:decode_msg(B1, rr),
+
+    M2 = {rr, 0},
+    %% Default for 'bytes' is the empty binary, which we have here,
+    %% so nmc is never included over the wire.
+    <<>> = B2 = M:encode_msg(M2),
+    {rr, 0} = M:decode_msg(B2, rr),
+    unload_code(M).
+
 %% -- translation of other types ----------
 
 basic_translate_with_userdata_test() ->
