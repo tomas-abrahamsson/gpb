@@ -468,15 +468,15 @@ type_to_comment(MsgName, Field, TypeSpec, AnRes) ->
 type_to_comment_2(#?gpb_field{type=Type}, true=_TypeSpec) ->
     case Type of
         sint32   -> "32 bits";
-        sint64   -> "32 bits";
+        sint64   -> "64 bits";
         int32    -> "32 bits";
-        int64    -> "32 bits";
+        int64    -> "64 bits";
         uint32   -> "32 bits";
-        uint64   -> "32 bits";
+        uint64   -> "64 bits";
         fixed32  -> "32 bits";
-        fixed64  -> "32 bits";
+        fixed64  -> "64 bits";
         sfixed32 -> "32 bits";
-        sfixed64 -> "32 bits";
+        sfixed64 -> "64 bits";
         {enum,E} -> "enum "++atom_to_list(E);
         _        -> ""
     end;
