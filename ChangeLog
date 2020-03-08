@@ -1,5 +1,17 @@
 -*- coding: utf-8 -*-
 
+Version 4.11.1
+2020-Mar-10
+
+        * Fix a bug in comments generated for 64 bit integer types,
+          they were all indicated in the comment as being 32 bits.
+        * Fix a bug in the type spec generated for oneof fields,
+          when oneof alternatives were translated: they were
+          lacking the wrapping tuple, or (for flat oneofs) never included the
+          translated type at all.
+        * Fix a bug where the decode translator for proto3 scalar fields
+          was never called if the field had the default value.
+
 Version 4.11.0
 2020-Jan-09
 
