@@ -322,16 +322,18 @@ count_group_fields(MsgDef) ->
 compute_translations(Defs, Opts) ->
     remove_empty_translations(
       remove_merge_translations_for_repeated_elements(
-        lists:foldl(
-          fun({_Name, Dict}, Acc) ->
-                  dict:merge(
-                    fun(_Key, Ts1, Ts2) -> merge_transls(Ts1, Ts2) end,
-                    Acc, Dict)
-          end,
-          dict:new(),
-          [{map_translations, compute_map_translations(Defs, Opts)},
-           {type_translations, compute_type_translations(Defs, Opts)},
-           {field_translations, compute_field_translations(Defs, Opts)}]))).
+        decode_init_default_for_decode_for_p3_non_compounds(
+          lists:foldl(
+            fun({_Name, Dict}, Acc) ->
+                    dict:merge(
+                      fun(_Key, Ts1, Ts2) -> merge_transls(Ts1, Ts2) end,
+                      Acc, Dict)
+            end,
+            dict:new(),
+            [{map_translations, compute_map_translations(Defs, Opts)},
+             {type_translations, compute_type_translations(Defs, Opts)},
+             {field_translations, compute_field_translations(Defs, Opts)}]),
+          Defs))).
 
 dict_from_translation_list(PTransls) ->
     lists:foldl(
@@ -364,6 +366,65 @@ merge_transls(Transls1, Transls2) ->
 ensure_list(_Op, L) when is_list(L) -> L;
 ensure_list(type_spec, Elem)        -> Elem;
 ensure_list(_Op, Elem)              -> [Elem].
+
+%% Default-valued fields in proto3-messages are not included in the
+%% encoded bytes over the wire. Yet, on decoding, any specified
+%% translator for such fields must be called. To make that happen, Add a
+%% `decode_init_default' translator that does what the `decode'
+%% translator does.
+%%
+%% This applies to proto3 scalar fields and enums, bytes and strings.
+%% This does not apply to:
+%% * repeated (has a decode_init_default translator)
+%% * oneof fields and sub message fields (which don't have any default value)
+%% * proto2 message fields
+decode_init_default_for_decode_for_p3_non_compounds(Transls, Defs) ->
+    case dict:size(Transls) of
+        0 ->
+            %% Common enough case: Save work when no translations are specified.
+            Transls;
+        _ ->
+            decode_init_default_for_decode_for_p3_non_compounds2(Transls, Defs)
+    end.
+
+decode_init_default_for_decode_for_p3_non_compounds2(Transls, Defs) ->
+    P3MsgNames = case lists:keyfind(proto3_msgs, 1, Defs) of
+                     {proto3_msgs, Names} -> sets:from_list(Names);
+                     false                -> sets:new()
+                 end,
+    dict:map(
+      fun([MsgName,FName], FTransls) ->
+              case sets:is_element(MsgName, P3MsgNames)
+                  andalso is_scalar_msg_field(MsgName, FName, Defs) of
+                  true ->
+                      case lists:keyfind(decode, 1, FTransls) of
+                          {decode, DTransl} ->
+                              DInitDefault = {decode_init_default, DTransl},
+                              FTransls ++ [DInitDefault];
+                          false ->
+                              FTransls
+                      end;
+                  false ->
+                      FTransls
+              end;
+         (_, FTransls) ->
+              FTransls
+      end,
+      Transls).
+
+is_scalar_msg_field(MsgName, FName, Defs) ->
+    {{msg,MsgName}, Fields} = lists:keyfind({msg,MsgName}, 1, Defs),
+    is_scalar_field(FName, Fields).
+
+is_scalar_field(FName, [#?gpb_field{name=FName, type=Type,
+                                    occurrence=Occurrence} | _]) ->
+    if Occurrence == optional -> is_scalar_type(Type);
+       Occurrence /= optional -> false
+    end;
+is_scalar_field(FName, [#gpb_oneof{name=FName} | _]) ->
+    false;
+is_scalar_field(FName, [_Field | Rest]) ->
+    is_scalar_field(FName, Rest).
 
 remove_merge_translations_for_repeated_elements(D) ->
     dict:map(fun(Key, Ops) ->

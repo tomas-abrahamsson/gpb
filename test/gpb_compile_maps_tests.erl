@@ -633,6 +633,57 @@ e_ipv6(Ip) -> element(2,gpb_compile_tests:e_ipv4or6(Ip)).
 d_ipv6(Ip) -> gpb_compile_tests:d_ipv4or6({ipv6,Ip}).
 v_ipv6(Ip) -> gpb_compile_tests:v_ipv4or6(Ip).
 
+oneof_with_translation_with_typespec_maps_test() ->
+    Proto = "message m1 {
+               oneof c {
+                 fixed32 a1 = 1;
+               }
+             }",
+    Erl = compile_to_string(
+            Proto,
+            [maps,
+             {translate_field,
+              {[m1,c,a1],
+               [{encode, {erlang, list_to_integer, ['$1', 16]}},
+                {decode, {erlang, integer_to_list, ['$1', 16]}},
+                {type_spec, "string()"}]}},
+             strip_preprocessor_lines % extra opt to compile_to_string_get_hrl
+            ]),
+    ?assert(gpb_lib:is_substr("c=>{a1,string()}", strip_ws(Erl))).
+
+flat_oneof_with_translation_with_typespec_maps_test_() ->
+    flat_map_prerequisites(
+      [{"oneof field translation with type specs for flat oneof",
+        fun flat_oneof_with_translation_with_typespec_maps_test_aux/0}]).
+
+flat_oneof_with_translation_with_typespec_maps_test_aux() ->
+    Proto = "message m1 {
+               oneof c {
+                 fixed32 a1 = 1;
+               }
+             }",
+    Erl = compile_to_string(
+            Proto,
+            [maps,
+             {maps_oneof, flat},
+             {translate_field,
+              {[m1,c,a1],
+               [{encode, {erlang, list_to_integer, ['$1', 16]}},
+                {decode, {erlang, integer_to_list, ['$1', 16]}},
+                {type_spec, "string()"}]}},
+             strip_preprocessor_lines % extra opt to compile_to_string_get_hrl
+            ]),
+    ?assert(gpb_lib:is_substr("a1=>string()", strip_ws(Erl))).
+
+
+strip_ws(B) when is_list(B) ->
+    binary_to_list(
+      binary:replace(iolist_to_binary(B),
+                     [<<" ">>, <<"\t">>, <<"\r">>, <<"\n">>],
+                     <<>>,
+                     [global])).
+
+
 %% --- target versions ----------------------------------
 
 type_syntax_for_required_fields_test() ->

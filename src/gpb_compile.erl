@@ -639,6 +639,16 @@ file(File) ->
 %% `decode_repeated_add_elem' and `decode_repeated_finalize' also exist
 %% and must all be specified.
 %%
+%% For translated proto3 message fields -- ie fields for messages in files
+%% with `syntax="proto3";' -- the `decode' callback will be invoked also
+%% initially when the decoding of the message binary is about to start.
+%% This holds for non-repeated non-oneof fields of integer types, enums,
+%% strings and bytes. The `decode' callback will be invoked with the type's
+%% default value. This is because in proto3, a field with the type's default
+%% value is never included in the resulting wire octets, so on decoding,
+%% gpb initially assumes such fields have the type's default value,
+%% and the translator needs to be invoked accordingly.
+%%
 %% <a id="option-epb_compatibility"/>
 %% <a id="option-epb_functions"/>
 %% The `epb_compatibility' option is an umbrella-option for
