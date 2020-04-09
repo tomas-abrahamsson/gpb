@@ -131,6 +131,8 @@ opt_enum_opts -> '$empty':              [].
 enum_opts -> enum_opt ',' enum_opts:    ['$1' | '$2'].
 enum_opts -> enum_opt:                  ['$1'].
 
+enum_opt -> deprecated:                 {deprecated, true}.
+enum_opt -> deprecated '=' bool_lit:    {deprecated, literal_value('$3')}.
 enum_opt -> option_name '=' constant:   {'$1', '$3'}.
 enum_opt -> option_name:                '$1'.
 

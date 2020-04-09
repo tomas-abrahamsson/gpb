@@ -1221,6 +1221,14 @@ verify_succeeds_for_defined_ref_in_message_test() ->
     ok = do_parse_verify_defs(["message m1 { required m2     x = 1; }",
                                "message m2 { required uint32 x = 1; }"]).
 
+verify_succeeds_for_good_enum_deprecated_test() ->
+   ok = do_parse_verify_defs(
+          ["enum e { e1 = 1; e2 = 2 [deprecated=true]; }"
+           "message m1 { required e f1 = 1; }"]),
+   ok = do_parse_verify_defs(
+          ["enum e { e1 = 1; e2 = 2 [deprecated]; }"
+           "message m1 { required e f1 = 1; }"]).
+
 verify_catches_missing_ref_in_message_test() ->
     {error, [{ref_to_undefined_msg_or_enum, _}]} = Error =
         do_parse_verify_defs(["message m1 { required m2 f1 = 1; }"]),
