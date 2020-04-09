@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.11.2
+2020-Apr-09
+
+        * Fix parsing enum option deprecated. Thanks to Paul Swartz for a
+        testcase. (#179)
+
 Version 4.11.1
 2020-Mar-10
 
