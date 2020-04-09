@@ -19,17 +19,19 @@ repo_name=rebar3_gpb_plugin
 upstream_url=git://github.com/lrascao/${repo_name}.git
 default_br=develop
 github_user=$(git config --get github.user)
+github_access_token_name=github.send-pr-to-rebar3-gpb-plugin
 branch_point=default
 
 dry_run=false
 moist_run=false
-while getopts "hc:u:U:B:nm" opt
+while getopts "hc:u:U:t:B:nm" opt
 do
     case "$opt" in
 	h) show_usage; exit 0;;
 	c) repo_name="$OPTARG";;
 	u) upstream_url="$OPTARG";;
 	U) github_user="$OPTARG";;
+        t) github_access_token_name="$OPTARG";;
         B) branch_point="$OPTARG";;
 	n) dry_run=true;;
 	m) moist_run=true;;
@@ -39,6 +41,16 @@ shift $(($OPTIND - 1))
 
 upstream_owner=$(echo "$upstream_url" | cut -d/ -f4)
 upstream_repo=$(echo "$upstream_url" | cut -d/ -f5 | sed -e 's/\.git$//')
+
+github_access_token=$(git config --get "$github_access_token_name")
+if [ -z "$github_access_token" ]
+then
+    echo "No access token configured for \"$github_access_token_name\"" >&2
+    exit 1
+fi
+github_access_token=$(echo "$github_access_token" | \
+			  openssl enc -d -base64 \
+				  -aes-256-cbc -pbkdf2 -in - -out -)
 
 echo "$upstream_owner=$upstream_owner"
 echo "$upstream_repo=$upstream_repo"
@@ -187,8 +199,8 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
     
     $maybe_dry \
      curl --request POST \
+     -H "Authorization: token $github_access_token"
      -H "Accept: application/vnd.github.v3+json" \
-     --user "$github_user" \
      --data "$data" \
      https://api.github.com/repos/"$upstream_owner"/"$upstream_repo"/pulls
 )
