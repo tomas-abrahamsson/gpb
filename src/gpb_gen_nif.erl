@@ -144,6 +144,7 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_map_api_check_if_needed(Opts),
        format_nif_cc_json_api_check_if_needed(Opts),
        format_nif_cc_json_includes_if_needed(Opts),
+       format_nif_cc_byte_size_macros(Defs),
        format_nif_cc_local_function_decls(Mod, Defs, CCMapping, Opts),
        format_nif_cc_mk_consts(Mod, Defs, AnRes, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
@@ -422,6 +423,16 @@ format_nif_cc_json_includes_if_needed(Opts) ->
         false ->
             ""
     end.
+
+format_nif_cc_byte_size_macros(Defs) ->
+    [["#if GOOGLE_PROTOBUF_VERSION >= 3007000\n"
+      "#define BYTE_SIZE_TYPE size_t\n"
+      "#define BYTE_SIZE_METHOD ByteSizeLong\n"
+      "#else\n"
+      "#define BYTE_SIZE_TYPE int\n"
+      "#define BYTE_SIZE_METHOD ByteSize\n"
+      "#endif\n"]
+     || gpb_lib:contains_messages(Defs)].
 
 format_nif_cc_local_function_decls(_Mod, Defs, CCMapping, _Opts) ->
     [[begin
@@ -968,7 +979,7 @@ format_nif_cc_encoder(_Mod, MsgName, _Fields, CCMapping, _Opts) ->
      FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
      "{\n",
      "    ErlNifBinary data;\n",
-     "    int byteSize;\n",
+     "    BYTE_SIZE_TYPE byteSize;\n",
      "    ",CMsgType," *m = new ",CMsgType,"();\n\n",
      ""
      "    if (argc != 1)\n"
@@ -989,7 +1000,7 @@ format_nif_cc_encoder(_Mod, MsgName, _Fields, CCMapping, _Opts) ->
      "        return enif_make_badarg(env);\n"
      "    }\n\n"
      ""
-     "    byteSize = m->ByteSize();\n"
+     "    byteSize = m->BYTE_SIZE_METHOD();\n"
      "    if (!enif_alloc_binary(byteSize, &data))\n"
      "    {\n"
      "        delete m;\n"
