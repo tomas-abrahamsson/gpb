@@ -474,8 +474,16 @@ receive_to_parse_tree_for_clause(Expr, RtTransforms) ->
 
 %%@hidden
 erl_prettypr_format_nl(Form) ->
+    %% Allow very wide output. erl_prettypr tends
+    %% to otherwise format the generated code very widely,
+    %%           breaking lines at the end of the lines,
+    %%                   giving a kind of boomerang-y shape,
+    %%                                           somewhat
+    %%                                             like
+    %%                                               this text
+    Opts = [{paper, 300}, {ribbon, 250}],
     with_increased_backtrace_depth(
-      fun() -> [erl_prettypr:format(Form), "\n\n"] end).
+      fun() -> [erl_prettypr:format(Form, Opts), "\n\n"] end).
 
 %%@hidden
 runtime_fn_transform(FnName, FnParseTree) ->
