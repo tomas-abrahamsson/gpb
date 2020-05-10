@@ -1481,6 +1481,140 @@ verify_repeated_and_optional_group_test() ->
     ?assertError({gpb_type_error, {_, [_, {path, 'm1.h.hf'}]}},
                  verify_msg({m1, [], {'m1.h', x}}, Defs)).
 
+-ifndef(NO_HAVE_MAPS).
+msg_to_from_map_test() ->
+    %% map<_,_> messages
+    MtDefs = [{{msg,m1},
+               [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                            type={map,string,fixed32},
+                            occurrence=repeated, opts=[]}]}],
+    Msg10 = #m1{a=[{"a", 1},{"b", 2}]},
+    #{a := #{"a" := 1, "b" := 2}} = Map10 =
+        gpb:msg_to_map(Msg10, MtDefs, []),
+    Msg10 = sort_elem2(gpb:msg_from_map(Map10, m1, MtDefs, [])),
+    Msg10 = sort_elem2(gpb:msg_from_map(#{a => Msg10#m1.a}, m1, MtDefs,
+                                        [{mapfields_as_maps,false}])),
+
+    %% Oneof
+    OoDefs = [{{msg,m1},
+               [#gpb_oneof{
+                   name=a, rnum=#m1.a,
+                   fields=[#?gpb_field{name=a1, fnum=1, rnum=#m1.a,
+                                       type=int32, occurrence=optional,
+                                       opts=[]},
+                           #?gpb_field{name=a2, fnum=2, rnum=#m1.a,
+                                       type=int32, occurrence=optional,
+                                       opts=[]}]}]}],
+
+    Msg20 = #m1{a={a1,10}},
+    #{a := {a1, 10}} = Map20 =
+        gpb:msg_to_map(Msg20, OoDefs, []),
+    Msg20 = gpb:msg_from_map(Map20, m1, OoDefs, []),
+    %% Flat oneof
+    #{a1 := 10} = Map21 =
+        gpb:msg_to_map(Msg20, OoDefs, [{maps_oneof, flat}]),
+    Msg20 = gpb:msg_from_map(Map21, m1, OoDefs, [{maps_oneof, flat}]),
+
+    %% Unset
+    Msg22 = #m1{a=undefined},
+    ?assertEqual(#{}, gpb:msg_to_map(Msg22, OoDefs, [])),
+    ?assertEqual(#{}, gpb:msg_to_map(Msg22, OoDefs, [{maps_oneof, flat}])),
+    Msg22 = gpb:msg_from_map(#{}, m1, OoDefs, []),
+    Msg22 = gpb:msg_from_map(#{}, m1, OoDefs, [{maps_oneof, flat}]),
+
+    %% Repeated
+    RpDefs = [{{msg,m1},
+               [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                            type=uint32,
+                            occurrence=repeated, opts=[]}]}],
+    Msg30 = #m1{a = [1,2,3]},
+    #{a := [1,2,3]} = Map30 = gpb:msg_to_map(Msg30, RpDefs, []),
+    Msg30 = gpb:msg_from_map(Map30, m1, RpDefs, []),
+
+    %% Required
+    RqDefs = [{{msg,m1},
+               [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                            type=uint32,
+                            occurrence=required, opts=[]}]}],
+    Msg40 = #m1{a = 4711},
+    #{a := 4711} = Map40 = gpb:msg_to_map(Msg40, RqDefs, []),
+    Msg40 = gpb:msg_from_map(Map40, m1, RqDefs, []),
+
+    %% Optional (proto2 and proto3)
+    O2Defs = [{{msg,m1},
+               [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                            type=uint32,
+                            occurrence=optional, opts=[]}]}],
+    O3Defs = [{{msg,m1},
+               [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
+                            type=uint32,
+                            occurrence=optional, opts=[]}]},
+              {proto3_msgs, [m1]}],
+    OptOmitted          = {maps_unset_optional, omitted},
+    OptPresentUndefined = {maps_unset_optional, present_undefined},
+    Msg51 = #m1{a = 4711},
+    Msg52 = #m1{a = undefined},
+    #{a := 4711} = Map51 = gpb:msg_to_map(Msg51, O2Defs, []),
+    Msg51 = gpb:msg_from_map(Map51, m1, O2Defs, []),
+    Msg51 = gpb:msg_from_map(Map51, m1, O2Defs,
+                            []),
+    ?assertEqual(#{}, gpb:msg_to_map(Msg52, O2Defs, [])),
+    ?assertEqual(#{}, gpb:msg_to_map(Msg52, O2Defs, [OptOmitted])),
+    #{a := undefined} = Map52 =
+        gpb:msg_to_map(Msg52, O2Defs, [OptPresentUndefined]),
+    Msg52 = gpb:msg_from_map(#{},   m1, O2Defs, []),
+    Msg52 = gpb:msg_from_map(Map52, m1, O2Defs, [OptPresentUndefined]),
+
+    #m1{a = undefined} = gpb:msg_from_map(#{}, m1, O3Defs, []),
+    #m1{a = undefined} = gpb:msg_from_map(#{}, m1, O3Defs, [OptOmitted]),
+    #m1{a = undefined} = gpb:msg_from_map(#{a => undefined}, m1, O3Defs,
+                                          [OptPresentUndefined]),
+
+    %% Submessages are to get converted recursively
+    SmDefs = [{{msg,m},
+               [#?gpb_field{name=mt, fnum=1, rnum=2,
+                            type={map, uint32, {msg,m2}},
+                            occurrence=repeated, opts=[]},
+                #?gpb_field{name=rp, fnum=1, rnum=2,
+                            type={msg,m2},
+                            occurrence=repeated, opts=[]},
+                #?gpb_field{name=op, fnum=1, rnum=3,
+                            type={msg,m2},
+                            occurrence=optional, opts=[]},
+                #?gpb_field{name=rq, fnum=1, rnum=4,
+                            type={msg,m2},
+                            occurrence=required, opts=[]},
+                #gpb_oneof{name=c, rnum=5,
+                           fields=[#?gpb_field{name=a1, fnum=1, rnum=5,
+                                               type={msg,m2},
+                                               occurrence=optional,
+                                               opts=[]}]}]},
+              {{msg,m2},
+               [#?gpb_field{name=b, fnum=1, rnum=#m2.b,
+                            type=uint32,
+                            occurrence=optional, opts=[]}]}],
+    Msg61 = {m, [{"a", #m2{b=11}}],
+             [#m2{b=12}], #m2{b=13}, #m2{b=14}, {a1,#m2{b=15}}},
+    #{mt := #{"a" := #{b := 11}},
+      rp := [#{b := 12}],
+      op := #{b := 13},
+      rq := #{b := 14},
+      c  := {a1, #{b := 15}}} = Map61 = gpb:msg_to_map(Msg61, SmDefs, []),
+    Msg61 = gpb:msg_from_map(Map61, m, SmDefs, []),
+    #{mt := #{"a" := #{b := 11}},
+      rp := [#{b := 12}],
+      op := #{b := 13},
+      rq := #{b := 14},
+      a1 := #{b := 15}} = Map62 = gpb:msg_to_map(Msg61, SmDefs,
+                                                 [{maps_oneof, flat}]),
+    Msg61 = gpb:msg_from_map(Map62, m, SmDefs, [{maps_oneof, flat}]),
+    ok.
+
+sort_elem2(Tuple) ->
+    setelement(2, Tuple, lists:sort(element(2, Tuple))).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+
 version_test() ->
     %% Check that none of version retrieval functions crash.
     S = gpb:version_as_string(),

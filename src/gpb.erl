@@ -49,6 +49,12 @@
 -export([field_record_to_proplist/1,   proplist_to_field_record/1]).
 -export([defs_records_to_proplists/1,  proplists_to_defs_records/1]).
 -export([rpc_records_to_proplists/1, rpc_record_to_proplist/1, proplists_to_rpc_records/1]).
+
+-ifndef(NO_HAVE_MAPS).
+-export([msg_to_map/3]).
+-export([msg_from_map/4]).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 -include("../include/gpb_version.hrl").
@@ -1295,6 +1301,225 @@ proto3_type_default(Type, MsgDefs) ->
             {Key,[{Sym0,_V0} | _]} = lists:keyfind(Key, 1, MsgDefs),
             Sym0
     end.
+
+-ifndef(NO_HAVE_MAPS).
+-type map_opts()          :: map_opts(none()).
+-type map_opts(OtherOpts) :: [map_opt(OtherOpts)].
+-type map_opt(Other) :: {maps_unset_optional, omitted | present_undefined} |
+                        {maps_oneof, flat | tuples} |
+                        Other.
+
+%% @doc Convert a message, as understood by eg {@link encode_msg/2}
+%%      on tuple format to a map.
+%%
+%%      The opts look similar to the options understood by gpb_compile, but is
+%%      only a limited subset of them and they govern solely to different map
+%%      representations and not the record represenatation.  While it can
+%%      support some of the map options understood by gpb_compile it does not
+%%      support mapfields_as_maps for the records representation, as this is not
+%%      supported by the rest of the code in this module.
+-spec msg_to_map(tuple(), gpb_defs:defs(), map_opts()) -> map().
+msg_to_map(Msg, Defs, MapOpts) when is_atom(element(1, Msg)) ->
+    MsgName = element(1, Msg),
+    Fields = keyfetch({msg, MsgName}, Defs),
+    Values = tl(tuple_to_list(Msg)),
+    fields_to_map(Fields, Values, maps:new(), Defs, MapOpts).
+
+fields_to_map([F | FRest], [V | VRest], Acc, Defs, Opts) ->
+    case F of
+        #?gpb_field{name=FName, occurrence=repeated, type={map,KType,VType}} ->
+            KVs = [begin
+                       ItemK2 = v_to_map(ItemK, KType, Defs, Opts),
+                       ItemV2 = v_to_map(ItemV, VType, Defs, Opts),
+                       {ItemK2, ItemV2}
+                   end
+                   || {ItemK, ItemV} <- V],
+            KVs2 = case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
+                       maps      -> maps:from_list(KVs);
+                       '2tuples' -> KVs
+                   end,
+            Acc2 = maps:put(FName, KVs2, Acc),
+            fields_to_map(FRest, VRest, Acc2, Defs, Opts);
+        #?gpb_field{name=FName, occurrence=repeated, type=Type} ->
+            Elems2 = [v_to_map(Elem, Type, Defs, Opts) || Elem <- V],
+            Acc2 = maps:put(FName, Elems2, Acc),
+            fields_to_map(FRest, VRest, Acc2, Defs, Opts);
+        #?gpb_field{name=FName, occurrence=optional, type=Type} ->
+            if V =:= undefined ->
+                    case get_unset_by_opts(Opts) of
+                        omitted ->
+                            fields_to_map(FRest, VRest, Acc, Defs, Opts);
+                        present_undefined ->
+                            Acc2 = maps:put(FName, undefined, Acc),
+                            fields_to_map(FRest, VRest, Acc2, Defs, Opts)
+                    end;
+               true ->
+                    V2 = v_to_map(V, Type, Defs, Opts),
+                    Acc2 = maps:put(FName, V2, Acc),
+                    fields_to_map(FRest, VRest, Acc2, Defs, Opts)
+            end;
+        #?gpb_field{name=FName, occurrence=required, type=Type} ->
+            V2 = v_to_map(V, Type, Defs, Opts),
+            Acc2 = maps:put(FName, V2, Acc),
+            fields_to_map(FRest, VRest, Acc2, Defs, Opts);
+        #gpb_oneof{name=FName, fields=OFields} ->
+            case V of
+                undefined ->
+                    case get_unset_by_opts(Opts) of
+                        omitted ->
+                            fields_to_map(FRest, VRest, Acc, Defs, Opts);
+                        present_undefined ->
+                            Acc2 = maps:put(FName, undefined, Acc),
+                            fields_to_map(FRest, VRest, Acc2, Defs, Opts)
+                    end;
+                {Tag, OV} ->
+                    #?gpb_field{type=Type} = fetch_field_by_name(Tag, OFields),
+                    OV2 = v_to_map(OV, Type, Defs, Opts),
+                    Acc2 = case flat_oneof_for_maps(Opts) of
+                               true  -> maps:put(Tag, OV2, Acc);
+                               false -> maps:put(FName, {Tag, OV2}, Acc)
+                           end,
+                    fields_to_map(FRest, VRest, Acc2, Defs, Opts)
+            end
+    end;
+fields_to_map([], [], Acc, _Defs, _Opts) ->
+    Acc.
+
+v_to_map(V, {msg, _MsgName}, Defs, Opts) ->
+    msg_to_map(V, Defs, Opts);
+v_to_map(V, _Type, _Defs, _Opts) ->
+    V.
+
+%% @doc Convert a message, on map format to a tuple, that can be understood by
+%%      eg {@link encode_msg/2}. The options govern how the map representation
+%%      is to be interpreted, see {@link msg_to_map/3} for more discussion on
+%%      this.
+-spec msg_from_map(map(), atom(), gpb_defs:defs(), map_opts()) -> tuple().
+msg_from_map(Map, MsgName, Defs, Opts) ->
+    Fields = keyfetch({msg, MsgName}, Defs),
+    Values = fields_from_map(Fields, Map, [], Defs, Opts),
+    list_to_tuple([MsgName | Values]).
+
+fields_from_map([F | Rest], Map, Acc, Defs, Opts) ->
+    case F of
+        #?gpb_field{name=FName, occurrence=repeated, type={map,KType,VType}} ->
+            KVs1 = case get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
+                       maps      -> maps:to_list(maps:get(FName, Map, []));
+                       '2tuples' -> maps:get(FName, Map, [])
+                   end,
+            KVs2 = [begin
+                        ItemK2 = v_from_map(ItemK, KType, Defs, Opts),
+                        ItemV2 = v_from_map(ItemV, VType, Defs, Opts),
+                        {ItemK2, ItemV2}
+                    end
+                    || {ItemK, ItemV} <- KVs1],
+            Acc2 = [KVs2 | Acc],
+            fields_from_map(Rest, Map, Acc2, Defs, Opts);
+        #?gpb_field{name=FName, occurrence=repeated, type=Type} ->
+            Elems1 = maps:get(FName, Map, []),
+            Elems2 = [v_from_map(Elem, Type, Defs, Opts) || Elem <- Elems1],
+            Acc2 = [Elems2 | Acc],
+            fields_from_map(Rest, Map, Acc2, Defs, Opts);
+        #?gpb_field{name=FName, occurrence=optional, type=Type} ->
+            V2 = case maps:find(FName, Map) of
+                     {ok, V} -> v_from_map(V, Type, Defs, Opts);
+                     error   -> undefined
+                 end,
+            Acc2 = [V2 | Acc],
+            fields_from_map(Rest, Map, Acc2, Defs, Opts);
+        #?gpb_field{name=FName, occurrence=required, type=Type} ->
+            {ok, V} = maps:find(FName, Map),
+            V2 = v_from_map(V, Type, Defs, Opts),
+            Acc2 = [V2 | Acc],
+            fields_from_map(Rest, Map, Acc2, Defs, Opts);
+        #gpb_oneof{fields=OFields} ->
+            V2 = case {get_unset_by_opts(Opts), flat_oneof_for_maps(Opts)} of
+                     {omitted, true} ->
+                         v_flat_oneof_from_map(OFields, Map, Defs, Opts);
+                     {omitted, false} ->
+                         v_tupled_ommittable_oneof_from_map(F, Map, Defs, Opts);
+                     {present_undefined, _} ->
+                         v_tupled_oneof_from_map(F, Map, Defs, Opts)
+                 end,
+            Acc2 = [V2 | Acc],
+            fields_from_map(Rest, Map, Acc2, Defs, Opts)
+    end;
+fields_from_map([], _, Acc, _Defs, _Opts) ->
+    lists:reverse(Acc).
+
+v_flat_oneof_from_map(OFields, Map, Defs, Opts) ->
+    try
+        lists:foreach(
+          fun(#?gpb_field{name=Tag, type=Type}) ->
+                  case maps:find(Tag, Map) of
+                      {ok, V} ->
+                          V2 = v_from_map(V, Type, Defs, Opts),
+                          throw({found, {Tag, V2}});
+                      error ->
+                          try_next
+                  end
+          end,
+          OFields),
+        undefined
+    catch throw:{found, V} ->
+            V
+    end.
+
+v_tupled_ommittable_oneof_from_map(#gpb_oneof{name=FName, fields=OFields},
+                                   Map, Defs, Opts) ->
+    case maps:find(FName, Map) of
+        {ok, {Tag, V}} ->
+            #?gpb_field{type=Type} = fetch_field_by_name(Tag, OFields),
+            V2 = v_from_map(V, Type, Defs, Opts),
+            {Tag, V2};
+        error ->
+            undefined
+    end.
+
+v_tupled_oneof_from_map(#gpb_oneof{name=FName, fields=OFields},
+                        Map, Defs, Opts) ->
+    case maps:get(FName, Map, undefined) of
+        {Tag, V} ->
+            #?gpb_field{type=Type} = fetch_field_by_name(Tag, OFields),
+            V2 = v_from_map(V, Type, Defs, Opts),
+            {Tag, V2};
+        undefined ->
+            undefined
+    end.
+
+v_from_map(V, {msg,SubMsgName}, Defs, Opts) ->
+    msg_from_map(V, SubMsgName, Defs, Opts);
+v_from_map(V, _Type, _Defs, _Opts) ->
+    V.
+
+get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) ->
+    case proplists:get_value(mapfields_as_maps, Opts, true) of
+        true  -> maps;
+        false -> '2tuples'
+    end.
+
+get_unset_by_opts(Opts) ->
+    case proplists:get_value(maps_unset_optional, Opts, omitted) of
+        omitted           -> omitted;
+        present_undefined -> present_undefined
+    end.
+
+flat_oneof_for_maps(SubOpts) ->
+    case proplists:get_value(maps_oneof, SubOpts, tuples) of
+        tuples -> false;
+        flat   -> true
+    end.
+
+fetch_field_by_name(Name, Fields) ->
+    case lists:keyfind(Name, #?gpb_field.name, Fields) of
+        #?gpb_field{}=Field ->
+            Field;
+        false ->
+            Names = [Nm || #?gpb_field{name=Nm} <- Fields],
+            erlang:error({error, {no_such_field, Name, Names}})
+    end.
+
+-endif. % -ifndef(NO_HAVE_MAPS).
 
 keyfetch(Key, KVPairs) ->
     case lists:keysearch(Key, 1, KVPairs) of
