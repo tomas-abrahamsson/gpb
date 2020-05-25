@@ -1,5 +1,13 @@
 -*- coding: utf-8 -*-
 
+Version 4.12.0
+2020-Apr-27
+
+        * Add possibility to build on Windows with no Cygwin. Thanks to
+          yidayoung. (#182)
+        * Add gpb:msg_to_map/3 and gpb:msg_from_map/4.
+        * Fix an warning in the generated nif code with protobuf >= 3.7.0.
+
 Version 4.11.2
 2020-Apr-09
 
