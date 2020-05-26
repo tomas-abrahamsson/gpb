@@ -54,6 +54,7 @@ github_access_token=$(echo "$github_access_token" | \
 
 echo "$upstream_owner=$upstream_owner"
 echo "$upstream_repo=$upstream_repo"
+echo "github_access_token=$github_access_token"
 
 # we must execute from inside the gpb repo, or else the
 # version retrieval will fail.
@@ -199,7 +200,7 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
     
     $maybe_dry \
      curl --request POST \
-     -H "Authorization: token $github_access_token"
+     -H "Authorization: token $github_access_token" \
      -H "Accept: application/vnd.github.v3+json" \
      --data "$data" \
      https://api.github.com/repos/"$upstream_owner"/"$upstream_repo"/pulls
