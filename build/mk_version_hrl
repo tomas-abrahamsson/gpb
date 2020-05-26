@@ -1,36 +1,58 @@
-#! /usr/bin/env bash
+#!/usr/bin/env escript
+%% -*- erlang -*-
 
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1
-then
-    echo "ERROR: Building outside a git work tree is not supported," >&2
-    echo "       unless the source has first been exported." >&2
-    echo "       This is for the version number to get correct." >&2
-    echo "       To build outside a git work tree, first export it:" >&2
-    echo "       Start with a git clone, then run helpers/export-from-git." >&2
-    echo "       For further info, see the README.md, the section section" >&2
-    echo "       named Building outside of a git work tree" >&2
-    echo "" >&2
-    echo "       Github automatically generates tar/zip files from tags,"  >&2
-    echo "       but these will unfortunately not do, since the version"  >&2
-    echo "       number does not get set correctly."  >&2
-    exit 1
-fi
 
-vsn="$(git describe --always --tags --match '[0-9]*.[0-9]*')"
 
-if [[ x"$vsn" = x || x"$vsn" =~ x[a-f0-9]{7,} ]]
-then
-    echo "ERROR: Unexpected version \"$vsn\", please make sure you are" >&2
-    echo "       building in a git repository with all tags intact, or" >&2
-    echo "       in a directory that has been exported from git." >&2
-    echo "       For further info, see the README.md, the section section" >&2
-    echo "       named Building outside of a git work tree" >&2
-    exit 1
-fi
+-mode(compile).
+-define(NOT_IN_GIT_ERR_MSG,
+    "ERROR: Building outside a git work tree is not supported,
+           unless the source has first been exported.
+           This is for the version number to get correct.
+           To build outside a git work tree, first export it:
+           Start with a git clone, then run helpers/export-from-git.
+           For further info, see the README.md, the section section
+           named Building outside of a git work tree
+           Github automatically generates tar/zip files from tags,
+           but these will unfortunately not do, since the version
+           number does not get set correctly.").
 
-sed \
-    -e "s/@vsn@/$vsn/g" \
-    -e "s/is expected to be/was/g" \
-    -e '/^%% The version below/ i \
-%% DO NOT EDIT -- generated from gpb_version.hrl.in' \
-    -e "/^%% NB: The build.mk_version_hrl depends/ d"
+file_err(FunName, FileName, Reason) ->
+    io:format(standard_error, "file:~p(~s) excute failed!, Reason :~s ~n",
+        [FunName, FileName, file:format_error(Reason)]),
+    halt(1).
+
+
+main([InFile, OutFile]) ->
+    InGit = os:cmd("git rev-parse --is-inside-work-tree  2>&1"),
+    case InGit of
+        "true" ++ _ ->
+            next;
+        _ ->
+            io:format(standard_error, "~s~n", [?NOT_IN_GIT_ERR_MSG]),
+            halt(1)
+    end,
+    Vsn0 = os:cmd("git describe --always --tags --match [0-9]*.[0-9]*"),
+    Vsn = lists:sublist(Vsn0, length(Vsn0) - 1),
+    BaseStr = case file:read_file(InFile) of
+                  {ok, S} ->
+                      S;
+                  {error, Reason} ->
+                      file_err(read_file, InFile, Reason)
+              end,
+    SedList =
+        [
+            {<<"@vsn@">>, Vsn},
+            {<<"is expected to be">>, <<"was">>},
+            {<<"%% The version below">>, [<<"%% DO NOT EDIT -- generated ">>,
+                <<"from gpb_version.hrl.in\n%% The version below">>]},
+            {<<"%% NB: The build.mk_version_hrl depends.*">>, <<"">>}
+        ],
+    VersionStr = lists:foldl(fun({Patten, Replacement}, Acc) ->
+        re:replace(Acc, Patten, Replacement, [{return, binary}])
+                             end, BaseStr, SedList),
+    case file:write_file(OutFile, VersionStr) of
+        ok ->
+            ok;
+        {error, Reason2} ->
+            file_err(write_file, OutFile, Reason2)
+    end.

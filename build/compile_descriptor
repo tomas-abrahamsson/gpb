@@ -1,62 +1,109 @@
-#! /bin/sh
+#!/usr/bin/env escript
+%% -*- erlang -*-
+-include_lib("kernel/include/file.hrl").
 
-# This is a simple form of make, called as a post_hook from rebar,
-# but depending on make for rebar support seemed ... wrong somehow
 
-is_up_to_date () {
-    target="$1"
-    shift
-    test ! -f "$target" && return 1
-    for f in "$@"
-    do
-        test "$f" -nt "$target" && return 1
-    done
-    return 0
-}
+is_up_to_date([Target|CheckResources]) ->
+    case file:read_file_info(Target) of
+        {ok, #file_info{mtime = TargetMTime}} ->
+            lists:all(fun(File) ->
+                              case file:read_file_info(File) of
+                                  {ok, #file_info{mtime = MTime}} ->
+                                      MTime =< TargetMTime;
+                                  _ ->
+                                      false
+                              end
+                      end, CheckResources);
+        _ ->
+            false
+    end.
 
-# The || exit $? is needed, if sh is a bash, then with some
-# versions of bash with -e, execution does not terminte if a
-# subshell exits with non-zero exit code
+check_source(FileList, EchoString, Fun) ->
+    case is_up_to_date(FileList) of
+        true ->
+            ok;
+        _ ->
+            io:format("~s~n",[EchoString]),
+            erlang:apply(Fun, [])
+    end.
 
-set -e
+gpb_compile_file(Proto, Opts) ->
+    check_ok_or_halt(gpb_compile:file(Proto, Opts)).
 
-if [ -d "$REBAR_DEPS_DIR/gpb" ]; then
-    # rebar3
-    EBIN="$REBAR_DEPS_DIR/gpb/ebin"
-    TEST="$REBAR_DEPS_DIR/gpb/test"
-    mkdir -p "$EBIN"
-else
-    # rebar2
-    EBIN="./ebin"
-    TEST="./test"
-fi
+compile_file(Erl, Opts) ->
+    check_ok_or_halt(compile:file(Erl, Opts)).
 
-is_up_to_date descr_src/gpb_descriptor.erl \
-          priv/proto3/google/protobuf/descriptor.proto || \
-    ( echo "Compiling descriptor.proto..."
-    erl +B -noinput -pa "$EBIN" \
-        -I priv/proto3/google/protobuf -o descr_src \
-    -modprefix gpb_ \
-        -s gpb_compile c descriptor.proto ) || exit $?
-is_up_to_date "$EBIN/gpb_descriptor.beam" descr_src/gpb_descriptor.erl || \
-    ( echo "Compiling gpb_descriptor.erl..."
-    erlc -Idescr_src -Iinclude -o "$EBIN" +debug_info \
-        descr_src/gpb_descriptor.erl ) || exit $?
-is_up_to_date "$EBIN/gpb_compile_descr.beam" \
-    descr_src/gpb_compile_descr.erl \
-    descr_src/gpb_descriptor.hrl || \
-    ( echo "Compiling gpb_compile_descr.erl..."
-    erlc -Idescr_src -Iinclude -o "$EBIN" +debug_info \
-    descr_src/gpb_compile_descr.erl ) || exit $?
-if [ -d "$TEST" ]; then
-    # eg: "rebar3 eunit" or "rebar2 eunit"
-    # but not "rebar3 compile"
-    # and not when compiling gpb as a dependency, since
-    # the test directory does not exist in the hex package.
-    is_up_to_date "$TEST/gpb_compile_descr_tests.beam" \
-        descr_src/gpb_compile_descr_tests.erl \
-        descr_src/gpb_descriptor.hrl || \
-        ( echo "Compiling gpb_compile_descr_tests.erl..."
-        erlc -Idescr_src -Iinclude -o "$TEST" +debug_info \
-        descr_src/gpb_compile_descr_tests.erl ) || exit $?
-fi
+check_ok_or_halt(Res) ->
+    if Res =:= ok -> ok;
+       element(1, Res) =:= ok -> ok;
+       true -> halt(1)
+    end.
+
+main(_) ->
+    REBAR_DEPS_DIR = os:getenv("REBAR_DEPS_DIR"),
+    {EbinPath, TestPath} =
+        case REBAR_DEPS_DIR =/= false
+            andalso filelib:is_dir(filename:join(REBAR_DEPS_DIR, "gpb")) of
+            true ->
+                Ebin = filename:join([REBAR_DEPS_DIR, "gpb", "ebin"]),
+                filelib:ensure_dir(filename:join(Ebin, ".dummy")),
+                {Ebin, filename:join([REBAR_DEPS_DIR, "gpb", "test"])};
+            _ ->
+                {"./ebin", "./test"}
+        end,
+
+    CheckList =
+        [{["descr_src/gpb_descriptor.erl",
+           "priv/proto3/google/protobuf/descriptor.proto"],
+          "Compiling descriptor.proto...",
+          fun() ->
+                  code:add_patha(EbinPath),
+                  Opts = [{i, "priv/proto3/google/protobuf"},
+                          {o, "descr_src"}, {module_name_prefix, "gpb_"}],
+                  Opts2 = Opts ++ [report_warnings, report_errors],
+                  gpb_compile_file("descriptor.proto", Opts2)
+          end},
+         {[filename:join(EbinPath, "gpb_descriptor.beam"),
+           "descr_src/gpb_descriptor.erl"],
+          "Compiling gpb_descriptor.erl...",
+          fun() ->
+                  compile_file("descr_src/gpb_descriptor.erl",
+                               [{i, "descr_src"},{i,"include"},
+                                {outdir, EbinPath},debug_info,
+                                report])
+          end},
+         {[filename:join(EbinPath, "gpb_compile_descr.beam"),
+           "descr_src/gpb_compile_descr.erl",
+           "descr_src/gpb_descriptor.hrl"],
+          "Compiling gpb_compile_descr.proto...",
+          fun() ->
+                  compile_file("descr_src/gpb_compile_descr.erl",
+                               [{i, "descr_src"},{i,"include"},
+                                {outdir, EbinPath},debug_info,
+                                report])
+          end}
+        ],
+    [check_source(FileList, EchoStr, Cmd)
+     || {FileList, EchoStr, Cmd} <- CheckList],
+    case filelib:is_dir(TestPath) of
+        true ->
+            %% eg: "rebar3 eunit" or "rebar2 eunit"
+            %% but not "rebar3 compile"
+            %% and not when compiling gpb as a dependency, since
+            %% the test directory does not exist in the hex package.
+            TestBeamFile =
+                filename:join(TestPath, "gpb_compile_descr_tests.beam"),
+            Fun = fun() ->
+                          compile_file("descr_src/gpb_compile_descr_tests.erl",
+                                       [{i, "descr_src"},{i,"include"},
+                                        {outdir, TestPath},debug_info])
+                  end,
+            check_source([TestBeamFile,
+                          "descr_src/gpb_compile_descr.erl",
+                          "descr_src/gpb_compile_descr_tests.erl",
+                          "descr_src/gpb_descriptor.hrl"],
+                         "Compiling gpb_compile_descr_tests.erl...",
+                         Fun);
+        _ ->
+            next
+    end.
