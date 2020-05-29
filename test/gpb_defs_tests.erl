@@ -1625,6 +1625,45 @@ verify_multiple_errors_caught_test() ->
     Msg = verify_flat_string(gpb_defs:format_post_process_error(Error)),
     verify_strings_present(Msg, ["m1", "f1", "-77"]).
 
+verify_catches_missing_optionality_for_proto2_test() ->
+    ProtoLines1 = ["message m1 {"
+                   "  uint32 f1 = 1;", % valid in proto3 but not proto2
+                   "}"],
+    {error, _} = Error1 = do_parse_verify_defs(ProtoLines1),
+    Msg1 = verify_flat_string(gpb_defs:format_post_process_error(Error1)),
+    verify_strings_present(Msg1, ["m1", "f1"]),
+    %% also for messages in messages
+    ProtoLines2 = ["message m1 {",
+                   "  message m2 {",
+                   "    uint32 f2 = 1;",
+                   "  }",
+                   "}"],
+    {error, _} = Error2 = do_parse_verify_defs(ProtoLines2),
+    Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
+    verify_strings_present(Msg2, ["m1.m2", "f2"]).
+
+verify_catches_unallowed_occurrence_for_proto3_test() ->
+    ProtoLines1 = ["syntax = 'proto3';",
+                   "message m1 {"
+                   "  optional uint32 f1 = 1;", % valid in proto2 but not proto3
+                   "  required uint32 f2 = 2;", % valid in proto2 but not proto3
+                   "}"],
+    {error, _} = Error1 = do_parse_verify_defs(ProtoLines1),
+    Msg1 = verify_flat_string(gpb_defs:format_post_process_error(Error1)),
+    verify_strings_present(Msg1, ["m1", "f1", "f2"]),
+
+    %% also for messages in messages
+    ProtoLines2 = ["syntax = 'proto3';",
+                   "message m1 {",
+                   "  message m2 {",
+                   "    optional uint32 f2 = 2;",
+                   "    required uint32 f3 = 3;",
+                   "  }",
+                   "}"],
+    {error, _} = Error2 = do_parse_verify_defs(ProtoLines2),
+    Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
+    verify_strings_present(Msg2, ["m1.m2", "f2", "f3"]).
+
 do_parse_verify_defs(Lines) ->
     do_parse_verify_defs(Lines, []).
 
@@ -1755,8 +1794,12 @@ do_process_sort_defs(Defs, Opts) ->
     lists:sort(Defs2).
 
 post_process(Elems, Opts) ->
-    {ok, Elems2} = gpb_defs:post_process_one_file("y", Elems, Opts),
-    gpb_defs:post_process_all_files(Elems2, Opts).
+    case gpb_defs:post_process_one_file("y", Elems, Opts) of
+        {ok, Elems2} ->
+            gpb_defs:post_process_all_files(Elems2, Opts);
+        {error, Reasons} ->
+            {error, Reasons}
+    end.
 
 do_process_sort_several_defs(ListOfDefs) ->
     do_process_sort_several_defs(ListOfDefs, []).

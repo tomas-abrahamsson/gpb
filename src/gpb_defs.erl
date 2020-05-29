@@ -71,8 +71,13 @@ post_process_one_file(FileName, Defs, Opts) ->
                       join_any_msg_options(
                         convert_default_values(
                           flatten_qualify_defnames(Defs, Package)))),
-            MetaInfo = mk_meta_info(FileName, Defs1, Opts),
-            {ok, [{file, {FileName, FileName}} | MetaInfo] ++ Defs1};
+            case tmp_fields_to_fields(Defs1) of
+                {ok, Defs2} ->
+                    MetaInfo = mk_meta_info(FileName, Defs2, Opts),
+                    {ok, [{file, {FileName, FileName}} | MetaInfo] ++ Defs2};
+                {error, Reasons} ->
+                    {error, Reasons}
+            end;
         {error, Reasons} ->
             {error, Reasons}
     end.
@@ -914,7 +919,13 @@ fmt_err({service_multiply_defined, ServiceName}) ->
 fmt_err({rpc_multiply_defined, {ServiceName, RpcName}}) ->
     ?f("rpc ~s in service ~s defined more than once", [RpcName, ServiceName]);
 fmt_err({enum_must_have_at_least_one_value, EnumName}) ->
-    ?f("enum ~s must have at least one value", [EnumName]).
+    ?f("enum ~s must have at least one value", [EnumName]);
+fmt_err({p3_unallowed_occurrence, MsgName, Field, Occurrence}) ->
+    ?f("in msg ~s, field ~s: it is not allowed to specify ~s",
+       [name_to_dstr(MsgName), Field, Occurrence]);
+fmt_err({missing_occurrence, MsgName, Field}) ->
+    ?f("in msg ~s, field ~s: missing 'optional' or 'required' or 'repeated'",
+       [name_to_dstr(MsgName), Field]).
 
 list_to_text([Item1, Item2]) ->
     ?f("~s and ~s", [Item1, Item2]);
@@ -1200,3 +1211,59 @@ is_unresolved_ref_reason({rpc_arg_ref_to_undefined_msg, _}) -> true;
 is_unresolved_ref_reason({rpc_return_ref_to_undefined_msg, _}) -> true;
 is_unresolved_ref_reason({extend_ref_to_undefined_msg, _}) -> true;
 is_unresolved_ref_reason(_) -> false.
+
+tmp_fields_to_fields(Defs) -> % Defs are expected to be flattened
+    Syntax = proplists:get_value(syntax, Defs, "proto2"),
+    OccHandler = mk_occurrence_handler(Syntax),
+    {Defs1, Errors} = to_fields_d2(Defs, OccHandler, _Errors=[]),
+    if Errors == [] -> {ok, Defs1};
+       Errors /= [] -> {error, lists:reverse(Errors)}
+    end.
+
+mk_occurrence_handler("proto2") ->
+    fun(#?gpb_field{name=FName, occurrence=Occurrence}=F, MsgName, Errors) ->
+            case Occurrence of
+                required -> {F, Errors};
+                repeated -> {F, Errors};
+                optional -> {F, Errors};
+                undefined ->
+                    Err = {missing_occurrence, MsgName, FName},
+                    {F#?gpb_field{occurrence=optional}, [Err | Errors]}
+            end
+    end;
+mk_occurrence_handler("proto3") ->
+    fun(#?gpb_field{name=FName, occurrence=Occurrence}=F, MsgName, Errors) ->
+            case Occurrence of
+                undefined -> {F#?gpb_field{occurrence=optional}, Errors};
+                repeated -> {F, Errors};
+                required ->
+                    Err = {p3_unallowed_occurrence, MsgName, FName, Occurrence},
+                    {F#?gpb_field{occurrence=optional}, [Err | Errors]};
+                optional ->
+                    Err = {p3_unallowed_occurrence, MsgName, FName, Occurrence},
+                    {F#?gpb_field{occurrence=optional}, [Err | Errors]}
+            end
+    end.
+
+to_fields_d2(Defs, OccHandler, Errors0) ->
+    lists:mapfoldl(
+      fun({{msg,MsgName}, MsgElems}, Errors) ->
+              {MsgElems1, Errors1} =
+                  to_fields_msg2(MsgName, MsgElems, OccHandler, Errors),
+              MsgDef1 = {{msg,MsgName}, MsgElems1},
+              {MsgDef1, Errors1};
+         (Other, Errors) ->
+              {Other, Errors}
+      end,
+      Errors0,
+      Defs).
+
+to_fields_msg2(MsgName, MsgElems, OccHandler, Errors0) ->
+    lists:mapfoldl(
+      fun(#?gpb_field{}=F, Errors) ->
+              OccHandler(F, MsgName, Errors);
+         (#gpb_oneof{}=F, Errors) ->
+              {F, Errors}
+      end,
+      Errors0,
+      MsgElems).
