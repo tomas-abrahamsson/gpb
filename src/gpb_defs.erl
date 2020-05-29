@@ -23,20 +23,29 @@
 %%% ------------------------------------------------------------------
 -module(gpb_defs).
 
+-export([supported_defs_versions/0]).
+-export([earliest_supported_defs_version/0]).
+-export([latest_defs_version/0]).
+-export([convert_defs_to_latest_version/1]).
+-export([convert_defs_from_latest_version/2]).
+
 -export([post_process_one_file/3]).
 -export([post_process_all_files/2]).
 -export([format_post_process_error/1]).
+-export([format_error/1]).
 -export([fetch_imports/1]).
 
 -export_type([defs/0, def/0]).
 -export_type([field/0]).
+-export_type([version/0]).
 
 -include("../include/gpb.hrl").
 
 -define(is_non_empty_string(Str), (is_list(Str) andalso is_integer(hd(Str)))).
 
 -type defs() :: [def()].
--type def() :: {{msg, Name::atom()}, [field()]} |
+-type def() :: {proto_defs_version, version()} |
+               {{msg, Name::atom()}, [field()]} |
                {{group, Name::atom()}, [field()]} |
                {{enum, Name::atom()}, [{Sym::atom(), Value::integer()} |
                                        {option, Name::atom(), Val::term()}]} |
@@ -61,6 +70,95 @@
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
+-type version() :: integer().
+
+%% @doc Return a list of supported versions of the definition format.
+%%
+%% The format is currently a list of tuples, most are 2-tuples.
+%%
+%% A new version means a non-backwards-compatible version change.
+%%
+%% Even when the version number has not changed, there may still
+%% be differences, but only backwards compatible changes.
+%%
+%% See file `doc/dev-guide/proto-defs-versions.md` for more info.
+%%
+%% Format versions obey the Erlang term order and be compared like
+%% normal Erlang terms with for instance `=<'.
+-spec supported_defs_versions() -> [version()].
+supported_defs_versions() ->
+    [1].
+
+%% @doc Return the earliest supported proto defs version.
+earliest_supported_defs_version() ->
+    lists:min(supported_defs_versions()).
+
+%% @doc Return the number of the latest proto defs version.
+latest_defs_version() ->
+    lists:max(supported_defs_versions()).
+
+%% @doc Convert proto definitions from some format found in the definitions,
+%% into the latest version for internal use within gpb.
+-spec convert_defs_to_latest_version(Defs) ->
+          {ok, Defs} |
+          {error, term()} when
+      Defs :: defs().
+convert_defs_to_latest_version(Defs) ->
+    FirstVsn = earliest_supported_defs_version(),
+    LatestVsn = latest_defs_version(),
+    %% The first version did not mandate a `proto_defs_version' marker,
+    %% when it is missing, it is 1.
+    case proplists:get_value(proto_defs_version, Defs, 1) of
+        CurrentVsn when  FirstVsn =< CurrentVsn, CurrentVsn =< LatestVsn ->
+            cvt_to_latest_aux(CurrentVsn, LatestVsn, Defs);
+        X ->
+            Supported = supported_defs_versions(),
+            Reason = {convert_from_unsupported_proto_defs_version,
+                      X, Supported},
+            {error, Reason}
+    end.
+
+cvt_to_latest_aux(LatestVsn, LatestVsn, Defs) ->
+    %% Add or replace a defs version marker.
+    case proplists:get_value(proto_defs_version, Defs) of
+        undefined ->
+            {ok, [{proto_defs_version, LatestVsn} | Defs]};
+        LatestVsn ->
+            {ok, Defs};
+        _EarlierVsn ->
+            Defs1 = lists:keydelete(proto_defs_version, 1, Defs),
+            {ok, [{proto_defs_version, LatestVsn} | Defs1]}
+    end.
+
+%% @doc Convert proto definitions on the latest format to some earlier format.
+-spec convert_defs_from_latest_version(Defs, version()) ->
+          {ok, Defs} |
+          {error, term()} when
+      Defs :: defs().
+convert_defs_from_latest_version(Defs, TargetVersion) ->
+    case lists:member(TargetVersion, supported_defs_versions()) of
+        true ->
+            CurrentVsn = latest_defs_version(),
+            cvt_from_latest_aux(CurrentVsn, TargetVersion, Defs);
+        false ->
+            Supported = supported_defs_versions(),
+            Reason = {convert_to_unsupported_proto_defs_version,
+                      TargetVersion, Supported},
+            {error, Reason}
+    end.
+
+cvt_from_latest_aux(TargetVsn, TargetVsn, Defs) ->
+    %% Add or replace a defs version marker.
+    case proplists:get_value(proto_defs_version, Defs) of
+        undefined ->
+            {ok, [{proto_defs_version, TargetVsn} | Defs]};
+        TargetVsn ->
+            {ok, Defs};
+        _LaterVsn ->
+            Defs1 = lists:keydelete(proto_defs_version, 1, Defs),
+            {ok, [{proto_defs_version, TargetVsn} | Defs1]}
+
+    end.
 
 %% @hidden
 %% @doc Post-process definitions from one file
@@ -90,12 +188,18 @@ post_process_all_files(Defs, Opts) ->
         {ok, Defs2} ->
             case verify_defs(Defs2, Opts) of
                 ok ->
-                    {ok, normalize_msg_field_options(
-                           handle_proto_syntax_version_all_files(
-                             enumerate_msg_fields(
-                               shorten_file_paths(
-                                 reformat_names(
-                                   extend_msgs(Defs2))))))};
+                    Defs3 = normalize_msg_field_options(
+                              handle_proto_syntax_version_all_files(
+                                enumerate_msg_fields(
+                                  shorten_file_paths(
+                                    reformat_names(
+                                      extend_msgs(Defs2)))))),
+                    case versionize_defs(Defs3, Opts) of
+                        {ok, Defs4} ->
+                            {ok, Defs4};
+                        {error, Reasons} ->
+                            {error, Reasons}
+                    end;
                 {error, Reasons} ->
                     {error, Reasons}
             end;
@@ -844,6 +948,11 @@ name_to_dstr(Name) when is_atom(Name) ->
 format_post_process_error({error, Reasons}) ->
     lists:flatten([[fmt_err(Reason),"\n"] || Reason <- Reasons]).
 
+format_error({error, Reason}) ->
+    format_error(Reason);
+format_error(Reason) ->
+    lists:flatten([fmt_err(Reason),"\n"]).
+
 -define(f(F, A), io_lib:format(F, A)).
 
 fmt_err({multiple_pkg_specifiers, Pkgs}) ->
@@ -925,7 +1034,16 @@ fmt_err({p3_unallowed_occurrence, MsgName, Field, Occurrence}) ->
        [name_to_dstr(MsgName), Field, Occurrence]);
 fmt_err({missing_occurrence, MsgName, Field}) ->
     ?f("in msg ~s, field ~s: missing 'optional' or 'required' or 'repeated'",
-       [name_to_dstr(MsgName), Field]).
+       [name_to_dstr(MsgName), Field]);
+fmt_err({request_of_unsupported_proto_defs_version, Requested, Supported}) ->
+    ?f("request of unsupported proto_defs_version ~w (supported: ~w)",
+       [Requested, Supported]);
+fmt_err({convert_from_unsupported_proto_defs_version, Found, Supported}) ->
+    ?f("supplied proto_defs_version ~w is unsupported (supported: ~w)",
+       [Found, Supported]);
+fmt_err({convert_to_unsupported_proto_defs_version, TargetVsn, Supported}) ->
+    ?f("specified proto_defs_version ~w is unsupported (supported: ~w)",
+       [TargetVsn, Supported]).
 
 list_to_text([Item1, Item2]) ->
     ?f("~s and ~s", [Item1, Item2]);
@@ -1158,6 +1276,17 @@ shorten_meta_info(Mapping, Defs) ->
               Other
       end,
       Defs).
+
+versionize_defs(Defs, Opts) ->
+    LatestVsn = latest_defs_version(),
+    case proplists:get_value(proto_defs_version, Opts, LatestVsn) of
+        LatestVsn ->
+            {ok, [{proto_defs_version, LatestVsn} | Defs]};
+        X ->
+            Supported = supported_defs_versions(),
+            Reason = {request_of_unsupported_proto_defs_version, X, Supported},
+            {error, [Reason]}
+    end.
 
 possibly_hint_use_packages_opt(Reasons, Defs, Opts) ->
     UsePackagesOptPresent = case proplists:get_value(use_packages, Opts) of

@@ -211,7 +211,8 @@ parses_file_to_binary_test() ->
 
 parses_file_to_msg_defs_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
-    {ok, [{file, _},
+    {ok, [{proto_defs_version, _},
+          {file, _},
           {{msg_containment,"X"},['Msg']},
           {{enum_containment, _}, _},
           {{msg,'Msg'},[#?gpb_field{}]}]=MsgDefs} =
@@ -2652,22 +2653,31 @@ format_warning_works_with_packed_for_unpackable_test() ->
 
 compile_and_assert_that_format_error_produces_iolist(Contents, ExpectedWords) ->
     compile_and_assert_that_format_error_produces_iolist(
-      Contents, [], ExpectedWords).
+      Contents, [], [], ExpectedWords).
 
 compile_and_assert_that_format_error_produces_iolist(Contents,
                                                      ExtraFileOpReturnValues,
                                                      ExpectedWords) ->
+    compile_and_assert_that_format_error_produces_iolist(
+      Contents, ExtraFileOpReturnValues, _ExtraOpts=[], ExpectedWords).
+
+compile_and_assert_that_format_error_produces_iolist(Contents,
+                                                     ExtraFileOpReturnValues,
+                                                     ExtraOpts,
+                                                     ExpectedWords) ->
     compile_and_assert_that_format_x_produces_iolist(
-      Contents, ExtraFileOpReturnValues, ExpectedWords, format_error).
+      Contents, ExtraFileOpReturnValues, ExtraOpts,
+      ExpectedWords, format_error).
 
 compile_and_assert_that_format_warning_produces_iolist(Contents,
                                                        ExpectedWords) ->
     compile_and_assert_that_format_x_produces_iolist(
-      Contents, [], ExpectedWords, format_warning).
+      Contents, [], [], ExpectedWords, format_warning).
 
 
 compile_and_assert_that_format_x_produces_iolist(Contents,
                                                  ExtraFileOpReturnValues,
+                                                 ExtraOpts,
                                                  ExpectedPhrases,
                                                  FormatWhat) ->
     FileContents = iolist_to_binary(Contents),
@@ -2677,15 +2687,19 @@ compile_and_assert_that_format_x_produces_iolist(Contents,
                            {read_file_info, FileInfoReader}]),
             mk_defs_probe_sender_opt(self()),
             {i,"."},
-            return_errors, return_warnings],
-    Txt = case gpb_compile:file("X.proto", Opts) of
-              {error, _Reason, _Warns}=Res when FormatWhat == format_error ->
+            return_errors, return_warnings] ++ ExtraOpts,
+    Res = gpb_compile:file("X.proto", Opts),
+    Txt = case Res of
+              {error, _Reason, _Warns} when FormatWhat == format_error ->
                   gpb_compile:format_error(Res);
               {ok, Warns} when FormatWhat == format_warning ->
                   [gpb_compile:format_warning(Warn) || Warn <- Warns]
           end,
+    assert_is_iolist_contains_phrases(Txt, Res, ExpectedPhrases).
+
+assert_is_iolist_contains_phrases(Txt, Res, ExpectedPhrases) ->
     IsIoList = io_lib:deep_char_list(Txt),
-    ?assertMatch({true, _}, {IsIoList, Txt}),
+    ?assertMatch({true, _, _}, {IsIoList, Txt, Res}),
     FlatTxt = lists:flatten(Txt),
     PhrasesFound = [gpb_lib:is_substr(Word, FlatTxt)
                     || Word <- ExpectedPhrases],
@@ -4643,6 +4657,22 @@ dashes_and_underscores_are_interchangeable_in_options_test() ->
            "-erlc-compile-options", "debug_info, inline_list_funcs", % ok too
            "x.proto"]).
 
+
+%% --- proto defs versions ---------
+
+error_when_request_to_return_unsupported_proto_defs_version_test() ->
+    ProtoTxt = ["message m1 { };"],
+    compile_and_assert_that_format_error_produces_iolist(
+      ProtoTxt,
+      [],
+      [to_proto_defs, {proto_defs_version, -17}],
+      ["version", "defs"]),
+    compile_and_assert_that_format_error_produces_iolist(
+      ProtoTxt,
+      [],
+      [{introspect_proto_defs_version, -17}],
+      ["introspect", "version", "defs"]),
+    ok.
 
 %% --- auxiliaries -----------------
 

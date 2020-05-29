@@ -175,6 +175,8 @@
                boolean_opt(gen_mergers) |
                boolean_opt(gen_introspect) |
                boolean_opt(ignore_wellknown_types_directory) |
+               {proto_defs_version, integer()} |
+               {introspect_proto_defs_version, integer()} |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -857,7 +859,15 @@ file(File) ->
 %% looking rom a well known types directory by trying to locate the `priv'
 %% directory of the `gpb' application. This can be used either when this
 %% directory is not available or to provide a custom set of well known types.
-
+%%
+%% <a id="option-proto_defs_version"/>
+%% <a id="option-introspect_proto_defs_version"/>
+%% The `proto_defs_version' can be used to specify version of definitions
+%% returned with the `to_proto_defs' option.  See the file
+%% `doc/dev-guide/proto_defs_version.md' for some more info.
+%% Not all proto definitions may be expressible in all versions.
+%% The `introspect_proto_defs_version' can be used to specify the version
+%% returned by the generated introspection functions, default is latest.
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
     do_file_or_string(File, Opts).
@@ -1032,7 +1042,17 @@ proto_defs(Mod, Defs, Opts) ->
 proto_defs(Mod, Defs, DefsNoRenamings, Renamings, Opts) ->
     Sources = [lists:concat([Mod, ".proto"])],
     Opts1 = normalize_opts(Opts),
-    do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts1).
+    case gpb_defs:convert_defs_to_latest_version(Defs) of
+        {ok, Defs1} ->
+            {ok, DefsNoRenamings1} =
+                gpb_defs:convert_defs_to_latest_version(DefsNoRenamings),
+            do_proto_defs_aux1(Mod, Defs1, DefsNoRenamings1,
+                               Sources, Renamings, Opts1);
+        {error, Reason} ->
+            Reason2 = {cvt_proto_defs_version_to_latest_error, Reason},
+            return_or_report_warnings_or_errors({error, Reason2}, [], Opts1,
+                                                get_output_format(Opts1))
+    end.
 
 do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
     possibly_probe_defs(Defs, Opts),
@@ -1152,16 +1172,47 @@ msg_defs(Mod, Defs, Opts) ->
     proto_defs(Mod, Defs, Opts).
 
 do_proto_defs_aux2(Defs, DefsNoRenamings, Mod, AnRes, Opts) ->
+    case gpb_lib:get_gen_introspect(Opts) of
+        false ->
+            do_proto_defs_aux3(Defs, DefsNoRenamings, Defs,
+                               Mod, AnRes, Opts);
+        true ->
+            IVsn = proplists:get_value(introspect_proto_defs_version, Opts,
+                                       gpb_defs:latest_defs_version()),
+            case gpb_defs:convert_defs_from_latest_version(Defs, IVsn) of
+                {ok, DefsForIntrospect} ->
+                    do_proto_defs_aux3(Defs, DefsNoRenamings, DefsForIntrospect,
+                                       Mod, AnRes, Opts);
+                {error, Reason} ->
+                    {error, {cvt_proto_defs_for_introspect_error, IVsn, Reason}}
+            end
+    end.
+
+do_proto_defs_aux3(Defs, DefsNoRenamings, DefsForIntrospect,
+                   Mod, AnRes, Opts) ->
     case get_output_format(Opts) of
         proto_defs ->
-            {ok, Defs};
+            case proplists:get_value(proto_defs_version, Opts) of
+                undefined ->
+                    {ok, Defs};
+                Vsn ->
+                    case gpb_defs:convert_defs_from_latest_version(Defs, Vsn) of
+                        {ok, Defs1} ->
+                            {ok, Defs1};
+                        {error, Reason} ->
+                            {error, {cvt_proto_defs_version_to_return_failed,
+                                     Vsn, Reason}}
+                    end
+            end;
         binary ->
-            ErlTxt = format_erl(Mod, Defs, DefsNoRenamings, AnRes, Opts),
+            ErlTxt = format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
+                                AnRes, Opts),
             HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             compile_to_binary(Mod, HrlTxt, ErlTxt, NifTxt, Opts);
         file ->
-            ErlTxt = format_erl(Mod, Defs, DefsNoRenamings, AnRes, Opts),
+            ErlTxt = format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
+                                AnRes, Opts),
             HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
             ErlOutDir = get_erl_outdir(Opts),
@@ -1333,6 +1384,17 @@ fmt_err(maps_flat_oneof_not_supported_for_target_version) ->
     "Flat oneof for maps is only supported on Erlang 18 and later";
 fmt_err({rename_defs, Reason}) ->
     gpb_names:format_error(Reason);
+fmt_err({cvt_proto_defs_version_to_latest_error, Reason}) ->
+    ?f("Failed to convert supplied proto definitions version "
+       "to latest: ~s",
+       [gpb_defs:format_error(Reason)]);
+fmt_err({cvt_proto_defs_version_to_return_failed, Vsn, Reason}) ->
+    ?f("Failed to convert definitions to version ~w: ~s",
+       [Vsn, gpb_defs:format_error(Reason)]);
+fmt_err({cvt_proto_defs_for_introspect_error, DefsVsn, Reason}) ->
+    ?f("Failed to convert definitions to version ~w "
+       "for introspection functions: ~s",
+       [DefsVsn, gpb_defs:format_error(Reason)]);
 fmt_err(X) ->
     ?f("Unexpected error ~p", [X]).
 
@@ -2683,7 +2745,7 @@ check_unpackables_marked_as_packed(Defs) ->
 
 %% -- generating code ----------------------------------------------
 
-format_erl(Mod, Defs, DefsNoRenamings,
+format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
            #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     AsLib = proplists:get_bool(include_as_lib, Opts),
@@ -2819,7 +2881,7 @@ format_erl(Mod, Defs, DefsNoRenamings,
          end]
         || DoJson],
        "\n",
-       [gpb_gen_introspect:format_introspection(Defs, AnRes, Opts)
+       [gpb_gen_introspect:format_introspection(DefsForIntrospect, AnRes, Opts)
         || DoIntrospect],
        "\n",
        possibly_format_descriptor(DefsNoRenamings, Opts),

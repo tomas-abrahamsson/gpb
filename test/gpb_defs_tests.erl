@@ -57,6 +57,7 @@ parses_simple_oneof_test() ->
     %% Verify oneof fields are enumerated to get the same rnum
     %% (since they occupy the same record position)
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,'Msg'}, [#gpb_oneof{
                        name=x,
@@ -82,6 +83,7 @@ parses_default_value_for_bytes_test() ->
                     "  optional string s = 2 [default = 'abc'];",
                     "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m}, [#?gpb_field{name=b, type=bytes,
                             opts=[{default,<<1,2,3>>}]},
@@ -132,6 +134,7 @@ parses_relative_nested_messages_test() ->
                                "  }",
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1},         [#?gpb_field{name=f2, type={msg,'m1.m2'}}]},
      {{msg,'m1.m2'},    []},
@@ -158,6 +161,7 @@ parses_relative_nested_messages_with_oneof_test() ->
                                "  }",
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1},      [#gpb_oneof{
                          name=x,
@@ -174,6 +178,7 @@ parses_circular_messages_test() ->
                                "  optional m1 f = 1;",
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, [#?gpb_field{name=f, type={msg,m1}}]},
      {{msg_containment,_}, [m1]}] =
@@ -241,6 +246,7 @@ parses_enum_option_test() ->
                                "  ee2 = 1;",
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum,e1}, [{option, allow_alias, true}, {ee1,1},{ee2,1}]},
      {{enum_containment, _}, [_]},
      {{msg_containment,_}, []}] =
@@ -254,6 +260,7 @@ parses_enum_with_custom_option_test() ->
                                "  ee2 = 2 [(my_e_option).x = \"abc\"];",
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum,e1}, [{option, my_e1_option, true},
                   {option, 'my_e1_option.x',true},
                   {ee1,1},{ee2,2}]},
@@ -293,6 +300,7 @@ parses_custom_option_test() ->
      {file, _},
      {package,'google.protobuf'},
      {package,x},
+     {proto_defs_version, _},
      {{enum_containment,"descriptor"}, []},
      {{enum_containment,"x"}, []},
      {{msg,'google.protobuf.FieldOptions'}, [#?gpb_field{name=my_f_option}]},
@@ -318,6 +326,7 @@ json_name_field_option_test() ->
                      "  required uint32 foo_bar_gazonk = 3;",
                      "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, []},
      {{msg,m1},[#?gpb_field{opts=[{json_name, "someName"}]}=F1,
                 #?gpb_field{opts=[{json_name, "somethingElse"}]},
@@ -340,6 +349,7 @@ generates_correct_absolute_names_test() ->
                                "  required m1.m2 b = 1;",
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum,'m1.e1'}, [_]},
      {{enum_containment, _}, ['m1.e1']},
      {{msg,m1},       [#?gpb_field{name=y, type={msg,'m1.m2'}},
@@ -363,6 +373,7 @@ generates_correct_absolute_names_2_test() ->
                                "  required m2.m4 f3 = 3;", %% -> .m2.m4
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, []},
      {{msg,m1},         [#?gpb_field{name=f1,type={msg,'m1.m2'}},
                          #?gpb_field{name=f2,type={msg,'m1.m2.m3'}},
@@ -390,6 +401,7 @@ resolve_refs_test() ->
     [{file, _},
      {import, _},
      {package, p1},
+     {proto_defs_version, _},
      {{enum,'m1.e1'}, _},
      {{enum_containment, _}, ['m1.e1']},
      {{msg,m1},       [#?gpb_field{name=y, type={msg,'m1.m2'}},
@@ -406,6 +418,7 @@ resolve_map_valuetype_refs_test() ->
                                "  map<string, m2> b = 1;",
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1},       [#?gpb_field{name=b, type={map,string,{msg,'m1.m2'}}}]},
      {{msg,'m1.m2'},  [#?gpb_field{name=x}]},
@@ -439,6 +452,7 @@ resolve_refs_with_packages_test() ->
     [{file, _},
      {import, _},
      {package, p1},
+     {proto_defs_version, _},
      {{enum,'p1.m1.e1'}, _},
      {{enum_containment, _}, _},
      {{msg,'p1.m1'},    [#?gpb_field{name=y, type={msg,'p1.m1.m2'}},
@@ -465,6 +479,7 @@ package_can_appear_anywhere_toplevelwise_test() ->
                                 "package p1;"]),
     [{file, _},
      {package, p1},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,'p1.m1'}, [#?gpb_field{}]},
      {{msg,'p1.m2'}, [#?gpb_field{}]},
@@ -483,6 +498,7 @@ enumerates_msg_fields_test() ->
                                "  required e1     z = 12;",
                                "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum,'m1.e1'}, _},
      {{enum_containment, _}, ['m1.e1']},
      {{msg,m1},       [#?gpb_field{name=y, fnum=11, rnum=2},
@@ -502,6 +518,7 @@ field_opt_normalization_test() ->
                              "  required bool   f7=7 [packed,default=true];",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, [#?gpb_field{name=f1, opts=[packed, {default,1}]},
                  #?gpb_field{name=f2, opts=[]},
@@ -516,6 +533,7 @@ field_opt_normalization_test() ->
 parses_empty_msg_field_options_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1 []; }"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, [#?gpb_field{name=f1, opts=[]}]},
      {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
@@ -537,6 +555,7 @@ parses_msg_extensions_test() ->
                              "  }",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{extensions,m1},[{100,199},{250,250},{300,300},{400,max}]},
      {{extensions,m1},[{251,251},{252,252}]},
@@ -555,6 +574,7 @@ parses_extending_msgs_test() ->
                              "  optional uint32 f2=2;",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{extensions,m1},[{200,299}]},
      {{msg,m1},       [#?gpb_field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
@@ -594,6 +614,7 @@ parses_extend_scope_rules_test() ->
                              "  optional string e22 = 202;",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{extensions,m1},[{100,199}]},
      {{extensions,'m1.m1'},[{200,299}]},
@@ -622,6 +643,7 @@ parses_extending_msgs_with_nested_msg_test() ->
                              "  optional m2 ext_m2 = 200;",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{extensions,m1},[{200,299}]},
      {{msg,m1},       [#?gpb_field{name=f1, fnum=1, rnum=2, opts=[{default,17}],
@@ -644,6 +666,7 @@ parses_nested_extending_msgs_in_package_test() ->
                              "}"]),
     [{file, _},
      {package,'p1.p2'},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{extensions,'p1.p2.m1'},[{200,299}]},
      {{msg,'p1.p2.m1'},
@@ -668,6 +691,7 @@ extend_msg_several_times_test() ->
                              "  optional string f3 = 203;",
                              "};"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{extensions,m1},[{200,299}]},
      {{msg,m1},
@@ -701,6 +725,7 @@ extend_msg_in_other_package_test() ->
      {file, _},
      {package,bar},
      {package,foo},
+     {proto_defs_version, _},
      {{enum_containment, "bar"}, _},
      {{enum_containment, "foo"}, _},
      {{extensions,'foo.fm1'},[{100,199}]},
@@ -739,6 +764,7 @@ extending_and_resolving_ref_to_msg_in_enclosing_package_test() ->
      {file, _},
      {package,p},
      {package,'p.x'},
+     {proto_defs_version, _},
      {{enum_containment, "p"}, _},
      {{enum_containment, "y"}, _},
      {{extensions,'p.x.a'},[{200,max}]},
@@ -777,6 +803,7 @@ scope_when_resolving_extend_field_refs_test() ->
      {file, _},
      {package,a},
      {package,b},
+     {proto_defs_version, _},
      {{enum_containment, "a"}, _},
      {{enum_containment, "b"}, _},
      {{extensions,'a.Foo'},[{200,max}]},
@@ -802,6 +829,7 @@ nested_extended_block_test() ->
                    "}"]}],
                 []),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,'A'},[#?gpb_field{name=b,type={msg,'B'}}]},
      {{msg,'B'},[]},
@@ -819,6 +847,7 @@ group_test() ->
                              "  required uint32 ff = 11;",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{group,'m1.g'},[#?gpb_field{name=gf,type=uint32,fnum=3,rnum=2,
                                   opts=[]}]},
@@ -840,6 +869,7 @@ message_def_nested_in_group_test() ->
                              "  }",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{group,'m1.g'},[#?gpb_field{name=gf,type=uint32,fnum=3,rnum=2,
                                   opts=[]}]},
@@ -856,6 +886,7 @@ parses_service_test() ->
                              "  rpc req(m1) returns (m2);",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, _},
      {{msg,m2}, _},
@@ -875,6 +906,7 @@ parses_multiple_services_test() ->
                              "  rpc req2(m2) returns (m1);",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, _},
      {{msg,m2}, _},
@@ -898,6 +930,7 @@ parses_rpc_streams_and_options_test() ->
                              "  rpc r7(m1) returns (m2) { option (a.b).c=1; };",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, _},
      {{msg,m2}, _},
@@ -923,6 +956,7 @@ parses_service_ignores_empty_method_option_braces_test() ->
                              "  rpc req(m1) returns (m2) {};",
                              "}"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, _},
      {{msg,m2}, _},
@@ -936,6 +970,7 @@ parses_service_ignores_empty_method_option_braces_test() ->
 parses_empty_toplevel_statement_test() ->
     {ok,Defs} = parse_lines(["; message m1 { required uint32 f1=1; }; ; "]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, _},
      {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
@@ -943,6 +978,7 @@ parses_empty_toplevel_statement_test() ->
 parses_empty_message_statement_test() ->
     {ok,Defs} = parse_lines(["message m1 { ; ; required uint32 f1=1;;; }"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, [#?gpb_field{name=f1}]},
      {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
@@ -950,6 +986,7 @@ parses_empty_message_statement_test() ->
 parses_empty_enum_statement_test() ->
     {ok,Defs} = parse_lines(["enum e1 { ; ; ee1=1;;; }"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum,e1}, [{ee1,1}]},
      {{enum_containment, _}, [e1]},
      {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
@@ -958,6 +995,7 @@ parses_empty_service_statement_test() ->
     {ok,Defs} = parse_lines(["message m1 { required uint32 f1=1; }",
                              "service s1 { ; ; rpc r1(m1) returns (m1);;; }"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, _},
      {{msg_containment,_}, _},
@@ -973,6 +1011,7 @@ parses_empty_service_statement_method_options_test() ->
                              "service s2 { rpc r5(m1) returns (m1){}",
                              "             rpc r6(m1) returns (m1){} }"]),
     [{file, _},
+     {proto_defs_version, _},
      {{enum_containment, _}, _},
      {{msg,m1}, _},
      {{msg_containment,_}, _},
@@ -992,6 +1031,7 @@ proto3_no_occurrence_test() ->
                              "}"]),
     [{file, _},
      {proto3_msgs,[m1]},
+     {proto_defs_version, _},
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},
@@ -1009,6 +1049,7 @@ proto3_sub_msgs_gets_occurrence_optional_test() ->
                              "message s1 { uint32 f1=1; }"]),
     [{file, _},
      {proto3_msgs,[m1,s1]},
+     {proto_defs_version, _},
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},
@@ -1029,6 +1070,7 @@ proto3_no_repeated_are_packed_by_default_test() ->
                              "}"]),
     [{file, _},
      {proto3_msgs,[m1]},
+     {proto_defs_version, _},
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},
@@ -1066,6 +1108,7 @@ proto3_only_numeric_scalars_are_packed_test() ->
                             ]),
     [{file, _},
      {proto3_msgs,[m1,subm]},
+     {proto_defs_version, _},
      {syntax,"proto3"},
      {{enum,ee},_},
      {{enum_containment, _}, _},
@@ -1107,6 +1150,7 @@ mixing_proto2_and_proto3_test() ->
     [{file, _},
      {file, _},
      {proto3_msgs,[m1]},
+     {proto_defs_version, _},
      {syntax,"proto2"},
      {syntax,"proto3"},
      {{enum_containment, _}, _},
@@ -1133,6 +1177,7 @@ proto3_reserved_numbers_and_names_test() ->
                              "}"]),
     [{file, _},
      {proto3_msgs,[m1,'m1.m2']},
+     {proto_defs_version, _},
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},      [#?gpb_field{name=f1}]},
@@ -1154,7 +1199,8 @@ file_attrs_for_each_file_test() ->
                  {"f3.proto33",
                   ["message M3 {}"]}],
                 []),
-    [{file, {"f1", "f1.proto"}},
+    [{proto_defs_version, _},
+     {file, {"f1", "f1.proto"}},
      {{msg_containment,_}, _},
      {{enum_containment,_}, _},
      {{msg,'M1'}, _},
@@ -1184,7 +1230,8 @@ basenameification_of_file_attrs_test() ->
                  {"f4.proto",
                   ["message M4 {}"]}],
                 []),
-    [{file, {"c/f1", "c/f1.proto"}},
+    [{proto_defs_version, _},
+     {file, {"c/f1", "c/f1.proto"}},
      {{msg_containment,_}, _},
      {{enum_containment,_}, _},
      {{msg,'M1'}, _},
@@ -1664,6 +1711,36 @@ verify_catches_unallowed_occurrence_for_proto3_test() ->
     Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
     verify_strings_present(Msg2, ["m1.m2", "f2", "f3"]).
 
+proto_defs_versions_test() ->
+    Fs = [{"f1.proto", ["message m1 { };"]}],
+    AllDefs = parse_several_file_lines(Fs, []),
+    [{proto_defs_version, _} | Rest] = AllDefs,
+
+    %% Try converting an unhandled version
+    Unhandled = [{proto_defs_version, -17} | Rest],
+    {error, R1} = gpb_defs:convert_defs_to_latest_version(Unhandled),
+    ?assert(is_io_list(gpb_defs:format_error(R1))),
+    %% Converting latest to itself should always work (identity)
+    {ok, AllDefs} = gpb_defs:convert_defs_to_latest_version(AllDefs),
+
+    %% Try requesting conversion to an unhandled version
+    {error, R2} = parse_several_file_lines(Fs, [{proto_defs_version, -17}],
+                                           expect_error, verify_imports),
+    ?assert(is_io_list(gpb_defs:format_post_process_error({error, R2}))),
+
+    %% Requesting conversion to latest supported should always work (identity)
+    Latest = lists:max(gpb_defs:supported_defs_versions()),
+    AllDefs = parse_several_file_lines(Fs, [{proto_defs_version, Latest}],
+                                       expect_success, verify_imports),
+
+    EarliestSupportedVsn = gpb_defs:earliest_supported_defs_version(),
+    {ok, _Defs} = gpb_defs:convert_defs_from_latest_version(
+                    AllDefs,
+                    EarliestSupportedVsn),
+    {error, R3} = gpb_defs:convert_defs_from_latest_version(AllDefs, -17),
+    ?assert(is_io_list(gpb_defs:format_error({error, R3}))),
+    ok.
+
 do_parse_verify_defs(Lines) ->
     do_parse_verify_defs(Lines, []).
 
@@ -1819,3 +1896,11 @@ do_process_several_defs(ListOfDefs, Opts) ->
            || {I, Elems} <- gpb_lib:index_seq(ListOfDefs)]),
     {ok, Defs2} = gpb_defs:post_process_all_files(AllElems, Opts),
     Defs2.
+
+is_io_list(X) when is_list(X); is_binary(X) ->
+    try
+        iolist_to_binary(X),
+        true
+    catch error:badarg ->
+            false
+    end.
