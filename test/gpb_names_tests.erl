@@ -26,8 +26,7 @@ renames_just_msg_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
     %% msg_name => don't touch Package part, just the msg name path.
     %% Over grpc, Package, Service and Rpc is exposed.
-    [{file, _},
-     {package,'TopPkg.SubPkg'},
+    [{package,'TopPkg.SubPkg'},
      {{enum_containment, _}, _},
      {{msg,'TopPkg.SubPkg.msg_name_1'},
       [#?gpb_field{type={msg,'TopPkg.SubPkg.msg_name_1.msg_name_2'}},
@@ -43,17 +42,18 @@ renames_just_msg_test() ->
                  input='TopPkg.SubPkg.msg_name_1',
                  output='TopPkg.SubPkg.msg_name_1.msg_name_2'}]},
      {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs0,
-                        [{rename, {msg_name, snake_case}}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs0,
+                 [{rename, {msg_name, snake_case}}])))).
 
 renames_msg_full_path_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
     %% msg_fqname => transform also the Package---but only for messages,
     %% (the package names in other parts won't match, but if one wants to
     %% do this, then one presumably has no services)
-    [{file, _},
-     {package,'TopPkg.SubPkg'},
+    [{package,'TopPkg.SubPkg'},
      {{enum_containment, _}, _},
      {{msg,'top_pkg.sub_pkg.msg_name_1'},
       [#?gpb_field{type={msg,'top_pkg.sub_pkg.msg_name_1.msg_name_2'}},
@@ -69,14 +69,15 @@ renames_msg_full_path_test() ->
                  input='top_pkg.sub_pkg.msg_name_1',
                  output='top_pkg.sub_pkg.msg_name_1.msg_name_2'}]},
      {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs0,
-                        [{rename, {msg_fqname, snake_case}}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs0,
+                 [{rename, {msg_fqname, snake_case}}])))).
 
 rename_package_affects_all_occurrences_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
-    [{file, _},
-     {package,'top_pkg.sub_pkg'},
+    [{package,'top_pkg.sub_pkg'},
      {{enum_containment, _}, _},
      {{msg,'top_pkg.sub_pkg.MsgName1'},
       [#?gpb_field{type={msg,'top_pkg.sub_pkg.MsgName1.MsgName2'}},
@@ -92,17 +93,18 @@ rename_package_affects_all_occurrences_test() ->
                  input='top_pkg.sub_pkg.MsgName1',
                  output='top_pkg.sub_pkg.MsgName1.MsgName2'}]},
      {{service_containment,"x"}, ['top_pkg.sub_pkg.SvcName1']}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs0,
-                        [{rename, {pkg_name, snake_case}},
-                         use_packages]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs0,
+                 [{rename, {pkg_name, snake_case}},
+                  use_packages])))).
 
 dots_to_underscores_for_nested_msgs_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
     %% msg_name => don't touch Package part, just the msg name path.
     %% Over grpc, Package, Service and Rpc is exposed.
-    [{file, _},
-     {package,'TopPkg.SubPkg'},
+    [{package,'TopPkg.SubPkg'},
      {{enum_containment, _}, _},
      {{msg,'TopPkg.SubPkg.msg_name_1'},
       [#?gpb_field{type={msg,'TopPkg.SubPkg.msg_name_1_msg_name_2'}},
@@ -118,10 +120,12 @@ dots_to_underscores_for_nested_msgs_test() ->
                  input='TopPkg.SubPkg.msg_name_1',
                  output='TopPkg.SubPkg.msg_name_1_msg_name_2'}]},
      {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs0,
-                        [{rename, {msg_name, snake_case}},
-                         {rename, {msg_name, dots_to_underscores}}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs0,
+                 [{rename, {msg_name, snake_case}},
+                  {rename, {msg_name, dots_to_underscores}}])))).
 
 nested_enums_test() ->
     Defs0 = parse_sort_several_file_lines(
@@ -135,8 +139,7 @@ nested_enums_test() ->
                  "  rpc RpcReq(MsgName1) returns (MsgName1) {};",
                  "}"]}],
               [use_packages]),
-    [{file,{"x","x.proto"}},
-     {package,'TopPkg.SubPkg'},
+    [{package,'TopPkg.SubPkg'},
      {{enum,'TopPkg.SubPkg.msg_name_1.EnumName'},[{a,0},{b,1}]},
      {{enum_containment,"x"},['TopPkg.SubPkg.msg_name_1.EnumName']},
      {{msg,'TopPkg.SubPkg.msg_name_1'},
@@ -152,15 +155,16 @@ nested_enums_test() ->
                  output = 'TopPkg.SubPkg.msg_name_1',input_stream = false,
                  output_stream = false,opts = []}]},
      {{service_containment,"x"},['TopPkg.SubPkg.SvcName1']}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs0,
-                        [{rename, {msg_name, snake_case}},
-                         {rename, {msg_name, dots_to_underscores}}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs0,
+                 [{rename, {msg_name, snake_case}},
+                  {rename, {msg_name, dots_to_underscores}}])))).
 
 base_name_test() ->
     Defs0 = parse_sort_several_file_lines(x_proto(), [use_packages]),
-    [{file, _},
-     {package,'TopPkg.SubPkg'},
+    [{package,'TopPkg.SubPkg'},
      {{enum_containment, _}, _},
      {{msg,msg_name_1}, [#?gpb_field{type={msg, msg_name_2}},
                          #?gpb_field{}]},
@@ -173,10 +177,12 @@ base_name_test() ->
                  input=msg_name_1,
                  output=msg_name_2}]},
      {{service_containment,"x"}, ['TopPkg.SubPkg.SvcName1']}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs0,
-                        [{rename, {msg_fqname, base_name}},
-                         {rename, {msg_fqname, snake_case}}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs0,
+                 [{rename, {msg_fqname, base_name}},
+                  {rename, {msg_fqname, snake_case}}])))).
 
 x_proto() ->
     [{"x.proto",
@@ -201,8 +207,7 @@ renames_groups_test() ->
                 "  message MsgName2 {required uint32 m21=21;}"
                 "};"]}],
              [use_packages]),
-    [{file, _},
-     {package,'TopPkg.SubPkg'},
+    [{package,'TopPkg.SubPkg'},
      {{enum_containment, _}, _},
      {{group,'TopPkg.SubPkg.msgname1.group_name'},
       [#?gpb_field{type={msg,'TopPkg.SubPkg.MsgName1.MsgName2'}}]},
@@ -213,9 +218,11 @@ renames_groups_test() ->
      {{msg_containment,"x"},
       ['TopPkg.SubPkg.MsgName1','TopPkg.SubPkg.MsgName1.MsgName2']},
      {{pkg_containment,"x"},'TopPkg.SubPkg'}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs,
-                        [{rename, {group_name, lowercase}}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs,
+                 [{rename, {group_name, lowercase}}])))).
 
 rename_msg_by_proto_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -228,10 +235,7 @@ rename_msg_by_proto_with_legacy_opts_test() ->
                                 "extend m1 { optional uint32 fm2=2; }"]},
               {"proto3.proto", ["message m3 {map<string, m1> m=1;}"]}],
              []),
-    [{file, _},
-     {file, _},
-     {file, _},
-     {{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+    [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
      {{enum_containment, _}, _},
      {{enum_containment, _}, _},
      {{enum_containment, _}, _},
@@ -250,11 +254,13 @@ rename_msg_by_proto_with_legacy_opts_test() ->
                  output=p2_m2} %% ... and result msgs to be prefixed
       ]},
      {{service_containment, "proto2"}, [s1]}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs,
-                        [{msg_name_prefix,
-                          {by_proto, [{proto1, "p1_"},
-                                      {proto2, "p2_"}]}}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs,
+                 [{msg_name_prefix,
+                   {by_proto, [{proto1, "p1_"},
+                               {proto2, "p2_"}]}}])))).
 
 prefix_record_names_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -266,9 +272,8 @@ prefix_record_names_with_legacy_opts_test() ->
                 "  rpc req(m1) returns (m2) {};",
                 "}",
                 "extend m1 { optional uint32 fm2=2; }"]}],
-            []),
-    [{file, _},
-     {{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+             []),
+    [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
      {{enum_containment, _}, _},
      {{msg,p_m1}, [#?gpb_field{name=f1, type={enum,e1}},
                    #?gpb_field{name=fm2}]},
@@ -281,9 +286,11 @@ prefix_record_names_with_legacy_opts_test() ->
                  input=p_m1,     %% both argument ...
                  output=p_m2}]}, %% ... and result msgs to be prefixed
      {{service_containment,_}, [s1]}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs,
-                        [{msg_name_prefix, "p_"}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs,
+                 [{msg_name_prefix, "p_"}])))).
 
 can_suffix_record_names_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -296,8 +303,7 @@ can_suffix_record_names_with_legacy_opts_test() ->
                 "}",
                 "extend m1 { optional uint32 fm2=2; }"]}],
              []),
-    [{file, _},
-     {{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+    [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
      {{enum_containment, _}, _},
      {{msg,m1_s}, [#?gpb_field{name=f1, type={enum,e1}},
                    #?gpb_field{name=fm2}]},
@@ -310,9 +316,11 @@ can_suffix_record_names_with_legacy_opts_test() ->
                  input=m1_s,     %% both argument ...
                  output=m2_s}]}, %% .. and result msgs to be prefixed
      {{service_containment,_}, [s1]}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs,
-                        [{msg_name_suffix, "_s"}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs,
+                 [{msg_name_suffix, "_s"}])))).
 
 can_tolower_record_names_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -323,9 +331,8 @@ can_tolower_record_names_with_legacy_opts_test() ->
                 "  rpc req(Msg1) returns (Msg2) {};",
                 "}",
                 "extend Msg1 { optional uint32 fm2=2; }"]}],
-            []),
-    [{file, _},
-     {{enum_containment, _}, _},
+             []),
+    [{{enum_containment, _}, _},
      {{msg,msg1}, [#?gpb_field{name=f1, type={msg,msg2}},
                    #?gpb_field{name=fm2}]},
      {{msg,msg2}, [#?gpb_field{name=g1}]},
@@ -336,7 +343,9 @@ can_tolower_record_names_with_legacy_opts_test() ->
                  input=msg1,     %% both argument ...
                  output=msg2}]}, %% .. and result msgs to be to-lower
      {{service_containment,_}, [svc1]}] =
-        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(Defs, [msg_name_to_lower])))).
 
 can_tolower_record_names_with_oneof_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -348,12 +357,13 @@ can_tolower_record_names_with_oneof_with_legacy_opts_test() ->
                 "  }",
                 "}"]}],
              []),
-    [{file, _},
-     {{enum_containment, _}, _},
+    [{{enum_containment, _}, _},
      {{msg,msg1}, [#gpb_oneof{fields=[#?gpb_field{name=a,type={msg,msg1}},
                                       #?gpb_field{name=b}]}]},
      {{msg_containment,_}, [msg1]}] =
-        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(Defs, [msg_name_to_lower])))).
 
 can_tolower_record_names_with_map_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -365,12 +375,13 @@ can_tolower_record_names_with_map_with_legacy_opts_test() ->
                 "  map<string,Msg1> m = 1;",
                 "}"]}],
              []),
-    [{file, _},
-     {{enum_containment, _}, _},
+    [{{enum_containment, _}, _},
      {{msg,msg1}, [#?gpb_field{}]},
      {{msg,msg2}, [#?gpb_field{type={map,string,{msg,msg1}}}]},
      {{msg_containment,_}, [msg1, msg2]}] =
-        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(Defs, [msg_name_to_lower])))).
 
 can_to_snake_record_names_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -382,8 +393,7 @@ can_to_snake_record_names_with_legacy_opts_test() ->
                 "}",
                 "extend MsgName1 { optional uint32 fm2=2; }"]}],
              []),
-    [{file, _},
-     {{enum_containment, _}, _},
+    [{{enum_containment, _}, _},
      {{msg,msg_name_1}, [#?gpb_field{name=f1, type={msg,msg_name_2}},
                          #?gpb_field{name=fm2}]},
      {{msg,msg_name_2}, [#?gpb_field{name=g1}]},
@@ -394,7 +404,9 @@ can_to_snake_record_names_with_legacy_opts_test() ->
                  input=msg_name_1,     %% both argument ...
                  output=msg_name_2}]}, %% .. and result msgs to be snake_cased
      {{service_containment,_},[svc_name_1]}] =
-        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_snake_case]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(Defs, [msg_name_to_snake_case])))).
 
 to_snake_case_with_packages_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -407,8 +419,7 @@ to_snake_case_with_packages_with_legacy_opts_test() ->
                 "}",
                 "extend MsgName1 { optional uint32 fm2=2; }"]}],
              [use_packages]),
-    [{file, _},
-     {package, 'top_pkg.sub_pkg'},
+    [{package, 'top_pkg.sub_pkg'},
      {{enum_containment, _}, _},
      {{msg,'top_pkg.sub_pkg.msg_name_1'},
       [#?gpb_field{name=f1, type={msg,'top_pkg.sub_pkg.msg_name_2'}},
@@ -423,8 +434,10 @@ to_snake_case_with_packages_with_legacy_opts_test() ->
                  input='top_pkg.sub_pkg.msg_name_1',
                  output='top_pkg.sub_pkg.msg_name_2'}]},
      {{service_containment,_}, ['top_pkg.sub_pkg.svc_name_1']}] =
-        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_snake_case,
-                                                   use_packages]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(Defs, [msg_name_to_snake_case,
+                                            use_packages])))).
 
 can_tolower_record_names_with_packages_with_legacy_opts_test() ->
     Defs = parse_sort_several_file_lines(
@@ -437,8 +450,7 @@ can_tolower_record_names_with_packages_with_legacy_opts_test() ->
                 "}",
                 "extend Msg1 { optional uint32 fm2=2; }"]}],
              [use_packages]),
-    [{file, _},
-     {package, 'pkg1'},
+    [{package, 'pkg1'},
      {{enum_containment, _}, _},
      {{msg,'pkg1.msg1'}, [#?gpb_field{name=f1, type={msg,'pkg1.msg2'}},
                           #?gpb_field{name=fm2}]},
@@ -451,8 +463,10 @@ can_tolower_record_names_with_packages_with_legacy_opts_test() ->
                  input='pkg1.msg1',     %% both argument ...
                  output='pkg1.msg2'}]}, %% .. and result msgs to be to-lower
      {{service_containment,"x"},['pkg1.svc1']}] =
-        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower,
-                                                   use_packages]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(Defs, [msg_name_to_lower,
+                                            use_packages])))).
 
 can_tolower_with_package_def_but_without_use_package_opt_test() ->
     Defs = parse_sort_several_file_lines(
@@ -461,12 +475,13 @@ can_tolower_with_package_def_but_without_use_package_opt_test() ->
                 "message Msg1 {required uint32 f1=1;}"]}],
              [%% Not: use_packages even though there's package pkg1; line
              ]),
-    [{file, _},
-     {package, 'pkg1'},
+    [{package, 'pkg1'},
      {{enum_containment, _}, _},
      {{msg,msg1}, [#?gpb_field{}]},
      {{msg_containment,_}, [msg1]}] =
-        lists:sort(ok(gpb_names:rename_defs(Defs, [msg_name_to_lower]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(Defs, [msg_name_to_lower])))).
 
 error_for_duplicates_after_rename_test() ->
     Defs = parse_sort_several_file_lines(
@@ -525,18 +540,19 @@ no_error_for_same_rpc_name_in_different_services_test() ->
                 "service Account { rpc Create (M) returns (M); }",
                 "service Device  { rpc Create (M) returns (M); }"]}],
              []),
-    [{file, _},
-     {{enum_containment, _}, _},
+    [{{enum_containment, _}, _},
      {{msg,'M'}, _},
      {{msg_containment,_},_},
      {{rpc_containment,_},[{account,create},{device,create}]},
      {{service,account}, [#?gpb_rpc{name=create}]},
      {{service,device},  [#?gpb_rpc{name=create}]},
      {{service_containment,_},[_,_]}] =
-        lists:sort(ok(gpb_names:rename_defs(
-                        Defs,
-                        [{rename,{rpc_name,lowercase}},
-                         {rename,{service_name,lowercase}}]))).
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs,
+                 [{rename,{rpc_name,lowercase}},
+                  {rename,{service_name,lowercase}}])))).
 
 original_names_test() ->
     Protos = [{"x.proto",
@@ -580,6 +596,23 @@ original_names_test() ->
     ok.
 
 %% test helpers
+filter_namey_things(Defs) ->
+    lists:filter(
+      fun({package, _}) -> true;
+         ({{msg, _}, _}) -> true;
+         ({{enum, _}, _}) -> true;
+         ({{group, _}, _}) -> true;
+         ({{service, _}, _}) -> true;
+         ({{pkg_containment, _}, _}) -> true;
+         ({{msg_containment, _}, _}) -> true;
+         ({{enum_containment, _}, _}) -> true;
+         ({{service_containment, _}, _}) -> true;
+         ({{rpc_containment, _}, _}) -> true;
+         (_) ->
+              false
+      end,
+      Defs).
+
 parse_sort_several_file_lines(ProtoLines, Opts) ->
     {AllProtoNames, _AllLines} = lists:unzip(ProtoLines),
     AllProtoBases = lists:map(fun filename:basename/1, AllProtoNames),
