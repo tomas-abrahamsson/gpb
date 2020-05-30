@@ -557,7 +557,7 @@ mapfield_proto() ->
     message BoolToStr { map<bool,string>   f = 1; };
     message StrToStr  { map<string,string> f = 1; };
     message StrToSub  { map<string,Sub>    f = 1; };
-    message Sub { uint32 s = 1; }
+    message Sub { optional uint32 s = 1; }
     ".
 
 mapfield_test() ->
@@ -1227,8 +1227,8 @@ field_pass_as_record_test() ->
     %% due to the joint depencency on gpb_decoders_lib.
     Proto = "
        message Msg {
-          uint32 f1 = 1;
-          uint32 f2 = 2;
+          optional uint32 f1 = 1;
+          optional uint32 f2 = 2;
           map<string,uint32> f3 = 3;
        }
        ",
@@ -1244,8 +1244,8 @@ field_pass_as_record_test() ->
 json_maps_and_records_with_mapfields_test() ->
     Proto = "
        message Msg {
-          uint32 f1 = 1;
-          uint32 f2 = 2;
+          optional uint32 f1 = 1;
+          optional uint32 f2 = 2;
           map<string,uint32> f3 = 3;
        }
        ",
