@@ -176,7 +176,7 @@
                boolean_opt(gen_introspect) |
                boolean_opt(ignore_wellknown_types_directory) |
                {proto_defs_version, integer()} |
-               {introspect_proto_defs_version, integer()} |
+               {introspect_proto_defs_version, integer() | preferably_1} |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -894,8 +894,9 @@ do_file_or_string(In, Opts0) ->
                     Mod = find_out_mod(In, Opts1),
                     DefaultOutDir = find_default_out_dir(In),
                     Opts2 = Opts1 ++ [{o,DefaultOutDir}],
+                    Opts3 = possibly_adjust_proto_defs_version_opt(Opts2),
                     do_proto_defs_aux1(Mod, Defs1, Defs, Sources, Renamings,
-                                       Opts2);
+                                       Opts3);
                 {error, Reason} = Error ->
                     possibly_report_error(Error, Opts1),
                     case proplists:get_bool(return_warnings, Opts1) of
@@ -1017,6 +1018,40 @@ find_out_mod(File, Opts) ->
 
 find_default_out_dir({_Mod, _S}) -> ".";
 find_default_out_dir(File) -> filename:dirname(File).
+
+possibly_adjust_proto_defs_version_opt(Opts) ->
+    case get_output_format(Opts) of
+        proto_defs ->
+            case proplists:get_value(proto_defs_version, Opts) of
+                undefined ->
+                    %% Default version is 1 for now
+                    [{proto_defs_version, 1} | Opts];
+                _Vsn ->
+                    Opts
+            end;
+        binary ->
+            Opts;
+        file ->
+            Opts
+    end.
+
+possibly_adjust_introspect_proto_defs_version_opt(Opts) ->
+    OutFormat = get_output_format(Opts),
+    if OutFormat == proto_defs ->
+            Opts;
+       OutFormat == binary;
+       OutFormat == file ->
+            case proplists:get_value(proto_defs_version, Opts) of
+                undefined ->
+                    OptName = introspect_proto_defs_version,
+                    case proplists:is_defined(OptName, Opts) of
+                        true  -> Opts;
+                        false -> [{OptName, preferably_1} | Opts]
+                    end;
+                Vsn ->
+                    [{introspect_proto_defs_version, Vsn} | Opts]
+            end
+    end.
 
 %% @equiv proto_defs(Mod, Defs, [])
 -spec proto_defs(module(), gpb_defs:defs()) -> comp_ret().
@@ -1177,14 +1212,38 @@ do_proto_defs_aux2(Defs, DefsNoRenamings, Mod, AnRes, Opts) ->
             do_proto_defs_aux3(Defs, DefsNoRenamings, Defs,
                                Mod, AnRes, Opts);
         true ->
-            IVsn = proplists:get_value(introspect_proto_defs_version, Opts,
-                                       gpb_defs:latest_defs_version()),
-            case gpb_defs:convert_defs_from_latest_version(Defs, IVsn) of
+            Opts2 = possibly_adjust_introspect_proto_defs_version_opt(Opts),
+            case convert_introspect_proto_defs(Defs, Opts2) of
                 {ok, DefsForIntrospect} ->
                     do_proto_defs_aux3(Defs, DefsNoRenamings, DefsForIntrospect,
-                                       Mod, AnRes, Opts);
-                {error, Reason} ->
+                                       Mod, AnRes, Opts2);
+                {error, {IVsn, Reason}} ->
                     {error, {cvt_proto_defs_for_introspect_error, IVsn, Reason}}
+            end
+    end.
+
+convert_introspect_proto_defs(Defs, Opts) ->
+    LatestVsn = gpb_defs:latest_defs_version(),
+    IVsn = proplists:get_value(introspect_proto_defs_version, Opts, LatestVsn),
+    if is_integer(IVsn) ->
+            case gpb_defs:convert_defs_from_latest_version(Defs, IVsn) of
+                {ok, DefsForIntrospect} ->
+                    {ok, DefsForIntrospect};
+                {error, Reason} ->
+                    {error, {IVsn, Reason}}
+            end;
+       IVsn == preferably_1 ->
+            %% The idea is that when introducing the new proto3 field presence,
+            %% do it in a mostly backwards compatible way;
+            %% * Work fully backwards compatible when no new proto3 field
+            %%   presence ("optional") is used.
+            %% * When new proto3 field presence is used, allow some minor
+            %%   non-backwards compatibility.
+            case gpb_defs:convert_defs_from_latest_version(Defs, 1) of
+                {ok, DefsForIntrospect} ->
+                    {ok, DefsForIntrospect};
+                {error, _Reason} ->
+                    {ok, Defs}
             end
     end.
 

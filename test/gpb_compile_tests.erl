@@ -4674,6 +4674,25 @@ error_when_request_to_return_unsupported_proto_defs_version_test() ->
       ["introspect", "version", "defs"]),
     ok.
 
+default_proto_defs_version_is_1_test() ->
+    Contents = <<"syntax='proto3';\n"
+                 "message Msg { uint32 field1 = 1; }\n">>,
+    {ok, MsgDefs} =
+        gpb_compile:file(
+          "X.proto",
+          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+           {i,"."},
+           to_proto_defs, report_warnings]),
+    1 = proplists:get_value(proto_defs_version, MsgDefs),
+    {_, [#?gpb_field{name=field1, occurrence=optional}]} =
+        lists:keyfind({msg,'Msg'}, 1, MsgDefs),
+    M1 = compile_defs(MsgDefs, []),
+    try
+        [#?gpb_field{name=field1, occurrence=optional}] = M1:find_msg_def('Msg')
+    after unload_code(M1)
+    end,
+    ok.
+
 %% --- auxiliaries -----------------
 
 %% vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
