@@ -237,8 +237,7 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     FieldPass = gpb_lib:get_field_pass(MsgName, AnRes),
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     FNames = [FName || {FName, _InitExpr} <- InitExprs],
-    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
-    FieldInfos = gpb_decoders_lib:calc_field_infos(MsgDef, IsProto3, Opts),
+    FieldInfos = gpb_decoders_lib:calc_field_infos(MsgDef, Opts),
     %% Compute extra post-generation operations needed for maps
     %% and pass_as_params
     Ops = case {MappingUnset, FieldPass} of

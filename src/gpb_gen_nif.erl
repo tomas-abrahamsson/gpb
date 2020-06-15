@@ -1117,6 +1117,7 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
 optional_to_mandatory(#?gpb_field{occurrence=Occurrence}=Field) ->
     case Occurrence of
         optional -> Field#?gpb_field{occurrence=required};
+        defaulty -> Field#?gpb_field{occurrence=required};
         required -> Field;
         repeated -> Field
     end;
@@ -1131,6 +1132,9 @@ format_nif_cc_field_packer(SrcVar, MsgVar, #?gpb_field{}=Field,
             format_nif_cc_field_packer_single(SrcVar, MsgVar, Field,
                                               Defs, CCMapping, Opts, set);
         optional ->
+            format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field,
+                                                Defs, CCMapping, Opts);
+        defaulty ->
             format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field,
                                                 Defs, CCMapping, Opts);
         repeated ->
@@ -1538,7 +1542,6 @@ format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
     #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
     IFields = gpb_lib:index_seq(Fields),
     Is = [I || {I,_} <- IFields],
-    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
     %% Initialize the keys to silence "may be used uninitialized"
     %% warnings for oneof fields for maps (not set in the default,
     %% but checked for instead by checking for no_value)
@@ -1565,8 +1568,7 @@ format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
                 4,
                 [[?f("key~w = gpb_fa_~s;\n", [I, FName]) || Maps],
                  format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field,
-                                              Defs, CCMapping, Opts,
-                                              IsProto3)]);
+                                              Defs, CCMapping, Opts)]);
           #gpb_oneof{} ->
               {KSetter, VSetter, UndefSetter} =
                   calc_oneof_key_value_updaters(I, Field, Opts),
@@ -1574,7 +1576,7 @@ format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
                 4,
                 format_nif_cc_field_oneof_unpacker(
                   "m", MsgName, Field, KSetter, VSetter, UndefSetter,
-                  Defs, CCMapping, Opts, IsProto3))
+                  Defs, CCMapping, Opts))
       end
       || {I, Field} <- IFields],
      "\n",
@@ -1604,6 +1606,9 @@ format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
                    TestLine = Test ++ "\n",
                    case gpb_lib:get_field_occurrence(Field) of
                        optional ->
+                           gpb_lib:indent_lines(
+                             4, [TestLine, gpb_lib:indent(4, PutLine)]);
+                       defaulty ->
                            gpb_lib:indent_lines(
                              4, [TestLine, gpb_lib:indent(4, PutLine)]);
                        _ ->
@@ -1639,15 +1644,18 @@ calc_oneof_key_value_updaters(I, #gpb_oneof{name=FName}, Opts) ->
     end.
 
 format_nif_cc_field_unpacker(DestVar, MsgVar, _MsgName, #?gpb_field{}=Field,
-                             Defs, CCMapping, Opts, IsProto3) ->
+                             Defs, CCMapping, Opts) ->
     #?gpb_field{occurrence=Occurrence, type=Type}=Field,
     case Occurrence of
         required ->
-            format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field,
-                                                Defs, CCMapping, IsProto3);
+            format_nif_cc_present_field_unpacker_single(DestVar, MsgVar, Field,
+                                                        Defs, CCMapping);
         optional ->
-            format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field,
-                                                Defs, CCMapping, IsProto3);
+            format_nif_cc_optional_field_unpacker_single(DestVar, MsgVar, Field,
+                                                         Defs, CCMapping);
+        defaulty ->
+            format_nif_cc_present_field_unpacker_single(DestVar, MsgVar, Field,
+                                                        Defs, CCMapping);
         repeated ->
             case Type of
                 {map,_,_} ->
@@ -1664,7 +1672,7 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, _MsgName, #?gpb_field{}=Field,
 format_nif_cc_field_oneof_unpacker(MsgVar, MsgName,
                                    #gpb_oneof{name=OFName, fields=OFields},
                                    KSetter, VSetter, UndefSetter,
-                                   Defs, CCMapping, _Opts, _IsProto3) ->
+                                   Defs, CCMapping, _Opts) ->
     #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
     UCOFName = to_upper(OFName),
     [?f("switch (~s->~s_case())\n", [MsgVar, OFName]),
@@ -1696,24 +1704,14 @@ format_nif_cc_field_oneof_unpacker(MsgVar, MsgName,
      ?f("}\n"),
      "\n"].
 
-format_nif_cc_field_unpacker_single(DestVar, MsgVar, Field,
-                                    Defs, CCMapping, IsProto3) ->
-    if IsProto3 ->
-            format_nif_cc_field_unpacker_single_p3(
-              DestVar, MsgVar, Field, Defs, CCMapping);
-       not IsProto3 ->
-            format_nif_cc_field_unpacker_single_p2(
-              DestVar, MsgVar, Field, Defs, CCMapping)
-    end.
-
-format_nif_cc_field_unpacker_single_p3(DestVar, MsgVar, Field,
-                                       Defs, CCMapping) ->
+format_nif_cc_present_field_unpacker_single(DestVar, MsgVar, Field,
+                                            Defs, CCMapping) ->
     [format_nif_cc_field_unpacker_by_field(DestVar, MsgVar, Field,
                                            Defs, CCMapping),
      "\n"].
 
-format_nif_cc_field_unpacker_single_p2(DestVar, MsgVar, Field,
-                                       Defs, CCMapping) ->
+format_nif_cc_optional_field_unpacker_single(DestVar, MsgVar, Field,
+                                             Defs, CCMapping) ->
     #?gpb_field{name=FName} = Field,
     CxxFName = 'field_name_to_c++'(FName),
     ?f("if (!~s->has_~s())\n"

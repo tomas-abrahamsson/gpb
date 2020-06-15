@@ -421,6 +421,33 @@ field_verifier(MsgName,
                                         gpb_lib:map_match([{FName, FVar}],
                                                           Opts)),
                            replace_tree('M', MsgVar) | Replacements])
+            end;
+        defaulty ->
+            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                records ->
+                    ?expr(if '<F>' == undefined -> ok;
+                             true -> '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                   'TrUserData')
+                          end,
+                          Replacements);
+                #maps{unset_optional=present_undefined} ->
+                    ?expr(if '<F>' == undefined -> ok;
+                             true -> '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                   'TrUserData')
+                          end,
+                          Replacements);
+                #maps{unset_optional=omitted} ->
+                    ?expr(case 'M' of
+                              '#{<FName> := <F>}' ->
+                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                'TrUserData');
+                              _ ->
+                                  ok
+                          end,
+                          [replace_tree('#{<FName> := <F>}',
+                                        gpb_lib:map_match([{FName, FVar}],
+                                                          Opts)),
+                           replace_tree('M', MsgVar) | Replacements])
             end
     end;
 field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},

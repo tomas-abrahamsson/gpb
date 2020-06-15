@@ -291,22 +291,53 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
     case Occurrence of
         optional ->
             EncodeExpr =
-                case gpb:is_msg_proto3(MsgName, Defs) of
-                    false ->
+                ?expr(begin
+                          'TrF' = 'Tr'('F', 'TrUserData'),
+                          tj_add_field(jfieldname, '<enc>', 'Json')
+                      end,
+                      [replace_tree('<enc>', FEncoderExpr(TrFVar)) |
+                       Transforms]),
+            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                records ->
+                    ?expr(
+                       if 'F' == undefined ->
+                               'Json';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                #maps{unset_optional=present_undefined} ->
+                    ?expr(
+                       if 'F' == undefined ->
+                               'Json';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                #maps{unset_optional=omitted} ->
+                    ?expr(
+                       case 'M' of
+                           '#{fieldname := <F>}' ->
+                               '<encodeit>';
+                           _ ->
+                               'Json'
+                       end,
+                       [replace_tree('M', MsgVar),
+                        replace_tree('#{fieldname := <F>}',
+                                     gpb_lib:map_match([{FName,FVar}], Opts)),
+                        replace_tree('<encodeit>', EncodeExpr)
+                        | Transforms])
+            end;
+        defaulty ->
+            EncodeExpr =
+                if EmitTypeDefaults ->
                         ?expr(begin
                                   'TrF' = 'Tr'('F', 'TrUserData'),
                                   tj_add_field(jfieldname, '<enc>', 'Json')
                               end,
                               [replace_tree('<enc>', FEncoderExpr(TrFVar)) |
                                Transforms]);
-                    true when EmitTypeDefaults ->
-                        ?expr(begin
-                                  'TrF' = 'Tr'('F', 'TrUserData'),
-                                  tj_add_field(jfieldname, '<enc>', 'Json')
-                              end,
-                              [replace_tree('<enc>', FEncoderExpr(TrFVar)) |
-                               Transforms]);
-                    true when Type == string ->
+                   Type == string ->
                         ?expr(begin
                                   'TrF' = 'Tr'('F', 'TrUserData'),
                                   case is_empty_string('TrF') of
@@ -319,7 +350,7 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                               end,
                               [replace_tree('<enc>', FEncoderExpr(TrFVar)) |
                                Transforms]);
-                    true when Type == bytes ->
+                   Type == bytes ->
                         ?expr(begin
                                   'TrF' = 'Tr'('F', 'TrUserData'),
                                   case iolist_size('TrF') of
@@ -332,7 +363,7 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                               end,
                               [replace_tree('<enc>', FEncoderExpr(TrFVar)) |
                                Transforms]);
-                    true when IsEnum ->
+                   IsEnum ->
                         TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
                            begin
@@ -348,7 +379,7 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                            [replace_term('<TypeDefault>', TypeDefault),
                             replace_tree('<enc>', FEncoderExpr(TrFVar)) |
                             Transforms]);
-                    true ->
+                   true ->
                         TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
                            begin

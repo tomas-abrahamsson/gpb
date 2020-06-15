@@ -1035,12 +1035,12 @@ proto3_no_occurrence_test() ->
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},
-      [#?gpb_field{name=f1,fnum=1,occurrence=optional},
+      [#?gpb_field{name=f1,fnum=1,occurrence=defaulty},
        #?gpb_field{name=f2,fnum=2,occurrence=repeated}]},
      {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
-proto3_sub_msgs_gets_occurrence_optional_test() ->
+proto3_sub_msgs_gets_occurrence_defaulty_test() ->
     {ok,Defs} = parse_lines(["syntax=\"proto3\";",
                              "message m1 {",
                              "  s1 f1=1;",
@@ -1053,10 +1053,10 @@ proto3_sub_msgs_gets_occurrence_optional_test() ->
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},
-      [#?gpb_field{name=f1,fnum=1,type={msg,s1},occurrence=optional},
+      [#?gpb_field{name=f1,fnum=1,type={msg,s1},occurrence=defaulty},
        #?gpb_field{name=f2,fnum=2,type={msg,s1},occurrence=repeated}]},
      {{msg,s1},
-      [#?gpb_field{name=f1,fnum=1,type=uint32,occurrence=optional}]},
+      [#?gpb_field{name=f1,fnum=1,type=uint32,occurrence=defaulty}]},
      {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 

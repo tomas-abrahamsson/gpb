@@ -223,6 +223,7 @@ zip_for_non_opt_fields([#?gpb_field{name=FName,
                        [Elem | ERest]) ->
     case Occurrence of
         optional -> zip_for_non_opt_fields(FRest, ERest);
+        defaulty -> zip_for_non_opt_fields(FRest, ERest);
         required -> [{FName, Elem} | zip_for_non_opt_fields(FRest, ERest)];
         repeated -> zip_for_non_opt_fields(FRest, ERest)
     end;
@@ -287,6 +288,7 @@ key_partition_on_optionality(Key, Items, Opts) ->
               Field = element(Key, Item),
               case get_field_occurrence(Field) of
                   optional -> true;
+                  defaulty -> true;
                   required -> false;
                   repeated -> case mapfields_considered_required(Opts) of
                                   false -> true;
@@ -303,10 +305,13 @@ classify_field_merge_action(FieldDef) ->
     case FieldDef of
         #?gpb_field{occurrence=required, type={msg, _}}   -> msgmerge;
         #?gpb_field{occurrence=optional, type={msg, _}}   -> msgmerge;
+        #?gpb_field{occurrence=defaulty, type={msg, _}}   -> msgmerge;
         #?gpb_field{occurrence=required, type={group, _}} -> msgmerge;
         #?gpb_field{occurrence=optional, type={group, _}} -> msgmerge;
+        #?gpb_field{occurrence=defaulty, type={group, _}} -> msgmerge;
         #?gpb_field{occurrence=required}                  -> overwrite;
         #?gpb_field{occurrence=optional}                  -> overwrite;
+        #?gpb_field{occurrence=defaulty}                  -> overwrite;
         #?gpb_field{occurrence=repeated}                  -> seqadd
     end.
 

@@ -864,10 +864,11 @@ file(File) ->
 %% <a id="option-introspect_proto_defs_version"/>
 %% The `proto_defs_version' can be used to specify version of definitions
 %% returned with the `to_proto_defs' option.  See the file
-%% `doc/dev-guide/proto_defs_version.md' for some more info.
+%% `doc/dev-guide/proto-defs-versions.md' for some more info.
 %% Not all proto definitions may be expressible in all versions.
+%% In gpb-4.x.y it defaults to 1.
 %% The `introspect_proto_defs_version' can be used to specify the version
-%% returned by the generated introspection functions, default is latest.
+%% returned by the generated introspection functions, default is 1.
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
     do_file_or_string(File, Opts).
@@ -1041,15 +1042,9 @@ possibly_adjust_introspect_proto_defs_version_opt(Opts) ->
             Opts;
        OutFormat == binary;
        OutFormat == file ->
-            case proplists:get_value(proto_defs_version, Opts) of
-                undefined ->
-                    OptName = introspect_proto_defs_version,
-                    case proplists:is_defined(OptName, Opts) of
-                        true  -> Opts;
-                        false -> [{OptName, preferably_1} | Opts]
-                    end;
-                Vsn ->
-                    [{introspect_proto_defs_version, Vsn} | Opts]
+            case proplists:is_defined(introspect_proto_defs_version, Opts) of
+                true  -> Opts;
+                false -> [{introspect_proto_defs_version, preferably_1} | Opts]
             end
     end.
 
@@ -2805,7 +2800,9 @@ check_unpackables_marked_as_packed(Defs) ->
 %% -- generating code ----------------------------------------------
 
 format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
-           #anres{maps_as_msgs=MapsAsMsgs}=AnRes, Opts) ->
+           #anres{maps_as_msgs=MapsAsMsgs,
+                  dec_maps_as_msgs=DMapsAsMsgs}=AnRes,
+           Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     AsLib = proplists:get_bool(include_as_lib, Opts),
     DoJson = gpb_lib:json_by_opts(Opts),
@@ -2904,7 +2901,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                                                               AnRes, Opts)];
           not DoNif ->
                [gpb_gen_decoders:format_msg_decoders(Defs, AnRes, Opts),
-                gpb_gen_decoders:format_map_decoders(MapsAsMsgs, AnRes, Opts),
+                gpb_gen_decoders:format_map_decoders(DMapsAsMsgs, AnRes, Opts),
                 gpb_gen_decoders:format_aux_decoders(Defs, AnRes, Opts)]
        end,
        "\n",

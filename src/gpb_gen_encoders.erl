@@ -343,15 +343,46 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
     case Occurrence of
         optional ->
             EncodeExpr =
-                case gpb:is_msg_proto3(MsgName, Defs) of
-                    false ->
-                        ?expr(begin
-                                  'TrF' = 'Tr'('<F>', 'TrUserData'),
-                                  '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
-                                          'TrUserData')
-                              end,
-                              Transforms);
-                    true when Type == string ->
+                ?expr(begin
+                          'TrF' = 'Tr'('<F>', 'TrUserData'),
+                          '<enc>'('TrF', <<'<Bin>'/binary, '<Key>'>>,
+                                  'TrUserData')
+                      end,
+                      Transforms),
+            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+                records ->
+                    ?expr(
+                       if '<F>' == undefined ->
+                               '<Bin>';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                #maps{unset_optional=present_undefined} ->
+                    ?expr(
+                       if '<F>' == undefined ->
+                               '<Bin>';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                #maps{unset_optional=omitted} ->
+                    ?expr(
+                       case 'M' of
+                           '#{fieldname := <F>}' ->
+                               '<encodeit>';
+                           _ ->
+                               '<Bin>'
+                       end,
+                       [replace_tree('M', MsgVar),
+                        replace_tree('#{fieldname := <F>}',
+                                     gpb_lib:map_match([{FName,FVar}], Opts)),
+                        replace_tree('<encodeit>', EncodeExpr)
+                       | Transforms])
+            end;
+        defaulty ->
+            EncodeExpr =
+                if Type == string ->
                         ?expr(begin
                                   'TrF' = 'Tr'('<F>', 'TrUserData'),
                                   case is_empty_string('TrF') of
@@ -364,7 +395,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                   end
                               end,
                               Transforms);
-                    true when Type == bytes ->
+                   Type == bytes ->
                         ?expr(begin
                                   'TrF' = 'Tr'('<F>', 'TrUserData'),
                                   case iolist_size('TrF') of
@@ -377,7 +408,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                   end
                               end,
                               Transforms);
-                    true when IsEnum ->
+                   IsEnum ->
                         TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
                            begin
@@ -393,7 +424,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                            end,
                            [replace_term('<TypeDefault>', TypeDefault)
                             | Transforms]);
-                    true ->
+                   true ->
                         TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
                            begin
@@ -640,6 +671,8 @@ format_field_encoder(MsgName, FieldDef, AnRes) ->
          {repeated, true} ->
              format_packed_field_encoder2(MsgName, FieldDef, AnRes);
          {optional, false} ->
+             [];
+         {defaulty, false} ->
              [];
          {required, false} ->
              []

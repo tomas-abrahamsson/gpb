@@ -23,7 +23,7 @@
 -module(gpb_decoders_lib).
 
 -export([init_exprs/6]).
--export([calc_field_infos/3]).
+-export([calc_field_infos/2]).
 -export([decoder_read_field_param/2]).
 -export([decoder_finalize_result/5]).
 
@@ -50,28 +50,19 @@
 %% optional fields in proto2 messages). Also of concern is that there
 %% may be translators that set other initial values.
 init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
-    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
-    IsMapMsg = is_map_msg(MsgName, AnRes),
     UseDefaults = proplists:get_bool(defaults_for_omitted_optionals, Opts),
     UseTypeDefaults = proplists:get_bool(type_defaults_for_omitted_optionals,
                                          Opts),
     ExprInfos1 =
         [case Field of
-             #?gpb_field{name=FName, occurrence=Occurrence0, type=Type,
+             #?gpb_field{name=FName, occurrence=Occurrence, type=Type,
                          opts=FOpts} ->
                  HasDefault = lists:keymember(default, 1, FOpts),
                  SubMsgType = is_msg_type(Type),
-                 Occurrence = if IsMapMsg, not SubMsgType -> optional;
-                                 true -> Occurrence0
-                              end,
                  {Undefined, Undef, P} =
-                     if IsProto3 ->
-                             TD = gpb_lib:proto3_type_default(Type, Defs, Opts),
-                             ATD = erl_syntax:abstract(TD),
-                             if SubMsgType     -> {ATD, ?expr('$undef'), o};
-                                not SubMsgType -> {ATD, ATD, o}
-                             end;
-                        IsMapMsg, not SubMsgType ->
+                     if SubMsgType ->
+                             {?expr(undefined), ?expr('$undef'), o};
+                        Occurrence == defaulty ->
                              TD = gpb_lib:proto3_type_default(Type, Defs, Opts),
                              ATD = erl_syntax:abstract(TD),
                              {ATD, ATD, o};
@@ -92,7 +83,8 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
                  case Occurrence of
                      repeated -> {FName, m, ?expr([]),        ?expr([])};
                      required -> {FName, o, ?expr(undefined), ?expr('$undef')};
-                     optional -> {FName, P, Undefined,        Undef}
+                     optional -> {FName, P, Undefined,        Undef};
+                     defaulty -> {FName, o, Undefined,        Undef}
                  end;
              #gpb_oneof{name=FName} ->
                  {FName, o, ?expr(undefined), ?expr('$undef')}
@@ -139,9 +131,6 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
             end
     end.
 
-is_map_msg(MsgName, #anres{maps_as_msgs=MapsAsMsgs}) ->
-    lists:keymember({msg,MsgName}, 1, MapsAsMsgs).
-
 is_msg_type({msg,_}) -> true;
 is_msg_type(_)       -> false.
 
@@ -187,28 +176,26 @@ decoder_finalize_result(MsgVar, FFields, MsgName, TrUserDataVar, AnRes) ->
        || {FName, FVar} <- FFields]).
 
 %% @doc Compute optionality information for each field of a message.
-calc_field_infos(MsgDef, IsProto3, Opts) ->
+calc_field_infos(MsgDef, Opts) ->
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         #maps{unset_optional=omitted, oneof=flat} ->
-            field_infos(MsgDef, true, IsProto3);
+            field_infos(MsgDef, true);
         _ ->
-            field_infos(MsgDef, false, IsProto3)
+            field_infos(MsgDef, false)
     end.
 
-field_infos(MsgDef, FlattenOnoef, IsProto3) ->
+field_infos(MsgDef, FlattenOnoef) ->
     [case Field of
          #?gpb_field{name=FName, type={msg,_}} ->
              {FName, optional};
+         #?gpb_field{name=FName, occurrence=defaulty} ->
+             %% On finalization, treat proto3 (scalar) fields as
+             %% requried, to avoid redundant if F == '$undef' -> ...
+             %% checks;  it can never be '$undef' since it has a
+             %% type-default. (except for sub messages and onoef)
+             {FName, required};
          #?gpb_field{name=FName} ->
-             if not IsProto3 ->
-                     {FName, gpb_lib:get_field_occurrence(Field)};
-                IsProto3 ->
-                     %% On finalization, treat proto3 (scalar) fields as
-                     %% requried, to avoid redundant if F == '$undef' -> ...
-                     %% checks;  it can never be '$undef' since it has a
-                     %% type-default. (except for sub messages and onoef)
-                     {FName, required}
-             end;
+             {FName, gpb_lib:get_field_occurrence(Field)};
          #gpb_oneof{name=FName} ->
              if not FlattenOnoef ->
                      {FName, optional};

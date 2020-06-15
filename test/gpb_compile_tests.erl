@@ -4123,10 +4123,10 @@ mk_proto3_fields() ->
     EachType   = [sint32, sint64, bool, double, string, bytes, {enum, ee}],
     MsgType    = {msg, submsg1},
     EnumDef    = {{enum, ee}, [{en0, 0}, {en1, 1}, {en2, 2}]},
-    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], optional)},
+    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], defaulty)},
     TopMsgDef1 = {{msg, topmsg1}, mk_fields_of_type(
                                     EachType ++ [MsgType],
-                                    optional)},
+                                    defaulty)},
     TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(
                                     EachType ++ [MsgType],
                                     repeated,
@@ -4690,6 +4690,35 @@ default_proto_defs_version_is_1_test() ->
     try
         [#?gpb_field{name=field1, occurrence=optional}] = M1:find_msg_def('Msg')
     after unload_code(M1)
+    end,
+    ok.
+
+can_return_proto_defs_on_version_2_test() ->
+    Contents = <<"syntax='proto3';\n",
+                 "message Msg { uint32 field1 = 1; }\n">>,
+
+    %% Check the version of the returned proto defs.
+    %% Check also the introspection format option also when compiling
+    %% to msg defs and then compiling these to code.
+    {ok, MsgDefs} =
+        gpb_compile:file(
+          "X.proto",
+          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+           {i,"."},
+           to_proto_defs, report_warnings,
+           {proto_defs_version,2}]),
+    2 = proplists:get_value(proto_defs_version, MsgDefs),
+    M1 = compile_defs(MsgDefs, [{introspect_proto_defs_version,2}]),
+    try
+        [#?gpb_field{name=field1, occurrence=defaulty}] = M1:find_msg_def('Msg')
+    after unload_code(M1)
+    end,
+
+    %% Check introspection format option also when compiling directly to code
+    M2 = compile_iolist(Contents, [{introspect_proto_defs_version,2}]),
+    try
+        [#?gpb_field{name=field1, occurrence=defaulty}] = M2:find_msg_def('Msg')
+    after unload_code(M2)
     end,
     ok.
 

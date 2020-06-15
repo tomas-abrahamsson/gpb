@@ -37,6 +37,7 @@
 analyze_defs(Defs, Sources, Renamings, Opts) ->
     MapTypes = find_map_types(Defs),
     MapsAsMsgs = map_types_to_msgs(MapTypes),
+    DMapsAsMsgs = map_types_to_msgs_for_decoding(MapTypes),
     MapMsgEnums = enums_for_maps_as_msgs(MapTypes, Defs),
     Translations = compute_translations(Defs, Opts),
     KnownMsgSize = find_msgsizes_known_at_compile_time(MapsAsMsgs ++ Defs),
@@ -49,6 +50,7 @@ analyze_defs(Defs, Sources, Renamings, Opts) ->
            d_field_pass_method = compute_decode_field_pass_methods(
                                    MapsAsMsgs ++ Defs, Opts),
            maps_as_msgs        = MapsAsMsgs ++ MapMsgEnums,
+           dec_maps_as_msgs    = DMapsAsMsgs ++ MapMsgEnums,
            translations        = Translations,
            map_types           = MapTypes,
            map_value_types     = compute_map_value_types(MapTypes),
@@ -68,8 +70,19 @@ find_map_types(Defs) ->
 
 map_types_to_msgs(MapTypes) ->
     sets:fold(fun({KeyType, ValueType}, Acc) ->
-                      [{{msg, gpb_lib:map_type_to_msg_name(KeyType,ValueType)},
-                        gpb:map_item_pseudo_fields(KeyType, ValueType)} | Acc]
+                      MsgName = gpb_lib:map_type_to_msg_name(KeyType,ValueType),
+                      Fields = gpb:map_item_pseudo_fields(KeyType, ValueType),
+                      [{{msg, MsgName}, Fields} | Acc]
+              end,
+              [],
+              MapTypes).
+
+map_types_to_msgs_for_decoding(MapTypes) ->
+    sets:fold(fun({KeyType, ValueType}, Acc) ->
+                      MsgName = gpb_lib:map_type_to_msg_name(KeyType,ValueType),
+                      Fields = gpb:map_item_pseudo_fields_for_decoding(
+                                 KeyType, ValueType),
+                      [{{msg, MsgName}, Fields} | Acc]
               end,
               [],
               MapTypes).
@@ -167,6 +180,8 @@ find_msgsize_2([#gpb_oneof{} | _], _AccSize, _Defs, _T) ->
 find_msgsize_2([#?gpb_field{occurrence=repeated} | _], _AccSize, _Defs, _T) ->
     undefined;
 find_msgsize_2([#?gpb_field{occurrence=optional} | _], _AccSize, _Defs, _T) ->
+    undefined;
+find_msgsize_2([#?gpb_field{occurrence=defaulty} | _], _AccSize, _Defs, _T) ->
     undefined;
 find_msgsize_2([#?gpb_field{type=Type, fnum=FNum} | Rest], AccSize, Defs, T) ->
     FKeySize =
@@ -419,6 +434,7 @@ is_scalar_msg_field(MsgName, FName, Defs) ->
 is_scalar_field(FName, [#?gpb_field{name=FName, type=Type,
                                     occurrence=Occurrence} | _]) ->
     if Occurrence == optional -> is_scalar_type(Type);
+       Occurrence == defaulty -> is_scalar_type(Type);
        Occurrence /= optional -> false
     end;
 is_scalar_field(FName, [#gpb_oneof{name=FName} | _]) ->
@@ -743,10 +759,12 @@ has_p3_opt_strings(Defs) ->
              end,
     try gpb_lib:fold_msg_or_group_fields_o(
           fun(_msg_or_group, MsgName, #?gpb_field{type=Type,occurrence=Occ},
-              IsOneOf, Acc) ->
+              _IsOneOf, Acc) ->
                   %% Consider only top-level fields, not inside oneof,
-                  %% since these are handled as if required eg during encoding
-                  if Type == string, Occ == optional, not IsOneOf ->
+                  %% since these are handled as if required eg during encoding.
+                  %% However, for oneof fields, occurrence is always optional;
+                  %% occurrence = defaulty can only occor for top-level fields.
+                  if Type == string, Occ == defaulty ->
                           case lists:member(MsgName, P3Msgs) of
                               true -> throw(true);
                               false -> Acc

@@ -324,6 +324,7 @@ find_pos(Name, [Name | _], Pos) -> Pos;
 find_pos(Name, [_ | Rest], Pos) -> find_pos(Name, Rest, Pos+1).
 
 occurrence_def_to_descr_label(optional) -> 'LABEL_OPTIONAL';
+occurrence_def_to_descr_label(defaulty) -> 'LABEL_OPTIONAL';
 occurrence_def_to_descr_label(required) -> 'LABEL_REQUIRED';
 occurrence_def_to_descr_label(repeated) -> 'LABEL_REPEATED'.
 
