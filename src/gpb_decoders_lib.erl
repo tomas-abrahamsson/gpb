@@ -71,10 +71,6 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
                              if SubMsgType     -> {ATD, ?expr('$undef'), o};
                                 not SubMsgType -> {ATD, ATD, o}
                              end;
-                        IsProto3, not SubMsgType ->
-                             TD = gpb_lib:proto3_type_default(Type, Defs, Opts),
-                             ATD = erl_syntax:abstract(TD),
-                             {ATD, ATD, m};
                         IsMapMsg, not SubMsgType ->
                              TD = gpb_lib:proto3_type_default(Type, Defs, Opts),
                              ATD = erl_syntax:abstract(TD),
