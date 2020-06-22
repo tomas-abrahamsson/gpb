@@ -977,6 +977,21 @@ proto3_type_default_values_never_serialized_for_enums_test() ->
     <<>> = encode_msg({m, 0}, Defs), % when given as integer
     {m, e0} = decode_msg(<<>>, m, Defs).
 
+proto3_optional_test() ->
+    Defs = [{proto_defs_version,2},
+            {syntax,"proto3"},
+            {proto3_msgs,[m1]},
+            {{msg,m1},[#?gpb_field{name=a, fnum=1, rnum=2, type=uint32,
+                                   occurrence=optional, opts=[]}]}],
+    B1 = encode_msg({m1, 0}, Defs),
+    ?assert(<<>> /= B1), % Must be sent even if the value = type-default
+    #m1{a=0} = decode_msg(B1, m1, Defs),
+    <<>> = B2 = encode_msg({m1, undefined}, Defs),
+    %% Expect undefined, instead of type-default, which would have
+    %% been the case with occurrence = defaulty:
+    #m1{a=undefined} = decode_msg(B2, m1, Defs),
+    ok.
+
 encode_decode_required_group_test() ->
     %% message m1 {
     %%   required group g = 30 {

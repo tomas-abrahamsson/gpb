@@ -1370,8 +1370,7 @@ mk_occurrence_handler("proto3") ->
                     Err = {p3_unallowed_occurrence, MsgName, FName, Occurrence},
                     {F#?gpb_field{occurrence=defaulty}, [Err | Errors]};
                 optional ->
-                    Err = {p3_unallowed_occurrence, MsgName, FName, Occurrence},
-                    {F#?gpb_field{occurrence=defaulty}, [Err | Errors]}
+                    {F, Errors}
             end
     end.
 

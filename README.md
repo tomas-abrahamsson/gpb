@@ -268,16 +268,21 @@ possible, and implemented for completeness.
 
 #### For proto3 syntax
 
-For proto3, there is neither `required` nor `optional` nor `default=<x>`
-for fields. Instead all scalar fields, strings and bytes are implicitly
-optional. On decoding, if such a field is missing in the binary to
-decode, they always decode to the type-specific default value.
+For proto3, there is neither `required` nor `default=<x>`
+for fields. Instead, unless marked with `optional`, all scalar fields,
+strings and bytes are implicitly optional. On decoding, if such a field
+is missing in the binary to decode, they always decode to the type-specific
+default value.
 On encoding, such fields are only included in the resulting encoded
 binary if they have a value different from the type-specific default
 value. Even though all fields are implicitly optional, one could also
 say that on a conceptual level, all such fields always have a value.
 At decoding, it is not possible to determine whether at encoding,
 a value was present---with a type-specific value---or not.
+
+Fields marked as `optional` are essentially represented the same way
+as in proto2 syntax; in a record the field has the value `undefined`
+if it is not set, and in maps the field is not present if it is not set.
 
 A recommendation I've seen for if you need detection of "missing" data,
 is to define `has_<field>` boolean fields and set them appropriately.

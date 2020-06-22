@@ -868,7 +868,8 @@ file(File) ->
 %% Not all proto definitions may be expressible in all versions.
 %% In gpb-4.x.y it defaults to 1.
 %% The `introspect_proto_defs_version' can be used to specify the version
-%% returned by the generated introspection functions, default is 1.
+%% returned by the generated introspection functions, default is 1
+%% if possible, else 2.
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
     do_file_or_string(File, Opts).

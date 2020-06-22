@@ -58,7 +58,7 @@ generated introspection functions, the format of which can be
 controlled with the `introspect_proto_defs_version` option.
 
 In gpb-4.x.y, the default `proto_defs_version` is 1, and the default
-and the default `introspect_proto_defs_version` is 1.
+and the default `introspect_proto_defs_version` is 1 if possible, else 2.
 
 To opt in to a later version, use `proto_defs_version` option like this:
 ```
@@ -101,33 +101,39 @@ In this version, the following has changed:
 For proto files with `syntax="proto3"`, the `occurrence` of fields has
 changed from `optional` to `defaulty`.
 
+In Google's protobuf 3.12.0, as of this writing, experimental support for
+`optional` was added also to proto3 messages, see [the field_presence.md document](https://github.com/protocolbuffers/protobuf/blob/v3.12.0/docs/field_presence.md)
+for more info.  When this is used, `occurrence=optional` is used
+to indicate it.
+
 Example: Given the following proto file:
 ```
   syntax="proto3";
-  message Msg {
+  message Msg1 {
     uint32 f1 = 1;
+  }
+  message Msg2 {
+    optional uint32 g1 = 1;
   }
   ```
 the definitions in version 2 is now:
 ```
   [{proto_defs_version, 2},
    ...
-   {proto3_msgs, ['Msg']},
+   {proto3_msgs, ['Msg1', 'Msg2']},
    ...
-   {{msg,'Msg'}, [#?gpb_field{name=f1, ..., occurrence=defaulty, ...}]},
-   %%                                                  ^^^^^^^^
-   %% in version 1, the occurrence would have been:    optional
+   {{msg,'Msg1'}, [#?gpb_field{name=f1, ..., occurrence=defaulty, ...}]},
+   %%                                                   ^^^^^^^^
+   %% in version 1, the occurrence would have been:     optional
+   ...
+   {{msg,'Msg2'}, [#?gpb_field{name=g1, ..., occurrence=optional, ...}]},
+   %%                                                   ^^^^^^^^
+   %% in version 2, this indicates proto2-style field presence handling.
    ...]
 ```
 
-Currently, it is always possible to convert both ways between version
-1 and version 2.
-
-(Side note: The reason for introducing version 2 is to be able to express the
-upcoming proto3 `optional` presence tracking feature, described
-in [the field_presence.md document](https://github.com/protocolbuffers/protobuf/blob/v3.12.0/docs/field_presence.md).
-When this has been implemented, conversion from version 2 to version 1
-will fail if fields are marked as `optional` in the proto text.)
+It is possible to convert from version 2 to version 1 only if there
+are no proto3 message with a field with `occurrence=optional`.
 
 ### Impact
 
