@@ -28,19 +28,78 @@
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
+
 encode_defs_to_descriptors(Defs, Opts) ->
     encode_defs_to_descriptors(undefined, Defs, Opts).
 
 encode_defs_to_descriptors(DefaultName, Defs, Opts) ->
+    Defs1 = synthesize_proto3_optional_oneofs(Defs),
     %% Encode the list of files as a #'FileDescriptorSet'{}.
     %% Encode also for each constituent proto, ie the top level and each
     %% imported proto separately, as #'FileDescriptorProto'{}.
-    PDefses = partition_protos(Defs, DefaultName, [], []),
+    PDefses = partition_protos(Defs1, DefaultName, [], []),
     {FdSet, Infos} = partitioned_defs_to_file_descr_set(PDefses, Opts),
     Bin = gpb_descriptor:encode_msg(FdSet, [verify]),
     PBins = [{FileNameSansExt, gpb_descriptor:encode_msg(FdProto, [verify])}
              || {FileNameSansExt, FdProto} <- Infos],
     {Bin, PBins}.
+
+synthesize_proto3_optional_oneofs(Defs) ->
+    P3Msgs = proplists:get_value(proto3_msgs, Defs, []),
+    [case Item of
+         {{msg,MsgName}, Fields} ->
+             case lists:member(MsgName, P3Msgs) of
+                 true ->
+                     Fields1 = synthesize_proto3_optional_oneofs_fields(Fields),
+                     {{msg,MsgName}, Fields1};
+                 false ->
+                     Item
+             end;
+         _ ->
+             Item
+     end
+     || Item <- Defs].
+
+synthesize_proto3_optional_oneofs_fields(Fields) ->
+    %% Change all fields with occurrence=optional
+    %% to oneof field containing only that single field.
+    %% Invent a unique name for the new oneof field.
+    %%
+    %% Change the inner oneof field to have occurrence=defaulty,
+    %% this will indicates that it is a synthetic oneof (oneof fields
+    %% normally have occurrence=optional)
+    FNames0 = collect_field_names(Fields, []),
+    {Fields1, _FNames} =
+        lists:mapfoldl(
+          fun(#?gpb_field{occurrence=optional}=Field, FNames) ->
+                  #?gpb_field{name=FName, rnum=RNum} = Field,
+                  NewFName = synthesize_unique_name(FName, FNames),
+                  DField = Field#?gpb_field{occurrence=defaulty},
+                  Oneof = #gpb_oneof{name=NewFName, rnum=RNum, fields=[DField]},
+                  {Oneof, [NewFName | FNames]};
+             (OtherField, FNames) ->
+                  {OtherField, FNames}
+          end,
+          FNames0,
+          Fields),
+    Fields1.
+
+collect_field_names(Fields, InitAcc) ->
+    lists:foldl(
+      fun(#?gpb_field{name=FName}, Acc) ->
+              [FName | Acc];
+         (#gpb_oneof{name=FName, fields=OFields}, Acc) ->
+              collect_field_names(OFields, [FName | Acc])
+      end,
+      InitAcc,
+      Fields).
+
+synthesize_unique_name(Name, Names) ->
+    Candidate = list_to_atom("_" ++ atom_to_list(Name)),
+    case lists:member(Name, Names) of
+        true  -> synthesize_unique_name(Candidate, Names);
+        false -> Candidate
+    end.
 
 partition_protos([{file, _Proto}=Item | Rest], Name, Curr, All) ->
     partition_protos(Rest, Name, [Item], add_to_all(Curr, All));
@@ -241,7 +300,7 @@ defs_to_types([{{_Path, {{_msg_or_group, MsgName}, Fields}}, ChildItems}
               MapTypesToPseudoMsgNames,
               Acc) when _msg_or_group == msg;
                         _msg_or_group == group ->
-    OneofNames = [Name || #gpb_oneof{name=Name} <- Fields],
+    OneofNames = oneof_names_synthetic_last(Fields),
     {SubMsgs, SubEnums} = defs_to_types(ChildItems, MapTypesToPseudoMsgNames,
                                         []),
     Item = #'DescriptorProto'{
@@ -271,6 +330,24 @@ defs_to_types([], _MapTypesToPseudoMsgNames, Acc) ->
                     end,
                     lists:reverse(Acc)).
 
+oneof_names_synthetic_last(Fields) ->
+    %% Synthetic oneof fields must come after all non-syntetic ones
+    Oneofs = [Field || #gpb_oneof{}=Field <- Fields],
+    {Synthetics, Nonsynthetics} = lists:partition(fun is_synthetic_oneof/1,
+                                                  Oneofs),
+    NonsyntheticNames = [Name || #gpb_oneof{name=Name} <- Nonsynthetics],
+    SyntheticNames = [Name || #gpb_oneof{name=Name} <- Synthetics],
+    NonsyntheticNames ++ SyntheticNames.
+
+is_synthetic_oneof(Field) ->
+    %% If it contains only one item with occurrence=defaulty
+    case Field of
+        #gpb_oneof{fields=[#?gpb_field{occurrence=defaulty}]} ->
+            true;
+        _ ->
+            false
+    end.
+
 maptype_defs_to_msgtype(MapPseudoMsgs, MapTypesToPseudoMsgNames) ->
     [#'DescriptorProto'{
         name            = atom_to_ustring_base(MsgName),
@@ -287,7 +364,8 @@ maptype_defs_to_msgtype(MapPseudoMsgs, MapTypesToPseudoMsgNames) ->
 
 field_defs_to_mgstype_fields(Fields, AllOneofs, MapTypesToPseudoMsgNames) ->
     lists:append([field_def_to_msgtype_field(Field, AllOneofs,
-                                             MapTypesToPseudoMsgNames)
+                                             MapTypesToPseudoMsgNames,
+                                             undefined)
                   || Field <- Fields]).
 
 field_def_to_msgtype_field(#?gpb_field{name=FName,
@@ -296,7 +374,8 @@ field_def_to_msgtype_field(#?gpb_field{name=FName,
                                        occurrence=Occurrence,
                                        opts=Opts}=Field,
                            _AllOneofs,
-                           MapTypesToPseudoMsgNames) ->
+                           MapTypesToPseudoMsgNames,
+                           Proto3Optional) ->
     [#'FieldDescriptorProto'{
         name          = atom_to_ustring_base(FName),
         number        = FNum,
@@ -304,15 +383,22 @@ field_def_to_msgtype_field(#?gpb_field{name=FName,
         type          = type_to_descr_type(Type),
         type_name     = type_to_descr_type_name(Type, MapTypesToPseudoMsgNames),
         default_value = field_default_value(Field),
-        options       = field_options(Opts)}];
+        options       = field_options(Opts),
+        proto3_optional = Proto3Optional}];
 field_def_to_msgtype_field(#gpb_oneof{name=FName,
-                                      fields=OFields},
+                                      fields=OFields}=Field,
                            AllOneofs,
-                           MapTypesToPseudoMsgNames) ->
+                           MapTypesToPseudoMsgNames,
+                           _Proto3Optional) ->
+    Proto3Optional = case is_synthetic_oneof(Field) of
+                         true  -> true;
+                         false -> undefined
+                     end,
     OneofIndex = find_oneof_index(FName, AllOneofs),
     [begin
          [F] = field_def_to_msgtype_field(OField, AllOneofs,
-                                          MapTypesToPseudoMsgNames),
+                                          MapTypesToPseudoMsgNames,
+                                          Proto3Optional),
          F#'FieldDescriptorProto'{oneof_index = OneofIndex}
      end
      || OField <- OFields].
@@ -324,6 +410,7 @@ find_pos(Name, [Name | _], Pos) -> Pos;
 find_pos(Name, [_ | Rest], Pos) -> find_pos(Name, Rest, Pos+1).
 
 occurrence_def_to_descr_label(optional) -> 'LABEL_OPTIONAL';
+occurrence_def_to_descr_label(defaulty) -> 'LABEL_OPTIONAL';
 occurrence_def_to_descr_label(required) -> 'LABEL_REQUIRED';
 occurrence_def_to_descr_label(repeated) -> 'LABEL_REPEATED'.
 

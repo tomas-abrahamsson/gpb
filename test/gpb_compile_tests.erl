@@ -2823,7 +2823,8 @@ nif_code_test_() ->
        ?nif_if_supported(nif_with_packages_and_enums),
        ?nif_if_supported(nif_with_renamings),
        ?nif_if_supported(nif_with_opt_but_no_package),
-       ?nif_if_supported(nif_without_mergers)]).
+       ?nif_if_supported(nif_without_mergers),
+       ?nif_if_supported(nif_p3_optional)]).
 
 increase_timeouts({Descr, Tests}) ->
     %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
@@ -2930,7 +2931,8 @@ protoc_feature_version_appearance(cxx_keywords) -> [3,0];
 protoc_feature_version_appearance(mapfields)    -> [3,0];
 protoc_feature_version_appearance(proto3)       -> [3,0];
 protoc_feature_version_appearance(json)         -> [3,0];
-protoc_feature_version_appearance(json_preserve_proto_field_names) -> [3,3].
+protoc_feature_version_appearance(json_preserve_proto_field_names) -> [3,3];
+protoc_feature_version_appearance(p3_optional)  -> [3,12].
 
 check_extras([Check | Rest], NeededFeatures) ->
     case Check(NeededFeatures) of
@@ -2943,6 +2945,14 @@ check_extras([], _) ->
     ok.
 
 guess_features(S) ->
+    F1 = guess_features_aux(S),
+    O = gpb_lib:is_substr("optional", binary_to_list(iolist_to_binary(S))),
+    case lists:member(proto3, F1) andalso O of
+        true  -> [p3_optional | F1];
+        false -> F1
+    end.
+
+guess_features_aux(S) ->
     S2 = binary_to_list(iolist_to_binary(S)),
     [Feat || {Substr, Feat} <- [{"syntax=\"proto3\"", proto3},
                                 {"syntax='proto3'", proto3},
@@ -2950,6 +2960,15 @@ guess_features(S) ->
                                 {"oneof", oneof},
                                 {"map<", mapfields}],
              gpb_lib:is_substr(Substr, S2)].
+
+protoc_opts(Features) ->
+    {ok, ProtocVersion} = cachingly_find_protoc_version(),
+    P3Optional = lists:member(p3_optional, Features),
+    if P3Optional, ProtocVersion >= [3,12] ->
+            [{protoc_opts, "--experimental_allow_proto3_optional"}];
+       true ->
+            []
+    end.
 
 verify_errors_in_separate_vm_are_caught() ->
     %% Sanity check of the machinery for running tests in a separate vm
@@ -3610,6 +3629,34 @@ nif_without_mergers() ->
                 end)
       end).
 
+nif_p3_optional(features) -> [proto3, p3_optional];
+nif_p3_optional(title) -> "Nif with proto3 optional".
+nif_p3_optional() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_p3_optional,
+              DefsTxt = lf_lines(["syntax='proto3';",
+                                  "message m1 {",
+                                  "    uint32 f1 = 1;",
+                                  "    optional uint32 f2 = 2;",
+                                  "}"]),
+              ProtocOpts = protoc_opts([p3_optional]),
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir,
+                                                [nif] ++ ProtocOpts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Msg1 = {m1,4711,0},
+                        Msg2 = {m1,0,undefined},
+                        Enc1 = M:encode_msg(Msg1),
+                        Msg1 = M:decode_msg(Enc1, m1),
+                        Enc2 = M:encode_msg(Msg2),
+                        ?assertEqual(<<>>, Enc2),
+                        Msg2 = M:decode_msg(Enc2, m1),
+                        ok
+                end)
+      end).
+
 compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
     compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, []).
 
@@ -3634,14 +3681,16 @@ compile_nif_several_msg_defs(M, [{Proto1,Text1}|_]=ProtoTexts, TmpDir, Opts) ->
                                     {error, {enoent, {FName, FNames}}}
                             end
                     end,
-    MoreOpts = [to_proto_defs, report_warnings,
-                {import_fetcher, ImportFetcher}],
+    LatestDefsVsn = lists:max(gpb_defs:supported_defs_versions()),
+    MoreOpts = [to_proto_defs, {proto_defs_version, LatestDefsVsn},
+                report_warnings, {import_fetcher, ImportFetcher}],
     AllOpts = Opts ++ MoreOpts,
     AllOpts2 = strip_renaming_opts(AllOpts),
     {ok, MsgDefs} = gpb_compile:string(M, Text1, AllOpts2),
     compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts).
 
 compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts) ->
+    {ProtocExtraOpts, Opts1} = partition_compile_opts(Opts),
     ProtoPaths = [filename:join(TmpDir, Proto) || {Proto, _Txt} <- ProtoTexts],
     PbCcPaths = [change_ext(Path, ".proto", ".pb.cc") || Path <- ProtoPaths],
     PbOPaths  = [change_ext(Path, ".proto", ".pb.o") || Path <- ProtoPaths],
@@ -3651,7 +3700,7 @@ compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts) ->
     LoadNif = f("load_nif() -> erlang:load_nif(\"~s\", {{loadinfo}}).\n",
                 [filename:join(TmpDir, lists:concat([M,".nif"]))]),
     LoadNifOpt = {load_nif, LoadNif},
-    Opts2 = [binary, nif, LoadNifOpt] ++ Opts,
+    Opts2 = [binary, nif, LoadNifOpt] ++ Opts1,
     {ok, Renamings} = gpb_names:compute_renamings(MsgDefs, Opts2),
     MsgDefs2 = gpb_names:apply_renamings(MsgDefs, Renamings),
     {ok, M, Codes} = gpb_compile:proto_defs(M, MsgDefs2, MsgDefs, Renamings,
@@ -3667,8 +3716,8 @@ compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts) ->
     Protoc = find_protoc(),
     CFlags = get_cflags(),
     LdFlags = get_ldflags(),
-    CompileProtos = [f("'~s' --proto_path '~s' --cpp_out='~s' '~s'",
-                       [Protoc, TmpDir, TmpDir, ProtoPath])
+    CompileProtos = [f("'~s' ~s --proto_path '~s' --cpp_out='~s' '~s'",
+                       [Protoc, ProtocExtraOpts, TmpDir, TmpDir, ProtoPath])
                      || ProtoPath <- ProtoPaths],
     CompileNif = f("'~s' -g -fPIC -Wall -O0 '-I~s' ~s -c -o '~s' '~s'",
                    [CC, TmpDir, CFlags, NifOPath, NifCcPath]),
@@ -3700,6 +3749,15 @@ compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts) ->
     ok = ccompile("~s", [["set -evx\n", gpb_lib:nl_join(CompileLines)]]),
     {ok, Code}.
 
+partition_compile_opts(Opts) ->
+    case lists:partition(fun is_protoc_opts/1, Opts) of
+        {[], GOpts} -> {"", GOpts};
+        {[{protoc_opts, S}], GOpts} -> {S, GOpts}
+    end.
+
+is_protoc_opts({protoc_opts, _}) -> true;
+is_protoc_opts(_) -> false.
+
 lf_lines(Lines) ->
     [[L,"\n"] || L <- Lines].
 
@@ -3718,11 +3776,13 @@ parse_to_proto_defs(Iolist) ->
 parse_to_proto_defs(Iolist, Opts) ->
     Opts2 = strip_renaming_opts(Opts),
     B = iolist_to_binary(Iolist),
+    LatestDefsVsn = lists:max(gpb_defs:supported_defs_versions()),
     {ok, ProtoDefs} = gpb_compile:file(
                         "X.proto",
                         [mk_fileop_opt([{read_file, fun(_) -> {ok, B} end}]),
                          {i,"."},
-                         to_proto_defs, report_warnings] ++ Opts2),
+                         to_proto_defs, {proto_defs_version, LatestDefsVsn},
+                         report_warnings] ++ Opts2),
     ProtoDefs.
 
 strip_renaming_opts(Opts) ->
@@ -4123,10 +4183,10 @@ mk_proto3_fields() ->
     EachType   = [sint32, sint64, bool, double, string, bytes, {enum, ee}],
     MsgType    = {msg, submsg1},
     EnumDef    = {{enum, ee}, [{en0, 0}, {en1, 1}, {en2, 2}]},
-    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], optional)},
+    SubMsgDef  = {{msg, submsg1}, mk_fields_of_type([uint32], defaulty)},
     TopMsgDef1 = {{msg, topmsg1}, mk_fields_of_type(
                                     EachType ++ [MsgType],
-                                    optional)},
+                                    defaulty)},
     TopMsgDef2 = {{msg, topmsg2}, mk_fields_of_type(
                                     EachType ++ [MsgType],
                                     repeated,
@@ -4690,6 +4750,35 @@ default_proto_defs_version_is_1_test() ->
     try
         [#?gpb_field{name=field1, occurrence=optional}] = M1:find_msg_def('Msg')
     after unload_code(M1)
+    end,
+    ok.
+
+can_return_proto_defs_on_version_2_test() ->
+    Contents = <<"syntax='proto3';\n",
+                 "message Msg { uint32 field1 = 1; }\n">>,
+
+    %% Check the version of the returned proto defs.
+    %% Check also the introspection format option also when compiling
+    %% to msg defs and then compiling these to code.
+    {ok, MsgDefs} =
+        gpb_compile:file(
+          "X.proto",
+          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+           {i,"."},
+           to_proto_defs, report_warnings,
+           {proto_defs_version,2}]),
+    2 = proplists:get_value(proto_defs_version, MsgDefs),
+    M1 = compile_defs(MsgDefs, [{introspect_proto_defs_version,2}]),
+    try
+        [#?gpb_field{name=field1, occurrence=defaulty}] = M1:find_msg_def('Msg')
+    after unload_code(M1)
+    end,
+
+    %% Check introspection format option also when compiling directly to code
+    M2 = compile_iolist(Contents, [{introspect_proto_defs_version,2}]),
+    try
+        [#?gpb_field{name=field1, occurrence=defaulty}] = M2:find_msg_def('Msg')
+    after unload_code(M2)
     end,
     ok.
 

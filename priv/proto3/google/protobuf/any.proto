@@ -1,4 +1,5 @@
-// This file is imported from protobuf 3.0.0-beta-2 (667f4a6)
+// This file is imported from protobuf 3.12.3
+//
 
 // Protocol Buffers - Google's data interchange format
 // Copyright 2008 Google Inc.  All rights reserved.
@@ -35,14 +36,62 @@ syntax = "proto3";
 package google.protobuf;
 
 option csharp_namespace = "Google.Protobuf.WellKnownTypes";
+option go_package = "github.com/golang/protobuf/ptypes/any";
 option java_package = "com.google.protobuf";
 option java_outer_classname = "AnyProto";
 option java_multiple_files = true;
-option java_generate_equals_and_hash = true;
 option objc_class_prefix = "GPB";
 
-// `Any` contains an arbitrary serialized message along with a URL
-// that describes the type of the serialized message.
+// `Any` contains an arbitrary serialized protocol buffer message along with a
+// URL that describes the type of the serialized message.
+//
+// Protobuf library provides support to pack/unpack Any values in the form
+// of utility functions or additional generated methods of the Any type.
+//
+// Example 1: Pack and unpack a message in C++.
+//
+//     Foo foo = ...;
+//     Any any;
+//     any.PackFrom(foo);
+//     ...
+//     if (any.UnpackTo(&foo)) {
+//       ...
+//     }
+//
+// Example 2: Pack and unpack a message in Java.
+//
+//     Foo foo = ...;
+//     Any any = Any.pack(foo);
+//     ...
+//     if (any.is(Foo.class)) {
+//       foo = any.unpack(Foo.class);
+//     }
+//
+//  Example 3: Pack and unpack a message in Python.
+//
+//     foo = Foo(...)
+//     any = Any()
+//     any.Pack(foo)
+//     ...
+//     if any.Is(Foo.DESCRIPTOR):
+//       any.Unpack(foo)
+//       ...
+//
+//  Example 4: Pack and unpack a message in Go
+//
+//      foo := &pb.Foo{...}
+//      any, err := ptypes.MarshalAny(foo)
+//      ...
+//      foo := &pb.Foo{}
+//      if err := ptypes.UnmarshalAny(any, foo); err != nil {
+//        ...
+//      }
+//
+// The pack methods provided by protobuf library will by default use
+// 'type.googleapis.com/full.type.name' as the type URL and the unpack
+// methods only use the fully qualified type name after the last '/'
+// in the type URL, for example "foo.bar.com/x/y.z" will yield type
+// name "y.z".
 //
 //
 // JSON
@@ -74,15 +123,19 @@ option objc_class_prefix = "GPB";
 //     }
 //
 message Any {
-  // A URL/resource name whose content describes the type of the
-  // serialized message.
+  // A URL/resource name that uniquely identifies the type of the serialized
+  // protocol buffer message. This string must contain at least
+  // one "/" character. The last segment of the URL's path must represent
+  // the fully qualified name of the type (as in
+  // `path/google.protobuf.Duration`). The name should be in a canonical form
+  // (e.g., leading "." is not accepted).
   //
-  // For URLs which use the schema `http`, `https`, or no schema, the
-  // following restrictions and interpretations apply:
+  // In practice, teams usually precompile into the binary all types that they
+  // expect it to use in the context of Any. However, for URLs which use the
+  // scheme `http`, `https`, or no scheme, one can optionally set up a type
+  // server that maps type URLs to message definitions as follows:
   //
-  // * If no schema is provided, `https` is assumed.
-  // * The last segment of the URL's path must represent the fully
-  //   qualified name of the type (as in `path/google.protobuf.Duration`).
+  // * If no scheme is provided, `https` is assumed.
   // * An HTTP GET on the URL must yield a [google.protobuf.Type][]
   //   value in binary format, or produce an error.
   // * Applications are allowed to cache lookup results based on the
@@ -91,11 +144,15 @@ message Any {
   //   on changes to types. (Use versioned type names to manage
   //   breaking changes.)
   //
-  // Schemas other than `http`, `https` (or the empty schema) might be
+  // Note: this functionality is not currently available in the official
+  // protobuf release, and it is not used for type URLs beginning with
+  // type.googleapis.com.
+  //
+  // Schemes other than `http`, `https` (or the empty scheme) might be
   // used with implementation specific semantics.
   //
   string type_url = 1;
 
-  // Must be valid serialized data of the above specified type.
+  // Must be a valid serialized protocol buffer of the above specified type.
   bytes value = 2;
 }

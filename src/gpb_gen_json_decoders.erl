@@ -166,8 +166,7 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     TmpAnRes = set_field_pass_as_params_for_all_msgs(AnRes),
     InitExprs1 = gpb_decoders_lib:init_exprs(MsgName, MsgDef, Defs,
                                              TrUserDataVar, TmpAnRes, Opts),
-    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
-    FieldInfos1 = gpb_decoders_lib:calc_field_infos(MsgDef, IsProto3, Opts),
+    FieldInfos1 = gpb_decoders_lib:calc_field_infos(MsgDef, Opts),
     {InitExprs2, FieldInfos2} = defaultify_p3wellknowns(InitExprs1, MsgDef,
                                                         FieldInfos1,
                                                         TrUserDataVar),
@@ -358,6 +357,7 @@ mk_check_null_decode_value_update_field_expr(
     DecExpr =
         case occurrence_or_mapfield(Occurrence, Type) of
             optional -> type_decode_expr(Type, JValueExpr, TrUserDataVar);
+            defaulty -> type_decode_expr(Type, JValueExpr, TrUserDataVar);
             required -> type_decode_expr(Type, JValueExpr, TrUserDataVar);
             repeated -> repeated_field_decode_expr(MsgName, Field, JValueExpr,
                                                    TrUserDataVar, AnRes);
@@ -1332,6 +1332,8 @@ calc_transl_info(MsgName, #?gpb_field{occurrence=Occurrence}=Field, AnRes) ->
         required ->
             calc_non_repeated_transl_info(MsgName, Field, AnRes);
         optional ->
+            calc_non_repeated_transl_info(MsgName, Field, AnRes);
+        defaulty ->
             calc_non_repeated_transl_info(MsgName, Field, AnRes);
         repeated ->
             calc_repeated_transl_info(MsgName, Field, AnRes)

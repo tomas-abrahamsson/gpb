@@ -867,7 +867,7 @@ encode_proto3_unicode_strings_test() ->
                                       occurrence=repeated, opts=[]}]},
               {{msg,m2}, [#?gpb_field{name=a, fnum=1, rnum=#m2.b,
                                       type=string,
-                                      occurrence=optional, opts=[]}]}],
+                                      occurrence=defaulty, opts=[]}]}],
     Smiley1  = [16#1f631],
     Smiley1B = <<240,159,152,177>> = unicode:characters_to_binary(Smiley1),
     Smiley2  = [16#1f628],
@@ -889,7 +889,7 @@ encode_proto3_various_empty_string_test() ->
                                       occurrence=repeated, opts=[]}]},
               {{msg,m2}, [#?gpb_field{name=a, fnum=1, rnum=#m2.b,
                                       type=string,
-                                      occurrence=optional, opts=[]}]}],
+                                      occurrence=defaulty, opts=[]}]}],
     SuperEmpty = [<<>>,[[[<<>>,<<>>]]]],
     <<10,4,8,1,18,0,
       10,4,8,2,18,0,
@@ -913,7 +913,7 @@ encode_proto3_various_empty_sequence_of_bytes_test() ->
                                       occurrence=repeated, opts=[]}]},
               {{msg,m2}, [#?gpb_field{name=a, fnum=1, rnum=#m2.b,
                                       type=bytes,
-                                      occurrence=optional, opts=[]}]}],
+                                      occurrence=defaulty, opts=[]}]}],
     SuperEmpty = [<<>>,[[[<<>>,<<>>]]]],
     <<10,4,8,1,18,0,
       10,4,8,2,18,0,
@@ -939,22 +939,22 @@ proto3_type_default_values_never_serialized_test() ->
             {{enum,e}, [{e0,0},{e1,1}]},
             {{msg,s}, % submsg
              [#?gpb_field{name=a, fnum=1, rnum=2, type=string,
-                          occurrence=optional, opts=[]}]},
+                          occurrence=defaulty, opts=[]}]},
             {{msg,m},
              [#?gpb_field{name=a, fnum=1, rnum=2, type=string,
-                          occurrence=optional, opts=[]},
+                          occurrence=defaulty, opts=[]},
               #?gpb_field{name=b, fnum=2, rnum=3, type=bytes,
-                          occurrence=optional, opts=[]},
+                          occurrence=defaulty, opts=[]},
               #?gpb_field{name=c, fnum=3, rnum=4, type=bool,
-                          occurrence=optional, opts=[]},
+                          occurrence=defaulty, opts=[]},
               #?gpb_field{name=d, fnum=4, rnum=5, type=uint32,
-                          occurrence=optional, opts=[]},
+                          occurrence=defaulty, opts=[]},
               #?gpb_field{name=e, fnum=5, rnum=6, type=float,
-                          occurrence=optional, opts=[]},
+                          occurrence=defaulty, opts=[]},
               #?gpb_field{name=f, fnum=6, rnum=7, type=double,
-                          occurrence=optional, opts=[]},
+                          occurrence=defaulty, opts=[]},
               #?gpb_field{name=g, fnum=7, rnum=8, type={msg,s},
-                          occurrence=optional, opts=[]},
+                          occurrence=defaulty, opts=[]},
               #gpb_oneof{
                  name=h, rnum=9,
                  fields=[#?gpb_field{name=ha, fnum=8, rnum=9, type=uint32,
@@ -972,10 +972,25 @@ proto3_type_default_values_never_serialized_for_enums_test() ->
             {proto3_msgs,[m]},
             {{enum,e},[{e0,0},{e1,1}]},
             {{msg,m},[#?gpb_field{name=a, fnum=1, rnum=2, type={enum,e},
-                                  occurrence=optional, opts=[]}]}],
+                                  occurrence=defaulty, opts=[]}]}],
     <<>> = encode_msg({m, e0}, Defs),
     <<>> = encode_msg({m, 0}, Defs), % when given as integer
     {m, e0} = decode_msg(<<>>, m, Defs).
+
+proto3_optional_test() ->
+    Defs = [{proto_defs_version,2},
+            {syntax,"proto3"},
+            {proto3_msgs,[m1]},
+            {{msg,m1},[#?gpb_field{name=a, fnum=1, rnum=2, type=uint32,
+                                   occurrence=optional, opts=[]}]}],
+    B1 = encode_msg({m1, 0}, Defs),
+    ?assert(<<>> /= B1), % Must be sent even if the value = type-default
+    #m1{a=0} = decode_msg(B1, m1, Defs),
+    <<>> = B2 = encode_msg({m1, undefined}, Defs),
+    %% Expect undefined, instead of type-default, which would have
+    %% been the case with occurrence = defaulty:
+    #m1{a=undefined} = decode_msg(B2, m1, Defs),
+    ok.
 
 encode_decode_required_group_test() ->
     %% message m1 {
@@ -1420,6 +1435,7 @@ verify_invalid_map_fails_test() ->
     ?verify_gpb_err(verify_msg(#m1{a = [{"x","wrong value type"}]}, Defs)).
 
 verify_proto3_fields_mandatory_test() ->
+    %% FIXME: Is this test relevant? A proto3 field cannot be required.
     Defs = [{syntax,"proto3"},
             {proto3_msgs,[m1]},
             {{msg,m1}, [#?gpb_field{name=a, fnum=1, rnum=#m1.a, type=uint32,
@@ -1548,7 +1564,7 @@ msg_to_from_map_test() ->
     O3Defs = [{{msg,m1},
                [#?gpb_field{name=a, fnum=1, rnum=#m1.a,
                             type=uint32,
-                            occurrence=optional, opts=[]}]},
+                            occurrence=defaulty, opts=[]}]},
               {proto3_msgs, [m1]}],
     OptOmitted          = {maps_unset_optional, omitted},
     OptPresentUndefined = {maps_unset_optional, present_undefined},

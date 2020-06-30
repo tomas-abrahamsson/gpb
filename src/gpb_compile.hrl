@@ -13,6 +13,7 @@
           d_field_pass_method,% :: dict:dict()  %% MsgName -> pass_as_record |
                               %                 %%            pass_as_params
           maps_as_msgs,       % :: list() % same format as `Defs'
+          dec_maps_as_msgs,   % :: list() % ditto, for decoding
           translations,       % :: dict:dict(), %% FieldPath -> TranslationOps
           map_types,          % :: sets:set({map,_,_})
           map_value_types,    % :: {boolean(), boolean()} % submsgs?/nonsubmsgs?

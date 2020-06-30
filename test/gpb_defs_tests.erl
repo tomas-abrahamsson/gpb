@@ -1035,12 +1035,12 @@ proto3_no_occurrence_test() ->
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},
-      [#?gpb_field{name=f1,fnum=1,occurrence=optional},
+      [#?gpb_field{name=f1,fnum=1,occurrence=defaulty},
        #?gpb_field{name=f2,fnum=2,occurrence=repeated}]},
      {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
-proto3_sub_msgs_gets_occurrence_optional_test() ->
+proto3_sub_msgs_gets_occurrence_defaulty_test() ->
     {ok,Defs} = parse_lines(["syntax=\"proto3\";",
                              "message m1 {",
                              "  s1 f1=1;",
@@ -1053,10 +1053,10 @@ proto3_sub_msgs_gets_occurrence_optional_test() ->
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},
-      [#?gpb_field{name=f1,fnum=1,type={msg,s1},occurrence=optional},
+      [#?gpb_field{name=f1,fnum=1,type={msg,s1},occurrence=defaulty},
        #?gpb_field{name=f2,fnum=2,type={msg,s1},occurrence=repeated}]},
      {{msg,s1},
-      [#?gpb_field{name=f1,fnum=1,type=uint32,occurrence=optional}]},
+      [#?gpb_field{name=f1,fnum=1,type=uint32,occurrence=defaulty}]},
      {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
@@ -1692,12 +1692,12 @@ verify_catches_missing_optionality_for_proto2_test() ->
 verify_catches_unallowed_occurrence_for_proto3_test() ->
     ProtoLines1 = ["syntax = 'proto3';",
                    "message m1 {"
-                   "  optional uint32 f1 = 1;", % valid in proto2 but not proto3
+                   "  optional uint32 f1 = 1;", % valid in proto2 and proto3
                    "  required uint32 f2 = 2;", % valid in proto2 but not proto3
                    "}"],
     {error, _} = Error1 = do_parse_verify_defs(ProtoLines1),
     Msg1 = verify_flat_string(gpb_defs:format_post_process_error(Error1)),
-    verify_strings_present(Msg1, ["m1", "f1", "f2"]),
+    verify_strings_present(Msg1, ["m1", "f2"]),
 
     %% also for messages in messages
     ProtoLines2 = ["syntax = 'proto3';",
@@ -1709,7 +1709,7 @@ verify_catches_unallowed_occurrence_for_proto3_test() ->
                    "}"],
     {error, _} = Error2 = do_parse_verify_defs(ProtoLines2),
     Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
-    verify_strings_present(Msg2, ["m1.m2", "f2", "f3"]).
+    verify_strings_present(Msg2, ["m1.m2", "f3"]).
 
 proto_defs_versions_test() ->
     Fs = [{"f1.proto", ["message m1 { };"]}],

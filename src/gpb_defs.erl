@@ -87,7 +87,7 @@
 %% normal Erlang terms with for instance `=<'.
 -spec supported_defs_versions() -> [version()].
 supported_defs_versions() ->
-    [1].
+    [1, 2].
 
 %% @doc Return the earliest supported proto defs version.
 earliest_supported_defs_version() ->
@@ -120,14 +120,13 @@ convert_defs_to_latest_version(Defs) ->
 
 cvt_to_latest_aux(LatestVsn, LatestVsn, Defs) ->
     %% Add or replace a defs version marker.
-    case proplists:get_value(proto_defs_version, Defs) of
-        undefined ->
-            {ok, [{proto_defs_version, LatestVsn} | Defs]};
-        LatestVsn ->
-            {ok, Defs};
-        _EarlierVsn ->
-            Defs1 = lists:keydelete(proto_defs_version, 1, Defs),
-            {ok, [{proto_defs_version, LatestVsn} | Defs1]}
+    ensure_proto_defs_versionized(Defs, LatestVsn);
+cvt_to_latest_aux(Vsn, LatestVsn, Defs) when Vsn < LatestVsn ->
+    CvtRes = case Vsn of
+                 1 -> cvt_defs_1_to_2(Defs)
+             end,
+    case CvtRes of
+        {ok, Defs1} -> cvt_to_latest_aux(Vsn + 1, LatestVsn, Defs1)
     end.
 
 %% @doc Convert proto definitions on the latest format to some earlier format.
@@ -149,15 +148,14 @@ convert_defs_from_latest_version(Defs, TargetVersion) ->
 
 cvt_from_latest_aux(TargetVsn, TargetVsn, Defs) ->
     %% Add or replace a defs version marker.
-    case proplists:get_value(proto_defs_version, Defs) of
-        undefined ->
-            {ok, [{proto_defs_version, TargetVsn} | Defs]};
-        TargetVsn ->
-            {ok, Defs};
-        _LaterVsn ->
-            Defs1 = lists:keydelete(proto_defs_version, 1, Defs),
-            {ok, [{proto_defs_version, TargetVsn} | Defs1]}
-
+    ensure_proto_defs_versionized(Defs, TargetVsn);
+cvt_from_latest_aux(Vsn, TargetVsn, Defs) when Vsn > TargetVsn ->
+    CvtRes = case Vsn of
+                 2 -> cvt_defs_2_to_1(Defs)
+             end,
+    case CvtRes of
+        {ok, Defs1} -> cvt_from_latest_aux(Vsn - 1, TargetVsn, Defs1);
+        {error, Reason} -> {error, Reason}
     end.
 
 %% @hidden
@@ -1043,7 +1041,10 @@ fmt_err({convert_from_unsupported_proto_defs_version, Found, Supported}) ->
        [Found, Supported]);
 fmt_err({convert_to_unsupported_proto_defs_version, TargetVsn, Supported}) ->
     ?f("specified proto_defs_version ~w is unsupported (supported: ~w)",
-       [TargetVsn, Supported]).
+       [TargetVsn, Supported]);
+fmt_err({defs_unrepresentable_in_fmt_1,p3_optional,MsgName,FName}) ->
+    ?f("definitions unrepresentable in format 1 due to proto3 optional ~s.~s",
+       [MsgName, FName]).
 
 list_to_text([Item1, Item2]) ->
     ?f("~s and ~s", [Item1, Item2]);
@@ -1363,14 +1364,13 @@ mk_occurrence_handler("proto2") ->
 mk_occurrence_handler("proto3") ->
     fun(#?gpb_field{name=FName, occurrence=Occurrence}=F, MsgName, Errors) ->
             case Occurrence of
-                undefined -> {F#?gpb_field{occurrence=optional}, Errors};
+                undefined -> {F#?gpb_field{occurrence=defaulty}, Errors};
                 repeated -> {F, Errors};
                 required ->
                     Err = {p3_unallowed_occurrence, MsgName, FName, Occurrence},
-                    {F#?gpb_field{occurrence=optional}, [Err | Errors]};
+                    {F#?gpb_field{occurrence=defaulty}, [Err | Errors]};
                 optional ->
-                    Err = {p3_unallowed_occurrence, MsgName, FName, Occurrence},
-                    {F#?gpb_field{occurrence=optional}, [Err | Errors]}
+                    {F, Errors}
             end
     end.
 
@@ -1396,3 +1396,78 @@ to_fields_msg2(MsgName, MsgElems, OccHandler, Errors0) ->
       end,
       Errors0,
       MsgElems).
+
+%%% -- Version and conversions ------------
+
+%% NB:
+%% Be quite explict here about the structure.  Don't rely so much on
+%% external helpers, such as gpb:is_msg_proto3/2, because helpers are
+%% for the latest defs version, while this may (in some future) be
+%% operating on a format that is not the latest any more.
+
+ensure_proto_defs_versionized(Defs, Version) ->
+    case proplists:get_value(proto_defs_version, Defs) of
+        undefined ->
+            {ok, [{proto_defs_version, Version} | Defs]};
+        Version ->
+            {ok, Defs};
+        _OtherVsn ->
+            Defs1 = lists:keydelete(proto_defs_version, 1, Defs),
+            {ok, [{proto_defs_version, Version} | Defs1]}
+    end.
+
+cvt_defs_1_to_2(Defs) ->
+    %% Convert occurrence = optional -> defaulty for proto3 msg fields
+    P3Msgs = proplists:get_value(proto3_msgs, Defs, []),
+    {ok,
+     [case Item of
+          {{msg, MsgName}, Fields} ->
+              case lists:member(MsgName, P3Msgs) of
+                  true ->
+                      Fields1 = [case F of
+                                     #?gpb_field{occurrence=optional} ->
+                                         F#?gpb_field{occurrence=defaulty};
+                                     _ ->
+                                         F
+                                 end
+                                 || F <- Fields],
+                      {{msg,MsgName}, Fields1};
+                  false ->
+                      Item
+              end;
+          _ ->
+              Item
+      end
+      || Item <- Defs]}.
+
+cvt_defs_2_to_1(Defs) ->
+    %% Convert occurrence = defaulty -> optional for proto3 msg fields
+    P3Msgs = proplists:get_value(proto3_msgs, Defs, []),
+    try
+        {ok,
+         [case Item of
+              {{msg, MsgName}, Fields} ->
+                  case lists:member(MsgName, P3Msgs) of
+                      true ->
+                          Fields1 =
+                              [case F of
+                                   #?gpb_field{occurrence=defaulty} ->
+                                       F#?gpb_field{occurrence=optional};
+                                   #?gpb_field{name=FName,
+                                               occurrence=optional} ->
+                                       throw({p3_optional,MsgName,FName});
+                                   _ ->
+                                       F
+                               end
+                               || F <- Fields],
+                          {{msg,MsgName}, Fields1};
+                      false ->
+                          Item
+                  end;
+              _ ->
+                  Item
+          end
+          || Item <- Defs]}
+    catch {p3_optional, MsgName, FName} ->
+            {error, {defs_unrepresentable_in_fmt_1,p3_optional,MsgName,FName}}
+    end.

@@ -88,6 +88,7 @@
                                gpb_internal_intermediary_map_ref()
                              | undefined, % temporarily in some phases
          occurrence         :: 'required' | 'optional' | 'repeated'
+                             | defaulty % in proto3: non-optional
                              | undefined, % temporarily in some phases
          opts      = []     :: [term()]
         }).

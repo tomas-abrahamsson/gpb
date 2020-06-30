@@ -38,6 +38,7 @@
 -export([merge_msgs/3]).
 -export([verify_msg/2, check_scalar/2]).
 -export([map_item_pseudo_fields/2]).
+-export([map_item_pseudo_fields_for_decoding/2]).
 -export([is_allowed_as_key_type/1]).
 -export([is_type_packable/1]).
 -export([is_msg_proto3/2, proto3_type_default/2]).
@@ -221,20 +222,19 @@ new_initial_msg({group,Name}=Key, MsgDefs) ->
 
 new_init_2(MsgName, Key, MsgDefs) ->
     MsgDef = keyfetch(Key, MsgDefs),
-    IsProto3 = is_msg_proto3(MsgName, MsgDefs),
     lists:foldl(fun(#?gpb_field{rnum=RNum, occurrence=repeated}, Record) ->
                         setelement(RNum, Record, []);
-                   (#?gpb_field{type={msg,_Name}, occurrence=optional}, Record)->
-                        Record;
-                   (#?gpb_field{rnum=RNum, type={msg,_Name}=FMsgKey}, Record) ->
-                        if not IsProto3 ->
+                   (#?gpb_field{rnum=RNum, type={msg,_Name}=FMsgKey,
+                                occurrence=Occurrence},
+                    Record) ->
+                        if Occurrence == required ->
                                 SubMsg = new_initial_msg(FMsgKey, MsgDefs),
                                 setelement(RNum, Record, SubMsg);
-                           IsProto3 ->
+                           true ->
                                 Record
                         end;
-                   (#?gpb_field{type=Type, occurrence=optional, rnum=RNum},
-                    Record) when IsProto3 ->
+                   (#?gpb_field{type=Type, occurrence=defaulty, rnum=RNum},
+                    Record) ->
                         Default = proto3_type_default(Type, MsgDefs),
                         setelement(RNum, Record, Default);
                    (#?gpb_field{}, Record) ->
@@ -541,6 +541,8 @@ add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
             setelement(RNum, Record, Value);
         #?gpb_field{rnum = RNum, occurrence = optional}->
             setelement(RNum, Record, Value);
+        #?gpb_field{rnum = RNum, occurrence = defaulty}->
+            setelement(RNum, Record, Value);
         #?gpb_field{rnum = RNum, occurrence = repeated, type={map,_,_}} ->
             append_to_map(RNum, Value, Record);
         #?gpb_field{rnum = RNum, occurrence = repeated} ->
@@ -740,8 +742,15 @@ encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=optional},
         undefined ->
             <<>>;
         Value ->
-            case is_msg_proto3(element(1, Msg), MsgDefs)
-                andalso is_proto3_type_default(Type, MsgDefs, Value) of
+            encode_field_value(Value, FNum, Type, MsgDefs)
+    end;
+encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=defaulty},
+             Msg, MsgDefs) ->
+    case element(RNum, Msg) of
+        undefined ->
+            <<>>;
+        Value ->
+            case is_proto3_type_default(Type, MsgDefs, Value) of
                 true ->
                     <<>>;
                 false ->
@@ -977,7 +986,8 @@ verify_value(Value, Type, Occurrence, Path, MsgDefs) ->
     case Occurrence of
         required -> verify_value_2(Value, Type, Path, MsgDefs);
         repeated -> verify_list(Value, Type, Path, MsgDefs);
-        optional -> verify_optional(Value, Type, Path, MsgDefs)
+        optional -> verify_optional(Value, Type, Path, MsgDefs);
+        defaulty -> verify_optional(Value, Type, Path, MsgDefs)
     end.
 
 -spec check_scalar(any(), gpb_scalar()) -> ok | {error, Reason::term()}.
@@ -1190,7 +1200,12 @@ proplist_to_rpc_record(PL) when is_list(PL) ->
     list_to_tuple([?gpb_rpc | RFields]).
 
 map_item_tmp_def(KeyType, ValueType) ->
-    {{msg, map_item_tmp_name()}, map_item_pseudo_fields(KeyType, ValueType)}.
+    MsgName = map_item_tmp_name(),
+    {{msg, MsgName}, map_item_pseudo_fields(KeyType, ValueType)}.
+
+map_item_tmp_def_for_decoding(KeyType, ValueType) ->
+    MsgName = map_item_tmp_name(),
+    {{msg, MsgName}, map_item_pseudo_fields_for_decoding(KeyType, ValueType)}.
 
 map_item_tmp_name() ->
     '$mapitem'.
@@ -1201,6 +1216,14 @@ map_item_pseudo_fields(KeyType, ValueType) ->
                  occurrence=required, type=KeyType},
      #?gpb_field{name=value, fnum=2, rnum=3,
                  occurrence=required, type=ValueType}].
+
+-spec map_item_pseudo_fields_for_decoding(gpb_map_key(), gpb_map_value()) ->
+          [field()].
+map_item_pseudo_fields_for_decoding(KeyType, ValueType) ->
+    [#?gpb_field{name=key, fnum=1, rnum=2, occurrence=defaulty,
+                 type=KeyType},
+     #?gpb_field{name=value, fnum=2, rnum=3, occurrence=defaulty,
+                 type=ValueType}].
 
 -spec is_allowed_as_key_type(gpb_field_type()) -> boolean().
 is_allowed_as_key_type({enum,_}) -> false;
@@ -1255,15 +1278,7 @@ is_proto3_type_default(Type, MsgDefs, Value) ->
     proto3_type_default(Type, MsgDefs) =:= Value.
 
 map_msg_defs_for_decoding(KeyType, ValueType, MsgDefs) ->
-    {{msg,TmpName},Fs} = map_item_tmp_def(KeyType, ValueType),
-    TmpMsg = {{msg,TmpName}, [F#?gpb_field{occurrence=optional} || F <- Fs]},
-    %% Redefine message to be a proto3 message to get type-defaults
-    case lists:keyfind(proto3_msgs, 1, MsgDefs) of
-        {proto3_msgs, Names} ->
-            [{proto3_msgs, [TmpName | Names]}, TmpMsg | MsgDefs];
-        false ->
-            [{proto3_msgs, [TmpName]}, TmpMsg | MsgDefs]
-    end.
+    [map_item_tmp_def_for_decoding(KeyType, ValueType) | MsgDefs].
 
 -spec proto2_type_default(gpb_field_type(), gpb_defs:defs()) -> term().
 proto2_type_default(Type, MsgDefs) ->
@@ -1421,6 +1436,13 @@ fields_from_map([F | Rest], Map, Acc, Defs, Opts) ->
             Acc2 = [Elems2 | Acc],
             fields_from_map(Rest, Map, Acc2, Defs, Opts);
         #?gpb_field{name=FName, occurrence=optional, type=Type} ->
+            V2 = case maps:find(FName, Map) of
+                     {ok, V} -> v_from_map(V, Type, Defs, Opts);
+                     error   -> undefined
+                 end,
+            Acc2 = [V2 | Acc],
+            fields_from_map(Rest, Map, Acc2, Defs, Opts);
+        #?gpb_field{name=FName, occurrence=defaulty, type=Type} ->
             V2 = case maps:find(FName, Map) of
                      {ok, V} -> v_from_map(V, Type, Defs, Opts);
                      error   -> undefined

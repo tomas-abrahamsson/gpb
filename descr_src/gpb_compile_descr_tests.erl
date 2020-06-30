@@ -213,6 +213,29 @@ nested_definitions_test() ->
                   enum_type = [#'EnumDescriptorProto'{name="E"}]}]}}]} =
         compile_descriptors(ProtosAsTxts, []).
 
+proto3_optional_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax='proto3';",
+           "message M {",
+           "  uint32 f1 = 1;",
+           "  optional uint32 f2 = 2;",
+           "  oneof c { uint32 f3 = 3; }",
+           "}"]}],
+    {_FileDescriptorSet,
+     [{"main",
+       #'FileDescriptorProto'{
+          message_type =
+              [#'DescriptorProto'{
+                  name="M",
+                  field=[#'FieldDescriptorProto'{name="f1"},
+                         #'FieldDescriptorProto'{name="f2", oneof_index=1},
+                         #'FieldDescriptorProto'{name="f3", oneof_index=0}],
+                  %% Synthetic names must come after any non-synthetic ones
+                  oneof_decl=[#'OneofDescriptorProto'{name="c"},
+                              #'OneofDescriptorProto'{}]}]}}]} =
+        compile_descriptors(ProtosAsTxts, []).
+
 %% --helpers----------
 
 compile_descriptors(IoLists, GpbCompileOpts) ->
@@ -242,11 +265,13 @@ compile_files_as_iolists([{FName, _IoList} | _Rest]=IoLists, GpbCompileOpts) ->
                                    file:read_file_info(F)
                            end
                    end,
+    LatestDefsVsn = lists:max(gpb_defs:supported_defs_versions()),
     gpb_compile:file(
       FName,
       [{file_op, [{read_file, ReadFile},
                   {read_file_info, ReadFileInfo},
                   {write_file, fun(_,_) -> ok end}]},
        {i,"."},
-       to_proto_defs, return_errors, return_warnings
+       to_proto_defs, {proto_defs_version, LatestDefsVsn},
+       return_errors, return_warnings
        | GpbCompileOpts]).

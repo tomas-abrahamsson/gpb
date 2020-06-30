@@ -126,7 +126,6 @@ calc_keytype_override(Fields, Opts) ->
     end.
 
 format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
-    IsProto3 = gpb:is_msg_proto3(MsgName, Defs),
     TypeSpecs = gpb_lib:get_type_specs_by_opts(Opts),
     MapsOrRecords = gpb_lib:get_records_or_maps_by_opts(Opts),
     MappingAndUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
@@ -158,7 +157,7 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
                 TypeSpecifierSep = calc_field_type_sep(Field, Opts),
                 LineLead = case MappingAndUnset of
                                #maps{unset_optional=omitted} when
-                                     Occur == optional,
+                                     Occur == optional orelse Occur == defaulty,
                                      not TypespecsCanIndicateMapItemPresence ->
                                    "%% ";
                                #maps{} ->
@@ -183,15 +182,15 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs) ->
                                 {_, repeated, records} ->
                                     ?f(" = []");
                                 {_, _, records} ->
-                                    case IsProto3 of
-                                        true ->
+                                    case Occur of
+                                        defaulty ->
                                             Default =
                                                 gpb_lib:proto3_type_default(
                                                   Type,
                                                   Defs,
                                                   Opts),
                                             ?f(" = ~p", [Default]);
-                                        false -> ""
+                                        _ -> ""
                                     end;
                                 _ ->
                                     ""
@@ -281,7 +280,8 @@ find_last_nonopt_field_index(Fields) ->
                         case gpb_lib:get_field_occurrence(F) of
                             required -> I;
                             repeated -> I;
-                            optional -> Acc
+                            optional -> Acc;
+                            defaulty -> Acc
                         end
                 end,
                 0,
@@ -297,7 +297,8 @@ calc_field_type_sep(#?gpb_field{occurrence=Occurrence}, Opts) ->
             case Occurrence of
                 required -> mandatory_map_item_type_sep(Opts);
                 repeated -> "=>";
-                optional -> "=>"
+                optional -> "=>";
+                defaulty -> "=>"
             end
     end;
 calc_field_type_sep(#gpb_oneof{}, Opts) ->
@@ -397,7 +398,8 @@ field_type_str(MsgName,
             case Occurrence of
                 required -> TypeStr;
                 repeated -> TypeStr ++ OrUndefined;
-                optional -> TypeStr ++ OrUndefined
+                optional -> TypeStr ++ OrUndefined;
+                defaulty -> TypeStr ++ OrUndefined
             end;
         false ->
             TypeStr = type_to_typestr_2(Type, Defs, AnRes, Opts),
@@ -420,6 +422,8 @@ field_type_str(MsgName,
                     end
                         ++ OrUndefined;
                 optional ->
+                    TypeStr ++ OrUndefined;
+                defaulty ->
                     TypeStr ++ OrUndefined
             end
     end.
@@ -564,7 +568,8 @@ field_type_comment_3(#?gpb_field{type=Type, occurrence=Occurrence}, false) ->
     case Occurrence of
         required -> ?f("~w", [Type]);
         repeated -> "[" ++ ?f("~w", [Type]) ++ "]";
-        optional -> ?f("~w (optional)", [Type])
+        optional -> ?f("~w (optional)", [Type]);
+        defaulty -> ?f("~w (optional)", [Type])
     end.
 
 lineup(CurrentCol, TargetCol) when CurrentCol < TargetCol ->
