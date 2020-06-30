@@ -2525,9 +2525,9 @@ parse_file_and_imports(In, AlreadyImported, Opts) ->
     end.
 
 scan_and_parse_string(S, FName, Opts) ->
-    case gpb_scan:string(S) of
+    case scan(S, Opts) of
         {ok, Tokens, _} ->
-            case gpb_parse:parse(Tokens++[{'$end', 999}]) of
+            case parse(Tokens, Opts) of
                 {ok, PTree} ->
                     case gpb_defs:post_process_one_file(FName, PTree, Opts) of
                         {ok, Result} ->
@@ -2541,6 +2541,31 @@ scan_and_parse_string(S, FName, Opts) ->
         {error, {_Line0, _Module, _ErrInfo}=Reason, _Line1} ->
             {error, {scan_error, FName, Reason}}
     end.
+
+scan(S, Opts) ->
+    case proplists:get_value(parser, Opts, default_scanner_parser()) of
+        1 ->
+            gpb_scan:string(S);
+        2 ->
+            gpb_scan2:binary(unicode:characters_to_binary(S))
+    end.
+
+parse(Tokens, Opts) ->
+    case proplists:get_value(parser, Opts, default_scanner_parser()) of
+        1 ->
+            gpb_parse:parse(Tokens++[{'$end', 999}]);
+        2 ->
+            case gpb_parse2:parse(Tokens) of
+                {ok, Defs} ->
+                    {ok, Defs};
+                {error, Errors} ->
+                    %% For now, calling code can only handle one error
+                    {error, hd(Errors)}
+            end
+    end.
+
+default_scanner_parser() ->
+    1.
 
 read_and_parse_imports([Import | Rest], AlreadyImported, Defs, Opts) ->
     case lists:member(Import, AlreadyImported) of
