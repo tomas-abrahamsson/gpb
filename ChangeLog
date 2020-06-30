@@ -1,5 +1,19 @@
 -*- coding: utf-8 -*-
 
+Version 4.13.0
+2020-Jun-30
+
+        * Add support for `optional` fields in proto3 messages.
+          This is new in Google's protobuf 3.12.0.  In gpb, this is
+          supported out-of-the-box, without any special option option.
+
+          Related to this, the proto defs format has changed and also
+          gotten versioned.  The new version is needed to represent
+          proto3 messages with optional fields.  By default, when gpb
+          returns proto defs, these are returned on the old format,
+          for backwards compatibility in gpb-4.x.x.  For more info,
+          see to the doc/dev-guide/proto-defs-versions.md file.
+
 Version 4.12.0
 2020-Apr-27
 
