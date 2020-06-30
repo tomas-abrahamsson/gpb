@@ -1429,7 +1429,7 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg1 = verify_flat_string(gpb_parse:format_post_process_error(Error1)),
+    Msg1 = verify_flat_string(gpb_defs:format_post_process_error(Error1)),
     verify_strings_present(Msg1, ["use_packages"]),
     %% Check when there are only refs from rpcs (different error values)
     {error, _} = Error2 =
@@ -1443,7 +1443,7 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg2 = verify_flat_string(gpb_parse:format_post_process_error(Error2)),
+    Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
     verify_strings_present(Msg2, ["use_packages"]),
     %% Check when there are only refs from extend (different error value)
     {error, _} = Error3 =
@@ -1457,7 +1457,7 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg3 = verify_flat_string(gpb_parse:format_post_process_error(Error3)),
+    Msg3 = verify_flat_string(gpb_defs:format_post_process_error(Error3)),
     verify_strings_present(Msg3, ["use_packages"]),
     %% Part of the heuristics for the hinting is that there are different
     %% package. Try two files, one imported, but with the same package.
@@ -1471,7 +1471,7 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg4 = verify_flat_string(gpb_parse:format_post_process_error(Error4)),
+    Msg4 = verify_flat_string(gpb_defs:format_post_process_error(Error4)),
     verify_strings_not_present(Msg4, ["use_packages"]),
     %% no hint about the option when it is already included
     {error, _} = Error5 =
@@ -1483,7 +1483,7 @@ verify_hints_about_use_packages_option_test() ->
           [use_packages],
           expect_error,
           verify_imports),
-    Msg5 = verify_flat_string(gpb_parse:format_post_process_error(Error5)),
+    Msg5 = verify_flat_string(gpb_defs:format_post_process_error(Error5)),
     verify_strings_not_present(Msg5, ["use_packages"]).
 
 verify_error_for_field_name_defined_twice_test() ->
@@ -1801,12 +1801,12 @@ parse_several_file_lines(ProtoLines, Opts,
                 || {FName, Lines} <- ProtoLines],
     case ExpectedResult of
         expect_success ->
-            {ok, AllDefs2} = gpb_parse:post_process_all_files(
+            {ok, AllDefs2} = gpb_defs:post_process_all_files(
                                lists:append(AllDefs1),
                                Opts),
             AllDefs2;
         expect_error ->
-            {error, Reasons} = gpb_parse:post_process_all_files(
+            {error, Reasons} = gpb_defs:post_process_all_files(
                                  lists:append(AllDefs1),
                                  Opts),
             {error, Reasons}
