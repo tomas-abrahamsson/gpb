@@ -224,8 +224,8 @@ all:	$(TARGETS)
 
 clean:
 	$(RM) $(TARGETS)
-	$(RM) $(src)/gpb_parse.erl
-	$(RM) $(src)/gpb_scan.erl
+	$(RM) $(src)/gpb_parse_old.erl
+	$(RM) $(src)/gpb_scan_old.erl
 	$(RM) $(DESCR_PROTO_ERL)
 	$(RM) $(DESCR_PROTO_HRL)
 	$(RM) $(TEST_BEAMS)
@@ -240,7 +240,7 @@ test:	all $(TEST_BEAMS) FORCE
 		_  -> halt(1) \
 	    end."
 
-doc:	| $(src)/gpb_parse.erl $(src)/gpb_scan.erl
+doc:	| $(src)/gpb_parse_old.erl $(src)/gpb_scan_old.erl
 	@echo Generating documentation...
 	$(silencer)$(ERL) $(ERL_BATCH_FLAGS) -pa $(ebin) -eval " \
 	    case edoc:application(gpb,\"$(EDOC_DEST_DIR)\",[$(EDOC_OPTS)]) of \
@@ -369,6 +369,7 @@ $(ebin)/gpb_lib.beam: $(src)/gpb_compile.hrl
 $(ebin)/gpb_lib.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_names.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_parse.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_parse_old.beam: $(incdir)/gpb.hrl
 
 # To compile gpb_codegen_tests, we first need the parse transform in gpb_codegen
 $(test)/gpb_codegen_tests.beam: $(ebin)/gpb_codegen.beam

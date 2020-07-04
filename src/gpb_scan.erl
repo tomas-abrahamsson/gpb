@@ -20,7 +20,7 @@
 %% @doc This is the scanner
 %% @private
 
--module(gpb_scan2).
+-module(gpb_scan).
 -export([binary/1, binary/2]).
 -export([format_error/1]).
 

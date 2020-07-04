@@ -20,7 +20,7 @@
 %% @doc This is the parser
 %% @private
 
--module(gpb_parse2).
+-module(gpb_parse).
 -export([parse/1]).
 -export([format_error/1]).
 
