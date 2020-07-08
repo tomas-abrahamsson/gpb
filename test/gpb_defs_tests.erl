@@ -880,6 +880,22 @@ group_test() ->
     ] =
         do_process_sort_defs(Defs).
 
+groups_with_options_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required group g = 2 [deprecated = true] {",
+                             "    required uint32 gf = 3;",
+                             "  }",
+                             "}"]),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{group,'m1.g'},[#?gpb_field{name=gf,type=uint32,fnum=3,rnum=2,
+                                  opts=[]}]},
+     {{msg,m1},[#?gpb_field{name=g,type={group,'m1.g'}}]},
+     {{msg_containment,_}, [m1]}
+    ] =
+        do_process_sort_defs(Defs).
+
 message_def_nested_in_group_test() ->
     {ok,Defs} = parse_lines(["message m1 {",
                              "  required m2 f = 1;",

@@ -367,10 +367,11 @@ p_msg_elem(Tokens) ->
 %%
 p_field_or_group(Occurrence, [?w("group"), ?w(Name/binary), ?t('=') | Rest]) ->
     {FNum, Rest2} = p_integer_const(Rest),
-    case Rest2  of
-        [?t('{') | Rest3] ->
-            Rest4 = skip_semicolon(Rest3),
-            {MsgElems, Rest5} = p_msg_elems(Rest4, []),
+    {_Opts, Rest3} = p_maybe_opt_list(Rest2),
+    case Rest3  of
+        [?t('{') | Rest4] ->
+            Rest5 = skip_semicolon(Rest4),
+            {MsgElems, Rest6} = p_msg_elems(Rest5, []),
             TmpGName = word_value(Name),
             Field = #?gpb_field{occurrence = Occurrence,
                                 type       = {ref,['...expanded-later']},
@@ -378,8 +379,8 @@ p_field_or_group(Occurrence, [?w("group"), ?w(Name/binary), ?t('=') | Rest]) ->
                                 fnum       = FNum,
                                 opts       = []},
             Group = {group1, TmpGName, MsgElems, Field},
-            Rest6 = skip_semicolon(Rest5),
-            {Group, Rest6};
+            Rest7 = skip_semicolon(Rest6),
+            {Group, Rest7};
         _ ->
             ?syntax_error(Rest2)
     end;
