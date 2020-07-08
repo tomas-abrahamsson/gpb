@@ -324,8 +324,10 @@ flatten_fields(FieldsOrDefs, FullName) ->
         lists:foldl(
           fun(#?gpb_field{}=F, {Fs,Ds}) ->
                   {[F | Fs], Ds};
-             (#gpb_oneof{}=O, {Fs,Ds}) ->
-                  {[O | Fs], Ds};
+             (#gpb_oneof{name=FName, fields=OFs}=O, {Fs,Ds}) ->
+                  FullOneofName = prepend_path(FullName, FName),
+                  {OFs2, ODs2} = flatten_fields(OFs, FullOneofName),
+                  {[O#gpb_oneof{fields=OFs2} | Fs], ODs2++Ds};
              ({group1,TmpGName,GFields,MField}, {Fs,Ds}) ->
                   FullGroupName = prepend_path(FullName, TmpGName),
                   Group0 = {{group,FullGroupName}, GFields},

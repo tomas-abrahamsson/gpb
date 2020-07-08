@@ -917,6 +917,26 @@ message_def_nested_in_group_test() ->
      {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
 
+groups_in_oneof_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  oneof c {",
+                             "    group g = 2 {",
+                             "      required uint32 gf = 3;",
+                             "    }",
+                             "  }",
+                             "}"]),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{group,'m1.c.g'},[#?gpb_field{name=gf,type=uint32,fnum=3,rnum=2,
+                                    opts=[]}]},
+     {{msg,m1},[#gpb_oneof{
+                   name=c,
+                   fields=[#?gpb_field{name=g, type={group,'m1.c.g'}}]}]},
+     {{msg_containment,_}, [m1]} % groups not included
+    ] =
+        do_process_sort_defs(Defs).
+
 parses_service_test() ->
     {ok,Defs} = parse_lines(["message m1 {required uint32 f1=1;}",
                              "message m2 {required uint32 f2=1;}",

@@ -507,7 +507,7 @@ p_oneof(Tokens) ->
 
 p_oneof_elems(Tokens, Acc) ->
     %% FIXME: Also allowed here: "option ..."
-    {Field, Rest} = p_field(optional, Tokens),
+    {Field, Rest} = p_field_or_group(optional, Tokens),
     Rest2 = skip_semicolon(Rest),
     Acc1 = [Field | Acc],
     case Rest2 of
