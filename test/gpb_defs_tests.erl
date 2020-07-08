@@ -340,6 +340,23 @@ parses_custom_option_test() ->
      {{pkg_containment, "x"}, x}] =
         AllDefs.
 
+parses_custom_option_in_oneof_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"x.proto",
+                  ["message x {",
+                   "  oneof c {",
+                   "    option (my_option) = -1;",
+                   "    uint32 f1 = 1;",
+                   "  }",
+                   "}"]}],
+                []),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{msg,x}, [#gpb_oneof{}]},
+     {{msg_containment, _}, _}] =
+        AllDefs.
+
 json_name_field_option_test() ->
     {ok, Elems} = parse_lines(
                     ["message m1 {",

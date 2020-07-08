@@ -506,15 +506,21 @@ p_oneof(Tokens) ->
     ?syntax_error(Tokens, "expected oneof <name> { <fields> }").
 
 p_oneof_elems(Tokens, Acc) ->
-    %% FIXME: Also allowed here: "option ..."
-    {Field, Rest} = p_field_or_group(optional, Tokens),
-    Rest2 = skip_semicolon(Rest),
-    Acc1 = [Field | Acc],
-    case Rest2 of
-        [?t('}') | _] ->
-            {lists:reverse(Acc1), Rest2};
+    case Tokens of
+        [?w("option") | _] ->
+            {_Opt, Rest} = p_option(Tokens),
+            Rest2 = skip_semicolon(Rest),
+            p_oneof_elems(Rest2, Acc);
         _ ->
-            p_oneof_elems(Rest2, Acc1)
+            {Field, Rest} = p_field_or_group(optional, Tokens),
+            Rest2 = skip_semicolon(Rest),
+            Acc1 = [Field | Acc],
+            case Rest2 of
+                [?t('}') | _] ->
+                    {lists:reverse(Acc1), Rest2};
+                _ ->
+                    p_oneof_elems(Rest2, Acc1)
+            end
     end.
 
 %% extensions_def -> extensions exts ';'
