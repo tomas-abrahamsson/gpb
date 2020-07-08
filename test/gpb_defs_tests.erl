@@ -357,6 +357,25 @@ parses_custom_option_in_oneof_test() ->
      {{msg_containment, _}, _}] =
         AllDefs.
 
+parses_custom_option_in_services_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"x.proto",
+                  ["message m { optional uint32 f1 = 1; }",
+                   "service s {",
+                   "  option (my_option) = -17;",
+                   "  rpc r(m) returns (m);",
+                   "}"]}],
+                []),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{msg,m}, _},
+     {{msg_containment, _}, _},
+     {{rpc_containment, _}, _},
+     {{service, _}, _},
+     {{service_containment, _}, _}] =
+        AllDefs.
+
 json_name_field_option_test() ->
     {ok, Elems} = parse_lines(
                     ["message m1 {",

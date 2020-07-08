@@ -674,10 +674,12 @@ p_service([?w("service"), ?w(Name/binary), ?t('{') | Rest]) ->
     {Service, Rest4}.
 
 p_rpc_defs(Tokens, Acc) ->
-    %% FIXME: Also allowed here: "option ..."
     case Tokens of
         [?t('}') | _] ->
             {lists:reverse(Acc), Tokens};
+        [?w("option") | _] ->
+            {_Opt, Rest} = p_option(Tokens),
+            p_rpc_defs(Rest, Acc);
         [?w("rpc") | _] ->
             {Rpc, Rest} = p_rpc_def(Tokens),
             Acc1 = [Rpc | Acc],
