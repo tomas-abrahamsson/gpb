@@ -115,7 +115,6 @@ b(Bin, Line, Acc) ->
         <<"\"", Rest/binary>> -> read_string(Rest, $\", <<>>, Line, Line, Acc);
         <<"'", Rest/binary>>  -> read_string(Rest, $', <<>>, Line, Line, Acc);
         <<D, _/binary>> when ?is_digit(D) -> read_number(Bin, Line, Acc);
-        <<S, _/binary>> when ?is_sign(S) -> read_number(Bin, Line, Acc);
         <<$., D, _/binary>> when ?is_digit(D) -> read_number(Bin, Line, Acc);
         <<L, Rest/binary>> when ?is_letter(L) ->
             read_word(Rest, <<L>>, Line, Acc);
@@ -131,6 +130,8 @@ b(Bin, Line, Acc) ->
         <<$,, Rest/binary>> -> b(Rest, Line, [{',', Line} | Acc]);
         <<$<, Rest/binary>> -> b(Rest, Line, [{'<', Line} | Acc]);
         <<$>, Rest/binary>> -> b(Rest, Line, [{'>', Line} | Acc]);
+        <<$-, Rest/binary>> -> b(Rest, Line, [{'-', Line} | Acc]);
+        <<$+, Rest/binary>> -> b(Rest, Line, [{'+', Line} | Acc]);
         <<_,  _/binary>>    -> syntax_error({error, before(Bin)}, Line);
         <<>> -> ok(Line, Acc)
     end.
@@ -235,46 +236,28 @@ escape_char(C)  -> C.
 
 %% -- number --
 
-read_number(Bin, Line, Acc) ->
+read_number(Bin, Line, Acc) -> % always positive, sign is another token
     case Bin of
-        <<"0.", Rest/binary>>  -> read_frac(Rest, plus,  <<"0.">>, Line, Acc);
-        <<"+0.", Rest/binary>> -> read_frac(Rest, plus,  <<"0.">>, Line, Acc);
-        <<"-0.", Rest/binary>> -> read_frac(Rest, minus, <<"0.">>, Line, Acc);
-        <<"0e", Rest/binary>>  -> read_exp(Rest, plus,  <<"0.0e">>, Line, Acc);
-        <<"+0e", Rest/binary>> -> read_exp(Rest, plus,  <<"0.0e">>, Line, Acc);
-        <<"-0e", Rest/binary>> -> read_exp(Rest, minus, <<"0.0e">>, Line, Acc);
-        <<"0x", Rest/binary>>  -> read_hexnum(Rest, plus,  Line, Acc);
-        <<"0X", Rest/binary>>  -> read_hexnum(Rest, plus,  Line, Acc);
-        <<"+0x", Rest/binary>> -> read_hexnum(Rest, plus,  Line, Acc);
-        <<"+0X", Rest/binary>> -> read_hexnum(Rest, plus,  Line, Acc);
-        <<"-0x", Rest/binary>> -> read_hexnum(Rest, minus, Line, Acc);
-        <<"-0X", Rest/binary>> -> read_hexnum(Rest, minus, Line, Acc);
-        _ ->
-            %% Float (0...)or octal
-            {Sign, Rest} =
-                case Bin of
-                    <<"+", T/binary>> -> {plus, T};
-                    <<"-", T/binary>> -> {minus, T};
-                    _                 -> {plus, Bin}
-                end,
-            case Rest of
-                <<"0", _/binary>> -> read_octnum(Rest, Sign, Line, Acc);
-                _                 -> read_num(Rest, Sign, <<>>, Line, Acc)
-            end
+        <<"0.", Rest/binary>>  -> read_frac(Rest,  <<"0.">>, Line, Acc);
+        <<"0e", Rest/binary>>  -> read_exp(Rest,  <<"0.0e">>, Line, Acc);
+        <<"0x", Rest/binary>>  -> read_hexnum(Rest,  Line, Acc);
+        <<"0X", Rest/binary>>  -> read_hexnum(Rest,  Line, Acc);
+        <<"0", _/binary>>      -> read_octnum(Bin, Line, Acc);
+        _                      -> read_num(Bin, <<>>, Line, Acc)
     end.
 
-read_hexnum(Bin, Sign, Line, Acc) ->
+read_hexnum(Bin, Line, Acc) ->
     case collect(Bin, fun is_hex_char/1, infinity) of
         {_, <<X, _/binary>>} when ?is_letter(X) ->
            syntax_error({invalid_number, Bin, {need_space, X}}, Line);
         {B2, Rest} ->
-            N = plus_minus(Sign, hex_to_integer(B2)),
+            N = hex_to_integer(B2),
             b(Rest, Line, [{{int_lit, {hex, N}}, Line} | Acc]);
         eof ->
             syntax_error({unterminated_numeral, Bin}, Line)
     end.
 
-read_octnum(Bin, Sign, Line, Acc) ->
+read_octnum(Bin, Line, Acc) ->
     case collect(Bin, fun is_oct_char/1, infinity) of
         {_, <<$8, _/binary>>} ->
            syntax_error({invalid_octal, Bin, {decimal_digit, 8}}, Line);
@@ -283,7 +266,7 @@ read_octnum(Bin, Sign, Line, Acc) ->
         {_, <<X, _/binary>>} when ?is_letter(X) ->
            syntax_error({invalid_number, Bin, {need_space, X}}, Line);
         {B2, Rest} ->
-            case plus_minus(Sign, oct_to_integer(B2)) of
+            case oct_to_integer(B2) of
                 0 ->
                     b(Rest, Line, [{{int_lit, {dec, 0}}, Line} | Acc]);
                 N ->
@@ -298,22 +281,22 @@ read_octnum(Bin, Sign, Line, Acc) ->
 %%      | Digits . Exp?
 %%      | Digits Exp?
 %% Exp -> (E|e)(+|-)?Digits
-read_num(Bin, Sign, StrAcc, Line, Acc) ->
+read_num(Bin, StrAcc, Line, Acc) ->
     case Bin of
         <<$., Rest/binary>> ->
             StrAcc2 = <<StrAcc/binary, $.>>,
             StrAcc3 = ensure_0_dot(StrAcc2),
-            read_frac(Rest, Sign, StrAcc3, Line, Acc);
+            read_frac(Rest, StrAcc3, Line, Acc);
         <<E, Rest/binary>> when ?is_exp(E) ->
             if StrAcc =:= <<>> ->
                     syntax_error({invalid_number, before(Bin)}, Line);
                StrAcc =/= <<>> ->
                     StrAcc2 = ensure_digits_dot_digits(StrAcc),
                     StrAcc3 = <<StrAcc2/binary, "e">>,
-                    read_exp(Rest, Sign, StrAcc3, Line, Acc)
+                    read_exp(Rest, StrAcc3, Line, Acc)
             end;
         <<D, Rest/binary>> when ?is_digit(D) ->
-            read_num(Rest, Sign, <<StrAcc/binary, D>>, Line, Acc);
+            read_num(Rest, <<StrAcc/binary, D>>, Line, Acc);
         <<X, _/binary>> when ?is_letter(X) ->
            syntax_error({invalid_number, {need_space, X}}, Line);
         _ ->
@@ -321,26 +304,25 @@ read_num(Bin, Sign, StrAcc, Line, Acc) ->
                     syntax_error({invalid_number, before(Bin)}, Line);
                StrAcc =/= <<>> ->
                     N = list_to_integer(binary_to_list(StrAcc)),
-                    Value = plus_minus(Sign, N),
-                    b(Bin, Line, [{{int_lit, {dec, Value}}, Line} | Acc])
+                    b(Bin, Line, [{{int_lit, {dec, N}}, Line} | Acc])
             end
     end.
 
-read_frac(Bin, Sign, StrAcc, Line, Acc) ->
+read_frac(Bin, StrAcc, Line, Acc) ->
     case Bin of
         <<D, Rest/binary>> when ?is_digit(D) ->
-            read_frac(Rest, Sign, <<StrAcc/binary, D>>, Line, Acc);
+            read_frac(Rest, <<StrAcc/binary, D>>, Line, Acc);
         <<E, Rest/binary>> when ?is_exp(E) ->
             StrAcc2 = ensure_digits_dot_digits(StrAcc),
             StrAcc3 = <<StrAcc2/binary, "e">>,
-            read_exp(Rest, Sign, StrAcc3, Line, Acc);
+            read_exp(Rest, StrAcc3, Line, Acc);
         <<X, _/binary>> when ?is_letter(X) ->
            syntax_error({invalid_number, {need_space, X}}, Line);
         <<$., _/binary>> ->
            syntax_error({invalid_number, multiple_decimal_points}, Line);
         _ ->
             StrAcc2 = ensure_digits_dot_digits(StrAcc),
-            try list_to_float(plus_minus_float_str(Sign, StrAcc2)) of
+            try list_to_float(binary_to_list(StrAcc2)) of
                 Float ->
                     b(Bin, Line, [{{float_lit, Float}, Line} | Acc])
             catch error:badarg ->
@@ -348,12 +330,12 @@ read_frac(Bin, Sign, StrAcc, Line, Acc) ->
             end
     end.
 
-read_exp(Bin, Sign, StrAcc, Line, Acc) ->
+read_exp(Bin, StrAcc, Line, Acc) ->
     case Bin of
         <<S, Rest/binary>> when ?is_sign(S)->
-            read_exp_d(Rest, Sign, <<StrAcc/binary, S>>, Line, Acc);
+            read_exp_d(Rest, <<StrAcc/binary, S>>, Line, Acc);
         <<D, Rest/binary>> when ?is_digit(D) ->
-            read_exp_d(Rest, Sign, <<StrAcc/binary, D>>, Line, Acc);
+            read_exp_d(Rest, <<StrAcc/binary, D>>, Line, Acc);
         <<X, _/binary>> when ?is_letter(X) ->
            syntax_error({invalid_number, {need_space, X}}, Line);
         <<$., _/binary>> ->
@@ -362,16 +344,16 @@ read_exp(Bin, Sign, StrAcc, Line, Acc) ->
             syntax_error({invalid_number, before(Bin)}, Line)
     end.
 
-read_exp_d(Bin, Sign, StrAcc, Line, Acc) ->
+read_exp_d(Bin, StrAcc, Line, Acc) ->
     case Bin of
         <<D, Rest/binary>> when ?is_digit(D) ->
-            read_exp_d(Rest, Sign, <<StrAcc/binary, D>>, Line, Acc);
+            read_exp_d(Rest, <<StrAcc/binary, D>>, Line, Acc);
         <<X, _/binary>> when ?is_letter(X) ->
            syntax_error({invalid_number, {need_space, X}}, Line);
         <<$., _/binary>> ->
            syntax_error({invalid_number, decimal_point_in_exp}, Line);
         _ ->
-            try list_to_float(plus_minus_float_str(Sign, StrAcc)) of
+            try list_to_float(binary_to_list(StrAcc)) of
                 Float ->
                     b(Bin, Line, [{{float_lit, Float}, Line} | Acc])
             catch error:badarg ->
@@ -388,9 +370,6 @@ ensure_digits_dot_digits(B) -> 'd.d'(B, B).
 'd.d'(<<>>, B)                                 -> <<B/binary, ".0">>;
 'd.d'(<<".">>, B)                              -> <<B/binary, "0">>;
 'd.d'(<<".", _/binary>>, B)                    -> B.
-
-plus_minus_float_str(plus, Bin)  -> "+" ++ binary_to_list(Bin);
-plus_minus_float_str(minus, Bin) -> "-" ++ binary_to_list(Bin).
 
 %% -- word --
 
@@ -430,9 +409,6 @@ is_hex_char(C) -> ?is_digit(C) orelse ?is_a_to_f(C).
 
 oct_to_integer(Bin) -> erlang:list_to_integer(binary_to_list(Bin), 8).
 hex_to_integer(Bin) -> erlang:list_to_integer(binary_to_list(Bin), 16).
-
-plus_minus(plus,  Value) -> Value;
-plus_minus(minus, Value) -> -Value.
 
 ok(Line, Acc) ->
     {ok, lists:reverse(Acc), Line}.

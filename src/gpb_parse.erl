@@ -243,12 +243,13 @@ p_enum_fields(Tokens, Acc) ->
         [?w("option") | _] ->
             {Option, Rest} = p_option(Tokens),
             p_enum_fields(Rest, [Option | Acc]);
-        [?w(Name/binary), ?t('='), ?i(Int) | Rest] ->
-            EnumField = {word_value(Name), int_value(Int)},
-            {_EOpts, Rest2} = p_maybe_opt_list(Rest),
-            Rest3 = skip_semicolon(Rest2),
+        [?w(Name/binary), ?t('=') | Rest] ->
+            {Value, Rest2} = p_integer_const(Rest),
+            EnumField = {word_value(Name), Value},
+            {_EOpts, Rest3} = p_maybe_opt_list(Rest2),
+            Rest4 = skip_semicolon(Rest3),
             Acc1 = [EnumField | Acc],
-            p_enum_fields(Rest3, Acc1);
+            p_enum_fields(Rest4, Acc1);
         [?t('}') | _] ->
             {lists:reverse(Acc), Tokens};
         _ ->
@@ -352,35 +353,40 @@ p_msg_elem(Tokens) ->
 
 %% group_def -> occurrence group identifier '=' dec_lit '{' msg_elems '}':
 %%
-p_field_or_group(Occurrence,
-                 [?w("group"), ?w(Name/binary), ?t('='), ?i(FNum), ?t('{')
-                 | Rest]) ->
-    Rest2 = skip_semicolon(Rest),
-    {MsgElems, Rest3} = p_msg_elems(Rest2, []),
-    TmpGName = word_value(Name),
-    Field = #?gpb_field{occurrence = Occurrence,
-                        type       = {ref,['...expanded-later']},
-                        name       = TmpGName,
-                        fnum       = int_value(FNum),
-                        opts       = []},
-    Group = {group1, TmpGName, MsgElems, Field},
-    Rest4 = skip_semicolon(Rest3),
-    {Group, Rest4};
+p_field_or_group(Occurrence, [?w("group"), ?w(Name/binary), ?t('=') | Rest]) ->
+    {FNum, Rest2} = p_integer_const(Rest),
+    case Rest2  of
+        [?t('{') | Rest3] ->
+            Rest4 = skip_semicolon(Rest3),
+            {MsgElems, Rest5} = p_msg_elems(Rest4, []),
+            TmpGName = word_value(Name),
+            Field = #?gpb_field{occurrence = Occurrence,
+                                type       = {ref,['...expanded-later']},
+                                name       = TmpGName,
+                                fnum       = FNum,
+                                opts       = []},
+            Group = {group1, TmpGName, MsgElems, Field},
+            Rest6 = skip_semicolon(Rest5),
+            {Group, Rest6};
+        _ ->
+            ?syntax_error(Rest2)
+    end;
 p_field_or_group(Occurrence, Tokens) ->
     p_field(Occurrence, Tokens).
 
 p_field(Occurrence, Tokens) ->
     {Type, Rest} = p_field_type(Tokens),
     case Rest of
-        [?w(FName/binary), ?t('='), ?i(FNum) | Rest2] ->
-            {FOpts, Rest3} = p_field_opts(Rest2),
+        [?w(FName/binary), ?t('=') | Rest2] ->
+            {FNum, Rest3} = p_integer_const(Rest2),
+            {FOpts, Rest4} = p_field_opts(Rest3),
             Field = #?gpb_field{name       = word_value(FName),
                                 type       = Type,
                                 occurrence = Occurrence,
-                                fnum       = int_value(FNum),
+                                fnum       = FNum,
                                 opts       = FOpts},
-            Rest4 = skip_semicolon(Rest3),
-            {Field, Rest4};
+            Rest5 = skip_semicolon(Rest4),
+            {Field, Rest5};
         _ ->
             ?syntax_error(Rest, "expected <field> = <num>")
     end.
@@ -433,16 +439,17 @@ p_map([?w("map"), ?t('<') | Rest]) ->
         [?t(',') | Rest3] ->
             {ValueType, Rest4} = p_field_type(Rest3),
             case Rest4 of
-                [?t('>'), ?w(FName/binary), ?t('='), ?i(FNum) | Rest5] ->
+                [?t('>'), ?w(FName/binary), ?t('=') | Rest5] ->
+                    {FNum, Rest6} = p_integer_const(Rest5),
                     Type = {map, KeyType, ValueType},
-                    {FOpts, Rest6} = p_field_opts(Rest5),
+                    {FOpts, Rest7} = p_field_opts(Rest6),
                     Field = #?gpb_field{name       = word_value(FName),
                                         type       = Type,
                                         occurrence = repeated,
-                                        fnum       = int_value(FNum),
+                                        fnum       = FNum,
                                         opts       = FOpts},
-                    Rest7 = skip_semicolon(Rest6),
-                    {Field, Rest7};
+                    Rest8 = skip_semicolon(Rest7),
+                    {Field, Rest8};
                 _ ->
                     ?syntax_error(Rest4, expected_mapfield_tokens())
             end;
@@ -818,16 +825,44 @@ p_maybe_opt_list([?t('[') | Rest]) ->
 p_maybe_opt_list(Tokens) ->
     {[], Tokens}.
 
-%% const -> integer
-%% const -> float_lit
-%% const -> string_expr
+p_integer_const([?i(Int) | Rest])          -> {int_value(Int), Rest};
+p_integer_const([?t('-'), ?i(Int) | Rest]) -> {-int_value(Int), Rest};
+p_integer_const([?t('+'), ?i(Int) | Rest]) -> {int_value(Int), Rest};
+p_integer_const(Tokens) ->
+    ?syntax_error(Tokens).
+
+%% const -> integer_or_float
+%% const -> '+' integer_or_float
+%% const -> '-' integer_or_float
+%% const -> pstring_expr
 %% const -> word
+%%
+%% integer_or_float -> float_lit
+%% integer_or_float -> inf
+%% integer_or_float -> nan
+%% integer_or_float -> int_lit
 p_const([?s(Str) | Rest]) ->
     p_str_const(Rest, [str_value(Str)]);
 p_const([?i(Int) | Rest]) ->
     {int_value(Int), Rest};
 p_const([?fl(Float) | Rest]) ->
     {float_value(Float), Rest};
+p_const([?w("inf") | Rest]) ->
+    {infinity, Rest};
+p_const([?w("nan") | Rest]) ->
+    {nan, Rest};
+p_const([?t('-'), ?i(Int) | Rest]) ->
+    {-int_value(Int), Rest};
+p_const([?t('-'), ?fl(Float) | Rest]) ->
+    {-float_value(Float), Rest};
+p_const([?t('-'), ?w("inf") | Rest]) ->
+    {'-infinity', Rest};
+p_const([?t('+'), ?i(Int) | Rest]) ->
+    {int_value(Int), Rest};
+p_const([?t('+'), ?fl(Float) | Rest]) ->
+    {float_value(Float), Rest};
+p_const([?t('+'), ?w("inf") | Rest]) ->
+    {infinity, Rest};
 p_const([?w(Word/binary) | Rest]) ->
     {word_value(Word), Rest};
 p_const(Tokens) ->

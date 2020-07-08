@@ -76,6 +76,20 @@ parses_default_value_test() ->
            "  optional uint32 x = 1 [default = 12];",
            "}"]).
 
+parses_default_value_for_float_test() ->
+    {ok, Defs} = parse_lines(
+                   ["message m {",
+                    "  optional float f1 = 1 [default = 1.25];",
+                    "  optional float f2 = 2 [default = inf];",
+                    "  optional float f3 = 3 [default = -inf];",
+                    "  optional float f4 = 4 [default = nan];",
+                    "}"]),
+    [{{msg,m}, [#?gpb_field{name=f1, opts=[{default,1.25}]},
+                #?gpb_field{name=f2, opts=[{default,infinity}]},
+                #?gpb_field{name=f3, opts=[{default,'-infinity'}]},
+                #?gpb_field{name=f4, opts=[{default,nan}]}]}] =
+        Defs.
+
 parses_default_value_for_bytes_test() ->
     {ok, Defs} = parse_lines(
                    ["message m {",
@@ -91,6 +105,7 @@ parses_default_value_for_bytes_test() ->
                             opts=[{default,"abc"}]}]},
      {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
+
 
 parses_string_concatenation_test() ->
     {ok, [{{msg,'Msg'}, [#?gpb_field{name=x, type=string, fnum=1,
