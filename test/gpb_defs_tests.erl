@@ -376,6 +376,28 @@ parses_custom_option_in_services_test() ->
      {{service_containment, _}, _}] =
         AllDefs.
 
+parse_uninterpreted_option_block_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"x.proto",
+                  ["option (my_opt1) = {a: 'some-string'};",
+                   "option (my_opt2) = {a: x { [x.y_opt] { i: 2 }}};",
+                   "message m {",
+                   "  optional uint32 f1 = 1 [(my_opt3) = { i:4 }];",
+                   "}"]}],
+                []),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{msg,m}, [#?gpb_field{opts=[{[my_opt3],{uninterpreted, S3}}]}]},
+     {{msg_containment, _}, _},
+     {option,[my_opt1], {uninterpreted, S1}},
+     {option,[my_opt2], {uninterpreted, S2}}] =
+        AllDefs,
+    {true, _} = {is_flat_string(S1), S1},
+    {true, _} = {is_flat_string(S2), S3},
+    {true, _} = {is_flat_string(S3), S2},
+    ok.
+
 json_name_field_option_test() ->
     {ok, Elems} = parse_lines(
                     ["message m1 {",
@@ -2020,3 +2042,9 @@ is_io_list(X) when is_list(X); is_binary(X) ->
     catch error:badarg ->
             false
     end.
+
+is_flat_string(L) when is_list(L) ->
+    lists:all(fun is_char/1, L).
+
+is_char(C) when 0 =< C, C =< 16#10ffff -> true;
+is_char(_) -> false.

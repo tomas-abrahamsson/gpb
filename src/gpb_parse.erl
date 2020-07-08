@@ -636,14 +636,42 @@ p_extend([?w("extend") | Rest]) ->
 p_option([?w("option") | Rest]=Tokens) ->
     case p_option_name(Rest) of
         {OptName, [?t('=') | Rest2]} ->
-            {Const, Rest3} = p_const(Rest2),
+            {Value, Rest3} = p_option_value(Rest2),
             Rest4 = skip_semicolon(Rest3),
-            {{option, OptName, Const}, Rest4};
+            {{option, OptName, Value}, Rest4};
         _ ->
             ?syntax_error(Tokens, "expected option <name> = <value>")
     end;
 p_option(Tokens) ->
     ?syntax_error(Tokens).
+
+p_option_value([?t('{')=T | Rest]) ->
+    p_uninterpreted_block(Rest, 1, [T]);
+p_option_value(Tokens) ->
+    p_const(Tokens).
+
+p_uninterpreted_block([Token | Rest], Depth, Acc) ->
+    %% Just count curly braces until we find a matching one.
+    %% This seems to be what the protobuf does.
+    case Token of
+        ?t('}') ->
+            if Depth =:= 1 ->
+                    AccTokens = lists:reverse([Token | Acc]),
+                    S = lists:flatten(tokens_to_str(AccTokens)),
+                    V = {uninterpreted, S},
+                    {V, Rest};
+               Depth > 1 ->
+                    p_uninterpreted_block(Rest, Depth-1, [Token | Acc])
+            end;
+        ?t('{') ->
+            p_uninterpreted_block(Rest, Depth+1, [Token | Acc]);
+        _ ->
+            p_uninterpreted_block(Rest, Depth, [Token | Acc])
+    end;
+p_uninterpreted_block([]=Tokens, _Depth, Acc) ->
+    L0Str = integer_to_list(line(lists:last(Acc))),
+    Why = "unexpected end of input in option block starting at line " ++ L0Str,
+    ?syntax_error(Tokens, Why).
 
 %% --------------------------------------------
 %% service
@@ -831,7 +859,7 @@ p_opt_list(Tokens, Acc) ->
             {Option, Rest4} =
                 case Rest of
                     [?t('=') | Rest2] ->
-                        {Value, Rest3} = p_const(Rest2),
+                        {Value, Rest3} = p_option_value(Rest2),
                         {{OptionName, Value}, Rest3};
                     _ ->
                         {OptionName, Rest}

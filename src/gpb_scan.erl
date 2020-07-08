@@ -119,6 +119,7 @@ b(Bin, Line, Acc) ->
         <<L, Rest/binary>> when ?is_letter(L) ->
             read_word(Rest, <<L>>, Line, Acc);
         <<$., Rest/binary>> -> b(Rest, Line, [{'.', Line} | Acc]);
+        <<$:, Rest/binary>> -> b(Rest, Line, [{':', Line} | Acc]);
         <<$;, Rest/binary>> -> b(Rest, Line, [{';', Line} | Acc]);
         <<${, Rest/binary>> -> b(Rest, Line, [{'{', Line} | Acc]);
         <<$}, Rest/binary>> -> b(Rest, Line, [{'}', Line} | Acc]);
