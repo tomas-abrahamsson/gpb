@@ -252,7 +252,14 @@ parses_package_test() ->
 parses_import_test() ->
     {ok, [{package,[p1,'.',p2]}, {import, "a/b/c.proto"}]} =
         parse_lines(["package p1.p2;",
-                     "import \"a/b/c.proto\";"]).
+                     "import \"a/b/c.proto\";"]),
+    %% Ignore public and weak keywords in imports
+    %% (single quote strings are ok too)
+    {ok, [{import, "a/b/c.proto"}]} =
+        parse_lines(["import public 'a/b/c.proto';"]),
+    {ok, [{import, "a/b/c.proto"}]} =
+        parse_lines(["import weak 'a/b/c.proto';"]).
+
 
 parses_enum_option_test() ->
     {ok, Elems} = parse_lines(["enum e1 {",

@@ -212,8 +212,20 @@ p_package([?w("package") | Rest]) ->
 %% import
 
 %% import_def -> import str_lit ';'
-p_import([?w("import"), ?s(Import), ?t(';') | Rest]) ->
-    {{import, str_value(Import)}, skip_semicolon(Rest)};
+p_import([?w("import") | Rest]) ->
+    case Rest of
+        [?s(Import) | Rest2] ->
+            Rest3 = skip_semicolon(Rest2),
+            {{import, str_value(Import)}, Rest3};
+        [?w("public"), ?s(Import) | Rest2] ->
+            Rest3 = skip_semicolon(Rest2),
+            {{import, str_value(Import)}, Rest3};
+        [?w("weak"), ?s(Import) | Rest2] ->
+            Rest3 = skip_semicolon(Rest2),
+            {{import, str_value(Import)}, Rest3};
+        _ ->
+            ?syntax_error(Rest)
+    end;
 p_import(Tokens) ->
     ?syntax_error(Tokens, "expected import <string>;").
 
