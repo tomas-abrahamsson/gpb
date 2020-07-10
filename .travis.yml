@@ -8,11 +8,11 @@ addons:
       - libprotobuf-dev
       - protobuf-compiler
 otp_release:
-  - 22.0
+  - 23.0
+  - 22.3
   - 21.3
   - 20.3
   - 19.3
-  - 18.3
 env:
   - VERBOSE=1
 script:
