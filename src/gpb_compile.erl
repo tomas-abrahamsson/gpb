@@ -1402,6 +1402,10 @@ fmt_err({option_error, {not_supported, maps_omitted_nif}}) ->
     ?f("Options maps, maps_unset_optional=omitted and nif is not supported");
 fmt_err({parse_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
+fmt_err({parse_errors, FileName, Reasons}) ->
+    gpb_lib:nl_join(
+      [?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)])
+       || {Line, Module, ErrInfo} <- Reasons]);
 fmt_err({scan_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
 fmt_err({import_not_found, Import, Tried}) ->
@@ -2536,7 +2540,9 @@ scan_and_parse_string(S, FName, Opts) ->
                             {error, {parse_error, FName, Reason}}
                     end;
                 {error, {_Line, _Module, _ErrInfo}=Reason} ->
-                    {error, {parse_error, FName, Reason}}
+                    {error, {parse_error, FName, Reason}};
+                {error, Reasons} when is_list(Reasons) -> % scanner/parser 2
+                    {error, {parse_errors, FName, Reasons}}
             end;
         {error, {_Line0, _Module, _ErrInfo}=Reason, _Line1} ->
             {error, {scan_error, FName, Reason}}
@@ -2555,13 +2561,7 @@ parse(Tokens, Opts) ->
         1 ->
             gpb_parse:parse(Tokens++[{'$end', 999}]);
         2 ->
-            case gpb_parse2:parse(Tokens) of
-                {ok, Defs} ->
-                    {ok, Defs};
-                {error, Errors} ->
-                    %% For now, calling code can only handle one error
-                    {error, hd(Errors)}
-            end
+            gpb_parse2:parse(Tokens)
     end.
 
 default_scanner_parser() ->
