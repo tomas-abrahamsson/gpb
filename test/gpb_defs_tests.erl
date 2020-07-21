@@ -1329,6 +1329,28 @@ proto3_reserved_numbers_and_names_test() ->
      {{reserved_numbers,'m1.m4'},[{100,max}]}] =
         do_process_sort_defs(Defs).
 
+proto3_enum_with_reserved_numbers_and_names_test() ->
+    {ok,Defs} = parse_lines(
+                  ["syntax=\"proto2\";",
+                   "message m1 {",
+                   "  optional e1 f1 = 1;",
+                   "  enum e1 {",
+                   "    A = 0;",
+                   "    reserved 100 to max, -3 to -1, 2, 15, 9 to 11;",
+                   "    reserved \"foo\", \"bar\";",
+                   "  }",
+                   "}"]),
+    [{file, _},
+     {proto_defs_version, _},
+     {syntax,_},
+     {{enum,'m1.e1'}, [{'A',0}]},
+     {{enum_containment, _}, _},
+     {{msg,m1}, [#?gpb_field{name=f1, type={enum,'m1.e1'}}]},
+     {{msg_containment,_}, _},
+     {{reserved_names,'m1.e1'},   ["foo","bar"]},
+     {{reserved_numbers,'m1.e1'}, [{100,max},{-3,-1},2,15,{9,11}]}] =
+        do_process_sort_defs(Defs).
+
 file_attrs_for_each_file_test() ->
     AllDefs = parse_several_file_lines( % no sort!
                 [{"f1.proto",

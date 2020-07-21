@@ -255,6 +255,9 @@ p_enum_fields(Tokens, Acc) ->
         [?w("option") | _] ->
             {Option, Rest} = p_option(Tokens),
             p_enum_fields(Rest, [Option | Acc]);
+        [?w("reserved") | _] ->
+            {Reserved, Rest} = p_reserved(Tokens),
+            p_enum_fields(Rest, [Reserved | Acc]);
         [?w(Name/binary), ?t('=') | Rest] ->
             {Value, Rest2} = p_integer_const(Rest),
             EnumField = {word_value(Name), Value},
