@@ -533,8 +533,9 @@ p_oneof_elems(Tokens, Acc) ->
 %% ext -> integer to max
 p_extensions([?w("extensions") | Rest]) ->
     {Exts, Rest2} = p_exts(Rest, []),
-    Rest3 = skip_semicolon(Rest2),
-    {{extensions, lists:sort(Exts)}, Rest3}.
+    {_Opts, Rest3} = p_maybe_opt_list(Rest2),
+    Rest4 = skip_semicolon(Rest3),
+    {{extensions, lists:sort(Exts)}, Rest4}.
 
 p_exts(Tokens, Acc) ->
     {Ext, Rest} = p_ext(Tokens),

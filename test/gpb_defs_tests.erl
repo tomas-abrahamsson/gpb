@@ -645,6 +645,21 @@ parses_msg_extensions_test() ->
      {{msg_containment,_}, [m1, 'm1.m2']}] =
         do_process_sort_defs(Defs).
 
+parses_msg_extensions_with_options_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required uint32 f1=1;",
+                             "  extensions 100 to 199, 300 [(a) = 'b'];",
+                             "  extensions 251 [];",
+                             "}"]),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{extensions,m1},[{100,199},{300,300}]},
+     {{extensions,m1},[{251,251}]},
+     {{msg,m1},      [#?gpb_field{name=f1}]},
+     {{msg_containment,_}, [m1]}] =
+        do_process_sort_defs(Defs).
+
 parses_extending_msgs_test() ->
     {ok,Defs} = parse_lines(["message m1 {",
                              "  required uint32 f1=1 [default=17];",
