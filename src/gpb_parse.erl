@@ -53,8 +53,7 @@ format_error({syntax_error, {before, Tokens}}) ->
 format_error({syntax_error, {before, Tokens}, Why}) ->
     ?f("syntax error at: ~s: ~s", [tokens_to_str(Tokens), ensure_str(Why)]).
 
--define(t(Token, Line), {Token, Line}).   % a token with a line number
--define(t(Token), ?t(Token, _)).          % a token
+-define(t(Token), {Token, _, _}).         % a token
 -define(w(N),   ?t(<<N>>)).               % a word, as a binary
 -define(s(S),   ?t({str_lit, S})).        % a string literal
 -define(i(I),   ?t({int_lit, I})).        % an integer literal
@@ -149,14 +148,14 @@ maybe_debug_syntax_error(Line, FollowingTokens, StackTrace, Why) ->
 safe_tl([_ | Rest]) -> Rest;
 safe_tl([]) -> [].
 
-line([{_Token, Line} | _]) -> Line;
+line([{_Token, Line, _Orig} | _]) -> Line;
 line([]) -> 'at end-of-file'.
 
 safe_max_n_on_same_line([], _Max) -> [];
-safe_max_n_on_same_line([{_, Line} | _]=Tokens, Max) ->
+safe_max_n_on_same_line([{_, Line, _Orig} | _]=Tokens, Max) ->
     safe_max_aux(Tokens, Max, Line).
 
-safe_max_aux([{_, Line}=Token | Rest], Max, Line) when Max >= 1 ->
+safe_max_aux([{_, Line, _Orig}=Token | Rest], Max, Line) when Max >= 1 ->
     [Token | safe_max_aux(Rest, Max-1, Line)];
 safe_max_aux(_, _Max, _Line) ->
     [].
@@ -965,18 +964,11 @@ float_value(Float) ->
 tokens_to_str(Tokens) ->
     space_join([token_to_str(T) || T <- Tokens]).
 
-token_to_str({X, _Loc}) ->
-    case X of
-        B when is_binary(B) ->
-            unicode:characters_to_list(B);
-        {str_lit, S} ->
-            S;
-        {int_lit, {_, I}} ->
-            integer_to_list(I);
-        {float_lit, F} ->
-            float_to_list(F);
-        A when is_atom(A) ->
-            atom_to_list(A)
+token_to_str({_X, _Loc, Orig}) ->
+    if is_binary(Orig) ->
+            unicode:characters_to_list(Orig);
+       is_atom(Orig) ->
+            atom_to_list(Orig)
     end.
 
 space_join([]) -> "";

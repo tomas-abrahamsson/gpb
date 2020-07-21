@@ -187,6 +187,55 @@ ignores_whitespace_test() ->
         ok_scan(<<"\n  12  13 \t 15">>),
     ok.
 
+saves_orig_test() ->
+    Strings = [{<<"'abcdef'">>,              single_quoted},
+               {<<"\"abc\"">>,               double_quoted},
+               {<<"'a\\u1234bc'">>,          up_to_4_hex_chars},
+               {<<"'a\\U101234 zz'">>,       up_to_8_hex_chars},
+               {<<"'a\\x10 zz'">>,           up_to_2_hex_chars},
+               {<<"'a\\0377 zz'">>,          octal},
+               {<<"'a\\n\\r\\v\\t\\b zz'">>, backslash_sequences}],
+    [{{ok, [{{str_lit,_}, _, Orig}], _}, _} = {scan(Orig), What}
+     || {Orig, What} <- Strings],
+
+    Words = [{<<"message">>, message},
+             {<<"max">>,     max},
+             {<<"inf">>,     inf},
+             {<<"m12_99">>,  m12_99}],
+    [{{ok, [{Word, _, Word}], _}, _} = {scan(Word), What}
+      || {Word, What} <- Words],
+
+    IntNumbers = [{<<"0">>,          int_zero},
+                  {<<"0x1234">>,     hex},
+                  {<<"0x1234ffff">>, hex_2},
+                  {<<"0X1234">>,     hex_3},
+                  {<<"0377">>,       oct_255},
+                  {<<"1234">>,       dec}],
+    [{{ok, [{{int_lit,{_,_}}, _, Orig}], _}, _} = {scan(Orig), What}
+     || {Orig, What} <- IntNumbers],
+
+    FloatNumbers = [{<<".125">>,       leading_point},
+                    {<<".125e3">>,     leading_point_exp},
+                    {<<".125e-3">>,    leading_point_signed_exp},
+                    {<<"0.125">>,      zero_point},
+                    {<<"0.125e3">>,    zero_point_digits_exp},
+                    {<<"0.125e-3">>,   zero_point_digits_signed_exp},
+                    {<<"0.e3">>,       zero_point_exp},
+                    {<<"0.e-3">>,      zero_point_signed_exp},
+                    {<<"0e3">>,        zero_exp},
+                    {<<"0e-3">>,       zero_signed_exp}],
+    [{{ok, [{{float_lit,_}, _, Orig}], _}, _} = {scan(Orig), What}
+     || {Orig, What} <- FloatNumbers],
+
+    Punctuations = ".:;{}[]()=,<>-+",
+    [begin
+         B = <<C>>,
+         T = list_to_atom([C]),
+         {{ok, [{T, _, T}], _}, _} = {scan(B), [C]}
+     end
+     || C <- Punctuations],
+    ok.
+
 line_numbers_in_tokens_test() ->
     B = <<"'abc'\n"
           ".\n"
@@ -196,14 +245,14 @@ line_numbers_in_tokens_test() ->
           "10\n"
           "1.25e3\n"
           "true">>,
-    {ok, [{{str_lit,_}, 1},
-          {'.', 2},
+    {ok, [{{str_lit,_}, 1, _},
+          {'.', 2, _},
           %% C++ comment, one line line
           %% C comment, 2 lines
           %% C comment 1 line, then c++ comment same line
-          {{int_lit, _}, 6},
-          {{float_lit, _}, 7},
-          {<<"true">>, 8}]=Tokens, 8 = _EndLine} =
+          {{int_lit, _}, 6, _},
+          {{float_lit, _}, 7, _},
+          {<<"true">>, 8, _}]=Tokens, 8 = _EndLine} =
         gpb_scan:binary(B),
     {ok, Tokens, 9} = gpb_scan:binary(<<B/binary, $\n>>),
     ok.
@@ -239,7 +288,10 @@ scan_error_test() ->
 
 ok_scan(B) when is_binary(B) ->
     {ok, TokensLines, _EndLine} = gpb_scan:binary(B),
-    [Token || {Token, _Line} <- TokensLines].
+    [Token || {Token, _Line, _Orig} <- TokensLines].
+
+scan(B) when is_binary(B) ->
+    gpb_scan:binary(B).
 
 err_scan(B, ExpectedErrTextFragmentsLowerCase) when is_binary(B) ->
     {error, {Line, Mod, Reason}, _EndLine} = gpb_scan:binary(B),

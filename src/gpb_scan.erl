@@ -28,7 +28,7 @@
 -export_type([pos/0]).
 -export_type([error/0]).
 
--type token() :: {token_data(), pos()}.
+-type token() :: {token_data(), pos(), orig_text()}.
 -type token_data()  :: atom() | % punctuation(-like) characters, generally
                        binary() | % words
                        {str_lit, string()} | % quoted strings
@@ -36,6 +36,8 @@
                        {int_lit, {int_format(), integer()}}.
 
 -type int_format() :: dec | hex | oct.
+
+-type orig_text() :: binary() | atom().
 
 -type pos() :: LineNumber::pos_integer().
 
@@ -112,27 +114,29 @@ b(Bin, Line, Acc) ->
         <<"/*", Rest/binary>> -> skip_c_comment(Rest, Line, Line, Acc);
         <<"\n", Rest/binary>> -> b(Rest, Line + 1, Acc);
         <<W, Rest/binary>> when ?is_white(W) -> b(Rest, Line, Acc);
-        <<"\"", Rest/binary>> -> read_string(Rest, $\", <<>>, Line, Line, Acc);
-        <<"'", Rest/binary>>  -> read_string(Rest, $', <<>>, Line, Line, Acc);
+        <<"\"", Rest/binary>> ->
+            read_string(Rest, $\", <<>>, Line, Line, <<"\"">>, Acc);
+        <<"'", Rest/binary>>  ->
+            read_string(Rest, $', <<>>, Line, Line, <<"'">>, Acc);
         <<D, _/binary>> when ?is_digit(D) -> read_number(Bin, Line, Acc);
         <<$., D, _/binary>> when ?is_digit(D) -> read_number(Bin, Line, Acc);
         <<L, Rest/binary>> when ?is_letter(L) ->
             read_word(Rest, <<L>>, Line, Acc);
-        <<$., Rest/binary>> -> b(Rest, Line, [{'.', Line} | Acc]);
-        <<$:, Rest/binary>> -> b(Rest, Line, [{':', Line} | Acc]);
-        <<$;, Rest/binary>> -> b(Rest, Line, [{';', Line} | Acc]);
-        <<${, Rest/binary>> -> b(Rest, Line, [{'{', Line} | Acc]);
-        <<$}, Rest/binary>> -> b(Rest, Line, [{'}', Line} | Acc]);
-        <<$[, Rest/binary>> -> b(Rest, Line, [{'[', Line} | Acc]);
-        <<$], Rest/binary>> -> b(Rest, Line, [{']', Line} | Acc]);
-        <<$(, Rest/binary>> -> b(Rest, Line, [{'(', Line} | Acc]);
-        <<$), Rest/binary>> -> b(Rest, Line, [{')', Line} | Acc]);
-        <<$=, Rest/binary>> -> b(Rest, Line, [{'=', Line} | Acc]);
-        <<$,, Rest/binary>> -> b(Rest, Line, [{',', Line} | Acc]);
-        <<$<, Rest/binary>> -> b(Rest, Line, [{'<', Line} | Acc]);
-        <<$>, Rest/binary>> -> b(Rest, Line, [{'>', Line} | Acc]);
-        <<$-, Rest/binary>> -> b(Rest, Line, [{'-', Line} | Acc]);
-        <<$+, Rest/binary>> -> b(Rest, Line, [{'+', Line} | Acc]);
+        <<$., Rest/binary>> -> b(Rest, Line, [{'.', Line, '.'} | Acc]);
+        <<$:, Rest/binary>> -> b(Rest, Line, [{':', Line, ':'} | Acc]);
+        <<$;, Rest/binary>> -> b(Rest, Line, [{';', Line, ';'} | Acc]);
+        <<${, Rest/binary>> -> b(Rest, Line, [{'{', Line, '{'} | Acc]);
+        <<$}, Rest/binary>> -> b(Rest, Line, [{'}', Line, '}'} | Acc]);
+        <<$[, Rest/binary>> -> b(Rest, Line, [{'[', Line, '['} | Acc]);
+        <<$], Rest/binary>> -> b(Rest, Line, [{']', Line, ']'} | Acc]);
+        <<$(, Rest/binary>> -> b(Rest, Line, [{'(', Line, '('} | Acc]);
+        <<$), Rest/binary>> -> b(Rest, Line, [{')', Line, ')'} | Acc]);
+        <<$=, Rest/binary>> -> b(Rest, Line, [{'=', Line, '='} | Acc]);
+        <<$,, Rest/binary>> -> b(Rest, Line, [{',', Line, ','} | Acc]);
+        <<$<, Rest/binary>> -> b(Rest, Line, [{'<', Line, '<'} | Acc]);
+        <<$>, Rest/binary>> -> b(Rest, Line, [{'>', Line, '>'} | Acc]);
+        <<$-, Rest/binary>> -> b(Rest, Line, [{'-', Line, '-'} | Acc]);
+        <<$+, Rest/binary>> -> b(Rest, Line, [{'+', Line, '+'} | Acc]);
         <<_,  _/binary>>    -> syntax_error({error, before(Bin)}, Line);
         <<>> -> ok(Line, Acc)
     end.
@@ -157,12 +161,13 @@ skip_c_comment(Bin, Line0, Line, Acc) ->
 
 %% -- string --
 
-read_string(Bin, Quote, StrAcc, Line0, Line, Acc) ->
+read_string(Bin, Quote, StrAcc, Line0, Line, Orig, Acc) ->
     case Bin of
         <<Quote, Rest/binary>> ->
             case unicode:characters_to_list(StrAcc, utf8) of
                 S when is_list(S) ->
-                    b(Rest, Line, [{{str_lit, S}, Line} | Acc]);
+                    Orig1 = <<Orig/binary, Quote>>,
+                    b(Rest, Line, [{{str_lit, S}, Line, Orig1} | Acc]);
                 {error, _SuccessfullyConverted, _Offending} ->
                     syntax_error({non_utf8_string, StrAcc}, Line0);
                 {incomplete, _SuccessfullyConverted, _IncompleteChar} ->
@@ -172,7 +177,9 @@ read_string(Bin, Quote, StrAcc, Line0, Line, Acc) ->
             case collect(Rest, fun is_hex_char/1, 4) of
                 {B2, Rest2} ->
                     C = hex_to_integer(B2),
-                    add_code_point(Rest2, Quote, StrAcc, C, Line0, Line, Acc);
+                    Orig1 = <<Orig/binary, "\\u", B2/binary>>,
+                    add_code_point(Rest2, Quote, StrAcc, C, Line0, Line,
+                                   Orig1, Acc);
                 eof ->
                     syntax_error({unterminated_string, StrAcc}, Line0)
             end;
@@ -180,7 +187,9 @@ read_string(Bin, Quote, StrAcc, Line0, Line, Acc) ->
             case collect(Rest, fun is_hex_char/1, 8) of
                 {B2, Rest2} ->
                     C = hex_to_integer(B2),
-                    add_code_point(Rest2, Quote, StrAcc, C, Line0, Line, Acc);
+                    Orig1 = <<Orig/binary, "\\U", B2/binary>>,
+                    add_code_point(Rest2, Quote, StrAcc, C, Line0, Line,
+                                   Orig1, Acc);
                 eof ->
                     syntax_error({unterminated_string, StrAcc}, Line0)
             end;
@@ -188,7 +197,9 @@ read_string(Bin, Quote, StrAcc, Line0, Line, Acc) ->
             case collect(Rest, fun is_hex_char/1, 2) of
                 {B2, Rest2} ->
                     C = hex_to_integer(B2),
-                    add_code_point(Rest2, Quote, StrAcc, C, Line0, Line, Acc);
+                    Orig1 = <<Orig/binary, "\\x", B2/binary>>,
+                    add_code_point(Rest2, Quote, StrAcc, C, Line0, Line,
+                                   Orig1, Acc);
                 eof ->
                     syntax_error({unterminated_string, StrAcc}, Line0)
             end;
@@ -197,23 +208,29 @@ read_string(Bin, Quote, StrAcc, Line0, Line, Acc) ->
             case collect(Rest, fun is_oct_char/1, 3) of
                 {B2, Rest2} ->
                     C = oct_to_integer(B2),
-                    add_code_point(Rest2, Quote, StrAcc, C, Line0, Line, Acc);
+                    Orig1 = <<Orig/binary, "\\", B2/binary>>,
+                    add_code_point(Rest2, Quote, StrAcc, C, Line0, Line,
+                                   Orig1, Acc);
                 eof ->
                     syntax_error({unterminated_string, StrAcc}, Line0)
             end;
         <<"\\", C, Rest/binary>> ->
             C2 = escape_char(C),
-            read_string(Rest, Quote, <<StrAcc/binary, C2>>, Line0, Line, Acc);
+            Orig1 = <<Orig/binary, "\\", C>>,
+            read_string(Rest, Quote, <<StrAcc/binary, C2>>, Line0, Line,
+                        Orig1, Acc);
         <<C, Rest/binary>> ->
-            read_string(Rest, Quote, <<StrAcc/binary, C>>, Line0, Line, Acc);
+            Orig1 = <<Orig/binary, C>>,
+            read_string(Rest, Quote, <<StrAcc/binary, C>>, Line0, Line,
+                        Orig1, Acc);
         <<>> ->
             syntax_error({unterminated_string, StrAcc}, Line0)
     end.
 
-add_code_point(Bin, Quote, StrAcc, C, Line0, Line, Acc) ->
+add_code_point(Bin, Quote, StrAcc, C, Line0, Line, Orig, Acc) ->
     try <<StrAcc/binary, C/utf8>> of
         StrAcc2 ->
-            read_string(Bin, Quote, StrAcc2, Line0, Line, Acc)
+            read_string(Bin, Quote, StrAcc2, Line0, Line, Orig, Acc)
     catch error:badarg ->
             Reason = explain_invalid_code_point(C),
             syntax_error({invalid_code_point, Reason, C}, Line)
@@ -239,26 +256,27 @@ escape_char(C)  -> C.
 
 read_number(Bin, Line, Acc) -> % always positive, sign is another token
     case Bin of
-        <<"0.", Rest/binary>>  -> read_frac(Rest,  <<"0.">>, Line, Acc);
-        <<"0e", Rest/binary>>  -> read_exp(Rest,  <<"0.0e">>, Line, Acc);
-        <<"0x", Rest/binary>>  -> read_hexnum(Rest,  Line, Acc);
-        <<"0X", Rest/binary>>  -> read_hexnum(Rest,  Line, Acc);
-        <<"0", _/binary>>      -> read_octnum(Bin, Line, Acc);
-        _                      -> read_num(Bin, <<>>, Line, Acc)
+        <<"0.", Rest/binary>> -> read_frac(Rest, <<"0.">>, Line, <<"0.">>, Acc);
+        <<"0e", Rest/binary>> -> read_exp(Rest, <<"0.0e">>,Line, <<"0e">>, Acc);
+        <<"0x", Rest/binary>> -> read_hexnum(Rest,  Line, <<"0x">>, Acc);
+        <<"0X", Rest/binary>> -> read_hexnum(Rest,  Line, <<"0X">>, Acc);
+        <<"0", _/binary>>     -> read_octnum(Bin, Line, <<>>, Acc);
+        _                     -> read_num(Bin, <<>>, Line, <<>>, Acc)
     end.
 
-read_hexnum(Bin, Line, Acc) ->
+read_hexnum(Bin, Line, Orig, Acc) ->
     case collect(Bin, fun is_hex_char/1, infinity) of
         {_, <<X, _/binary>>} when ?is_letter(X) ->
            syntax_error({invalid_number, Bin, {need_space, X}}, Line);
         {B2, Rest} ->
             N = hex_to_integer(B2),
-            b(Rest, Line, [{{int_lit, {hex, N}}, Line} | Acc]);
+            Orig1 = <<Orig/binary, B2/binary>>,
+            b(Rest, Line, [{{int_lit, {hex, N}}, Line, Orig1} | Acc]);
         eof ->
             syntax_error({unterminated_numeral, Bin}, Line)
     end.
 
-read_octnum(Bin, Line, Acc) ->
+read_octnum(Bin, Line, Orig, Acc) ->
     case collect(Bin, fun is_oct_char/1, infinity) of
         {_, <<$8, _/binary>>} ->
            syntax_error({invalid_octal, Bin, {decimal_digit, 8}}, Line);
@@ -267,11 +285,12 @@ read_octnum(Bin, Line, Acc) ->
         {_, <<X, _/binary>>} when ?is_letter(X) ->
            syntax_error({invalid_number, Bin, {need_space, X}}, Line);
         {B2, Rest} ->
+            Orig1 = <<Orig/binary, B2/binary>>,
             case oct_to_integer(B2) of
                 0 ->
-                    b(Rest, Line, [{{int_lit, {dec, 0}}, Line} | Acc]);
+                    b(Rest, Line, [{{int_lit, {dec, 0}}, Line, Orig1} | Acc]);
                 N ->
-                    b(Rest, Line, [{{int_lit, {oct, N}}, Line} | Acc])
+                    b(Rest, Line, [{{int_lit, {oct, N}}, Line, Orig1} | Acc])
             end;
         eof ->
             syntax_error({unterminated_numeral, Bin}, Line)
@@ -282,22 +301,25 @@ read_octnum(Bin, Line, Acc) ->
 %%      | Digits . Exp?
 %%      | Digits Exp?
 %% Exp -> (E|e)(+|-)?Digits
-read_num(Bin, StrAcc, Line, Acc) ->
+read_num(Bin, StrAcc, Line, Orig, Acc) ->
     case Bin of
         <<$., Rest/binary>> ->
+            Orig1 = <<Orig/binary, $.>>,
             StrAcc2 = <<StrAcc/binary, $.>>,
             StrAcc3 = ensure_0_dot(StrAcc2),
-            read_frac(Rest, StrAcc3, Line, Acc);
+            read_frac(Rest, StrAcc3, Line, Orig1, Acc);
         <<E, Rest/binary>> when ?is_exp(E) ->
             if StrAcc =:= <<>> ->
                     syntax_error({invalid_number, before(Bin)}, Line);
                StrAcc =/= <<>> ->
+                    Orig1 = <<Orig/binary, $E>>,
                     StrAcc2 = ensure_digits_dot_digits(StrAcc),
                     StrAcc3 = <<StrAcc2/binary, "e">>,
-                    read_exp(Rest, StrAcc3, Line, Acc)
+                    read_exp(Rest, StrAcc3, Line, Orig1, Acc)
             end;
         <<D, Rest/binary>> when ?is_digit(D) ->
-            read_num(Rest, <<StrAcc/binary, D>>, Line, Acc);
+            Orig1 = <<Orig/binary, D>>,
+            read_num(Rest, <<StrAcc/binary, D>>, Line, Orig1, Acc);
         <<X, _/binary>> when ?is_letter(X) ->
            syntax_error({invalid_number, {need_space, X}}, Line);
         _ ->
@@ -305,18 +327,20 @@ read_num(Bin, StrAcc, Line, Acc) ->
                     syntax_error({invalid_number, before(Bin)}, Line);
                StrAcc =/= <<>> ->
                     N = list_to_integer(binary_to_list(StrAcc)),
-                    b(Bin, Line, [{{int_lit, {dec, N}}, Line} | Acc])
+                    b(Bin, Line, [{{int_lit, {dec, N}}, Line, Orig} | Acc])
             end
     end.
 
-read_frac(Bin, StrAcc, Line, Acc) ->
+read_frac(Bin, StrAcc, Line, Orig, Acc) ->
     case Bin of
         <<D, Rest/binary>> when ?is_digit(D) ->
-            read_frac(Rest, <<StrAcc/binary, D>>, Line, Acc);
+            Orig1 = <<Orig/binary, D>>,
+            read_frac(Rest, <<StrAcc/binary, D>>, Line, Orig1, Acc);
         <<E, Rest/binary>> when ?is_exp(E) ->
+            Orig1 = <<Orig/binary, E>>,
             StrAcc2 = ensure_digits_dot_digits(StrAcc),
             StrAcc3 = <<StrAcc2/binary, "e">>,
-            read_exp(Rest, StrAcc3, Line, Acc);
+            read_exp(Rest, StrAcc3, Line, Orig1, Acc);
         <<X, _/binary>> when ?is_letter(X) ->
            syntax_error({invalid_number, {need_space, X}}, Line);
         <<$., _/binary>> ->
@@ -325,18 +349,20 @@ read_frac(Bin, StrAcc, Line, Acc) ->
             StrAcc2 = ensure_digits_dot_digits(StrAcc),
             try list_to_float(binary_to_list(StrAcc2)) of
                 Float ->
-                    b(Bin, Line, [{{float_lit, Float}, Line} | Acc])
+                    b(Bin, Line, [{{float_lit, Float}, Line, Orig} | Acc])
             catch error:badarg ->
                     syntax_error({invalid_number, before(Bin)}, Line)
             end
     end.
 
-read_exp(Bin, StrAcc, Line, Acc) ->
+read_exp(Bin, StrAcc, Line, Orig, Acc) ->
     case Bin of
         <<S, Rest/binary>> when ?is_sign(S)->
-            read_exp_d(Rest, <<StrAcc/binary, S>>, Line, Acc);
+            Orig1 = <<Orig/binary, S>>,
+            read_exp_d(Rest, <<StrAcc/binary, S>>, Line, Orig1, Acc);
         <<D, Rest/binary>> when ?is_digit(D) ->
-            read_exp_d(Rest, <<StrAcc/binary, D>>, Line, Acc);
+            Orig1 = <<Orig/binary, D>>,
+            read_exp_d(Rest, <<StrAcc/binary, D>>, Line, Orig1, Acc);
         <<X, _/binary>> when ?is_letter(X) ->
            syntax_error({invalid_number, {need_space, X}}, Line);
         <<$., _/binary>> ->
@@ -345,10 +371,11 @@ read_exp(Bin, StrAcc, Line, Acc) ->
             syntax_error({invalid_number, before(Bin)}, Line)
     end.
 
-read_exp_d(Bin, StrAcc, Line, Acc) ->
+read_exp_d(Bin, StrAcc, Line, Orig, Acc) ->
     case Bin of
         <<D, Rest/binary>> when ?is_digit(D) ->
-            read_exp_d(Rest, <<StrAcc/binary, D>>, Line, Acc);
+            Orig1 = <<Orig/binary, D>>,
+            read_exp_d(Rest, <<StrAcc/binary, D>>, Line, Orig1, Acc);
         <<X, _/binary>> when ?is_letter(X) ->
            syntax_error({invalid_number, {need_space, X}}, Line);
         <<$., _/binary>> ->
@@ -356,7 +383,7 @@ read_exp_d(Bin, StrAcc, Line, Acc) ->
         _ ->
             try list_to_float(binary_to_list(StrAcc)) of
                 Float ->
-                    b(Bin, Line, [{{float_lit, Float}, Line} | Acc])
+                    b(Bin, Line, [{{float_lit, Float}, Line, Orig} | Acc])
             catch error:badarg ->
                     syntax_error({invalid_number, before(Bin)}, Line)
             end
@@ -381,7 +408,7 @@ read_word(Bin, StrAcc, Line, Acc) ->
         <<D, Rest/binary>> when ?is_digit(D) ->
             read_word(Rest, <<StrAcc/binary, D>>, Line, Acc);
         _ ->
-            b(Bin, Line, [{StrAcc, Line} | Acc])
+            b(Bin, Line, [{StrAcc, Line, StrAcc} | Acc])
     end.
 
 %% -- common helpers --
