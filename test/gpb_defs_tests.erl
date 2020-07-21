@@ -1305,18 +1305,28 @@ proto3_reserved_numbers_and_names_test() ->
                              "    uint32 f2=2;",
                              "    reserved 17;",
                              "  }",
+                             "  message m3 {",
+                             "    reserved -35, -33 to -31, -2 to 2;",
+                             "  }"
+                             "  message m4 {",
+                             "    reserved 100 to max;",
+                             "  }"
                              "}"]),
     [{file, _},
-     {proto3_msgs,[m1,'m1.m2']},
+     {proto3_msgs,[m1,'m1.m2','m1.m3','m1.m4']},
      {proto_defs_version, _},
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},      [#?gpb_field{name=f1}]},
      {{msg,'m1.m2'}, [#?gpb_field{name=f2}]},
+     {{msg,'m1.m3'}, []},
+     {{msg,'m1.m4'}, []},
      {{msg_containment,_}, _},
      {{reserved_names,m1},       ["foo","bar"]},
      {{reserved_numbers,m1},     [2,15,{9,11}]},
-     {{reserved_numbers,'m1.m2'},[17]}] =
+     {{reserved_numbers,'m1.m2'},[17]},
+     {{reserved_numbers,'m1.m3'},[-35,{-33,-31},{-2,2}]},
+     {{reserved_numbers,'m1.m4'},[{100,max}]}] =
         do_process_sort_defs(Defs).
 
 file_attrs_for_each_file_test() ->

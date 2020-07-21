@@ -575,6 +575,10 @@ p_reserved([?w("reserved") | Rest]) ->
             {Numbers, Rest2} = p_reserved_numbers_or_ranges(Rest, []),
             Rest3 = skip_semicolon(Rest2),
             {{reserved_numbers, Numbers}, Rest3};
+        ?t('-') ->
+            {Numbers, Rest2} = p_reserved_numbers_or_ranges(Rest, []),
+            Rest3 = skip_semicolon(Rest2),
+            {{reserved_numbers, Numbers}, Rest3};
         ?s(_) ->
             {Names, Rest2} = p_reserved_names(Rest, []),
             Rest3 = skip_semicolon(Rest2),
@@ -593,12 +597,17 @@ p_reserved_numbers_or_ranges(Tokens, Acc) ->
             {lists:reverse(Acc1), Rest}
     end.
 
-p_reserved_number_or_range([?i(Min), ?w("to"), ?i(Max) | Rest]) ->
-    {{int_value(Min), int_value(Max)}, Rest};
-p_reserved_number_or_range([?i(N) | Rest]) ->
-    {int_value(N), Rest};
 p_reserved_number_or_range(Tokens) ->
-    ?syntax_error(Tokens).
+    {Min, Rest} = p_integer_const(Tokens),
+    case Rest of
+        [?w("to"), ?w("max") | Rest2] ->
+            {{Min, max}, Rest2};
+        [?w("to") | Rest2] ->
+            {Max, Rest3} = p_integer_const(Rest2),
+            {{Min, Max}, Rest3};
+        _ ->
+            {Min, Rest}
+    end.
 
 p_reserved_names(Tokens, Acc) ->
     {Reserved, Rest} = p_reserved_name(Tokens),
