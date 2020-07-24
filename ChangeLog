@@ -1,5 +1,44 @@
 -*- coding: utf-8 -*-
 
+Version 4.14.0
+2020-Jul-24
+
+        * Introduce a new parser to fix issues with keywords in
+          identifier positions. Here are a few examples of .proto that
+          the old parser could not handle, but the new one can:
+
+            package a.service.b; // 'service' is also a keyword
+            message enum { optional int32 f = 1; } // 'enum'
+            message rpc { optional int32 f = 1; } // 'rpc'
+
+          The new parser is a recursive-descent parser that is
+          free of such limitations.
+
+          Several parsing shortcomings have also been fixed, such as:
+          * Options for oneof, service extensions and groups,
+            as well as option blocks: { ... }
+          * Allow inf, -inf and nan as default values for float/double
+          * Allow "to max" and negative values for reserved
+          * Allow reserved names and numbers in enums too
+          * Allow, but ignore, public or weak in import
+
+          The intention is that the new parser should accept all files
+          that the old parser accepted, and more.  Should there be any
+          need to invoke the old parser, eg for comparison or due to bugs,
+          it is possible:
+
+          * Set the environment variable GPB_PARSER to old
+          * Set the option {parser,old}
+
+          Note that these options will exist only temporarily. The
+          intention is to keep the old parser for a few releases,
+          and then remove it.
+
+          The functions in gpb_parse and gpb_scan have changed.
+          However, they were never part of the external API.
+          To retrieve parsed proto definitions use this instead:
+          gpb_compile:file(..., [to_proto_defs, ...]).
+
 Version 4.13.0
 2020-Jun-30
 
@@ -581,7 +620,7 @@ Version 3.26.6
 Version 3.26.5
 2016-Dec-10
 
-	* Consider also messages also for map fields when calculating
+ * Consider also messages also for map fields when calculating
 	order of messages, so that type specs for record fields come in
 	the right order. Thanks to Tristan Sloughter.
 
