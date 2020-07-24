@@ -300,7 +300,8 @@ flatten_qualify_defnames(Defs, Root) ->
                 [{{group,FullName},Fields2} | Defs2] ++ Acc;
            ({{enum,Name}, ENs}, Acc) ->
                 FullName = prepend_path(Root, Name),
-                [{{enum,FullName}, ENs} | Acc];
+                {ENs2, Defs2} = flatten_enum_elems(ENs, FullName),
+                [{{enum,FullName}, ENs2} | Defs2] ++ Acc;
            ({extensions,Exts}, Acc) ->
                 [{{extensions,Root},Exts} | Acc];
            ({{extend,{eref1,Name}}, FieldsOrDefs}, Acc) ->
@@ -324,8 +325,10 @@ flatten_fields(FieldsOrDefs, FullName) ->
         lists:foldl(
           fun(#?gpb_field{}=F, {Fs,Ds}) ->
                   {[F | Fs], Ds};
-             (#gpb_oneof{}=O, {Fs,Ds}) ->
-                  {[O | Fs], Ds};
+             (#gpb_oneof{name=FName, fields=OFs}=O, {Fs,Ds}) ->
+                  FullOneofName = prepend_path(FullName, FName),
+                  {OFs2, ODs2} = flatten_fields(OFs, FullOneofName),
+                  {[O#gpb_oneof{fields=OFs2} | Fs], ODs2++Ds};
              ({group1,TmpGName,GFields,MField}, {Fs,Ds}) ->
                   FullGroupName = prepend_path(FullName, TmpGName),
                   Group0 = {{group,FullGroupName}, GFields},
@@ -350,6 +353,22 @@ flatten_fields(FieldsOrDefs, FullName) ->
           {[],[]},
           FieldsOrDefs),
     {lists:reverse(RFields2), Defs2}.
+
+flatten_enum_elems(EnumElemsOrDefs, FullName) ->
+    {EnumElems2, Defs2} =
+        lists:foldl(
+          fun({reserved_numbers, Ns}, {Es,Ds}) ->
+                  Def = {{reserved_numbers,FullName}, Ns},
+                  {Es, [Def | Ds]};
+             ({reserved_names, Ns}, {Es,Ds}) ->
+                  Def = {{reserved_names,FullName}, Ns},
+                  {Es, [Def | Ds]};
+             (Other, {Es,Ds}) ->
+                  {[Other | Es], Ds}
+          end,
+          {[],[]},
+          EnumElemsOrDefs),
+    {lists:reverse(EnumElems2), Defs2}.
 
 %% Resolve any refs
 resolve_refs(Defs) ->

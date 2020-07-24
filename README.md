@@ -438,13 +438,6 @@ Features of gpb
    You might want to first verify with `protoc` that the .proto files
    are valid before feeding them to gpb.
 
-*  Caveats
-
-   The gpb does accept reserved words as names for fields (just like
-   protoc does), but not as names for messages. To correct this, one
-   would have to either rewrite the grammar, or stop using yecc.
-   (maybe rewrite it all as a protoc plugin?)
-
 Interaction with rebar
 ----------------------
 

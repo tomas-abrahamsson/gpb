@@ -17,7 +17,7 @@
 %%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 %%% MA  02110-1301  USA
 
-%% Test gpb_defs.erl and (somewhat implicitly) gpb_parse.yrl and gpb_scan.xrl
+%% Test gpb_defs.erl and (somewhat implicitly) gpb_parse.erl and gpb_scan.erl
 
 -module(gpb_defs_tests).
 
@@ -76,6 +76,20 @@ parses_default_value_test() ->
            "  optional uint32 x = 1 [default = 12];",
            "}"]).
 
+parses_default_value_for_float_test() ->
+    {ok, Defs} = parse_lines(
+                   ["message m {",
+                    "  optional float f1 = 1 [default = 1.25];",
+                    "  optional float f2 = 2 [default = inf];",
+                    "  optional float f3 = 3 [default = -inf];",
+                    "  optional float f4 = 4 [default = nan];",
+                    "}"]),
+    [{{msg,m}, [#?gpb_field{name=f1, opts=[{default,1.25}]},
+                #?gpb_field{name=f2, opts=[{default,infinity}]},
+                #?gpb_field{name=f3, opts=[{default,'-infinity'}]},
+                #?gpb_field{name=f4, opts=[{default,nan}]}]}] =
+        Defs.
+
 parses_default_value_for_bytes_test() ->
     {ok, Defs} = parse_lines(
                    ["message m {",
@@ -91,6 +105,7 @@ parses_default_value_for_bytes_test() ->
                             opts=[{default,"abc"}]}]},
      {{msg_containment,_}, _}] =
         do_process_sort_defs(Defs).
+
 
 parses_string_concatenation_test() ->
     {ok, [{{msg,'Msg'}, [#?gpb_field{name=x, type=string, fnum=1,
@@ -237,7 +252,14 @@ parses_package_test() ->
 parses_import_test() ->
     {ok, [{package,[p1,'.',p2]}, {import, "a/b/c.proto"}]} =
         parse_lines(["package p1.p2;",
-                     "import \"a/b/c.proto\";"]).
+                     "import \"a/b/c.proto\";"]),
+    %% Ignore public and weak keywords in imports
+    %% (single quote strings are ok too)
+    {ok, [{import, "a/b/c.proto"}]} =
+        parse_lines(["import public 'a/b/c.proto';"]),
+    {ok, [{import, "a/b/c.proto"}]} =
+        parse_lines(["import weak 'a/b/c.proto';"]).
+
 
 parses_enum_option_test() ->
     {ok, Elems} = parse_lines(["enum e1 {",
@@ -317,6 +339,64 @@ parses_custom_option_test() ->
      {{pkg_containment, "descriptor"}, 'google.protobuf'},
      {{pkg_containment, "x"}, x}] =
         AllDefs.
+
+parses_custom_option_in_oneof_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"x.proto",
+                  ["message x {",
+                   "  oneof c {",
+                   "    option (my_option) = -1;",
+                   "    uint32 f1 = 1;",
+                   "  }",
+                   "}"]}],
+                []),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{msg,x}, [#gpb_oneof{}]},
+     {{msg_containment, _}, _}] =
+        AllDefs.
+
+parses_custom_option_in_services_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"x.proto",
+                  ["message m { optional uint32 f1 = 1; }",
+                   "service s {",
+                   "  option (my_option) = -17;",
+                   "  rpc r(m) returns (m);",
+                   "}"]}],
+                []),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{msg,m}, _},
+     {{msg_containment, _}, _},
+     {{rpc_containment, _}, _},
+     {{service, _}, _},
+     {{service_containment, _}, _}] =
+        AllDefs.
+
+parse_uninterpreted_option_block_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"x.proto",
+                  ["option (my_opt1) = {a: 'some-string'};",
+                   "option (my_opt2) = {a: x { [x.y_opt] { i: 2 }}};",
+                   "message m {",
+                   "  optional uint32 f1 = 1 [(my_opt3) = { i:4 }];",
+                   "}"]}],
+                []),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{msg,m}, [#?gpb_field{opts=[{[my_opt3],{uninterpreted, S3}}]}]},
+     {{msg_containment, _}, _},
+     {option,[my_opt1], {uninterpreted, S1}},
+     {option,[my_opt2], {uninterpreted, S2}}] =
+        AllDefs,
+    {true, _} = {is_flat_string(S1), S1},
+    {true, _} = {is_flat_string(S2), S3},
+    {true, _} = {is_flat_string(S3), S2},
+    ok.
 
 json_name_field_option_test() ->
     {ok, Elems} = parse_lines(
@@ -563,6 +643,21 @@ parses_msg_extensions_test() ->
      {{msg,m1},      [#?gpb_field{name=f1}]},
      {{msg,'m1.m2'}, [#?gpb_field{name=f2}]},
      {{msg_containment,_}, [m1, 'm1.m2']}] =
+        do_process_sort_defs(Defs).
+
+parses_msg_extensions_with_options_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required uint32 f1=1;",
+                             "  extensions 100 to 199, 300 [(a) = 'b'];",
+                             "  extensions 251 [];",
+                             "}"]),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{extensions,m1},[{100,199},{300,300}]},
+     {{extensions,m1},[{251,251}]},
+     {{msg,m1},      [#?gpb_field{name=f1}]},
+     {{msg_containment,_}, [m1]}] =
         do_process_sort_defs(Defs).
 
 parses_extending_msgs_test() ->
@@ -858,6 +953,22 @@ group_test() ->
     ] =
         do_process_sort_defs(Defs).
 
+groups_with_options_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  required group g = 2 [deprecated = true] {",
+                             "    required uint32 gf = 3;",
+                             "  }",
+                             "}"]),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{group,'m1.g'},[#?gpb_field{name=gf,type=uint32,fnum=3,rnum=2,
+                                  opts=[]}]},
+     {{msg,m1},[#?gpb_field{name=g,type={group,'m1.g'}}]},
+     {{msg_containment,_}, [m1]}
+    ] =
+        do_process_sort_defs(Defs).
+
 message_def_nested_in_group_test() ->
     {ok,Defs} = parse_lines(["message m1 {",
                              "  required m2 f = 1;",
@@ -877,6 +988,26 @@ message_def_nested_in_group_test() ->
                 #?gpb_field{name=g,type={group,'m1.g'}}]},
      {{msg,'m1.m2'},[#?gpb_field{name=ff}]},
      {{msg_containment,_}, _}] =
+        do_process_sort_defs(Defs).
+
+groups_in_oneof_test() ->
+    {ok,Defs} = parse_lines(["message m1 {",
+                             "  oneof c {",
+                             "    group g = 2 {",
+                             "      required uint32 gf = 3;",
+                             "    }",
+                             "  }",
+                             "}"]),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{group,'m1.c.g'},[#?gpb_field{name=gf,type=uint32,fnum=3,rnum=2,
+                                    opts=[]}]},
+     {{msg,m1},[#gpb_oneof{
+                   name=c,
+                   fields=[#?gpb_field{name=g, type={group,'m1.c.g'}}]}]},
+     {{msg_containment,_}, [m1]} % groups not included
+    ] =
         do_process_sort_defs(Defs).
 
 parses_service_test() ->
@@ -1174,18 +1305,50 @@ proto3_reserved_numbers_and_names_test() ->
                              "    uint32 f2=2;",
                              "    reserved 17;",
                              "  }",
+                             "  message m3 {",
+                             "    reserved -35, -33 to -31, -2 to 2;",
+                             "  }"
+                             "  message m4 {",
+                             "    reserved 100 to max;",
+                             "  }"
                              "}"]),
     [{file, _},
-     {proto3_msgs,[m1,'m1.m2']},
+     {proto3_msgs,[m1,'m1.m2','m1.m3','m1.m4']},
      {proto_defs_version, _},
      {syntax,"proto3"},
      {{enum_containment, _}, _},
      {{msg,m1},      [#?gpb_field{name=f1}]},
      {{msg,'m1.m2'}, [#?gpb_field{name=f2}]},
+     {{msg,'m1.m3'}, []},
+     {{msg,'m1.m4'}, []},
      {{msg_containment,_}, _},
      {{reserved_names,m1},       ["foo","bar"]},
      {{reserved_numbers,m1},     [2,15,{9,11}]},
-     {{reserved_numbers,'m1.m2'},[17]}] =
+     {{reserved_numbers,'m1.m2'},[17]},
+     {{reserved_numbers,'m1.m3'},[-35,{-33,-31},{-2,2}]},
+     {{reserved_numbers,'m1.m4'},[{100,max}]}] =
+        do_process_sort_defs(Defs).
+
+proto3_enum_with_reserved_numbers_and_names_test() ->
+    {ok,Defs} = parse_lines(
+                  ["syntax=\"proto2\";",
+                   "message m1 {",
+                   "  optional e1 f1 = 1;",
+                   "  enum e1 {",
+                   "    A = 0;",
+                   "    reserved 100 to max, -3 to -1, 2, 15, 9 to 11;",
+                   "    reserved \"foo\", \"bar\";",
+                   "  }",
+                   "}"]),
+    [{file, _},
+     {proto_defs_version, _},
+     {syntax,_},
+     {{enum,'m1.e1'}, [{'A',0}]},
+     {{enum_containment, _}, _},
+     {{msg,m1}, [#?gpb_field{name=f1, type={enum,'m1.e1'}}]},
+     {{msg_containment,_}, _},
+     {{reserved_names,'m1.e1'},   ["foo","bar"]},
+     {{reserved_numbers,'m1.e1'}, [{100,max},{-3,-1},2,15,{9,11}]}] =
         do_process_sort_defs(Defs).
 
 file_attrs_for_each_file_test() ->
@@ -1429,7 +1592,7 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg1 = verify_flat_string(gpb_parse:format_post_process_error(Error1)),
+    Msg1 = verify_flat_string(gpb_defs:format_post_process_error(Error1)),
     verify_strings_present(Msg1, ["use_packages"]),
     %% Check when there are only refs from rpcs (different error values)
     {error, _} = Error2 =
@@ -1443,7 +1606,7 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg2 = verify_flat_string(gpb_parse:format_post_process_error(Error2)),
+    Msg2 = verify_flat_string(gpb_defs:format_post_process_error(Error2)),
     verify_strings_present(Msg2, ["use_packages"]),
     %% Check when there are only refs from extend (different error value)
     {error, _} = Error3 =
@@ -1457,7 +1620,7 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg3 = verify_flat_string(gpb_parse:format_post_process_error(Error3)),
+    Msg3 = verify_flat_string(gpb_defs:format_post_process_error(Error3)),
     verify_strings_present(Msg3, ["use_packages"]),
     %% Part of the heuristics for the hinting is that there are different
     %% package. Try two files, one imported, but with the same package.
@@ -1471,7 +1634,7 @@ verify_hints_about_use_packages_option_test() ->
           [],
           expect_error,
           verify_imports),
-    Msg4 = verify_flat_string(gpb_parse:format_post_process_error(Error4)),
+    Msg4 = verify_flat_string(gpb_defs:format_post_process_error(Error4)),
     verify_strings_not_present(Msg4, ["use_packages"]),
     %% no hint about the option when it is already included
     {error, _} = Error5 =
@@ -1483,7 +1646,7 @@ verify_hints_about_use_packages_option_test() ->
           [use_packages],
           expect_error,
           verify_imports),
-    Msg5 = verify_flat_string(gpb_parse:format_post_process_error(Error5)),
+    Msg5 = verify_flat_string(gpb_defs:format_post_process_error(Error5)),
     verify_strings_not_present(Msg5, ["use_packages"]).
 
 verify_error_for_field_name_defined_twice_test() ->
@@ -1801,12 +1964,12 @@ parse_several_file_lines(ProtoLines, Opts,
                 || {FName, Lines} <- ProtoLines],
     case ExpectedResult of
         expect_success ->
-            {ok, AllDefs2} = gpb_parse:post_process_all_files(
+            {ok, AllDefs2} = gpb_defs:post_process_all_files(
                                lists:append(AllDefs1),
                                Opts),
             AllDefs2;
         expect_error ->
-            {error, Reasons} = gpb_parse:post_process_all_files(
+            {error, Reasons} = gpb_defs:post_process_all_files(
                                  lists:append(AllDefs1),
                                  Opts),
             {error, Reasons}
@@ -1847,13 +2010,35 @@ protobase_by_importline(Line) ->
 
 
 parse_lines(Lines) ->
+    parse_lines_new(Lines).
+
+-compile({nowarn_unused_function, parse_lines_old/1}).
+parse_lines_old(Lines) ->
     S = binary_to_list(iolist_to_binary([[L,"\n"] || L <- Lines])),
-    case gpb_scan:string(S) of
+    case gpb_scan_old:string(S) of
         {ok, Tokens, _} ->
-            case gpb_parse:parse(Tokens++[{'$end',length(Lines)+1}]) of
+            case gpb_parse_old:parse(Tokens++[{'$end',length(Lines)+1}]) of
                 {ok, Result} ->
                     {ok, Result};
                 {error, {LNum,_Module,EMsg}=Reason} ->
+                    io:format("Parse error on line ~w:~n  ~p~n",
+                              [LNum, {Tokens,EMsg}]),
+                    erlang:error({parse_error,Lines,Reason})
+            end;
+        {error,Reason} ->
+            io:format("Scan error:~n  ~p~n", [Reason]),
+            erlang:error({scan_error,Lines,Reason})
+    end.
+
+-compile({nowarn_unused_function, parse_lines_new/1}).
+parse_lines_new(Lines) ->
+    B = iolist_to_binary([[L,"\n"] || L <- Lines]),
+    case gpb_scan:binary(B) of
+        {ok, Tokens, _} ->
+            case gpb_parse:parse(Tokens) of
+                {ok, Result} ->
+                    {ok, Result};
+                {error, [{LNum,_Module,EMsg}=Reason | _MaybeMore]} ->
                     io:format("Parse error on line ~w:~n  ~p~n",
                               [LNum, {Tokens,EMsg}]),
                     erlang:error({parse_error,Lines,Reason})
@@ -1904,3 +2089,9 @@ is_io_list(X) when is_list(X); is_binary(X) ->
     catch error:badarg ->
             false
     end.
+
+is_flat_string(L) when is_list(L) ->
+    lists:all(fun is_char/1, L).
+
+is_char(C) when 0 =< C, C =< 16#10ffff -> true;
+is_char(_) -> false.

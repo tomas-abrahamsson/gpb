@@ -671,15 +671,36 @@ protobase_by_importline(Line) ->
     ["import"++_, ImportTxt | _] = gpb_lib:string_lexemes(Line, "\""),
     filename:basename(ImportTxt).
 
-
 parse_lines(Lines) ->
+    parse_lines_new(Lines).
+
+-compile({nowarn_unused_function, parse_lines_old/1}).
+parse_lines_old(Lines) ->
     S = binary_to_list(iolist_to_binary([[L,"\n"] || L <- Lines])),
-    case gpb_scan:string(S) of
+    case gpb_scan_old:string(S) of
         {ok, Tokens, _} ->
-            case gpb_parse:parse(Tokens++[{'$end',length(Lines)+1}]) of
+            case gpb_parse_old:parse(Tokens++[{'$end',length(Lines)+1}]) of
                 {ok, Result} ->
                     {ok, Result};
                 {error, {LNum,_Module,EMsg}=Reason} ->
+                    io:format("Parse error on line ~w:~n  ~p~n",
+                              [LNum, {Tokens,EMsg}]),
+                    erlang:error({parse_error,Lines,Reason})
+            end;
+        {error,Reason} ->
+            io:format("Scan error:~n  ~p~n", [Reason]),
+            erlang:error({scan_error,Lines,Reason})
+    end.
+
+-compile({nowarn_unused_function, parse_lines_new/1}).
+parse_lines_new(Lines) ->
+    B = iolist_to_binary([[L,"\n"] || L <- Lines]),
+    case gpb_scan:binary(B) of
+        {ok, Tokens, _} ->
+            case gpb_parse:parse(Tokens) of
+                {ok, Result} ->
+                    {ok, Result};
+                {error, [{LNum,_Module,EMsg}=Reason | _MaybeMore]} ->
                     io:format("Parse error on line ~w:~n  ~p~n",
                               [LNum, {Tokens,EMsg}]),
                     erlang:error({parse_error,Lines,Reason})

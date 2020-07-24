@@ -1402,6 +1402,10 @@ fmt_err({option_error, {not_supported, maps_omitted_nif}}) ->
     ?f("Options maps, maps_unset_optional=omitted and nif is not supported");
 fmt_err({parse_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
+fmt_err({parse_errors, FileName, Reasons}) ->
+    gpb_lib:nl_join(
+      [?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)])
+       || {Line, Module, ErrInfo} <- Reasons]);
 fmt_err({scan_error, FileName, {Line, Module, ErrInfo}}) ->
     ?f("~s:~w: ~s", [FileName, Line, Module:format_error(ErrInfo)]);
 fmt_err({import_not_found, Import, Tried}) ->
@@ -2525,9 +2529,9 @@ parse_file_and_imports(In, AlreadyImported, Opts) ->
     end.
 
 scan_and_parse_string(S, FName, Opts) ->
-    case gpb_scan:string(S) of
+    case scan(S, Opts) of
         {ok, Tokens, _} ->
-            case gpb_parse:parse(Tokens++[{'$end', 999}]) of
+            case parse(Tokens, Opts) of
                 {ok, PTree} ->
                     case gpb_defs:post_process_one_file(FName, PTree, Opts) of
                         {ok, Result} ->
@@ -2536,10 +2540,35 @@ scan_and_parse_string(S, FName, Opts) ->
                             {error, {parse_error, FName, Reason}}
                     end;
                 {error, {_Line, _Module, _ErrInfo}=Reason} ->
-                    {error, {parse_error, FName, Reason}}
+                    {error, {parse_error, FName, Reason}};
+                {error, Reasons} when is_list(Reasons) -> % scanner/parser 2
+                    {error, {parse_errors, FName, Reasons}}
             end;
         {error, {_Line0, _Module, _ErrInfo}=Reason, _Line1} ->
             {error, {scan_error, FName, Reason}}
+    end.
+
+scan(S, Opts) ->
+    case proplists:get_value(parser, Opts, default_scanner_parser()) of
+        new ->
+            gpb_scan:binary(unicode:characters_to_binary(S));
+        old ->
+            gpb_scan_old:string(S)
+    end.
+
+parse(Tokens, Opts) ->
+    case proplists:get_value(parser, Opts, default_scanner_parser()) of
+        new ->
+            gpb_parse:parse(Tokens);
+        old ->
+            gpb_parse_old:parse(Tokens++[{'$end', 999}])
+    end.
+
+default_scanner_parser() ->
+    case os:getenv("GPB_PARSER") of
+        false -> new; % default
+        "old" -> old;
+        _     -> new
     end.
 
 read_and_parse_imports([Import | Rest], AlreadyImported, Defs, Opts) ->
