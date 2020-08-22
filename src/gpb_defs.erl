@@ -1230,8 +1230,8 @@ opt_tuple_to_atom_if_defined_true(Opt, Opts) ->
         true  -> [Opt | lists:keydelete(Opt, 1, Opts)]
     end.
 
-%% @hidden
 %% @doc Fetch the `import'ed files.
+%% @end
 %% `Defs' is expected to be parsed, but not necessarily post_processed.
 -spec fetch_imports(defs()) -> [ProtoFile::string()].
 fetch_imports(Defs) ->
