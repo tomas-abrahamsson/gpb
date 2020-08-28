@@ -60,6 +60,71 @@ encode_varint_test() ->
     <<128, 1>> = gpb:encode_varint(128),
     <<150, 1>> = gpb:encode_varint(150).
 
+decode_packet_test() ->
+    {ok, <<>>, <<20,21,22,23,24>>} =
+        gpb:decode_packet(uint32, <<0, 20,21,22,23,24>>, []),
+    {ok, <<20,21>>, <<22,23,24>>} =
+        gpb:decode_packet(uint32, <<2, 20,21,22,23,24>>, []),
+    {ok, <<20,21,22,23,24>>, <<>>} =
+        gpb:decode_packet(uint32, <<5, 20,21,22,23,24>>, []),
+    MaxSize5Opt = {packet_size,5},
+    {ok, <<>>, <<20,21,22,23,24>>} =
+        gpb:decode_packet(uint32, <<0, 20,21,22,23,24>>, [MaxSize5Opt]),
+    {ok, <<20,21>>, <<22,23,24>>} =
+        gpb:decode_packet(uint32, <<2, 20,21,22,23,24>>, [MaxSize5Opt]),
+    {ok, <<20,21,22,23,24>>, <<>>} =
+        gpb:decode_packet(uint32, <<5, 20,21,22,23,24>>, [MaxSize5Opt]),
+
+    %% Not enough data, but packet size is known: {more, TotalSize}
+    %% Thus TotalSize should include the length field too.
+    {more, 11} =
+        gpb:decode_packet(uint32, <<10, 20,21>>, []),
+    %% {more, 11} same total size, even though more of the data is known
+    {more, 11} =
+        gpb:decode_packet(uint32, <<10, 20,21,22>>, []),
+    %% length is non-minimally encoded (2 bytes when is enough)
+    {10,<<>>} = gpb:decode_varint(<<(128+10),128,0>>),
+    {more, 13} =
+        gpb:decode_packet(uint32, <<(128+10),128,0, 20,21,22>>, []),
+
+    %% The packet size is not known => {more, undefined}
+    {more, undefined} =
+        gpb:decode_packet(uint32, <<130>>, []),
+
+    %% Size field encodes a size > 2^32, but type is uint32:
+    %% Treat it as uint32 (masked)
+    Sz1 = gpb:encode_varint(16#ffffFFFF + 3),
+    TotalSize1 = byte_size(Sz1) + ((16#ffffFFFF + 3) band 16#ffffFFFF),
+    {more, TotalSize1} =
+        gpb:decode_packet(uint32, <<Sz1/binary, 0>>, []),
+    {more, 4294967303} =
+        gpb:decode_packet(uint64, <<Sz1/binary, 0>>, []),
+
+    %% Over max size when enough data is available
+    {error,invalid} =
+        gpb:decode_packet(uint32, <<3, 20,21,22,23,24>>, [{packet_size,2}]),
+    {error,invalid} =
+        gpb:decode_packet(uint32, <<3, 20,21,22,23>>, [{packet_size,2}]),
+    %% Over max size when _not_ enough data is available
+    %% (but the packet len is complete)
+    {error,invalid} =
+        gpb:decode_packet(uint32, <<10, 20,21,22>>, [{packet_size,2}]),
+    {error,invalid} =
+        gpb:decode_packet(uint32, <<10>>, [{packet_size,2}]),
+
+    %% Check that we don't process too long non-minimally encoded values,
+    %% since it may be a denial of service: since we accumulate
+    %% integers, we may run slow or even out of memory when of sent
+    %% a super-long sequence of specially crafted bytes.
+    VeryLongLength = <<129,128,128,128,128,128,128,128,128,0>>, % within limits
+    TooLongLength  = <<129,128,128,128,128,128,128,128,128,128,0>>,
+    {1,<<>>} = gpb:decode_varint(VeryLongLength),
+    ?assertError(_, gpb:decode_varint(TooLongLength)), % very too long
+    {ok,<<17>>, <<18>>} =
+        gpb:decode_packet(uint32, <<VeryLongLength/binary, 17, 18>>, []),
+    {error, invalid} =
+        gpb:decode_packet(uint32, TooLongLength, []).
+
 field_proplist_conversion_test() ->
     F1 = #?gpb_field{name=a,fnum=1,rnum=2, type=int32, occurrence=required,
                      opts=[]},

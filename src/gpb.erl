@@ -45,6 +45,7 @@
 -export([proto2_type_default/2]).
 -export([encode_varint/1, decode_varint/1, decode_varint/2]).
 -export([encode_wiretype/1, decode_wiretype/1]).
+-export([decode_packet/3]).
 -export([version_as_string/0, version_as_list/0]).
 -export([field_records_to_proplists/1, proplists_to_field_records/1]).
 -export([field_record_to_proplist/1,   proplist_to_field_record/1]).
@@ -899,6 +900,43 @@ de_vi(<<0:1, X:7, Rest/binary>>, N, Acc, MaxNumBits) ->
     Mask = (1 bsl MaxNumBits) - 1,
     {(X bsl N + Acc) band Mask, Rest}.
 
+-spec decode_packet(Type, binary(), Opts) -> Result when
+      Type   :: uint32 | uint64,
+      Opts   :: [Opt],
+      Opt    :: {packet_size, non_neg_integer()}, % max size, 0 means no limit
+      Result :: {ok, Packet, Rest} |
+                {more, Length} |
+                {error, Reason::term()},
+      Packet :: binary(),
+      Rest   :: binary(),
+      Length :: non_neg_integer() | undefined.
+decode_packet(Type, Bin, Options) ->
+    Bits = case Type of
+                     uint32 -> 32;
+                     uint64 -> 64
+                 end,
+    de_pkt(Bin, 0, 0, 0, Bits, Options).
+
+de_pkt(<<1:1, X:7, Rest/binary>>, N, Acc, C, Bits, Opts) when N < (64-7) ->
+    de_pkt(Rest, N+7, X bsl N + Acc, C + 1, Bits, Opts);
+de_pkt(<<0:1, X:7, Rest/binary>>, N, Acc, Consumed, Bits, Opts) ->
+    Mask = (1 bsl Bits) - 1,
+    PktLen = (X bsl N + Acc) band Mask,
+    MaxLen = proplists:get_value(packet_size, Opts, 0),
+    if PktLen > MaxLen, MaxLen =/= 0 ->
+            {error, invalid};
+       byte_size(Rest) >= PktLen ->
+            <<Pkt:PktLen/binary, Rest2/bitstring>> = Rest,
+            {ok, Pkt, Rest2};
+       true ->
+            Total = Consumed + 1 + PktLen,
+            {more, Total}
+    end;
+de_pkt(<<1:1, _/bitstring>>, N, _Acc, _C, _Bits, _Opts) when N >= (64-7) ->
+    {error, invalid};
+de_pkt(<<>>, _N, _Acc, _Consumed, _Bits, _Opts) ->
+    {more, undefined}.
+
 -spec encode_varint(integer()) -> binary().
 encode_varint(N) -> en_vi(N).
 
@@ -911,7 +949,6 @@ decode_zigzag(N) when N band 1 =:= 1 -> -((N+1) bsr 1). %% N is odd
 
 encode_zigzag(N) when N >= 0 -> N * 2;
 encode_zigzag(N) when N <  0 -> N * -2 - 1.
-
 
 -spec verify_msg(tuple() | term(), gpb_defs:defs()) -> ok.
 verify_msg(Msg, MsgDefs) when is_tuple(Msg), tuple_size(Msg) >= 1 ->
