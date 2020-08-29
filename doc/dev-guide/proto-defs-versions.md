@@ -69,7 +69,7 @@ To opt in to a later version, use `proto_defs_version` option like this:
 
 There are also functions in `gpb_defs.erl` for converting to and from
 the latest version, see the `gpb_defs:convert_defs_to_latest_version/1`
-and the `gpb_def:convert_defs_from_latest_version/2` functions.
+and the `gpb_defs:convert_defs_from_latest_version/2` functions.
 
 In general, converting from a previous version to the latest is
 expected to always succeed, but converting from the latest to a
