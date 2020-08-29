@@ -25,10 +25,25 @@
 %%
 %% The reason for keeping this (slower) data-driven encoder/decoder is
 %% mostly to be able to cross-check with the generated encoder/decoder.
-%% and also to some extent for easier interop testing.
+%% and also to some extent for easier inter-op testing.
 %%
-%% The encoder/decoder in this module currently does not support maps.
+%% The encoder/decoder in this module works on records or tuples,
+%% but the functions {@link msg_to_map/3} and {@link msg_from_map/4}
+%% can convert to and from maps.
 %%
+%% A note about format versions of definitions: Functions in this module
+%% that take definitions, such as {@link encode_msg/2} and
+%% {@link decode_msg/3} expect the definitions to be on the latest format
+%% version.  If you use functions in `gpb_compile' to parse proto
+%% files to definitions, for example {@link gpb_compile:file/2}, then
+%% make sure to include the option
+%% `{proto_defs_version, gpb_defs:latest_defs_version()}'.
+%% This is in contrast to the advice in the
+%% [doc/dev-guide/proto-defs-versions.md] to tool writers to use a
+%% hard-wired version number, but this module is part of gpb and thus
+%% developed in tandem with any changes to the definitions, whereas
+%% the definitions returned from `gpb_compile' can occasionally default
+%% to an earlier-than-latest version for compatibility reasons.
 %% @end
 
 -module(gpb).
@@ -130,18 +145,21 @@
 %%   was unexpected. Related: principle of least astonishment.
 
 
+%% @doc Return the version as a string.
 %% Valid version format is:
+%% ```
 %%      <n>.<m>            % e.g. 2.1, 2.1.1, etc (any number of dots and ints)
 %%      <n>.<m>-<o>-<text> % e.g. 2.1-53-gb996fbe means: a commit after 2.1
-%%
+%% '''
 %% The format is what `git describe --always --tags' produces,
-%% given that all tags are always on the format <n>.<m>.
+%% given that all tags are always on the format `<n>.<m>'.
 -spec version_as_string() -> string().
 version_as_string() ->
     S = ?gpb_version,
     assert_version_format(S),
     S.
 
+%% @doc Return the version on a list format, so that it can be compared.
 %% The version_as_list is better if you want to be able to compare
 %% versions, for instance to see if one version is larger/later than
 %% another.
@@ -154,15 +172,16 @@ version_as_string() ->
 %% one is larger/later or smaller/earlier than another.
 %%
 %% This will return for example:
+%% ```
 %%    "2.1"             -> [2,1]
 %%    "2.1-53-gb996fbe" -> [2,1,0,0,53,"gb996fbe"]
 %%    "2.1.1"           -> [2,1,1]
 %%    "2.2"             -> [2,2]
-%%
-%% (Lists are better than tuples when doing comparisons.  For tuples
-%% this holds: {2,2} < {2,1,1}, since tuples are first compared by
+%% '''
+%% (Lists are better than tuples when doing version comparisons.  For tuples
+%% this holds: `{2,2} < {2,1,1}', since tuples are first compared by
 %% size then element by element for tuples of the same size. For
-%% lists, it holds instead that: [2,1,1] < [2,2].)
+%% lists, it holds instead that: `[2,1,1] < [2,2]'.)
 -spec version_as_list() -> [integer() | string()].
 version_as_list() ->
     version_as_list(version_as_string()).
@@ -209,6 +228,11 @@ v2l2("-"++T, Acc)                   -> [v_acc_to_int(Acc), T].
 v_acc_to_int(Acc) ->
     list_to_integer(lists:reverse(Acc)).
 
+%% @doc Decode a binary to a message on record format.
+%%
+%% If a field would occur more than once in the message,
+%% it is subject to merging, as per how protobuf is expected to work.
+%% See {@link merge_msgs/3} for more details.
 -spec decode_msg(binary(), atom(), gpb_defs:defs()) -> tuple().
 decode_msg(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
@@ -324,6 +348,7 @@ wiretype_matches_normal_type(WireType, Type) ->
         _        -> no
     end.
 
+%% @doc Decode an integer 0..5 to a wire type
 -spec decode_wiretype(non_neg_integer()) -> varint | bits32 | bits64 |
                                             group_start | group_end |
                                             length_delimited.
@@ -591,6 +616,31 @@ append_to_map(RNum, {Key, _Value}=NewItem, Record) ->
     NewElems = lists:keystore(Key, 1, PrevElems, NewItem),
     setelement(RNum, Record, NewElems).
 
+%% @doc Merge messages on record format.
+%%
+%% Merging of messages M1 and M2 are defined in protobuf to work like this:
+%% <dl>
+%%   <dt>integers, floats, booleans, strings,  bytes and enums</dt>
+%%   <dd>If the field is set in M2, it overwrites
+%%       any field in M1.</dd>
+%%
+%%   <dt>Repeated fields</dt>
+%%   <dd>Elements of the field in M2 are appended to that of M1</dd>
+%%
+%%   <dt>Sub messages</dt>
+%%   <dd>Fields that are sub messages are merged recursively.</dd>
+%%
+%%   <dt>Map fields</dt>
+%%   <dd>A map is treated as a repeated field in the sense that
+%%       map elements of M2 are added to M1. If a key of exists
+%%       in both M1 and M2, the map element of M2 overwrites
+%%       that of M1.</dd>
+%%
+%%   <dt>Oneof fields</dt>
+%%   <dd>A oneof field of M2 generally overwrites a oneof field of M1.
+%%       If the oneof field is a sub message, they are merged
+%%       recursively.</dd>
+%% </dl>
 -spec merge_msgs(tuple(), tuple(), gpb_defs:defs()) -> tuple().
 merge_msgs(PrevMsg, NewMsg, MsgDefs)
   when element(1,PrevMsg) == element(1,NewMsg) ->
@@ -682,6 +732,7 @@ merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs) ->
       MsgDef).
 
 
+%% @doc Encode a message on record format to a binary.
 -spec encode_msg(tuple(), gpb_defs:defs()) -> binary().
 encode_msg(Msg, MsgDefs) ->
     MsgName = element(1, Msg),
@@ -866,6 +917,7 @@ encode_value(Value, Type, MsgDefs) ->
             encode_value({MsgName,Key,Value1}, {msg,MsgName}, MsgDefs1)
     end.
 
+%% @doc Encode a wire type for a protobuf field type.
 -spec encode_wiretype(gpb_field_type()) -> non_neg_integer().
 encode_wiretype(sint32)            -> 0;
 encode_wiretype(sint64)            -> 0;
@@ -888,9 +940,13 @@ encode_wiretype(sfixed32)          -> 5;
 encode_wiretype(float)             -> 5;
 encode_wiretype({map,_KT,_VT}) -> encode_wiretype({msg,map_item_tmp_name()}).
 
--spec decode_varint(binary()) -> {non_neg_integer(), binary()}.
+%% @equiv decode_varint(Bin, 64)
+-spec decode_varint(binary()) -> {non_neg_integer(), Rest::binary()}.
 decode_varint(Bin) -> decode_varint(Bin, 64).
 
+%% @doc Decode an unsigned varint.  The decoded integer will have be at most
+%% `MaxNumBits' bits long. Any higher bits will be masked away. If the binary
+%% contains an overly long encoded integer, this function will fail.
 -spec decode_varint(binary(), pos_integer()) -> {non_neg_integer(), binary()}.
 decode_varint(Bin, MaxNumBits) -> de_vi(Bin, 0, 0, MaxNumBits).
 
@@ -900,6 +956,69 @@ de_vi(<<0:1, X:7, Rest/binary>>, N, Acc, MaxNumBits) ->
     Mask = (1 bsl MaxNumBits) - 1,
     {(X bsl N + Acc) band Mask, Rest}.
 
+%% @doc Decode a varint-length-delimited packet.
+%% This function works like `erlang:decode_packet/3', but the length
+%% is a varint encoded value.
+%%
+%% The `Type' is either `uint32' or `uint64', indicating the maximum
+%% number of bits considered as length of the packet.
+%%
+%% Available options (just as for `erlang:decode_packet/3'):
+%% <dl>
+%%   <dt>`{packet_size, MaxNumBytes :: integer() >= 0}'</dt>
+%%   <dd>This defines a maximum packet size. 0, which is the default,
+%%       means no upper limit. If the encoded length indicates a packet
+%%       of size larger than `packet_size', then `{error, invalid}' will
+%%       be returned instead.</dd>
+%% </dl>
+%%
+%% This function will return:
+%% <dl>
+%%   <dt>`{ok, Packet :: binary(), Rest :: binary()}'</dt>
+%%   <dd>One packet was extracted in `Packet', trailing data is in `Rest'</dd>
+%%   <dt>`{more, Length}' when<br/>
+%%       `Length = TotalSize :: integer() >= 1 | undefined'</dt>
+%%   <dd>This signifies that more data is needed to extracted one packet.
+%%       If sufficient data was present to know the size of the packet,
+%%       an integer is returned indicating the <em>total</em> number of
+%%       bytes needed to extract one packet.
+%%       </dd>
+%%   <dt>`{error, Reason :: term()}'</dt>
+%%   <dd>If the length is malformed, for instance overly many bytes
+%%       are used to encode the length, then `{error,invalid}'
+%%       will be returned. The idea is to protect against a denial of
+%%       service in case an adversary would send a valid (possibly small)
+%%       length encoded using a huge number of bytes.</dd>
+%% </dl>
+%%
+%% Example: Here is an example of how to use this function to receive
+%% varint length delimited packets from a TCP/IP socket in `active' and
+%% `binary' mode.
+%% ```
+%%    receive_tcp_data(Socket, Pending) when is_binary(Pending) ->
+%%        receive
+%%           {tcp, Socket, IncomingBin} ->
+%%               Data = <<Pending/binary, IncomingBin/binary>>,
+%%               %% We may now have either a partial packet,
+%%               %% or one packet and possibly some more,
+%%               %% or several packets and possibly some more.
+%%               %% Handle them in a loop:
+%%               NewPending = handle_packets(Data),
+%%               receive_tcp_data(Socket, NewPending)
+%%        end.
+%%
+%%    handle_packets(Data) ->
+%%        %% In this example, we do not expect any decoding errors,
+%%        %% for instance a malformed varint encoded length,
+%%        %% so for simplicity fail fast on any error.
+%%        case gpb:decode_packet(uint32, Data, []) of
+%%            {ok, Packet, Rest} ->
+%%                handle_one_packet(Packet), % do some work here
+%%                handle_packets(Rest);
+%%            {more, _Length} ->
+%%                Data
+%%        end.
+%% '''
 -spec decode_packet(Type, binary(), Opts) -> Result when
       Type   :: uint32 | uint64,
       Opts   :: [Opt],
@@ -909,7 +1028,7 @@ de_vi(<<0:1, X:7, Rest/binary>>, N, Acc, MaxNumBits) ->
                 {error, Reason::term()},
       Packet :: binary(),
       Rest   :: binary(),
-      Length :: non_neg_integer() | undefined.
+      Length :: pos_integer() | undefined.
 decode_packet(Type, Bin, Options) ->
     Bits = case Type of
                      uint32 -> 32;
@@ -937,6 +1056,7 @@ de_pkt(<<1:1, _/bitstring>>, N, _Acc, _C, _Bits, _Opts) when N >= (64-7) ->
 de_pkt(<<>>, _N, _Acc, _Consumed, _Bits, _Opts) ->
     {more, undefined}.
 
+%% @doc Encode an unsigned varint to a binary.
 -spec encode_varint(integer()) -> binary().
 encode_varint(N) -> en_vi(N).
 
@@ -950,6 +1070,7 @@ decode_zigzag(N) when N band 1 =:= 1 -> -((N+1) bsr 1). %% N is odd
 encode_zigzag(N) when N >= 0 -> N * 2;
 encode_zigzag(N) when N <  0 -> N * -2 - 1.
 
+%% @doc Verify type and range of fields in a message on record format.
 -spec verify_msg(tuple() | term(), gpb_defs:defs()) -> ok.
 verify_msg(Msg, MsgDefs) when is_tuple(Msg), tuple_size(Msg) >= 1 ->
     MsgName = element(1, Msg),
@@ -1027,6 +1148,8 @@ verify_value(Value, Type, Occurrence, Path, MsgDefs) ->
         defaulty -> verify_optional(Value, Type, Path, MsgDefs)
     end.
 
+%% @doc Verify type and range of a boolean, integral, floating point,
+%% string, bytes or value.
 -spec check_scalar(any(), gpb_scalar()) -> ok | {error, Reason::term()}.
 check_scalar(Value, Type) when is_atom(Type) ->
     try
@@ -1147,6 +1270,7 @@ mk_type_error(Error, ValueSeen, Path) ->
 %% Conversion functions between various forms of #?gpb_field{} and a proplist
 %% with keys being the #?gpb_field{} record's field names.
 
+%% @doc In definitions, convert msg field records to proplists.
 -spec defs_records_to_proplists(gpb_defs:defs()) -> proplist_defs().
 defs_records_to_proplists(Defs) ->
     [case Def of
@@ -1157,6 +1281,7 @@ defs_records_to_proplists(Defs) ->
      end
      || Def <- Defs].
 
+%% @doc In definitions, convert msg fields as proplists to field records.
 -spec proplists_to_defs_records(proplist_defs()) -> gpb_defs:defs().
 proplists_to_defs_records(Defs) ->
     [case Def of
@@ -1167,6 +1292,7 @@ proplists_to_defs_records(Defs) ->
      end
      || Def <- Defs].
 
+%% @doc Convert msg field definitions on field record format to proplists.
 -spec field_records_to_proplists([field()]) -> [proplist_field()].
 field_records_to_proplists(Fields) when is_list(Fields) ->
     [case F of
@@ -1175,6 +1301,7 @@ field_records_to_proplists(Fields) when is_list(Fields) ->
      end
      || F <- Fields].
 
+%% @doc Convert one field definition on field record format to a proplist.
 -spec field_record_to_proplist(#?gpb_field{}) -> [proplist_field_item()].
 field_record_to_proplist(#?gpb_field{}=F) ->
     Names = record_info(fields, ?gpb_field),
@@ -1187,6 +1314,7 @@ oneof_record_to_proplist(#gpb_oneof{}=F) ->
      end
      || {FName, FValue} <- lists:zip(Names, tl(tuple_to_list(F)))].
 
+%% @doc Convert proplists for msg fields to msg field records.
 -spec proplists_to_field_records([proplist_field()]) -> [field()].
 proplists_to_field_records(PLs) ->
     [case {is_field_pl(PL), is_oneof_pl(PL)} of
@@ -1203,6 +1331,7 @@ are_all_fields_present(FNames, PL) ->
     lists:all(fun(FName) -> lists:keymember(FName, 1, PL) end,
               FNames).
 
+%% @doc Convert a proplist for an msg field to an msg field record.
 -spec proplist_to_field_record([proplist_field_item()]) -> #?gpb_field{}.
 proplist_to_field_record(PL) when is_list(PL) ->
     Names = record_info(fields, ?gpb_field),
@@ -1218,15 +1347,18 @@ proplist_to_oneof_record(PL) when is_list(PL) ->
                     end
                     || {N, V} <- lists:zip(Names, RFields)]]).
 
+%% @doc Convert rpc records to proplists.
 -spec rpc_records_to_proplists([#?gpb_rpc{}]) -> [proplist_rpc()].
 rpc_records_to_proplists(Rpcs) when is_list(Rpcs) ->
     [rpc_record_to_proplist(R) || R <- Rpcs].
 
+%% @doc Convert an rpc record to a proplist.
 -spec rpc_record_to_proplist(#?gpb_rpc{}) -> proplist_rpc().
 rpc_record_to_proplist(#?gpb_rpc{}=R) ->
     Names = record_info(fields, ?gpb_rpc),
     lists:zip(Names, tl(tuple_to_list(R))).
 
+%% @doc Convert proplists to rpc records.
 -spec proplists_to_rpc_records([proplist_rpc()]) -> [#?gpb_rpc{}].
 proplists_to_rpc_records(PLs) ->
     [proplist_to_rpc_record(PL) || PL <- PLs].
@@ -1247,6 +1379,12 @@ map_item_tmp_def_for_decoding(KeyType, ValueType) ->
 map_item_tmp_name() ->
     '$mapitem'.
 
+%% @doc Make a list of fields for a pseudo message, given a key type and
+%% a value type for a `map<_,_>' type field, for use in encoding,
+%% verification.
+%%
+%% At encoding a field value is to be included even if the proto syntax
+%% is `"proto3"' and the value to encode is the type's default value.
 -spec map_item_pseudo_fields(gpb_map_key(), gpb_map_value()) -> [field()].
 map_item_pseudo_fields(KeyType, ValueType) ->
     [#?gpb_field{name=key, fnum=1, rnum=2,
@@ -1254,6 +1392,12 @@ map_item_pseudo_fields(KeyType, ValueType) ->
      #?gpb_field{name=value, fnum=2, rnum=3,
                  occurrence=required, type=ValueType}].
 
+%% @doc Make a list of fields for a pseudo message, given a key type and
+%% a value type for a `map<_,_>' type field, for use in decoding.
+%%
+%% At decoding if the field would not be present in the binary to
+%% decode, it is expected to have be the type's default value, even when
+%% the proto syntax is `"proto2"'.
 -spec map_item_pseudo_fields_for_decoding(gpb_map_key(), gpb_map_value()) ->
           [field()].
 map_item_pseudo_fields_for_decoding(KeyType, ValueType) ->
@@ -1262,6 +1406,8 @@ map_item_pseudo_fields_for_decoding(KeyType, ValueType) ->
      #?gpb_field{name=value, fnum=2, rnum=3, occurrence=defaulty,
                  type=ValueType}].
 
+%% @doc Test whether a field type is allowed as key type in a `msg<_,_>'
+%% type field.
 -spec is_allowed_as_key_type(gpb_field_type()) -> boolean().
 is_allowed_as_key_type({enum,_}) -> false;
 is_allowed_as_key_type({msg,_}) -> false;
@@ -1270,6 +1416,7 @@ is_allowed_as_key_type(float) -> false;
 is_allowed_as_key_type(bytes) -> false;
 is_allowed_as_key_type(_) -> true.
 
+%% @doc Test whether a field is allowed to have the option `[packed]' or not.
 -spec is_type_packable(gpb_field_type()) -> boolean().
 is_type_packable(int32)     -> true;
 is_type_packable(int64)     -> true;
@@ -1296,6 +1443,11 @@ is_type_packable({map,_,_}) -> false.
 is_packed(#?gpb_field{opts=Opts}) ->
     lists:member(packed, Opts).
 
+%% @doc Test whether a message was defined with `"proto3"' syntax.
+%%
+%% If a file with `"proto3"' syntax import another file with `"proto2"'
+%% syntax, or vice versa, then some messages will be of `"proto2"' while
+%% others will be `"proto3"'.
 -spec is_msg_proto3(atom(), gpb_defs:defs()) -> boolean().
 is_msg_proto3(Name, MsgDefs) ->
     case lists:keyfind(proto3_msgs, 1, MsgDefs) of
@@ -1317,6 +1469,7 @@ is_proto3_type_default(Type, MsgDefs, Value) ->
 map_msg_defs_for_decoding(KeyType, ValueType, MsgDefs) ->
     [map_item_tmp_def_for_decoding(KeyType, ValueType) | MsgDefs].
 
+%% @doc Return the default for a type of a message field in a `"proto2"' file.
 -spec proto2_type_default(gpb_field_type(), gpb_defs:defs()) -> term().
 proto2_type_default(Type, MsgDefs) ->
     %% Type-specific defaults for proto2 are the same as for proto3,
@@ -1329,6 +1482,7 @@ proto2_type_default(Type, MsgDefs) ->
     %% some odd corner case.
     proto3_type_default(Type, MsgDefs).
 
+%% @doc Return the default for a type of a message field in a `"proto3"' file.
 -spec proto3_type_default(gpb_field_type(), gpb_defs:defs()) -> term().
 proto3_type_default(Type, MsgDefs) ->
     case Type of
@@ -1361,14 +1515,15 @@ proto3_type_default(Type, MsgDefs) ->
                         {maps_oneof, flat | tuples} |
                         Other.
 
-%% @doc Convert a message, as understood by eg {@link encode_msg/2}
+%% @doc Convert a message, as returned by eg {@link decode_msg/3}
 %%      on tuple format to a map.
 %%
-%%      The opts look similar to the options understood by gpb_compile, but is
-%%      only a limited subset of them and they govern solely to different map
-%%      representations and not the record represenatation.  While it can
-%%      support some of the map options understood by gpb_compile it does not
-%%      support mapfields_as_maps for the records representation, as this is not
+%%      The `MapOpts' look similar to the options understood by
+%%      gpb_compile, but is only a limited subset of them and they
+%%      concern only different map representations and not the
+%%      record representation.  While it can support some of the map
+%%      options understood by gpb_compile it does not support
+%%      mapfields_as_maps for the records representation, as this is not
 %%      supported by the rest of the code in this module.
 -spec msg_to_map(tuple(), gpb_defs:defs(), map_opts()) -> map().
 msg_to_map(Msg, Defs, MapOpts) when is_atom(element(1, Msg)) ->
@@ -1442,10 +1597,10 @@ v_to_map(V, {msg, _MsgName}, Defs, Opts) ->
 v_to_map(V, _Type, _Defs, _Opts) ->
     V.
 
-%% @doc Convert a message, on map format to a tuple, that can be understood by
-%%      eg {@link encode_msg/2}. The options govern how the map representation
-%%      is to be interpreted, see {@link msg_to_map/3} for more discussion on
-%%      this.
+%% @doc Convert a message, on map format to a tuple, so that it can be
+%%      used with eg {@link encode_msg/2}. The options control how the map
+%%      representation is to be interpreted, see {@link msg_to_map/3} for
+%%      further discussion on this.
 -spec msg_from_map(map(), atom(), gpb_defs:defs(), map_opts()) -> tuple().
 msg_from_map(Map, MsgName, Defs, Opts) ->
     Fields = keyfetch({msg, MsgName}, Defs),
