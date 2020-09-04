@@ -395,8 +395,11 @@ field_type_str(MsgName,
     ElemPath = [MsgName, FName],
     case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
         {true, TypeStr} ->
+            %% Even if Occurrence == required, it can still end up undefined,
+            %% for instance if decoding a proto2 message and the input binary
+            %% does not contain it, even though it should.
             case Occurrence of
-                required -> TypeStr;
+                required -> TypeStr ++ OrUndefined;
                 repeated -> TypeStr ++ OrUndefined;
                 optional -> TypeStr ++ OrUndefined;
                 defaulty -> TypeStr ++ OrUndefined
@@ -405,7 +408,7 @@ field_type_str(MsgName,
             TypeStr = type_to_typestr_2(Type, Defs, AnRes, Opts),
             case Occurrence of
                 required ->
-                    TypeStr;
+                    TypeStr ++ OrUndefined;
                 repeated ->
                     case Type of
                         {map,_,_} ->
