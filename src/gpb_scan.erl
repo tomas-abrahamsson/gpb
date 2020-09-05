@@ -28,6 +28,16 @@
 -export_type([pos/0]).
 -export_type([error/0]).
 
+%% -- bwd compat -- do not use these ----------------------------------
+%% Deprecated!
+%% Instead, to retrieve proto definitions,
+%% use the option to_proto_defs
+%% with gpb_compile:file or gpb_compile:string.
+%% For exprotobuf, see also
+%% https://github.com/bitwalker/exprotobuf/issues/114
+-export([string/1]). % use opt to_proto_defs instead
+%% --^^--- bwd compat -- do not use these ----------------------------
+
 -type token() :: {token_data(), pos(), orig_text()}.
 -type token_data()  :: atom() | % punctuation(-like) characters, generally
                        binary() | % words
@@ -451,3 +461,16 @@ get_line(<<"\n", _/binary>>, Acc) -> Acc;
 get_line(<<C, Rest/binary>>, Acc) -> get_line(Rest, <<Acc/binary, C>>);
 get_line(<<>>, <<>>) -> 'end-of-input';
 get_line(<<>>, Acc) -> Acc.
+
+%% -- bwd compat -- do not use these ----------------------------------
+%% Deprecated!
+%% Instead, to retrieve proto definitions,
+%% use the option to_proto_defs
+%% with gpb_compile:file or gpb_compile:string.
+%% For exprotobuf, see also
+%% https://github.com/bitwalker/exprotobuf/issues/114
+
+%% Use the option to_proto_defs with gpb_compile:file/string instead.
+string(S) ->
+    binary(unicode:characters_to_binary(S)).
+%% --^^--- bwd compat -- do not use these ----------------------------

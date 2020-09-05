@@ -28,6 +28,19 @@
 
 -type error() :: {Line::pos_integer(), module(), Reason::term()}.
 
+%% -- bwd compat -- do not use these ----------------------------------
+%% Deprecated!
+%% Instead, to retrieve proto definitions,
+%% use the option to_proto_defs
+%% with gpb_compile:file or gpb_compile:string.
+%% For exprotobuf, see also
+%% https://github.com/bitwalker/exprotobuf/issues/114
+-export([post_process_one_file/3]). % use opt to_proto_defs instead
+-export([post_process_all_files/2]). % use opt to_proto_defs instead
+-export([format_post_process_error/1]). % use gpb_compile:format_error/1
+-export([fetch_imports/1]). % use gpb_defs:fetch_imports
+%% --^^--- bwd compat -- do not use these ----------------------------
+
 -include("../include/gpb.hrl").
 
 %% @doc Parse a list of tokens as returned from {@link gpb_parse2:binary/1}
@@ -113,6 +126,9 @@ p_top(Tokens, Acc, Errors) when Tokens /= [] ->
                 p_top(Rest, Acc1, Errors);
             ?t(';') ->
                 p_top(tl(Tokens), Acc, Errors);
+            {'$end', _Line} ->
+                %% bwd compat with the old parser
+                p_top([], Acc, Errors);
             _ ->
                 ?syntax_error(Tokens)
         end
@@ -981,3 +997,33 @@ ensure_str(S) ->
         false ->
             ?f("~p", [S])
     end.
+
+%% -- bwd compat -- do not use these ----------------------------------
+%% Deprecated!
+%% Instead, to retrieve proto definitions,
+%% use the option to_proto_defs
+%% with gpb_compile:file or gpb_compile:string
+%% For exprotobuf, see also
+%% https://github.com/bitwalker/exprotobuf/issues/114
+
+%% Use the option to_proto_defs with gpb_compile:file/string instead.
+post_process_one_file(FileName, Defs, Opts) ->
+    gpb_defs:post_process_one_file(FileName, Defs, Opts).
+
+%% Use the option to_proto_defs with gpb_compile:file/string instead.
+post_process_all_files(Defs, _Opts) ->
+    case gpb_defs:post_process_all_files(Defs, _Opts) of
+        {ok, Defs1} ->
+            gpb_defs:convert_defs_from_latest_version(Defs1, 1);
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% Use the option to_proto_defs with gpb_compile:file/string instead.
+format_post_process_error({error, Reasons}) ->
+    gpb_defs:format_post_process_error({error, Reasons}).
+
+%% Use gpb_defs:fetch_imports instead.
+fetch_imports(Defs) ->
+    gpb_defs:fetch_imports(Defs).
+%% --^^--- bwd compat -- do not use these ----------------------------
