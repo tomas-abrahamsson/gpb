@@ -1,5 +1,17 @@
 -*- coding: utf-8 -*-
 
+Version 4.14.1
+2020-Sep-05
+
+        * Add a utility gpb:decode_packet/3 mimicing erlang:decode_packet/3,
+          but for varint length encoded framing of data.
+        * Document the public API in gpb.erl.
+        * Document gpb_defs:fetch_imports, it is part of the API.
+        * Fix some dialyzer issues in generated code
+        * Add back some non-API functions to gpb_parse and gpb_scan
+          with the intention of getting exprotobuf going again until
+          its issue bitwalker/exprotobuf#114 has been addressed.
+
 Version 4.14.0
 2020-Jul-24
 
