@@ -1551,7 +1551,9 @@ fields_to_map([F | FRest], [V | VRest], Acc, Defs, Opts) ->
             Elems2 = [v_to_map(Elem, Type, Defs, Opts) || Elem <- V],
             Acc2 = maps:put(FName, Elems2, Acc),
             fields_to_map(FRest, VRest, Acc2, Defs, Opts);
-        #?gpb_field{name=FName, occurrence=optional, type=Type} ->
+        #?gpb_field{name=FName, occurrence=Optional, type=Type}
+          when Optional =:= optional;
+               Optional =:= defaulty ->
             if V =:= undefined ->
                     case get_unset_by_opts(Opts) of
                         omitted ->

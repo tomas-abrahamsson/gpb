@@ -1646,6 +1646,8 @@ msg_to_from_map_test() ->
     Msg52 = gpb:msg_from_map(#{},   m1, O2Defs, []),
     Msg52 = gpb:msg_from_map(Map52, m1, O2Defs, [OptPresentUndefined]),
 
+    O3Map = gpb:msg_to_map({m1, undefined}, O3Defs, []),
+    0 = maps:size(O3Map),
     #m1{a = undefined} = gpb:msg_from_map(#{}, m1, O3Defs, []),
     #m1{a = undefined} = gpb:msg_from_map(#{}, m1, O3Defs, [OptOmitted]),
     #m1{a = undefined} = gpb:msg_from_map(#{a => undefined}, m1, O3Defs,
