@@ -525,9 +525,21 @@ enum_typestr(E, Defs, Opts) ->
       [?f("~p", [EName]) || {EName, _} <- Enumerations])
         ++ UnknownEnums.
 
-field_type_comment(MsgName, #?gpb_field{name=FName}=Field, TypeSpec, AnRes) ->
+field_type_comment(MsgName,
+                   #?gpb_field{name=FName, occurrence=Occurrence}=Field,
+                   TypeSpec, AnRes) ->
+    PresenceIndication =
+        case Occurrence of
+            defaulty -> "optional";
+            optional -> "optional";
+            required -> "required";
+            repeated -> "repeated"
+        end,
     ElemPath = [MsgName, FName],
-    field_type_comment_2(Field, ElemPath, TypeSpec, AnRes).
+    TypeComment = field_type_comment_2(Field, ElemPath, TypeSpec, AnRes),
+    if TypeComment == "" -> "(" ++ PresenceIndication ++ ")";
+       TypeComment /= "" -> PresenceIndication ++ ": " ++ TypeComment
+    end.
 
 oneof_type_comments(MsgName, #gpb_oneof{name=FName, fields=OFields},
                     TypeSpec, AnRes) ->
