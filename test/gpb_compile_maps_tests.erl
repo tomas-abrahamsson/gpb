@@ -688,9 +688,11 @@ strip_ws(B) when is_list(B) ->
 
 type_syntax_for_required_fields_test() ->
     %% In Erlang/OTP 19, required and optional fields for maps can be defined
-    %% using ":=" and "=>" respectively, like this:
+    %% using ":=" and "=>" respectively, however, use "=>" also for
+    %% required fields, since actual presence at decoding depends on
+    %% the input, especially when fields are passed using a map.
     %%
-    %%     -type m() :: #{req := integer(),
+    %%     -type m() :: #{req => integer(),
     %%                    opt => string()}.
     %%
     %% For Erlang/OTP 18 and earlier, only "=>" is available, so do
@@ -709,7 +711,7 @@ type_syntax_for_required_fields_test() ->
 
     S2 = compile_to_string(Proto, [{target_erlang_version,19} | CommonOpts]),
     T2 = get_type(S2),
-    [false, true] = [gpb_lib:is_substr(X, T2) || X <- ["=>", ":="]].
+    [true, false] = [gpb_lib:is_substr(X, T2) || X <- ["=>", ":="]].
 
 compile_to_string(Proto, Opts) ->
     Self = self(),

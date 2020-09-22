@@ -287,19 +287,18 @@ find_last_nonopt_field_index(Fields) ->
                 0,
                 gpb_lib:index_seq(Fields)).
 
-calc_field_type_sep(#?gpb_field{occurrence=Occurrence}, Opts) ->
+calc_field_type_sep(#?gpb_field{}, Opts) ->
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
         records ->
             "::";
         #maps{unset_optional=present_undefined} ->
             mandatory_map_item_type_sep(Opts);
         #maps{unset_optional=omitted} ->
-            case Occurrence of
-                required -> mandatory_map_item_type_sep(Opts);
-                repeated -> "=>";
-                optional -> "=>";
-                defaulty -> "=>"
-            end
+            %% Even for required (proto2) fields, we use "=>", since we
+            %% cannot guarantee that we will always decode to a map with
+            %% all required fields always set, since it depends on the
+            %% input binary.
+            "=>"
     end;
 calc_field_type_sep(#gpb_oneof{}, Opts) ->
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
