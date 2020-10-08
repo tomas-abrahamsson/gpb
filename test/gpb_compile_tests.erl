@@ -858,7 +858,19 @@ enum_from_binary_test() ->
     <<"foo.bar.E1">> = M3:enum_name_to_fqbin('foo.bar.E1'),
     'foo.bar.msg.E2' = M3:fqbin_to_enum_name(<<"foo.bar.Msg.E2">>),
     <<"foo.bar.Msg.E2">> = M3:enum_name_to_fqbin('foo.bar.msg.E2'),
-    unload_code(M3).
+    unload_code(M3),
+
+    %% With the use_package _and_ rename options, with enum type renaming
+    M4 = compile_iolist(Proto1,
+                        [use_packages,
+                        {rename,{msg_name,lowercase}},
+                        {rename,{enum_typename,lowercase}},
+                        type_specs]),
+    'foo.bar.E1' = M4:fqbin_to_enum_name(<<"foo.bar.E1">>),
+    <<"foo.bar.E1">> = M4:enum_name_to_fqbin('foo.bar.E1'),
+    'foo.bar.msg.E2' = M4:fqbin_to_enum_name(<<"foo.bar.Msg.E2">>),
+    <<"foo.bar.Msg.E2">> = M4:enum_name_to_fqbin('foo.bar.msg.E2'),
+    unload_code(M4).
 
 sources_and_basenames_test() ->
     M = compile_protos(
