@@ -59,7 +59,7 @@ format_export_types(Defs, AnRes, Opts) ->
                                 || {{enum, Enum}, Enumeration} <- Defs]),
                "\n",
                ?f("-export_type([~s]).",
-                  [gpb_lib:comma_join(["'"++atom_to_list(Enum)++"'/0"
+                  [gpb_lib:comma_join([format_enum_export(Enum, AnRes)
                                        || {{enum, Enum}, _} <- Defs])]),
                "\n\n",
                "%% message types\n",
@@ -79,6 +79,10 @@ format_enum_typespec(Enum, Enumeration, AnRes) ->
     Enumerators = gpb_lib:or_join([?f("~p", [EName])
                                    || {EName, _} <- Enumeration]),
     ?f("-type ~p() :: ~s.", [Enum1, Enumerators]).
+
+format_enum_export(Enum, AnRes) ->
+    Enum1 = rename_enum_type(Enum, AnRes),
+    ?f("~p/0", [Enum1]).
 
 format_record_typespec(Msg, Fields, Defs, AnRes, Opts) ->
     MsgType = rename_msg_type(Msg, AnRes),
