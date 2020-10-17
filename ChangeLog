@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 4.14.2
+2020-Oct-17
+
+	* Apply renames to the enum type also in export_type. Thanks
+	  to Jonas Boberg. (#185, #186)
+	* Bugfix gpb:msg_to_map/3 for proto3 messages.
+	* Fix map associations in type specs and instead indicate
+	  proto presence in comments.
+
 Version 4.14.1
 2020-Sep-05
 
