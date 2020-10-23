@@ -889,7 +889,7 @@ string(Mod, Str, Opts) ->
 do_file_or_string(In, Opts0) ->
     Opts1 = normalize_opts(Opts0),
     case parse_file_or_string(In, Opts1) of
-        {ok, Defs, Sources} ->
+        {ok, {Defs, Sources}} ->
             case gpb_names:compute_renamings(Defs, Opts1) of
                 {ok, Renamings} ->
                     Defs1 = gpb_names:apply_renamings(Defs, Renamings),
@@ -2481,16 +2481,88 @@ string_to_number(S) ->
 
 parse_file_or_string(In, Opts) ->
     Opts1 = add_curr_dir_as_include_if_needed(Opts),
-    case parse_file_and_imports(In, Opts1) of
-        {ok, {Defs1, AllImported}} ->
-            case gpb_defs:post_process_all_files(Defs1, Opts1) of
+    Opts2 = ensure_include_path_to_wellknown_types(Opts1),
+    case parse_input(In, Opts2) of
+        {ok, {Defs, Sources}} ->
+            case gpb_defs:post_process_all_files(Defs, Opts2) of
                 {ok, Defs2} ->
-                    {ok, Defs2, AllImported};
+                    {ok, {Defs2, Sources}};
                 {error, Reasons} ->
                     {error, {post_process, Reasons}}
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+parse_input(Input, Opts) ->
+    {Acc, Sources} =
+        process_each_input_once(
+          fun(In, {ok, Acc}) ->
+                  case parse_one_input(In, Opts) of
+                      {ok, {Imports, Defs}} ->
+                          {Imports, {ok, [Defs | Acc]}};
+                      {error, Reason} ->
+                          {[], {error, Reason}}
+                  end;
+             (_In, {error, Reason}) ->
+                  {[], {error, Reason}}
+          end,
+          {ok, []},
+          queue:from_list([Input])),
+    case Acc of
+        {ok, AllDefs} ->
+            {ok, {lists:append(lists:reverse(AllDefs)), Sources}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+parse_one_input(In, Opts) ->
+    case locate_read_import_int(In, Opts) of
+        {ok, Contents} ->
+            FName = file_name_from_input(In),
+            case scan_and_parse_string(Contents, FName, Opts) of
+                {ok, Defs} ->
+                    Imports = gpb_defs:fetch_imports(Defs),
+                    {ok, {Imports, Defs}};
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+process_each_input_once(F, AccIn, Queue) ->
+    {AccOut, Seen} =
+        process_input_queue(
+          fun(Input, {Acc1, Seen1}) ->
+                  Seen2 = [file_name_from_input(Input) | Seen1],
+                  {ToEnqueue1, Acc2} = F(Input, Acc1),
+                  ToEnqueue2 = filter_unseen(ToEnqueue1, Seen2, []),
+                  {ToEnqueue2, {Acc2, Seen2}}
+          end,
+          {AccIn, []},
+          Queue),
+    {AccOut, lists:reverse(Seen)}.
+
+filter_unseen([Elem | Rest], Seen, Acc) ->
+    case lists:member(Elem, Acc) orelse lists:member(Elem, Seen) of
+        true  -> filter_unseen(Rest, Seen, Acc);
+        false -> filter_unseen(Rest, Seen, [Elem | Acc])
+    end;
+filter_unseen([], _Seen, Acc) ->
+    lists:reverse(Acc).
+
+%% A bit like lists:foldl, but over a queue, and
+%% the F returns more elements to fold over as well as an acc.
+process_input_queue(F, Acc, Queue) ->
+    try queue:get(Queue) of
+        Item ->
+            QRest = queue:drop(Queue),
+            {ToEnqueue, Acc2} = F(Item, Acc),
+            Queue2 = lists:foldl(fun queue:in/2, QRest, ToEnqueue),
+            process_input_queue(F, Acc2, Queue2)
+    catch error:empty ->
+            Acc
     end.
 
 add_curr_dir_as_include_if_needed(Opts) ->
@@ -2500,33 +2572,8 @@ add_curr_dir_as_include_if_needed(Opts) ->
         false -> Opts ++ [{i,"."}]
     end.
 
-parse_file_and_imports(In, Opts) ->
-    FName = file_name_from_input(In),
-    parse_file_and_imports(In, [FName], Opts).
-
 file_name_from_input({Mod,_S}) -> lists:concat([Mod, ".proto"]);
 file_name_from_input(FName)    -> FName.
-
-parse_file_and_imports(In, AlreadyImported, Opts) ->
-    case locate_read_import_int(In, Opts) of
-        {ok, Contents} ->
-            %% Add to AlreadyImported to prevent trying to import it again: in
-            %% case we get an error we don't want to try to reprocess it later
-            %% (in case it is multiply imported) and get the error again.
-            FName = file_name_from_input(In),
-            AlreadyImported2 = append_unique(AlreadyImported, [FName]),
-            case scan_and_parse_string(Contents, FName, Opts) of
-                {ok, Defs} ->
-                    Imports = gpb_defs:fetch_imports(Defs),
-                    Opts2 = ensure_include_path_to_wellknown_types(Opts),
-                    read_and_parse_imports(Imports, AlreadyImported2,
-                                           Defs, Opts2);
-                {error, Reason} ->
-                    {error, Reason}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
 
 scan_and_parse_string(S, FName, Opts) ->
     case scan(S, Opts) of
@@ -2570,45 +2617,6 @@ default_scanner_parser() ->
         "old" -> old;
         _     -> new
     end.
-
-read_and_parse_imports([Import | Rest], AlreadyImported, Defs, Opts) ->
-    case lists:member(Import, AlreadyImported) of
-        true ->
-            read_and_parse_imports(Rest, AlreadyImported, Defs, Opts);
-        false ->
-            case import_it(Import, AlreadyImported, Defs, Opts) of
-                {ok, {Defs2, Imported2}} ->
-                    read_and_parse_imports(Rest, Imported2, Defs2, Opts);
-                {error, Reason} ->
-                    {error, Reason}
-            end
-    end;
-read_and_parse_imports([], Imported, Defs, _Opts) ->
-    {ok, {Defs, Imported}}.
-
-import_it(Import, AlreadyImported, Defs, Opts) ->
-    %% FIXME: how do we handle scope of declarations,
-    %%        e.g. options/package for imported files?
-    case parse_file_and_imports(Import, AlreadyImported, Opts) of
-        {ok, {MoreDefs, MoreImported}} ->
-            Defs2 = Defs++MoreDefs,
-            Imported2 = append_unique(AlreadyImported, MoreImported),
-            {ok, {Defs2, Imported2}};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-append_unique(Items, MoreItemsToAppend) ->
-    lists:foldl(
-      fun(NewItem, Acc) ->
-              case lists:member(NewItem, Acc) of
-                  true -> Acc;
-                  false -> Acc ++ [NewItem]
-              end
-      end,
-      Items,
-      MoreItemsToAppend).
-
 
 locate_read_import_int({_Mod, Str}, _Opts) ->
     {ok, Str};
