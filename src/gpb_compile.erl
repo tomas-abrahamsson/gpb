@@ -2220,6 +2220,8 @@ parse_opt(_, {OptName, 'integer()', OptTag, _Descr}, [OptArg | Rest]) ->
             {error, ?ff("Invalid version number (integer) for ~s: ~p",
                         [OptName, OptArg])}
     end;
+parse_opt(_, {_OptName, {'opt_value()', OptValue}, OptTag, _Descr}, Rest) ->
+    {ok, {{OptTag, OptValue}, Rest}};
 parse_opt(_, {_OptName, F, OptTag, _Descr}, Rest) when is_function(F) ->
     F(OptTag, Rest);
 parse_opt(_, {OptName, Alternatives, OptTag, _Descr}, [OptArg | Rest]) ->
@@ -2368,7 +2370,7 @@ opt_specs() ->
       "       instead of -include, which is the default.\n"},
      {"type", undefined, type_specs, "\n"
       "       Enables `::Type()' annotations in the generated code.\n"},
-     {"no_type", fun opt_x_false/2, type_specs, "\n"
+     {"no_type", {'opt_value()', false}, type_specs, "\n"
       "       Disables `::Type()' annotations in the generated code.\n"},
      {"descr", undefined, descriptor, "\n"
       "       Generate self-description information.\n"},
@@ -2467,10 +2469,10 @@ opt_specs() ->
       "       Make case insignificant when parsing enums in JSON. Also allow\n"
       "       dash as alternative to underscore.\n"
       "       Default is that case _is_ significant when parsing enums.\n"},
-     {"no-gen-mergers", fun opt_x_false/2, gen_mergers, "\n"
+     {"no-gen-mergers", {'opt_value()', false}, gen_mergers, "\n"
       "       Do not generate code for merging of messages. This is only\n"
       "       useful with the option -nif.\n"},
-     {"no-gen-introspect", fun opt_x_false/2, gen_introspect, "\n"
+     {"no-gen-introspect", {'opt_value()', false}, gen_introspect, "\n"
       "       Do not generate code for introspection.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
@@ -2563,10 +2565,6 @@ opt_rename_how_proto_prefix("proto="++S) ->
         _ ->
             throw({badopt, "Expected prefix= following proto="})
     end.
-
-opt_x_false(OptTag, Rest) ->
-    Opt = {OptTag, false},
-    {ok, {Opt, Rest}}.
 
 opt_translate_type(OptTag, [S | Rest]) ->
     try S of
