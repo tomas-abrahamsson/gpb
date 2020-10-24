@@ -1270,12 +1270,7 @@ do_proto_defs_aux3(Defs, DefsNoRenamings, DefsForIntrospect,
                                 AnRes, Opts),
             HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
-            ErlOutDir = get_erl_outdir(Opts),
-            HrlOutDir = get_hrl_outdir(Opts),
-            NifCcOutDir = get_nif_cc_outdir(Opts),
-            Erl   = filename:join(ErlOutDir, atom_to_list(Mod) ++ ".erl"),
-            Hrl   = filename:join(HrlOutDir, atom_to_list(Mod) ++ ".hrl"),
-            NifCc = filename:join(NifCcOutDir, atom_to_list(Mod) ++ ".nif.cc"),
+            {Erl, Hrl, NifCc} = get_output_files(Mod, Opts),
             case {file_write_file(Erl, ErlTxt, Opts),
                   possibly_write_file(Hrl, HrlTxt, Opts),
                   possibly_write_file(NifCc, NifTxt, Opts)} of
@@ -1369,6 +1364,27 @@ get_output_format([to_proto_defs | _])         -> proto_defs;
 get_output_format([{to_proto_defs, true} | _]) -> proto_defs;
 get_output_format([_ | Rest])                  -> get_output_format(Rest);
 get_output_format([])                          -> file.
+
+get_output_files(Mod, Opts) ->
+    ErlOutDir = get_erl_outdir(Opts),
+    HrlOutDir = get_hrl_outdir(Opts),
+    NifCcOutDir = get_nif_cc_outdir(Opts),
+    Erl = filename:join(ErlOutDir, atom_to_list(Mod) ++ ".erl"),
+    Hrl =
+        case gpb_lib:get_records_or_maps_by_opts(Opts) of
+            records ->
+                filename:join(HrlOutDir, atom_to_list(Mod) ++ ".hrl");
+            maps ->
+                '$not_generated'
+        end,
+    NifCc =
+        case proplists:get_bool(nif, Opts) of
+            true ->
+                filename:join(NifCcOutDir, atom_to_list(Mod) ++ ".nif.cc");
+            false ->
+                '$not_generated'
+        end,
+    {Erl, Hrl, NifCc}.
 
 get_erl_outdir(Opts) ->
     proplists:get_value(o_erl, Opts, get_outdir(Opts)).
