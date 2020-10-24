@@ -2499,9 +2499,9 @@ parse_input(Input, Opts) ->
         process_each_input_once(
           fun(In, {ok, Acc}) ->
                   case parse_one_input(In, Opts) of
-                      {ok, {Imports, Defs}} ->
+                      {ok, {Defs, Imports, _InputLocation}} ->
                           {Imports, {ok, [Defs | Acc]}};
-                      {error, Reason} ->
+                      {error, {Reason, _InputLocation}} ->
                           {[], {error, Reason}}
                   end;
              (_In, {error, Reason}) ->
@@ -2518,17 +2518,17 @@ parse_input(Input, Opts) ->
 
 parse_one_input(In, Opts) ->
     case locate_read_import_int(In, Opts) of
-        {ok, Contents} ->
+        {ok, {Contents, InputLocation}} ->
             FName = file_name_from_input(In),
             case scan_and_parse_string(Contents, FName, Opts) of
                 {ok, Defs} ->
                     Imports = gpb_defs:fetch_imports(Defs),
-                    {ok, {Imports, Defs}};
+                    {ok, {Defs, Imports, InputLocation}};
                 {error, Reason} ->
-                    {error, Reason}
+                    {error, {Reason, InputLocation}}
             end;
         {error, Reason} ->
-            {error, Reason}
+            {error, {Reason, In}}
     end.
 
 process_each_input_once(F, AccIn, Queue) ->
@@ -2619,7 +2619,7 @@ default_scanner_parser() ->
     end.
 
 locate_read_import_int({_Mod, Str}, _Opts) ->
-    {ok, Str};
+    {ok, {Str, from_input_string}};
 locate_read_import_int(Import, Opts) ->
     case proplists:get_value(import_fetcher, Opts) of
         undefined ->
@@ -2631,7 +2631,7 @@ locate_read_import_int(Import, Opts) ->
                 {ok, Contents} when is_list(Contents) ->
                     case lists:all(fun is_integer/1, Contents) of
                         true ->
-                            {ok, Contents};
+                            {ok, {Contents, {from_fetched, Import}}};
                         false ->
                             error({bad_fetcher_return,
                                    {not_a_string, Contents},
@@ -2686,9 +2686,9 @@ read_import(File, Opts) ->
         {ok,B} ->
             case utf8_decode(B) of
                 {ok, {utf8, S}} ->
-                    {ok, S};
+                    {ok, {S, File}};
                 {ok, {latin1, S}} ->
-                    {ok, S};
+                    {ok, {S, File}};
                 {error, Reason} ->
                     {error, {utf8_decode_failed, Reason, File}}
             end;
