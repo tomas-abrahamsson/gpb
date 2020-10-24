@@ -2454,6 +2454,129 @@ list_io_with_nif_options_includes_nif_cc_output_test() ->
         do_list_io_defs(FileSystem, [nif]),
     ok.
 
+generates_makefile_deps_to_stdout_test() ->
+    MainProto = lf_lines(["import 'a.proto';",
+                          "message M { required uint32 f = 1; }\n"]),
+    ExtraProtos = [{"a.proto", ["message A { required uint32 g = 2; }"]}],
+    Opts = [{list_deps, makefile_rules},
+            list_deps_makefile_phonies,
+            %% --
+            {test_extra_known_protos, ExtraProtos},
+            {test_extra_mod, gpb_c_test_main},
+            test_extra_no_binary],
+    {{return, ok},
+     {output, Output}} =
+        capture_stdout(
+          fun() ->
+                  compile_iolist_maybe_errors_or_warnings(MainProto, Opts,
+                                                          get_result)
+          end),
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto", "./a.proto"]},
+     {"./a.proto", []}] = parse_makefile_deps(Output).
+
+generates_makefile_deps_to_file_test() ->
+    MainProto = lf_lines(["import 'a.proto';",
+                          "message M { required uint32 f = 1; }\n"]),
+    ExtraProtos = [{"a.proto", ["message A { required uint32 g = 2; }"]}],
+    Opts = [{list_deps, makefile_rules},
+            list_deps_makefile_phonies,
+            {list_deps_dest_file, "/x.d"},
+            %% --
+            {test_extra_known_protos, ExtraProtos},
+            {test_extra_mod, gpb_c_test_main},
+            test_extra_no_binary,
+            test_extra_capture_write_file],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts, get_result),
+    [{"/x.d", DepsFileText}] = retrieve_files_written(),
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto", "./a.proto"]},
+     {"./a.proto", []}] = parse_makefile_deps(DepsFileText).
+
+generates_makefiles_missing_files_are_generated_test() ->
+    MainProto = lf_lines(["import 'a.proto';",
+                          "message M { required uint32 f = 1; }\n"]),
+    Opts = [{list_deps, makefile_rules},
+            {list_deps_dest_file, "/x.d"},
+            %% --
+            {test_extra_mod, gpb_c_test_main},
+            test_extra_no_binary,
+            test_extra_capture_write_file],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts, get_result),
+    [{"/x.d", DepsFileText1}] = retrieve_files_written(),
+    %% a.proto is not expected since not found:
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto"]}] =
+         parse_makefile_deps(DepsFileText1),
+
+    %% Same again but missing are to considered generated
+    Opts2 = [list_deps_missing_imports_are_generated | Opts],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts2, get_result),
+    [{"/x.d", DepsFileText2}] = retrieve_files_written(),
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto",
+                                "a.proto" % <- expected this time
+                               ]}] =
+         parse_makefile_deps(DepsFileText2).
+
+generates_deps_and_compile_to_file_test() ->
+    MainProto = lf_lines(["message M { required uint32 f = 1; }\n"]),
+    Opts = [{list_deps, makefile_rules},
+            list_deps_makefile_phonies,
+            {list_deps_dest_file, "/x.d"},
+            %% --
+            {test_extra_mod, gpb_c_test_main},
+            test_extra_no_binary,
+            test_extra_capture_write_file,
+            test_extra_dont_load_code],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts, get_result),
+    [{"/x.d", DepsFileText}] = retrieve_files_written(),
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto"]}] =
+        parse_makefile_deps(DepsFileText).
+
+list_deps_more_formats_test() ->
+    MainProto = lf_lines(["import 'a.proto';",
+                          "message M { required uint32 f = 1; }\n"]),
+    ExtraProtos = [{"a.proto", ["message A { required uint32 g = 2; }"]}],
+    CmnOpts = [{list_deps_dest_file, "/x.d"},
+               %% --
+               {test_extra_known_protos, ExtraProtos},
+               {test_extra_mod, gpb_c_test_main},
+               test_extra_no_binary,
+               test_extra_capture_write_file],
+
+    %% Newline-terminated lines
+    Opts1 = [{list_deps, {list_imports, newline_terminated}} | CmnOpts],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts1, get_result),
+    [{"/x.d", "./a.proto\n"}] = retrieve_files_written(),
+
+    %% null-terminated lines
+    Opts2 = [{list_deps, {list_imports, null_terminated}} | CmnOpts],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts2, get_result),
+    [{"/x.d", "./a.proto\000"}] = retrieve_files_written().
+
+parse_makefile_deps(Str) ->
+    %% Very simplistic naive approach: If it ends with a colon, it is a
+    %% target, the rest of the words are dependencies. Assume no commands
+    %% are present (ie no commands to create the target from the deps)
+    [Target1 | Words] = gpb_lib:string_lexemes(Str, " \n\\"),
+    parse_mfdeps(Words, drop_trailing_colon(Target1), [], []).
+
+parse_mfdeps([Word | Rest], CurrTarget, CurrDeps, Acc) ->
+    case ends_with_colon(Word) of
+        true ->
+            Acc1 = [{CurrTarget, lists:reverse(CurrDeps)} | Acc],
+            parse_mfdeps(Rest, drop_trailing_colon(Word), [], Acc1);
+        false ->
+            parse_mfdeps(Rest, CurrTarget, [Word | CurrDeps], Acc)
+    end;
+parse_mfdeps([], CurrTarget, CurrDeps, Acc) ->
+    Acc1 = [{CurrTarget, lists:reverse(CurrDeps)} | Acc],
+    lists:reverse(Acc1).
+
+drop_trailing_colon(S) ->
+    ":" ++ Rest = lists:reverse(S),
+    lists:reverse(Rest).
+
+ends_with_colon(S) ->
+    $: == lists:last(S).
+
 do_list_string_io_defs(Mod, Str, Files, Opts) ->
     do_list_io_defs(Files, [{string_input, {Mod, Str}} | Opts]).
 
@@ -5144,11 +5267,19 @@ compile_iolist(IoList, ExtraOpts) ->
 compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
     {TestOpts, GpbCompileOpts} =
         lists:partition(fun({test_extra_known_protos, _}) -> true;
+                           (test_extra_no_binary) -> true;
+                           ({test_extra_mod, _}) -> true;
+                           (test_extra_capture_write_file) -> true;
+                           (test_extra_dont_load_code) -> true;
                            (_GpbCompileOpt) -> false
                         end,
                         ExtraOpts0),
     ExtraProtos = proplists:get_value(test_extra_known_protos, TestOpts, []),
-    Mod = find_unused_module(),
+    DoBinary = not proplists:get_bool(test_extra_no_binary, TestOpts),
+    Mod = case proplists:get_value(test_extra_mod, TestOpts) of
+              undefined -> find_unused_module();
+              TM        -> TM
+          end,
     ModProto = f("~s.proto", [Mod]),
     KnownProtos = [{ModProto, IoList} | ExtraProtos],
     ReadFile = fun(F) ->
@@ -5169,26 +5300,45 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
                                    file:read_file_info(F)
                            end
                    end,
-
+    BinaryOpts = [binary || DoBinary],
+    WriteFile =
+        case proplists:get_bool(test_extra_capture_write_file, TestOpts) of
+            true ->
+                Master = self(),
+                fun(FName, Data) ->
+                        Master ! {file_written, {FName, Data}},
+                        ok
+                end;
+            false ->
+                fun(_, _) -> ok end
+        end,
     CompRes = gpb_compile:file(
                 ModProto,
                 [{file_op, [{read_file, ReadFile},
                             {read_file_info, ReadFileInfo},
-                            {write_file, fun(_,_) -> ok end}]},
+                            {write_file, WriteFile}]},
                  {i,"."},
-                 binary, return_errors, return_warnings | GpbCompileOpts]),
+                 return_errors, return_warnings] ++
+                    BinaryOpts ++
+                    GpbCompileOpts),
+    LoadCode = case proplists:get_bool(test_extra_dont_load_code, TestOpts) of
+                   false -> fun(MMod, Code) -> load_code(MMod, Code) end;
+                   true  -> fun(_Mod, _Code) -> ok end
+               end,
     case OnFail of
         must_succeed ->
             %% Mod1 instead of Mod, since some options can change the
             %% module name (module_name_suffix, or epb_compatibility,
             %% for instance)
             {ok, Mod1, Code, []} = CompRes,
-            load_code(Mod1, Code),
+            LoadCode(Mod1, Code),
             Mod1;
         get_result ->
             case CompRes of
+                ok ->
+                    ok;
                 {ok, Mod1, Code, Warnings} -> % Mod1 insead of Mod, see above
-                    load_code(Mod1, Code),
+                    LoadCode(Mod1, Code),
                     {ok, Mod1, Warnings};
                 {error, Reasons, Warnings} ->
                     {error, Reasons, Warnings}
@@ -5200,6 +5350,14 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
                 {error, Reasons, Warnings} ->
                     {error, Reasons, Warnings}
             end
+    end.
+
+retrieve_files_written() ->
+    receive
+        {file_written, {FName, Data}} ->
+            [{FName, lists:flatten(Data)} | retrieve_files_written()]
+    after 10 ->
+            []
     end.
 
 compile_iolist_get_errors_or_warnings(IoList) ->

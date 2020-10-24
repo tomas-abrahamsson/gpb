@@ -180,6 +180,12 @@
                boolean_opt(ignore_wellknown_types_directory) |
                {proto_defs_version, integer()} |
                {introspect_proto_defs_version, integer() | preferably_1} |
+               {list_deps, list_deps_format()} |
+               {list_deps_dest_file, filename()} |
+               boolean_opt(list_deps_missing_imports_are_generated) |
+               boolean_opt(list_deps_makefile_phonies) |
+               {list_deps_makefile_target, list_deps_makefile_target()} |
+               boolean_opt(list_deps_ang_generate) |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -240,6 +246,11 @@
 -type json_array_format() :: list | {atom(), list}.
 %% A list or a list in a tagged tuple.
 -type json_string_format() :: binary | list.
+
+-type list_deps_format() :: makefile_format |
+                            {list_imports, newline_terminated} |
+                            {list_imports, null_terminated}.
+-type list_deps_makefile_target() :: string() | {quote, string()}.
 
 %% Compilation return values
 -type comp_ret() :: mod_ret() | bin_ret() | defs_ret() | error_ret().
@@ -883,6 +894,63 @@ file(File) ->
 %% The `introspect_proto_defs_version' can be used to specify the version
 %% returned by the generated introspection functions, default is 1
 %% if possible, else 2.
+%%
+%% <a id="option-list_deps"/>
+%% <a id="option-list_deps_dest_file"/>
+%% <a id="option-list_deps_ang_generate"/>
+%% <a id="option-list_deps_missing_imports_are_generated"/>
+%% <a id="option-list_deps_makefile_phonies"/>
+%% <a id="option-list_deps_makefile_target"/>
+%% A set of options will cause {@link file/2} and {@link string/3} to
+%% list `import' dependencies as described below. To retrieve dependency
+%% information as Erlang terms, see {@link list_io/2} and
+%% {@link string_list_io/3}.
+%% <dl>
+%%   <dt>`{list_deps, Format}'<br/>
+%%       `{list_deps_dest_file, Filename::string()}'</dt>
+%%   <dd>Either or both of these two options without the
+%%       `list_deps_and_generate' option described below, will cause
+%%       dependencies to be listed, and no code to be generated.
+%%       The default format is Makefile format, ie with only the
+%%       `list_deps_dest_file' option. The default destination is
+%%       to print to standard output, ie with only the `list_deps' option.</dd>
+%%   <dt>`list_deps_and_generate'</dt>
+%%   <dd>If specified, dependencies will be listed, and code will be
+%%       generated. .</dd>
+%% </dl>
+%% Formats:
+%% <dl>
+%%   <dt>`{list_deps, makefile_format}'</dt>
+%%   <dd>Makefile rules will be generated. The top-level .proto file
+%%       will be the first dependency followed by imported .proto files,
+%%       and the .erl file will be the target. Outdir options as well
+%%       as module renaming options are considered for target.
+%%       Include path options are considered for the dependencies.</dd>
+%%   <dt>`{list_deps, {list_imports, newline_terminated}}'</dt>
+%%   <dd>Imports of the .proto file will be listed, one per line.</dd>
+%%   <dt>`{list_deps, {list_imports, null_terminated}}'</dt>
+%%   <dd>Like `newline_terminated' but instead, each import is followed
+%%       by a NUL character. This can be useful when paths have spaces
+%%       or newline or other strange characters.</dd>
+%%   <dt>`list_deps_missing_imports_are_generated'</dt>
+%%   <dd>Consider missing imports to be generated, and include them
+%%       in the dependency list</dd>
+%% </dl>
+%% Some of the options apply only when the `Target' is `makefile_format':
+%% <dl>
+%%   <dt>`{list_deps_makefile_target, Target}'</dt>
+%%   <dd>Override the default target for the Makefile rule, as follows:
+%%      <dl>
+%%         <dt>`Target :: string()'</dt>
+%%         <dd>Use the specified value instead.</dd>
+%%         <dt>`Target :: {quote, string()}'</dt>
+%%         <dd>Same, but quote characters special to make.</dd>
+%%      </dl></dd>
+%%   <dt>`list_deps_makefile_phonies'</dt>
+%%   <dd>Generate phony Makefile targets for dependencies.</dd>
+%% </dl>
+
+
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
     do_file_or_string(File, Opts).
@@ -901,35 +969,55 @@ string(Mod, Str, Opts) ->
 
 do_file_or_string(In, Opts0) ->
     Opts1 = normalize_opts(Opts0),
-    case parse_file_or_string(In, Opts1) of
+    case list_deps_or_generate(Opts1) of
+        generate ->
+            do_generate_from_file_or_string(In, Opts1);
+        list_deps ->
+            do_list_deps_from_file_or_string(In, Opts1);
+        list_deps_and_generate ->
+            do_list_deps_from_file_or_string(In, Opts1),
+            do_generate_from_file_or_string(In, Opts1)
+    end.
+
+list_deps_or_generate(Opts) ->
+    OptM   = proplists:get_value(list_deps, Opts) /= undefined,
+    OptMMD = proplists:get_bool(list_deps_and_generate, Opts),
+    if OptMMD -> list_deps_and_generate;
+       OptM   -> list_deps;
+       true   -> generate
+    end.
+
+do_generate_from_file_or_string(In, Opts) ->
+    case parse_file_or_string(In, Opts) of
         {ok, {Defs, Sources}} ->
-            case gpb_names:compute_renamings(Defs, Opts1) of
+            case gpb_names:compute_renamings(Defs, Opts) of
                 {ok, Renamings} ->
                     Defs1 = gpb_names:apply_renamings(Defs, Renamings),
-                    Mod = find_out_mod(In, Opts1),
+                    Mod = find_out_mod(In, Opts),
                     DefaultOutDir = find_default_out_dir(In),
-                    Opts2 = Opts1 ++ [{o,DefaultOutDir}],
-                    Opts3 = possibly_adjust_proto_defs_version_opt(Opts2),
+                    Opts1 = Opts ++ [{o,DefaultOutDir}],
+                    Opts2 = possibly_adjust_proto_defs_version_opt(Opts1),
                     do_proto_defs_aux1(Mod, Defs1, Defs, Sources, Renamings,
-                                       Opts3);
+                                       Opts2);
                 {error, Reason} = Error ->
-                    possibly_report_error(Error, Opts1),
-                    case proplists:get_bool(return_warnings, Opts1) of
+                    possibly_report_error(Error, Opts),
+                    case proplists:get_bool(return_warnings, Opts) of
                         true  -> {error, Reason, []};
                         false -> Error
                     end
             end;
         {error, Reason} = Error ->
-            possibly_report_error(Error, Opts1),
-            case proplists:get_bool(return_warnings, Opts1) of
+            possibly_report_error(Error, Opts),
+            case proplists:get_bool(return_warnings, Opts) of
                 true  -> {error, Reason, []};
                 false -> Error
             end
     end.
 
 normalize_opts(Opts0) ->
-    normalize_return_report_opts(
-      normalize_alias_opts(Opts0)).
+    normalize_list_deps_rules(
+      normalize_return_report_opts(
+        normalize_alias_opts(Opts0))).
 
 normalize_alias_opts(Opts) ->
     lists:foldl(fun(F, OptsAcc) -> F(OptsAcc) end,
@@ -1006,6 +1094,19 @@ normalize_return_report_opts(Opts1) ->
     Opts4 = unless_defined_set(return_warnings, report_warnings, Opts3),
     Opts5 = unless_defined_set(return_errors,   report_errors, Opts4),
     Opts5.
+
+normalize_list_deps_rules(Opts) ->
+    OptM = proplists:get_value(list_deps, Opts),
+    OptMF = proplists:get_value(list_deps_dest_file, Opts),
+    OptMMD = proplists:get_bool(list_deps_and_generate, Opts),
+    if OptMF /= undefined, OptM == undefined;
+       OptMMD, OptM == undefined ->
+            %% -MF <file> implies -M
+            %% -MMD implies -M
+            [{list_deps, makefile_rules} | Opts];
+       true ->
+            Opts
+    end.
 
 expand_opt(OptionToTestFor, OptionsToExpandTo, Opts) ->
     lists:append(
@@ -1474,6 +1575,75 @@ list_deps(In, Opts) ->
     OutputFiles ++
         [{sources, Sources},
          {missing, Missing}].
+
+do_list_deps_from_file_or_string(In, Opts) ->
+    Listing = list_deps(In, Opts),
+    case get_deps_output_dest(Opts) of
+        {file, DestFileName} ->
+            ListingTxt = render_deps_listing(Listing, Opts),
+            case file_write_file(DestFileName, ListingTxt, Opts) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    {error, {write_failed, DestFileName, Reason}}
+            end;
+        stdout ->
+            ListingTxt = render_deps_listing(Listing, Opts),
+            io:format("~s", [ListingTxt]),
+            ok
+    end.
+
+render_deps_listing(Listing, Opts) ->
+    Erl = proplists:get_value(erl_output, Listing),
+    Sources = proplists:get_value(sources, Listing),
+    Missing = proplists:get_value(missing, Listing),
+    OptMG = proplists:get_bool(list_deps_missing_imports_are_generated, Opts),
+    %% The first among Dependencies is the input source to analyzs
+    Dependencies = if OptMG -> Sources ++ Missing;
+                      true  -> Sources
+                   end,
+    Target = get_listing_target(Erl, Opts),
+    case proplists:get_value(list_deps, Opts) of
+        makefile_rules ->
+            Phonies =
+                case proplists:get_bool(list_deps_makefile_phonies, Opts) of
+                    true  -> only_files(tl(Dependencies));
+                    false -> []
+                end,
+            [?f("~s: ~s~n", [Target, format_deps(only_files(Dependencies))]),
+             [?f("~n~s:~n", [Phony]) || Phony <- Phonies]];
+        {list_imports, newline_terminated} ->
+            [?f("~s~n", [Dep]) || Dep <- only_files(tl(Dependencies))];
+        {list_imports, null_terminated} ->
+            %% Find -print0 is null terminated rather than null separated.
+            %% so do the same here.
+            [?f("~s\000", [Dep]) || Dep <- only_files(tl(Dependencies))]
+    end.
+
+format_deps(Dependencies) ->
+    gpb_lib:string_join(Dependencies, " \\\n    ").
+
+get_deps_output_dest(Opts) ->
+    case proplists:get_value(list_deps_dest_file, Opts) of
+        undefined -> stdout;
+        File      -> {file, File}
+    end.
+
+only_files(Sources) ->
+    %% Filter away from_input_string and {from_fetched,_}
+    [Source || Source <- Sources,
+               is_list(Source)].
+
+get_listing_target(Erl, Opts) ->
+    case proplists:get_value(list_deps_makefile_target, Opts) of
+        undefined         -> Erl;
+        S when is_list(S) -> S;
+        {quote, S}        -> make_quote(S)
+    end.
+
+make_quote("$" ++ Rest) -> "$$" ++ make_quote(Rest);
+make_quote([C | Rest]) -> [C | make_quote(Rest)];
+make_quote("") -> "".
 
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()
