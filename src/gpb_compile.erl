@@ -92,6 +92,8 @@
 -export([string/2, string/3]).
 -export([proto_defs/2, proto_defs/3, proto_defs/5]).
 -export([msg_defs/2, msg_defs/3]).
+-export([list_io/2]).
+-export([string_list_io/2, string_list_io/3]).
 -export([format_error/1, format_warning/1]).
 -export([c/0, c/1, c/2]). % Cmd line interface, halts vm---don't use from shell!
 -export([parse_opts_and_args/1]).
@@ -112,6 +114,7 @@
 %% Options
 -type boolean_opt(X) :: X | {X, boolean()}.% Just an option `X' means `{X,true}'
 -type directory() :: string().
+-type filename() :: string().
 
 -type opts() :: [opt()].
 -type opt() :: type_specs | {type_specs, boolean()} |
@@ -251,8 +254,18 @@
 -type code() :: binary() | gpb_defs:defs() | [code_item()].
 -type code_item() :: {erl, ErlCode :: binary()} |
                      {nif, NifCcText :: string()}.
+-type io_info_item() :: {erl_output, filename()} |
+                        {hrl_output, filename()} |
+                        {nif_cc_output, filename()} |
+                        {sources, [source()]} |
+                        {missing, [source()]}.
+-type source() :: from_input_string |
+                  {from_fetched, Proto::filename()} |
+                  filename().
+
 -export_type([opts/0, opt/0]).
 -export_type([comp_ret/0]).
+-export_type([io_info_item/0]).
 
 -ifdef(OTP_RELEASE).
 -define(STACKTRACE(C,R,St), C:R:St ->).
@@ -1402,6 +1415,66 @@ clean_module_name(Mod) ->
     Clean = re:replace(atom_to_list(Mod), "[.]", "_", [global, {return,list}]),
     list_to_atom(Clean).
 
+%% @doc List inputs and file outputs, based on an input file.  The
+%% elements `erl_output', `hrl_output' and `nif_cc_output' are present
+%% if output would be generated to those based on the options. The file
+%% is scanned for `import "file.proto";' declarations recursively.
+%%
+%% The imported files are located the same way {@link file/2} would find
+%% them, using the options for instance `{i,directory()}'.
+%%
+%% If there is an error parsing the input proto file or an imported
+%% file, it is treated as it it was a file with no imports. Thus it is
+%% still included in `sources'. If a file in an `import' declaration
+%% cannot be found, it is included among the `missing' items.
+%%
+%% The first element in `sources' is always the input file.  The rest of
+%% the elements are any imported files in breadth-first order. An imported
+%% file is in `sources' only once, even if it is imported multiple
+%% times.
+%%
+%% Any renaming options are used to compute the output file names.
+%% Any import fetcher options are used to retrieve files.
+-spec list_io(filename(), opts()) -> [io_info_item()].
+list_io(FileName, Opts) ->
+    Opts1 = normalize_opts(Opts),
+    list_deps(FileName, Opts1).
+
+%% @equiv string_list_io(Mod, Str, [])
+-spec string_list_io(module(), string()) -> [io_info_item()].
+string_list_io(Mod, Str) ->
+    string_list_io(Mod, Str, []).
+
+%% @doc List inputs and file outputs based on proto definitions in a
+%% string instead of in a file, similar to {@link string/3}.  See
+%% {@link list_io/2} for further information.
+-spec string_list_io(module(), string(), opts()) -> [io_info_item()].
+string_list_io(Mod, Str, Opts) ->
+    Opts1 = normalize_opts(Opts),
+    list_deps({Mod, Str}, Opts1).
+
+list_deps(In, Opts) ->
+    {Sources, Missing} = collect_inputs(In, Opts),
+    Mod = find_out_mod(In, Opts),
+    DefaultOutDir = find_default_out_dir(In),
+    Opts1 = Opts ++ [{o,DefaultOutDir}],
+    OutputFiles =
+        case get_output_format(Opts1) of
+            proto_defs ->
+                [];
+            binary ->
+                [];
+            file ->
+                {Erl, Hrl, NifCc} = get_output_files(Mod, Opts1),
+                lists:append(
+                  [[{erl_output, Erl}],
+                   [{hrl_output, Hrl} || Hrl /= '$not_generated'],
+                   [{nif_cc_output, NifCc} || NifCc /= '$not_generated']])
+        end,
+    OutputFiles ++
+        [{sources, Sources},
+         {missing, Missing}].
+
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()
 %%
@@ -2534,6 +2607,34 @@ parse_input(Input, Opts) ->
         {error, Reason} ->
             {error, Reason}
     end.
+
+collect_inputs(Input, Opts) ->
+    Opts1 = add_curr_dir_as_include_if_needed(Opts),
+    Opts2 = ensure_include_path_to_wellknown_types(Opts1),
+    {{Imports, Missing}, _} =
+        process_each_input_once(
+          fun(In, {AccImports, AccMissing}) ->
+                  Level = if AccImports == [], AccMissing == [] -> top_level;
+                             true -> import
+                          end,
+                  case parse_one_input(In, Opts2, Level) of
+                      {ok, {_Defs, MoreImports, InputLocation}} ->
+                          Acc1 = {[InputLocation | AccImports], AccMissing},
+                          {MoreImports, Acc1};
+                      {error, {{import_not_found, Import, _},_InputLocation}}->
+                          Acc1 = {AccImports, [Import | AccMissing]},
+                          {[], Acc1};
+                      {error, {{fetcher_issue, Import, _}, _InputLocation}} ->
+                          Acc1 = {AccImports, [Import | AccMissing]},
+                          {[], Acc1};
+                      {error, {_Reason, InputLocation}} ->
+                          Acc1 = {[InputLocation | AccImports], AccMissing},
+                          {[], Acc1}
+                  end
+          end,
+          {[], []},
+          queue:from_list([Input])),
+    {lists:reverse(Imports), lists:reverse(Missing)}.
 
 parse_one_input(In, Opts, ToplevelOrImport) ->
     case locate_read_import_int(In, Opts, ToplevelOrImport) of
