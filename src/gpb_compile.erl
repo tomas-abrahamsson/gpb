@@ -2495,19 +2495,22 @@ parse_file_or_string(In, Opts) ->
     end.
 
 parse_input(Input, Opts) ->
-    {Acc, Sources} =
+    {{Acc, _N}, Sources} =
         process_each_input_once(
-          fun(In, {ok, Acc}) ->
-                  case parse_one_input(In, Opts) of
+          fun(In, {{ok, Acc}, N}) ->
+                  Level = if N == 0 -> top_level;
+                             N >= 1 -> import
+                          end,
+                  case parse_one_input(In, Opts, Level) of
                       {ok, {Defs, Imports, _InputLocation}} ->
-                          {Imports, {ok, [Defs | Acc]}};
+                          {Imports, {{ok, [Defs | Acc]}, N + 1}};
                       {error, {Reason, _InputLocation}} ->
-                          {[], {error, Reason}}
+                          {[], {{error, Reason}, N + 1}}
                   end;
-             (_In, {error, Reason}) ->
-                  {[], {error, Reason}}
+             (_In, {{error, Reason}, N}) ->
+                  {[], {{error, Reason}, N + 1}}
           end,
-          {ok, []},
+          {{ok, []}, 0},
           queue:from_list([Input])),
     case Acc of
         {ok, AllDefs} ->
@@ -2516,8 +2519,8 @@ parse_input(Input, Opts) ->
             {error, Reason}
     end.
 
-parse_one_input(In, Opts) ->
-    case locate_read_import_int(In, Opts) of
+parse_one_input(In, Opts, ToplevelOrImport) ->
+    case locate_read_import_int(In, Opts, ToplevelOrImport) of
         {ok, {Contents, InputLocation}} ->
             FName = file_name_from_input(In),
             case scan_and_parse_string(Contents, FName, Opts) of
@@ -2618,9 +2621,11 @@ default_scanner_parser() ->
         _     -> new
     end.
 
-locate_read_import_int({_Mod, Str}, _Opts) ->
+locate_read_import_int({_Mod, Str}, _Opts, _IsToplevelOrImport) ->
     {ok, {Str, from_input_string}};
-locate_read_import_int(Import, Opts) ->
+locate_read_import_int(Proto, Opts, top_level) ->
+    locate_read_import_aux(Proto, Opts);
+locate_read_import_int(Import, Opts, import) ->
     case proplists:get_value(import_fetcher, Opts) of
         undefined ->
             locate_read_import_aux(Import, Opts);

@@ -147,8 +147,7 @@ import_fetcher_test() ->
                                        from_file
                              end},
             FileReadOpt, {i,"."}]),
-    [{redir_to_file,"X.proto"},
-     {read,"X.proto"},
+    [{read,"X.proto"},
      {redir_to_file,"Y.proto"},
      {read,"Y.proto"}] = flush_msgs(),
 
@@ -164,7 +163,7 @@ import_fetcher_test() ->
                                             end)}
                              end},
             FileReadOpt, {i,"."}]),
-    [{fetched,"X.proto"},
+    [{read,"X.proto"},
      {fetched,"Y.proto"}] = flush_msgs(),
 
     %% Importer returns error
