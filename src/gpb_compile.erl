@@ -2335,7 +2335,7 @@ opt_specs() ->
       "         pkg_name       Modify the package name. Useful\n"
       "                        with the -pkgs option.\n"
       "         msg_name       Modify message names, but not the package\n"
-      "                        partof them\n"
+      "                        part of them\n"
       "         msg_fqname     Modify message names, including their\n"
       "                        package part. Useful with the -pkgs option.\n"
       "         group_name     Group names.\n"
@@ -2369,7 +2369,7 @@ opt_specs() ->
      {"type", undefined, type_specs, "\n"
       "       Enables `::Type()' annotations in the generated code.\n"},
      {"no_type", fun opt_x_false/2, type_specs, "\n"
-      "       Disbles `::Type()' annotations in the generated code.\n"},
+      "       Disables `::Type()' annotations in the generated code.\n"},
      {"descr", undefined, descriptor, "\n"
       "       Generate self-description information.\n"},
      {"maps", undefined, maps, "\n"
@@ -2431,7 +2431,7 @@ opt_specs() ->
      {"json-format", {jsx,mochijson2,jiffy,maps}, json_format, "\n"
       "       Specify format for JSON representation:\n"
       "       * jsx          (default if -maps is not specified)\n"
-      "       * mochihison2\n"
+      "       * mochijson2\n"
       "       * jiffy\n"
       "       * maps         (default if -maps is specified)\n"},
      {"json-object-format", fun opt_json_object_format/2,json_object_format,"\n"
@@ -2465,11 +2465,11 @@ opt_specs() ->
      {"json-case-insensitive-enum-parsing", undefined,
       json_case_insensitive_enum_parsing, "\n"
       "       Make case insignificant when parsing enums in JSON. Also allow\n"
-      "       dash as alternative to undercore.\n"
+      "       dash as alternative to underscore.\n"
       "       Default is that case _is_ significant when parsing enums.\n"},
      {"no-gen-mergers", fun opt_x_false/2, gen_mergers, "\n"
       "       Do not generate code for merging of messages. This is only\n"
-      "       usefulwith the option -nif.\n"},
+      "       useful with the option -nif.\n"},
      {"no-gen-introspect", fun opt_x_false/2, gen_introspect, "\n"
       "       Do not generate code for introspection.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
