@@ -2096,6 +2096,40 @@ c() ->
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
 %%       `-W' and `-Wall' are the same as `-W1'</dd>
+%%   <dt><a id="cmdline-option-m"/>
+%%       `-M'</dt>
+%%   <dd>Generate Makefile rule(s) to stdout for dependencies.
+%%       No code is generated unless `-MMD' is specified.</dd>
+%%   <dt><a id="cmdline-option-ml"/>
+%%       `-ML'</dt>
+%%   <dd>Print imports, on per line instead of on Makefile format.
+%%       No code is generated unless `-MMD' is specified.</dd>
+%%   <dt><a id="cmdline-option-m0"/>
+%%       `-M0'</dt>
+%%   <dd>Print imports, each terminated by a null character, instead of
+%%       on Makefile format.
+%%       No code is generated unless `-MMD' is specified.</dd>
+%%   <dt><a id="cmdline-option-mf"/>
+%%       `-MF file'</dt>
+%%   <dd>Specify a file to write dependency rules to, instead of printing them
+%%       to stdout. No code is generated unless `-MMD' is specified.</dd>
+%%   <dt><a id="cmdline-option-mg"/>
+%%       `-MG'</dt>
+%%   <dd>Consider missing imports to be generated and include\n"
+%%       them in the listed dependencies or rules.</dd>
+%%   <dt><a id="cmdline-option-mp"/>
+%%       `-MP'</dt>
+%%   <dd>Generate phony Makefile targets for dependencies.</dd>
+%%   <dt><a id="cmdline-option-mt"/>
+%%       `-MT target'</dt>
+%%   <dd>Override the Makefile rule target.</dd>
+%%   <dt><a id="cmdline-option-mq"/>
+%%       `-MQ target'</dt>
+%%   <dd>Same as `-MT' but quote characters special to make.</dd>
+%%   <dt><a id="cmdline-option-mmd"/>
+%%       `-MMD'</dt>
+%%   <dd>List imports or Makefile rules and generate code.
+%%       This option works like in erlc, which contrasts to gcc.</dd>
 %%   <dt><a id="cmdline-option-help"/>
 %%       <a id="cmdline-option-h"/>
 %%       `--help' or `-h'</dt>
@@ -2484,6 +2518,31 @@ opt_specs() ->
       "       Same as -W1\n"},
      {"W", undefined, report_warnings, "\n"
       "       Same as -W1\n"},
+     {"M", {'opt_value()', makefile_rules}, list_deps, "\n"
+      "       Generate Makefile rule(s) for dependencies.\n"
+      "       No code is generated unless -MMD.\n"},
+     {"ML", {'opt_value()', {list_imports, newline_terminated}}, list_deps,"\n"
+      "       Print imports, on per line instead of on Makefile format.\n"
+      "       No code is generated unless -MMD.\n"},
+     {"M0", {'opt_value()', {list_imports, null_terminated}}, list_deps, "\n"
+      "       Print imports, each terminated by a null character, instead of\n"
+      "       on Makefile format.\n"
+      "       No code is generated unless -MMD.\n"},
+     {"MF", 'string()', list_deps_dest_file, "\n"
+      "       Specify a file to write dependency rules to. -MF implies -M.\n"
+      "       No code is generated unless -MMD.\n"},
+     {"MG", undefined, list_deps_missing_imports_are_generated, "\n"
+      "       Consider missing imports to be generated and include\n"
+      "       them in the listed dependencies or rules.\n"},
+     {"MP", undefined, list_deps_makefile_phonies, "\n"
+      "       Generate phony Makefile targets for dependencies.\n"},
+     {"MT", 'string()', list_deps_makefile_target, "\n"
+      "       Override the Makefile rule target.\n"},
+     {"MQ", fun opt_quote_makefile_target/2, list_deps_makefile_target, "\n"
+      "       Same as -MT but quote characters special to make.\n"},
+     {"MMD", undefined, list_deps_and_generate, "\n"
+      "       List imports and generate code.\n"
+      "       This option works like in erlc, which contrasts to gcc.\n"},
      {"h", undefined, help, "\n"
       "       Show help\n"},
      {"-help", undefined, help, "\n"
@@ -2690,6 +2749,12 @@ opt_json_array_format(OptTag, [S | Rest]) ->
     end;
 opt_json_array_format(_OptTag, []) ->
     {error, "Missing JSON array format"}.
+
+opt_quote_makefile_target(list_deps_makefile_target, [S | Rest]) ->
+    {ok, {{list_deps_makefile_target, {quote, S}}, Rest}};
+opt_quote_makefile_target(_OptTag, []) ->
+    {error, "Missing target"}.
+
 
 s2a(S) -> list_to_atom(S).
 

@@ -5133,6 +5133,39 @@ no_gen_intospections_test() ->
     {ok, {[{gen_introspect, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]).
 
+makedeps_cmdline_opts_test() ->
+    {ok, {[{list_deps, makefile_rules},
+           list_deps_missing_imports_are_generated,
+           list_deps_makefile_phonies,
+           {list_deps_makefile_target, "src/my_target.erl"}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-M", "-MG", "-MP", "-MT", "src/my_target.erl",
+           "x.proto"]),
+    {ok, {[{list_deps_dest_file, "deps.d"},
+           {list_deps_makefile_target, {quote, "$(src)/my_target.erl"}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-MF", "deps.d",
+           "-MQ", "$(src)/my_target.erl",
+           "x.proto"]),
+    {ok, {[list_deps_and_generate],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-MMD",
+           "x.proto"]),
+    {ok, {[{list_deps, {list_imports, newline_terminated}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-ML",
+           "x.proto"]),
+    {ok, {[{list_deps, {list_imports, null_terminated}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-M0",
+           "x.proto"]),
+    ok.
+
 dashes_and_underscores_are_interchangeable_in_options_test() ->
     {ok, {[{target_erlang_version,18}, {target_erlang_version,18}],
           ["x.proto"]}} =
