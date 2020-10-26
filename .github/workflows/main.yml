@@ -1,0 +1,31 @@
+name: build
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  build:
+
+    name: Build and test gpb
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        otpvsn: [19, 20, 21, 22, 23]
+        fail-fast: false
+
+    container:
+      image: erlang:${{ matrix.otpvsn }}
+
+    env:
+      VERBOSE: 1
+      GPB_ALLOW_NON_CONFORMING_VSN_FORMAT: 1
+    steps:
+      - uses: actions/checkout@v2
+      - name: Erlang ${{ matrix.otpvsn }}
+        # TODO: test with protobuf (in the container)
+        run: |
+          set -xv
+          ./.github/helpers/write_commit_sha_to_gpb_version_hrl $GITHUB_SHA \
+          < include/gpb_version.hrl.in \
+          > include/gpb_version.hrl
+          make all test doc
