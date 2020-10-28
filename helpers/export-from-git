@@ -27,10 +27,12 @@ mkdir "$dest_dir/gpb-$vsn"
 git archive --format=tar HEAD | (cd "$dest_dir/gpb-$vsn" && tar xfp -)
 
 ./build/mk_version_hrl \
-    < include/gpb_version.hrl.in \
-    > "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in"
+    include/gpb_version.hrl.in \
+    "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in"
 cp  "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in" \
     "$dest_dir/gpb-$vsn/include/gpb_version.hrl"
+/bin/rm "$dest_dir/$subdirname/include/gpb_version.hrl.in"
+
 ( echo "#! /usr/bin/env bash";
   echo
   echo "# This script was turned into a no-op during extraction from"
