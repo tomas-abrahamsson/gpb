@@ -2,7 +2,9 @@ The gpb is a compiler for
 [Google protocol buffer](https://developers.google.com/protocol-buffers/)
 definitions files for Erlang.
 
-Shortcuts: [API documentation](https://hexdocs.pm/gpb/) ~ [gpb on hex.pm](https://hex.pm/packages/gpb/) ~ [![Build Status](https://travis-ci.org/tomas-abrahamsson/gpb.svg?branch=master)](https://travis-ci.org/tomas-abrahamsson/gpb)
+Shortcuts: [API documentation](https://hexdocs.pm/gpb/) ~ [gpb on hex.pm](https://hex.pm/packages/gpb/)
+
+[![Build Status](https://github.com/tomas-abrahamsson/gpb/workflows/build/badge.svg?branch=master)](https://github.com/tomas-abrahamsson/gpb/actions?query=workflow%3A%22build%22)
 
 Basic example of using gpb
 --------------------------
