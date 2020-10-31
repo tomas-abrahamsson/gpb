@@ -156,7 +156,10 @@
 -spec version_as_string() -> string().
 version_as_string() ->
     S = ?gpb_version,
-    assert_version_format(S),
+    case vsn_format() of
+        enforce_conforming -> assert_version_format(S);
+        any -> ok
+    end,
     S.
 
 %% @doc Return the version on a list format, so that it can be compared.
@@ -184,10 +187,28 @@ version_as_string() ->
 %% lists, it holds instead that: `[2,1,1] < [2,2]'.)
 -spec version_as_list() -> [integer() | string()].
 version_as_list() ->
-    version_as_list(version_as_string()).
+    case vsn_format() of
+        enforce_conforming ->
+            version_as_list(version_as_string());
+        any ->
+            S = version_as_string(),
+            case analyse_vsn_format(S) of
+                git  -> version_as_string();
+                text -> [S]
+            end
+    end.
+
+vsn_format() ->
+    case os:getenv("GPB_ALLOW_NON_CONFORMING_VSN_FORMAT") of
+        false -> enforce_conforming;
+        _     -> any
+    end.
 
 version_as_list(S) ->
-    v2l(S, "").
+    case analyse_vsn_format(S) of
+        git -> v2l(S, "");
+        text -> [-1,-1, -1,-1,-1, S] % outside of ordinary versions
+    end.
 
 assert_version_format(S) ->
     case analyse_vsn_format(S) of
