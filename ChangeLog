@@ -1,5 +1,14 @@
 -*- coding: utf-8 -*-
 
+Version 4.15.0
+2020-Nov-01
+
+        * Add -M family of (makedep) cmd-line options and
+          the gpb_compile:[string_]list_io/2,3 functions to
+          retreieve dependencies, and outputs from code generation.
+        * Fix a link to rebar3. (#187). Thanks to aqian1103 for notifying.
+        * Switch to github workflows from travis.
+
 Version 4.14.2
 2020-Oct-17
 
