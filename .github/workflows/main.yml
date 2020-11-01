@@ -11,7 +11,7 @@ jobs:
     strategy:
       matrix:
         otpvsn: [19, 20, 21, 22, 23]
-        fail-fast: false
+      fail-fast: false
 
     container:
       image: erlang:${{ matrix.otpvsn }}
