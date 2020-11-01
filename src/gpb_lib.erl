@@ -135,6 +135,7 @@
 -export([nl_join/1]).
 -export([or_join/1]).
 -export([dot_join/1]).
+-export([string_join/2]).
 -export([is_substr/2]).
 -export([string_slice/2]).
 -export([string_lexemes/2]).
@@ -1058,6 +1059,9 @@ or_join(Alternatives) ->
 dot_join(Alternatives) ->
     lists:append(lists:join(".", Alternatives)).
 
+string_join(Alternatives, Sep) ->
+    lists:append(lists:join(Sep, Alternatives)).
+
 is_substr(SearchPattern, String) ->
     string:find(String, SearchPattern) /= nomatch.
 
@@ -1086,6 +1090,9 @@ or_join(Alternatives) ->
 
 dot_join(Alternatives) ->
     string:join(Alternatives, ".").
+
+string_join(Alternatives, Sep) ->
+    string:join(Alternatives, Sep).
 
 is_substr(SearchPattern, String) ->
     string:str(String, SearchPattern) > 0.

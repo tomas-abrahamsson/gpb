@@ -1,0 +1,10 @@
+#! /bin/bash
+
+vsn="$1"
+
+sed \
+    -e "s/@vsn@/$vsn/g" \
+    -e "s/is expected to be/was/g" \
+    -e '/^%% The version below/ i \
+%% DO NOT EDIT -- generated from gpb_version.hrl.in' \
+    -e "/^%% NB: The build.mk_version_hrl depends/ d"

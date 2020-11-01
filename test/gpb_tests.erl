@@ -1699,6 +1699,12 @@ sort_elem2(Tuple) ->
 
 
 version_test() ->
+    case vsn_format() of
+        enforce_conforming -> version_test_aux();
+        any -> ok % not useful to do any tests here
+    end.
+
+version_test_aux() ->
     %% Check that none of version retrieval functions crash.
     S = gpb:version_as_string(),
     _ = gpb:version_as_list(),
@@ -1716,3 +1722,9 @@ version_test() ->
     {ok, [{application, App, PL}]} = file:consult(AppFile),
     ?assertEqual(S, proplists:get_value(vsn, PL)),
     ok.
+
+vsn_format() ->
+    case os:getenv("GPB_ALLOW_NON_CONFORMING_VSN_FORMAT") of
+        false -> enforce_conforming;
+        _     -> any
+    end.

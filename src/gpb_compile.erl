@@ -92,6 +92,8 @@
 -export([string/2, string/3]).
 -export([proto_defs/2, proto_defs/3, proto_defs/5]).
 -export([msg_defs/2, msg_defs/3]).
+-export([list_io/2]).
+-export([string_list_io/2, string_list_io/3]).
 -export([format_error/1, format_warning/1]).
 -export([c/0, c/1, c/2]). % Cmd line interface, halts vm---don't use from shell!
 -export([parse_opts_and_args/1]).
@@ -112,6 +114,7 @@
 %% Options
 -type boolean_opt(X) :: X | {X, boolean()}.% Just an option `X' means `{X,true}'
 -type directory() :: string().
+-type filename() :: string().
 
 -type opts() :: [opt()].
 -type opt() :: type_specs | {type_specs, boolean()} |
@@ -177,6 +180,12 @@
                boolean_opt(ignore_wellknown_types_directory) |
                {proto_defs_version, integer()} |
                {introspect_proto_defs_version, integer() | preferably_1} |
+               {list_deps, list_deps_format()} |
+               {list_deps_dest_file, filename()} |
+               boolean_opt(list_deps_missing_imports_are_generated) |
+               boolean_opt(list_deps_makefile_phonies) |
+               {list_deps_makefile_target, list_deps_makefile_target()} |
+               boolean_opt(list_deps_ang_generate) |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -238,6 +247,11 @@
 %% A list or a list in a tagged tuple.
 -type json_string_format() :: binary | list.
 
+-type list_deps_format() :: makefile_format |
+                            {list_imports, newline_terminated} |
+                            {list_imports, null_terminated}.
+-type list_deps_makefile_target() :: string() | {quote, string()}.
+
 %% Compilation return values
 -type comp_ret() :: mod_ret() | bin_ret() | defs_ret() | error_ret().
 -type mod_ret() :: ok | {ok, [warning()]}.
@@ -251,8 +265,18 @@
 -type code() :: binary() | gpb_defs:defs() | [code_item()].
 -type code_item() :: {erl, ErlCode :: binary()} |
                      {nif, NifCcText :: string()}.
+-type io_info_item() :: {erl_output, filename()} |
+                        {hrl_output, filename()} |
+                        {nif_cc_output, filename()} |
+                        {sources, [source()]} |
+                        {missing, [source()]}.
+-type source() :: from_input_string |
+                  {from_fetched, Proto::filename()} |
+                  filename().
+
 -export_type([opts/0, opt/0]).
 -export_type([comp_ret/0]).
+-export_type([io_info_item/0]).
 
 -ifdef(OTP_RELEASE).
 -define(STACKTRACE(C,R,St), C:R:St ->).
@@ -870,6 +894,63 @@ file(File) ->
 %% The `introspect_proto_defs_version' can be used to specify the version
 %% returned by the generated introspection functions, default is 1
 %% if possible, else 2.
+%%
+%% <a id="option-list_deps"/>
+%% <a id="option-list_deps_dest_file"/>
+%% <a id="option-list_deps_ang_generate"/>
+%% <a id="option-list_deps_missing_imports_are_generated"/>
+%% <a id="option-list_deps_makefile_phonies"/>
+%% <a id="option-list_deps_makefile_target"/>
+%% A set of options will cause {@link file/2} and {@link string/3} to
+%% list `import' dependencies as described below. To retrieve dependency
+%% information as Erlang terms, see {@link list_io/2} and
+%% {@link string_list_io/3}.
+%% <dl>
+%%   <dt>`{list_deps, Format}'<br/>
+%%       `{list_deps_dest_file, Filename::string()}'</dt>
+%%   <dd>Either or both of these two options without the
+%%       `list_deps_and_generate' option described below, will cause
+%%       dependencies to be listed, and no code to be generated.
+%%       The default format is Makefile format, ie with only the
+%%       `list_deps_dest_file' option. The default destination is
+%%       to print to standard output, ie with only the `list_deps' option.</dd>
+%%   <dt>`list_deps_and_generate'</dt>
+%%   <dd>If specified, dependencies will be listed, and code will be
+%%       generated. .</dd>
+%% </dl>
+%% Formats:
+%% <dl>
+%%   <dt>`{list_deps, makefile_format}'</dt>
+%%   <dd>Makefile rules will be generated. The top-level .proto file
+%%       will be the first dependency followed by imported .proto files,
+%%       and the .erl file will be the target. Outdir options as well
+%%       as module renaming options are considered for target.
+%%       Include path options are considered for the dependencies.</dd>
+%%   <dt>`{list_deps, {list_imports, newline_terminated}}'</dt>
+%%   <dd>Imports of the .proto file will be listed, one per line.</dd>
+%%   <dt>`{list_deps, {list_imports, null_terminated}}'</dt>
+%%   <dd>Like `newline_terminated' but instead, each import is followed
+%%       by a NUL character. This can be useful when paths have spaces
+%%       or newline or other strange characters.</dd>
+%%   <dt>`list_deps_missing_imports_are_generated'</dt>
+%%   <dd>Consider missing imports to be generated, and include them
+%%       in the dependency list</dd>
+%% </dl>
+%% Some of the options apply only when the `Target' is `makefile_format':
+%% <dl>
+%%   <dt>`{list_deps_makefile_target, Target}'</dt>
+%%   <dd>Override the default target for the Makefile rule, as follows:
+%%      <dl>
+%%         <dt>`Target :: string()'</dt>
+%%         <dd>Use the specified value instead.</dd>
+%%         <dt>`Target :: {quote, string()}'</dt>
+%%         <dd>Same, but quote characters special to make.</dd>
+%%      </dl></dd>
+%%   <dt>`list_deps_makefile_phonies'</dt>
+%%   <dd>Generate phony Makefile targets for dependencies.</dd>
+%% </dl>
+
+
 -spec file(string(), opts()) -> comp_ret().
 file(File, Opts) ->
     do_file_or_string(File, Opts).
@@ -888,35 +969,55 @@ string(Mod, Str, Opts) ->
 
 do_file_or_string(In, Opts0) ->
     Opts1 = normalize_opts(Opts0),
-    case parse_file_or_string(In, Opts1) of
-        {ok, Defs, Sources} ->
-            case gpb_names:compute_renamings(Defs, Opts1) of
+    case list_deps_or_generate(Opts1) of
+        generate ->
+            do_generate_from_file_or_string(In, Opts1);
+        list_deps ->
+            do_list_deps_from_file_or_string(In, Opts1);
+        list_deps_and_generate ->
+            do_list_deps_from_file_or_string(In, Opts1),
+            do_generate_from_file_or_string(In, Opts1)
+    end.
+
+list_deps_or_generate(Opts) ->
+    OptM   = proplists:get_value(list_deps, Opts) /= undefined,
+    OptMMD = proplists:get_bool(list_deps_and_generate, Opts),
+    if OptMMD -> list_deps_and_generate;
+       OptM   -> list_deps;
+       true   -> generate
+    end.
+
+do_generate_from_file_or_string(In, Opts) ->
+    case parse_file_or_string(In, Opts) of
+        {ok, {Defs, Sources}} ->
+            case gpb_names:compute_renamings(Defs, Opts) of
                 {ok, Renamings} ->
                     Defs1 = gpb_names:apply_renamings(Defs, Renamings),
-                    Mod = find_out_mod(In, Opts1),
+                    Mod = find_out_mod(In, Opts),
                     DefaultOutDir = find_default_out_dir(In),
-                    Opts2 = Opts1 ++ [{o,DefaultOutDir}],
-                    Opts3 = possibly_adjust_proto_defs_version_opt(Opts2),
+                    Opts1 = Opts ++ [{o,DefaultOutDir}],
+                    Opts2 = possibly_adjust_proto_defs_version_opt(Opts1),
                     do_proto_defs_aux1(Mod, Defs1, Defs, Sources, Renamings,
-                                       Opts3);
+                                       Opts2);
                 {error, Reason} = Error ->
-                    possibly_report_error(Error, Opts1),
-                    case proplists:get_bool(return_warnings, Opts1) of
+                    possibly_report_error(Error, Opts),
+                    case proplists:get_bool(return_warnings, Opts) of
                         true  -> {error, Reason, []};
                         false -> Error
                     end
             end;
         {error, Reason} = Error ->
-            possibly_report_error(Error, Opts1),
-            case proplists:get_bool(return_warnings, Opts1) of
+            possibly_report_error(Error, Opts),
+            case proplists:get_bool(return_warnings, Opts) of
                 true  -> {error, Reason, []};
                 false -> Error
             end
     end.
 
 normalize_opts(Opts0) ->
-    normalize_return_report_opts(
-      normalize_alias_opts(Opts0)).
+    normalize_list_deps_rules(
+      normalize_return_report_opts(
+        normalize_alias_opts(Opts0))).
 
 normalize_alias_opts(Opts) ->
     lists:foldl(fun(F, OptsAcc) -> F(OptsAcc) end,
@@ -993,6 +1094,19 @@ normalize_return_report_opts(Opts1) ->
     Opts4 = unless_defined_set(return_warnings, report_warnings, Opts3),
     Opts5 = unless_defined_set(return_errors,   report_errors, Opts4),
     Opts5.
+
+normalize_list_deps_rules(Opts) ->
+    OptM = proplists:get_value(list_deps, Opts),
+    OptMF = proplists:get_value(list_deps_dest_file, Opts),
+    OptMMD = proplists:get_bool(list_deps_and_generate, Opts),
+    if OptMF /= undefined, OptM == undefined;
+       OptMMD, OptM == undefined ->
+            %% -MF <file> implies -M
+            %% -MMD implies -M
+            [{list_deps, makefile_rules} | Opts];
+       true ->
+            Opts
+    end.
 
 expand_opt(OptionToTestFor, OptionsToExpandTo, Opts) ->
     lists:append(
@@ -1270,12 +1384,7 @@ do_proto_defs_aux3(Defs, DefsNoRenamings, DefsForIntrospect,
                                 AnRes, Opts),
             HrlTxt = possibly_format_hrl(Mod, Defs, AnRes, Opts),
             NifTxt = possibly_format_nif_cc(Mod, Defs, AnRes, Opts),
-            ErlOutDir = get_erl_outdir(Opts),
-            HrlOutDir = get_hrl_outdir(Opts),
-            NifCcOutDir = get_nif_cc_outdir(Opts),
-            Erl   = filename:join(ErlOutDir, atom_to_list(Mod) ++ ".erl"),
-            Hrl   = filename:join(HrlOutDir, atom_to_list(Mod) ++ ".hrl"),
-            NifCc = filename:join(NifCcOutDir, atom_to_list(Mod) ++ ".nif.cc"),
+            {Erl, Hrl, NifCc} = get_output_files(Mod, Opts),
             case {file_write_file(Erl, ErlTxt, Opts),
                   possibly_write_file(Hrl, HrlTxt, Opts),
                   possibly_write_file(NifCc, NifTxt, Opts)} of
@@ -1370,6 +1479,27 @@ get_output_format([{to_proto_defs, true} | _]) -> proto_defs;
 get_output_format([_ | Rest])                  -> get_output_format(Rest);
 get_output_format([])                          -> file.
 
+get_output_files(Mod, Opts) ->
+    ErlOutDir = get_erl_outdir(Opts),
+    HrlOutDir = get_hrl_outdir(Opts),
+    NifCcOutDir = get_nif_cc_outdir(Opts),
+    Erl = filename:join(ErlOutDir, atom_to_list(Mod) ++ ".erl"),
+    Hrl =
+        case gpb_lib:get_records_or_maps_by_opts(Opts) of
+            records ->
+                filename:join(HrlOutDir, atom_to_list(Mod) ++ ".hrl");
+            maps ->
+                '$not_generated'
+        end,
+    NifCc =
+        case proplists:get_bool(nif, Opts) of
+            true ->
+                filename:join(NifCcOutDir, atom_to_list(Mod) ++ ".nif.cc");
+            false ->
+                '$not_generated'
+        end,
+    {Erl, Hrl, NifCc}.
+
 get_erl_outdir(Opts) ->
     proplists:get_value(o_erl, Opts, get_outdir(Opts)).
 
@@ -1385,6 +1515,135 @@ get_outdir(Opts) ->
 clean_module_name(Mod) ->
     Clean = re:replace(atom_to_list(Mod), "[.]", "_", [global, {return,list}]),
     list_to_atom(Clean).
+
+%% @doc List inputs and file outputs, based on an input file.  The
+%% elements `erl_output', `hrl_output' and `nif_cc_output' are present
+%% if output would be generated to those based on the options. The file
+%% is scanned for `import "file.proto";' declarations recursively.
+%%
+%% The imported files are located the same way {@link file/2} would find
+%% them, using the options for instance `{i,directory()}'.
+%%
+%% If there is an error parsing the input proto file or an imported
+%% file, it is treated as it it was a file with no imports. Thus it is
+%% still included in `sources'. If a file in an `import' declaration
+%% cannot be found, it is included among the `missing' items.
+%%
+%% The first element in `sources' is always the input file.  The rest of
+%% the elements are any imported files in breadth-first order. An imported
+%% file is in `sources' only once, even if it is imported multiple
+%% times.
+%%
+%% Any renaming options are used to compute the output file names.
+%% Any import fetcher options are used to retrieve files.
+-spec list_io(filename(), opts()) -> [io_info_item()].
+list_io(FileName, Opts) ->
+    Opts1 = normalize_opts(Opts),
+    list_deps(FileName, Opts1).
+
+%% @equiv string_list_io(Mod, Str, [])
+-spec string_list_io(module(), string()) -> [io_info_item()].
+string_list_io(Mod, Str) ->
+    string_list_io(Mod, Str, []).
+
+%% @doc List inputs and file outputs based on proto definitions in a
+%% string instead of in a file, similar to {@link string/3}.  See
+%% {@link list_io/2} for further information.
+-spec string_list_io(module(), string(), opts()) -> [io_info_item()].
+string_list_io(Mod, Str, Opts) ->
+    Opts1 = normalize_opts(Opts),
+    list_deps({Mod, Str}, Opts1).
+
+list_deps(In, Opts) ->
+    {Sources, Missing} = collect_inputs(In, Opts),
+    Mod = find_out_mod(In, Opts),
+    DefaultOutDir = find_default_out_dir(In),
+    Opts1 = Opts ++ [{o,DefaultOutDir}],
+    OutputFiles =
+        case get_output_format(Opts1) of
+            proto_defs ->
+                [];
+            binary ->
+                [];
+            file ->
+                {Erl, Hrl, NifCc} = get_output_files(Mod, Opts1),
+                lists:append(
+                  [[{erl_output, Erl}],
+                   [{hrl_output, Hrl} || Hrl /= '$not_generated'],
+                   [{nif_cc_output, NifCc} || NifCc /= '$not_generated']])
+        end,
+    OutputFiles ++
+        [{sources, Sources},
+         {missing, Missing}].
+
+do_list_deps_from_file_or_string(In, Opts) ->
+    Listing = list_deps(In, Opts),
+    case get_deps_output_dest(Opts) of
+        {file, DestFileName} ->
+            ListingTxt = render_deps_listing(Listing, Opts),
+            case file_write_file(DestFileName, ListingTxt, Opts) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    {error, {write_failed, DestFileName, Reason}}
+            end;
+        stdout ->
+            ListingTxt = render_deps_listing(Listing, Opts),
+            io:format("~s", [ListingTxt]),
+            ok
+    end.
+
+render_deps_listing(Listing, Opts) ->
+    Erl = proplists:get_value(erl_output, Listing),
+    Sources = proplists:get_value(sources, Listing),
+    Missing = proplists:get_value(missing, Listing),
+    OptMG = proplists:get_bool(list_deps_missing_imports_are_generated, Opts),
+    %% The first among Dependencies is the input source to analyzs
+    Dependencies = if OptMG -> Sources ++ Missing;
+                      true  -> Sources
+                   end,
+    Target = get_listing_target(Erl, Opts),
+    case proplists:get_value(list_deps, Opts) of
+        makefile_rules ->
+            Phonies =
+                case proplists:get_bool(list_deps_makefile_phonies, Opts) of
+                    true  -> only_files(tl(Dependencies));
+                    false -> []
+                end,
+            [?f("~s: ~s~n", [Target, format_deps(only_files(Dependencies))]),
+             [?f("~n~s:~n", [Phony]) || Phony <- Phonies]];
+        {list_imports, newline_terminated} ->
+            [?f("~s~n", [Dep]) || Dep <- only_files(tl(Dependencies))];
+        {list_imports, null_terminated} ->
+            %% Find -print0 is null terminated rather than null separated.
+            %% so do the same here.
+            [?f("~s\000", [Dep]) || Dep <- only_files(tl(Dependencies))]
+    end.
+
+format_deps(Dependencies) ->
+    gpb_lib:string_join(Dependencies, " \\\n    ").
+
+get_deps_output_dest(Opts) ->
+    case proplists:get_value(list_deps_dest_file, Opts) of
+        undefined -> stdout;
+        File      -> {file, File}
+    end.
+
+only_files(Sources) ->
+    %% Filter away from_input_string and {from_fetched,_}
+    [Source || Source <- Sources,
+               is_list(Source)].
+
+get_listing_target(Erl, Opts) ->
+    case proplists:get_value(list_deps_makefile_target, Opts) of
+        undefined         -> Erl;
+        S when is_list(S) -> S;
+        {quote, S}        -> make_quote(S)
+    end.
+
+make_quote("$" ++ Rest) -> "$$" ++ make_quote(Rest);
+make_quote([C | Rest]) -> [C | make_quote(Rest)];
+make_quote("") -> "".
 
 %% @spec format_error({error, Reason} | Reason) -> io_list()
 %%           Reason = term()
@@ -1837,6 +2096,40 @@ c() ->
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
 %%       `-W1' enables warnings, `-W0' disables warnings.<br></br>
 %%       `-W' and `-Wall' are the same as `-W1'</dd>
+%%   <dt><a id="cmdline-option-m"/>
+%%       `-M'</dt>
+%%   <dd>Generate Makefile rule(s) to stdout for dependencies.
+%%       No code is generated unless `-MMD' is specified.</dd>
+%%   <dt><a id="cmdline-option-ml"/>
+%%       `-ML'</dt>
+%%   <dd>Print imports, on per line instead of on Makefile format.
+%%       No code is generated unless `-MMD' is specified.</dd>
+%%   <dt><a id="cmdline-option-m0"/>
+%%       `-M0'</dt>
+%%   <dd>Print imports, each terminated by a null character, instead of
+%%       on Makefile format.
+%%       No code is generated unless `-MMD' is specified.</dd>
+%%   <dt><a id="cmdline-option-mf"/>
+%%       `-MF file'</dt>
+%%   <dd>Specify a file to write dependency rules to, instead of printing them
+%%       to stdout. No code is generated unless `-MMD' is specified.</dd>
+%%   <dt><a id="cmdline-option-mg"/>
+%%       `-MG'</dt>
+%%   <dd>Consider missing imports to be generated and include\n"
+%%       them in the listed dependencies or rules.</dd>
+%%   <dt><a id="cmdline-option-mp"/>
+%%       `-MP'</dt>
+%%   <dd>Generate phony Makefile targets for dependencies.</dd>
+%%   <dt><a id="cmdline-option-mt"/>
+%%       `-MT target'</dt>
+%%   <dd>Override the Makefile rule target.</dd>
+%%   <dt><a id="cmdline-option-mq"/>
+%%       `-MQ target'</dt>
+%%   <dd>Same as `-MT' but quote characters special to make.</dd>
+%%   <dt><a id="cmdline-option-mmd"/>
+%%       `-MMD'</dt>
+%%   <dd>List imports or Makefile rules and generate code.
+%%       This option works like in erlc, which contrasts to gcc.</dd>
 %%   <dt><a id="cmdline-option-help"/>
 %%       <a id="cmdline-option-h"/>
 %%       `--help' or `-h'</dt>
@@ -1961,6 +2254,8 @@ parse_opt(_, {OptName, 'integer()', OptTag, _Descr}, [OptArg | Rest]) ->
             {error, ?ff("Invalid version number (integer) for ~s: ~p",
                         [OptName, OptArg])}
     end;
+parse_opt(_, {_OptName, {'opt_value()', OptValue}, OptTag, _Descr}, Rest) ->
+    {ok, {{OptTag, OptValue}, Rest}};
 parse_opt(_, {_OptName, F, OptTag, _Descr}, Rest) when is_function(F) ->
     F(OptTag, Rest);
 parse_opt(_, {OptName, Alternatives, OptTag, _Descr}, [OptArg | Rest]) ->
@@ -2076,7 +2371,7 @@ opt_specs() ->
       "         pkg_name       Modify the package name. Useful\n"
       "                        with the -pkgs option.\n"
       "         msg_name       Modify message names, but not the package\n"
-      "                        partof them\n"
+      "                        part of them\n"
       "         msg_fqname     Modify message names, including their\n"
       "                        package part. Useful with the -pkgs option.\n"
       "         group_name     Group names.\n"
@@ -2109,8 +2404,8 @@ opt_specs() ->
       "       instead of -include, which is the default.\n"},
      {"type", undefined, type_specs, "\n"
       "       Enables `::Type()' annotations in the generated code.\n"},
-     {"no_type", fun opt_x_false/2, type_specs, "\n"
-      "       Disbles `::Type()' annotations in the generated code.\n"},
+     {"no_type", {'opt_value()', false}, type_specs, "\n"
+      "       Disables `::Type()' annotations in the generated code.\n"},
      {"descr", undefined, descriptor, "\n"
       "       Generate self-description information.\n"},
      {"maps", undefined, maps, "\n"
@@ -2172,7 +2467,7 @@ opt_specs() ->
      {"json-format", {jsx,mochijson2,jiffy,maps}, json_format, "\n"
       "       Specify format for JSON representation:\n"
       "       * jsx          (default if -maps is not specified)\n"
-      "       * mochihison2\n"
+      "       * mochijson2\n"
       "       * jiffy\n"
       "       * maps         (default if -maps is specified)\n"},
      {"json-object-format", fun opt_json_object_format/2,json_object_format,"\n"
@@ -2206,12 +2501,12 @@ opt_specs() ->
      {"json-case-insensitive-enum-parsing", undefined,
       json_case_insensitive_enum_parsing, "\n"
       "       Make case insignificant when parsing enums in JSON. Also allow\n"
-      "       dash as alternative to undercore.\n"
+      "       dash as alternative to underscore.\n"
       "       Default is that case _is_ significant when parsing enums.\n"},
-     {"no-gen-mergers", fun opt_x_false/2, gen_mergers, "\n"
+     {"no-gen-mergers", {'opt_value()', false}, gen_mergers, "\n"
       "       Do not generate code for merging of messages. This is only\n"
-      "       usefulwith the option -nif.\n"},
-     {"no-gen-introspect", fun opt_x_false/2, gen_introspect, "\n"
+      "       useful with the option -nif.\n"},
+     {"no-gen-introspect", {'opt_value()', false}, gen_introspect, "\n"
       "       Do not generate code for introspection.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
@@ -2223,6 +2518,31 @@ opt_specs() ->
       "       Same as -W1\n"},
      {"W", undefined, report_warnings, "\n"
       "       Same as -W1\n"},
+     {"M", {'opt_value()', makefile_rules}, list_deps, "\n"
+      "       Generate Makefile rule(s) for dependencies.\n"
+      "       No code is generated unless -MMD.\n"},
+     {"ML", {'opt_value()', {list_imports, newline_terminated}}, list_deps,"\n"
+      "       Print imports, on per line instead of on Makefile format.\n"
+      "       No code is generated unless -MMD.\n"},
+     {"M0", {'opt_value()', {list_imports, null_terminated}}, list_deps, "\n"
+      "       Print imports, each terminated by a null character, instead of\n"
+      "       on Makefile format.\n"
+      "       No code is generated unless -MMD.\n"},
+     {"MF", 'string()', list_deps_dest_file, "\n"
+      "       Specify a file to write dependency rules to. -MF implies -M.\n"
+      "       No code is generated unless -MMD.\n"},
+     {"MG", undefined, list_deps_missing_imports_are_generated, "\n"
+      "       Consider missing imports to be generated and include\n"
+      "       them in the listed dependencies or rules.\n"},
+     {"MP", undefined, list_deps_makefile_phonies, "\n"
+      "       Generate phony Makefile targets for dependencies.\n"},
+     {"MT", 'string()', list_deps_makefile_target, "\n"
+      "       Override the Makefile rule target.\n"},
+     {"MQ", fun opt_quote_makefile_target/2, list_deps_makefile_target, "\n"
+      "       Same as -MT but quote characters special to make.\n"},
+     {"MMD", undefined, list_deps_and_generate, "\n"
+      "       List imports and generate code.\n"
+      "       This option works like in erlc, which contrasts to gcc.\n"},
      {"h", undefined, help, "\n"
       "       Show help\n"},
      {"-help", undefined, help, "\n"
@@ -2304,10 +2624,6 @@ opt_rename_how_proto_prefix("proto="++S) ->
         _ ->
             throw({badopt, "Expected prefix= following proto="})
     end.
-
-opt_x_false(OptTag, Rest) ->
-    Opt = {OptTag, false},
-    {ok, {Opt, Rest}}.
 
 opt_translate_type(OptTag, [S | Rest]) ->
     try S of
@@ -2434,6 +2750,12 @@ opt_json_array_format(OptTag, [S | Rest]) ->
 opt_json_array_format(_OptTag, []) ->
     {error, "Missing JSON array format"}.
 
+opt_quote_makefile_target(list_deps_makefile_target, [S | Rest]) ->
+    {ok, {{list_deps_makefile_target, {quote, S}}, Rest}};
+opt_quote_makefile_target(_OptTag, []) ->
+    {error, "Missing target"}.
+
+
 s2a(S) -> list_to_atom(S).
 
 determine_cmdline_op(Opts, FileNames) ->
@@ -2481,16 +2803,119 @@ string_to_number(S) ->
 
 parse_file_or_string(In, Opts) ->
     Opts1 = add_curr_dir_as_include_if_needed(Opts),
-    case parse_file_and_imports(In, Opts1) of
-        {ok, {Defs1, AllImported}} ->
-            case gpb_defs:post_process_all_files(Defs1, Opts1) of
+    Opts2 = ensure_include_path_to_wellknown_types(Opts1),
+    case parse_input(In, Opts2) of
+        {ok, {Defs, Sources}} ->
+            case gpb_defs:post_process_all_files(Defs, Opts2) of
                 {ok, Defs2} ->
-                    {ok, Defs2, AllImported};
+                    {ok, {Defs2, Sources}};
                 {error, Reasons} ->
                     {error, {post_process, Reasons}}
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+parse_input(Input, Opts) ->
+    {{Acc, _N}, Sources} =
+        process_each_input_once(
+          fun(In, {{ok, Acc}, N}) ->
+                  Level = if N == 0 -> top_level;
+                             N >= 1 -> import
+                          end,
+                  case parse_one_input(In, Opts, Level) of
+                      {ok, {Defs, Imports, _InputLocation}} ->
+                          {Imports, {{ok, [Defs | Acc]}, N + 1}};
+                      {error, {Reason, _InputLocation}} ->
+                          {[], {{error, Reason}, N + 1}}
+                  end;
+             (_In, {{error, Reason}, N}) ->
+                  {[], {{error, Reason}, N + 1}}
+          end,
+          {{ok, []}, 0},
+          queue:from_list([Input])),
+    case Acc of
+        {ok, AllDefs} ->
+            {ok, {lists:append(lists:reverse(AllDefs)), Sources}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+collect_inputs(Input, Opts) ->
+    Opts1 = add_curr_dir_as_include_if_needed(Opts),
+    Opts2 = ensure_include_path_to_wellknown_types(Opts1),
+    {{Imports, Missing}, _} =
+        process_each_input_once(
+          fun(In, {AccImports, AccMissing}) ->
+                  Level = if AccImports == [], AccMissing == [] -> top_level;
+                             true -> import
+                          end,
+                  case parse_one_input(In, Opts2, Level) of
+                      {ok, {_Defs, MoreImports, InputLocation}} ->
+                          Acc1 = {[InputLocation | AccImports], AccMissing},
+                          {MoreImports, Acc1};
+                      {error, {{import_not_found, Import, _},_InputLocation}}->
+                          Acc1 = {AccImports, [Import | AccMissing]},
+                          {[], Acc1};
+                      {error, {{fetcher_issue, Import, _}, _InputLocation}} ->
+                          Acc1 = {AccImports, [Import | AccMissing]},
+                          {[], Acc1};
+                      {error, {_Reason, InputLocation}} ->
+                          Acc1 = {[InputLocation | AccImports], AccMissing},
+                          {[], Acc1}
+                  end
+          end,
+          {[], []},
+          queue:from_list([Input])),
+    {lists:reverse(Imports), lists:reverse(Missing)}.
+
+parse_one_input(In, Opts, ToplevelOrImport) ->
+    case locate_read_import_int(In, Opts, ToplevelOrImport) of
+        {ok, {Contents, InputLocation}} ->
+            FName = file_name_from_input(In),
+            case scan_and_parse_string(Contents, FName, Opts) of
+                {ok, Defs} ->
+                    Imports = gpb_defs:fetch_imports(Defs),
+                    {ok, {Defs, Imports, InputLocation}};
+                {error, Reason} ->
+                    {error, {Reason, InputLocation}}
+            end;
+        {error, Reason} ->
+            {error, {Reason, In}}
+    end.
+
+process_each_input_once(F, AccIn, Queue) ->
+    {AccOut, Seen} =
+        process_input_queue(
+          fun(Input, {Acc1, Seen1}) ->
+                  Seen2 = [file_name_from_input(Input) | Seen1],
+                  {ToEnqueue1, Acc2} = F(Input, Acc1),
+                  ToEnqueue2 = filter_unseen(ToEnqueue1, Seen2, []),
+                  {ToEnqueue2, {Acc2, Seen2}}
+          end,
+          {AccIn, []},
+          Queue),
+    {AccOut, lists:reverse(Seen)}.
+
+filter_unseen([Elem | Rest], Seen, Acc) ->
+    case lists:member(Elem, Acc) orelse lists:member(Elem, Seen) of
+        true  -> filter_unseen(Rest, Seen, Acc);
+        false -> filter_unseen(Rest, Seen, [Elem | Acc])
+    end;
+filter_unseen([], _Seen, Acc) ->
+    lists:reverse(Acc).
+
+%% A bit like lists:foldl, but over a queue, and
+%% the F returns more elements to fold over as well as an acc.
+process_input_queue(F, Acc, Queue) ->
+    try queue:get(Queue) of
+        Item ->
+            QRest = queue:drop(Queue),
+            {ToEnqueue, Acc2} = F(Item, Acc),
+            Queue2 = lists:foldl(fun queue:in/2, QRest, ToEnqueue),
+            process_input_queue(F, Acc2, Queue2)
+    catch error:empty ->
+            Acc
     end.
 
 add_curr_dir_as_include_if_needed(Opts) ->
@@ -2500,33 +2925,8 @@ add_curr_dir_as_include_if_needed(Opts) ->
         false -> Opts ++ [{i,"."}]
     end.
 
-parse_file_and_imports(In, Opts) ->
-    FName = file_name_from_input(In),
-    parse_file_and_imports(In, [FName], Opts).
-
 file_name_from_input({Mod,_S}) -> lists:concat([Mod, ".proto"]);
 file_name_from_input(FName)    -> FName.
-
-parse_file_and_imports(In, AlreadyImported, Opts) ->
-    case locate_read_import_int(In, Opts) of
-        {ok, Contents} ->
-            %% Add to AlreadyImported to prevent trying to import it again: in
-            %% case we get an error we don't want to try to reprocess it later
-            %% (in case it is multiply imported) and get the error again.
-            FName = file_name_from_input(In),
-            AlreadyImported2 = append_unique(AlreadyImported, [FName]),
-            case scan_and_parse_string(Contents, FName, Opts) of
-                {ok, Defs} ->
-                    Imports = gpb_defs:fetch_imports(Defs),
-                    Opts2 = ensure_include_path_to_wellknown_types(Opts),
-                    read_and_parse_imports(Imports, AlreadyImported2,
-                                           Defs, Opts2);
-                {error, Reason} ->
-                    {error, Reason}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
 
 scan_and_parse_string(S, FName, Opts) ->
     case scan(S, Opts) of
@@ -2571,48 +2971,11 @@ default_scanner_parser() ->
         _     -> new
     end.
 
-read_and_parse_imports([Import | Rest], AlreadyImported, Defs, Opts) ->
-    case lists:member(Import, AlreadyImported) of
-        true ->
-            read_and_parse_imports(Rest, AlreadyImported, Defs, Opts);
-        false ->
-            case import_it(Import, AlreadyImported, Defs, Opts) of
-                {ok, {Defs2, Imported2}} ->
-                    read_and_parse_imports(Rest, Imported2, Defs2, Opts);
-                {error, Reason} ->
-                    {error, Reason}
-            end
-    end;
-read_and_parse_imports([], Imported, Defs, _Opts) ->
-    {ok, {Defs, Imported}}.
-
-import_it(Import, AlreadyImported, Defs, Opts) ->
-    %% FIXME: how do we handle scope of declarations,
-    %%        e.g. options/package for imported files?
-    case parse_file_and_imports(Import, AlreadyImported, Opts) of
-        {ok, {MoreDefs, MoreImported}} ->
-            Defs2 = Defs++MoreDefs,
-            Imported2 = append_unique(AlreadyImported, MoreImported),
-            {ok, {Defs2, Imported2}};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-append_unique(Items, MoreItemsToAppend) ->
-    lists:foldl(
-      fun(NewItem, Acc) ->
-              case lists:member(NewItem, Acc) of
-                  true -> Acc;
-                  false -> Acc ++ [NewItem]
-              end
-      end,
-      Items,
-      MoreItemsToAppend).
-
-
-locate_read_import_int({_Mod, Str}, _Opts) ->
-    {ok, Str};
-locate_read_import_int(Import, Opts) ->
+locate_read_import_int({_Mod, Str}, _Opts, _IsToplevelOrImport) ->
+    {ok, {Str, from_input_string}};
+locate_read_import_int(Proto, Opts, top_level) ->
+    locate_read_import_aux(Proto, Opts);
+locate_read_import_int(Import, Opts, import) ->
     case proplists:get_value(import_fetcher, Opts) of
         undefined ->
             locate_read_import_aux(Import, Opts);
@@ -2623,7 +2986,7 @@ locate_read_import_int(Import, Opts) ->
                 {ok, Contents} when is_list(Contents) ->
                     case lists:all(fun is_integer/1, Contents) of
                         true ->
-                            {ok, Contents};
+                            {ok, {Contents, {from_fetched, Import}}};
                         false ->
                             error({bad_fetcher_return,
                                    {not_a_string, Contents},
@@ -2678,9 +3041,9 @@ read_import(File, Opts) ->
         {ok,B} ->
             case utf8_decode(B) of
                 {ok, {utf8, S}} ->
-                    {ok, S};
+                    {ok, {S, File}};
                 {ok, {latin1, S}} ->
-                    {ok, S};
+                    {ok, {S, File}};
                 {error, Reason} ->
                     {error, {utf8_decode_failed, Reason, File}}
             end;

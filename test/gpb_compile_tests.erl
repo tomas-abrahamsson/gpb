@@ -147,8 +147,7 @@ import_fetcher_test() ->
                                        from_file
                              end},
             FileReadOpt, {i,"."}]),
-    [{redir_to_file,"X.proto"},
-     {read,"X.proto"},
+    [{read,"X.proto"},
      {redir_to_file,"Y.proto"},
      {read,"Y.proto"}] = flush_msgs(),
 
@@ -164,7 +163,7 @@ import_fetcher_test() ->
                                             end)}
                              end},
             FileReadOpt, {i,"."}]),
-    [{fetched,"X.proto"},
+    [{read,"X.proto"},
      {fetched,"Y.proto"}] = flush_msgs(),
 
     %% Importer returns error
@@ -2229,6 +2228,425 @@ ignores_packed_for_nonpackable_repeated_on_encoding_test() ->
     %% expect no length-delimited wrapping around the field
     %% just the elements one after the other.
     <<10,3,"abc",10,3,"def">> = M:encode_msg({m1, ["abc", "def"]}).
+
+%% --- io listing ----------
+
+list_io_from_file_test() ->
+    FileSystem =
+        [{"/main.proto",
+          ["import 'a1.proto';",
+           "import 'b.proto';",
+           "message MsgT { optional uint32 f = 1; }"]},
+         {"/a1.proto", % to be found via auto-added {i,"."} option
+          ["import 'a2.proto';"]},
+         {"/dir2/a2.proto", % to be found via the {i,"dir2"} option
+          ["message A2 { optional uint32 a = 2; }"]},
+         {"/b.proto",
+          ["message B { optional uint32 b = 10; }"]}],
+    [{erl_output, "/main.erl"},
+     {hrl_output, "/main.hrl"},
+     {sources, ["/main.proto", "/a1.proto", "/b.proto", "/dir2/a2.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, [{i, "/dir2"}]),
+
+    %% No hrl since maps
+    [{erl_output, "/main.erl"},
+     {sources, ["/main.proto", "/a1.proto", "/b.proto", "/dir2/a2.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, [maps, % no hrl file to be generated
+                                     {i, "/dir2"}]),
+    %% No hrl since maps
+    [{erl_output, "/main.erl"},
+     {sources, ["/main.proto", "/a1.proto", "/b.proto", "/dir2/a2.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, [msgs_as_maps, % maps expands to this
+                                     {i, "/dir2"}]),
+    ok.
+
+list_io_file_in_sources_only_once_when_imported_multiple_times_test() ->
+    FileSystem =
+        [{"/main.proto",
+          ["import 'a.proto';",
+           "import 'a.proto';"]},
+         {"/a.proto",
+          ["import 'b.proto';"]},
+         {"/b.proto",
+          ["message B { optional uint32 b = 10; }"]}],
+    [{erl_output, "/main.erl"},
+     {hrl_output, "/main.hrl"},
+     {sources, ["/main.proto", "/a.proto", "/b.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, [{i, "/dir2"}]),
+    ok.
+
+list_io_with_renaming_options_test() ->
+    FileSystem = [{"/main.proto", ["message M { optional uint32 f = 1; }"]}],
+    [{erl_output, "/main_pb.erl"},
+     {hrl_output, "/main_pb.hrl"},
+     {sources, ["/main.proto"]} | _] =
+        do_list_io_defs(FileSystem, [{module_name_suffix, "_pb"}]),
+    [{erl_output, "/something_else.erl"},
+     {hrl_output, "/something_else.hrl"},
+     {sources, ["/main.proto"]} | _] =
+        do_list_io_defs(FileSystem, [{module_name, "something_else"}]),
+    ok.
+
+list_io_with_outdir_options_test() ->
+    FileSystem = [{"/main.proto", ["message M { optional uint32 f = 1; }"]}],
+    [{erl_output, "/erl_dest/main.erl"},
+     {hrl_output, "/hrl_dest/main.hrl"},
+     {sources, ["/main.proto"]} | _] =
+        do_list_io_defs(FileSystem,
+                        [{o_erl, "/erl_dest"},
+                         {o_hrl, "/hrl_dest"}]),
+    ok.
+
+list_io_when_input_fails_to_parse_test() ->
+    %% Parse error in an imported file
+    FileSystem1 =
+        [{"/main.proto",
+          ["import 'a.proto';",
+           "import 'b.proto';",
+           "message MsgT { optional uint32 f = 1; }"]},
+         {"/a.proto",
+          ["blaha &/%#! blaha"]}, % scan/parse error
+         {"/b.proto",
+          ["message B { optional uint32 b = 10; }"]}],
+    [{erl_output, _},
+     {hrl_output, _},
+     %% /a.proto should still be listed as a source,
+     %% it is imported after all
+     {sources, ["/main.proto", "/a.proto", "/b.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem1, []),
+
+    %% Parse error in the top-level file. It should still be in sources.
+    FileSystem2 = [{"/main.proto", ["blaha %!(# blaha';"]}],
+    [{erl_output, "/main.erl"},
+     {hrl_output, "/main.hrl"},
+     {sources, ["/main.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem2, []),
+    ok.
+
+list_io_lists_non_found_imports_as_missing_test() ->
+    FileSystem =
+        [{"/main.proto",
+          ["import 'x/./../y/z/no-such-file.proto';",
+           "import 'b.proto';",
+           "message MsgT { optional uint32 f = 1; }"]},
+         {"/b.proto",
+          ["message B { optional uint32 b = 10; }"]}],
+    [{erl_output, _},
+     {hrl_output, _},
+     %% Non-missing files should still be in sources
+     {sources, ["/main.proto", "/b.proto"]},
+     %% The missing one should be reported in verbatim as it appeares
+     %% in the import declaration
+     {missing, ["x/./../y/z/no-such-file.proto"]}] =
+        do_list_io_defs(FileSystem, []),
+    ok.
+
+list_io_with_fetched_imports_test() ->
+    %% The import fetcher returns the file contents
+    ImportFetcher1 = fun("a.proto") -> {ok, "enum E { A = 0; }"} end,
+    FileSystem1 = [{"/main.proto", ["import 'a.proto';"]}],
+    [{erl_output, _},
+     {hrl_output, _},
+     {sources, ["/main.proto", {from_fetched, "a.proto"}]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem1, [{import_fetcher, ImportFetcher1}]),
+
+    %% The import fetcher redirects to the file system
+    ImportFetcher2 = fun("a.proto") -> from_file end,
+    FileSystem2 = [{"/main.proto", ["import 'a.proto';"]},
+                   {"/dir2/a.proto",    ["enum E { A = 0; }"]}],
+    [{erl_output, _},
+     {hrl_output, _},
+     {sources, ["/main.proto", "/dir2/a.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem2, [{import_fetcher, ImportFetcher2},
+                                      {i, "dir2"}]),
+
+    %% Parse error in the import-fetched file
+    ImportFetcher3 = fun("a.proto") -> {ok, "blaha (/#& blaha"} end,
+    FileSystem3 = [{"/main.proto", ["import 'a.proto';"]}],
+    [{erl_output, _},
+     {hrl_output, _},
+     {sources, ["/main.proto", {from_fetched, "a.proto"}]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem3, [{import_fetcher, ImportFetcher3}]),
+
+    %% The fetcher returns an error
+    ImportFetcher4 = fun("a.proto") -> {error, bad_error} end,
+    FileSystem4 = [{"/main.proto", ["import 'a.proto';"]}],
+    [{erl_output, _},
+     {hrl_output, _},
+     {sources, ["/main.proto"]},
+     {missing, ["a.proto"]}] =
+        do_list_io_defs(FileSystem4, [{import_fetcher, ImportFetcher4}]),
+    ok.
+
+list_io_from_string_test() ->
+    MainProto = "import 'a.proto';",
+    FileSystem = [{"/a.proto", ["message M { optional uint32 f = 1; }"]}],
+    [{erl_output, "/x.erl"},
+     {hrl_output, "/x.hrl"},
+     {sources, [from_input_string, "/a.proto"]},
+     {missing, []}] =
+        do_list_string_io_defs(x, MainProto, FileSystem, []),
+    ok.
+
+list_io_with_import_of_wellknown_test() ->
+    AnyProto = wellknown_path("/google/protobuf/any.proto"),
+    FileSystem =
+        [{"/main.proto",
+          ["import 'google/protobuf/any.proto';",
+           "import 'a.proto';"]},
+         {"/a.proto",
+          ["message M { optional uint32 f = 1; }"]},
+         {AnyProto,
+          []}],
+    [{erl_output, "/main.erl"},
+     {hrl_output, "/main.hrl"},
+     {sources, ["/main.proto", AnyProto, "/a.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, []),
+    ok.
+
+list_io_with_option_for_no_wellknowns_test() ->
+    AnyProto = wellknown_path("/google/protobuf/any.proto"),
+    FileSystem =
+        [{"/main.proto",
+          ["import 'google/protobuf/any.proto';",
+           "import 'a.proto';"]},
+         {"/a.proto",
+          ["message M { optional uint32 f = 1; }"]},
+         {AnyProto,
+          []}],
+    [{erl_output, "/main.erl"},
+     {hrl_output, "/main.hrl"},
+     {sources, ["/main.proto", "/a.proto"]},
+     {missing, ["google/protobuf/any.proto"]}] =
+        do_list_io_defs(FileSystem, [ignore_wellknown_types_directory]),
+    ok.
+
+
+wellknown_path(WellknownProto) ->
+    Gpb = filename:dirname(filename:dirname(code:which(gpb_compile))),
+    PrivProto3 = Gpb ++ "/priv/proto3",
+    PrivProto3 ++ WellknownProto.
+
+list_io_no_erl_output_with_binary_option_test() ->
+    FileSystem = [{"/main.proto", ["message M { optional uint32 f = 1; }"]}],
+    [{sources, ["/main.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, [binary]),
+    ok.
+
+list_io_with_nif_options_includes_nif_cc_output_test() ->
+    FileSystem = [{"/main.proto", ["message M { optional uint32 f = 1; }"]}],
+    [{erl_output, "/main.erl"},
+     {hrl_output, "/main.hrl"},
+     {nif_cc_output, "/main.nif.cc"},
+     {sources, ["/main.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, [nif]),
+    ok.
+
+generates_makefile_deps_to_stdout_test() ->
+    MainProto = lf_lines(["import 'a.proto';",
+                          "message M { required uint32 f = 1; }\n"]),
+    ExtraProtos = [{"a.proto", ["message A { required uint32 g = 2; }"]}],
+    Opts = [{list_deps, makefile_rules},
+            list_deps_makefile_phonies,
+            %% --
+            {test_extra_known_protos, ExtraProtos},
+            {test_extra_mod, gpb_c_test_main},
+            test_extra_no_binary],
+    {{return, ok},
+     {output, Output}} =
+        capture_stdout(
+          fun() ->
+                  compile_iolist_maybe_errors_or_warnings(MainProto, Opts,
+                                                          get_result)
+          end),
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto", "./a.proto"]},
+     {"./a.proto", []}] = parse_makefile_deps(Output).
+
+generates_makefile_deps_to_file_test() ->
+    MainProto = lf_lines(["import 'a.proto';",
+                          "message M { required uint32 f = 1; }\n"]),
+    ExtraProtos = [{"a.proto", ["message A { required uint32 g = 2; }"]}],
+    Opts = [{list_deps, makefile_rules},
+            list_deps_makefile_phonies,
+            {list_deps_dest_file, "/x.d"},
+            %% --
+            {test_extra_known_protos, ExtraProtos},
+            {test_extra_mod, gpb_c_test_main},
+            test_extra_no_binary,
+            test_extra_capture_write_file],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts, get_result),
+    [{"/x.d", DepsFileText}] = retrieve_files_written(),
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto", "./a.proto"]},
+     {"./a.proto", []}] = parse_makefile_deps(DepsFileText).
+
+generates_makefiles_missing_files_are_generated_test() ->
+    MainProto = lf_lines(["import 'a.proto';",
+                          "message M { required uint32 f = 1; }\n"]),
+    Opts = [{list_deps, makefile_rules},
+            {list_deps_dest_file, "/x.d"},
+            %% --
+            {test_extra_mod, gpb_c_test_main},
+            test_extra_no_binary,
+            test_extra_capture_write_file],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts, get_result),
+    [{"/x.d", DepsFileText1}] = retrieve_files_written(),
+    %% a.proto is not expected since not found:
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto"]}] =
+         parse_makefile_deps(DepsFileText1),
+
+    %% Same again but missing are to considered generated
+    Opts2 = [list_deps_missing_imports_are_generated | Opts],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts2, get_result),
+    [{"/x.d", DepsFileText2}] = retrieve_files_written(),
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto",
+                                "a.proto" % <- expected this time
+                               ]}] =
+         parse_makefile_deps(DepsFileText2).
+
+generates_deps_and_compile_to_file_test() ->
+    MainProto = lf_lines(["message M { required uint32 f = 1; }\n"]),
+    Opts = [{list_deps, makefile_rules},
+            list_deps_makefile_phonies,
+            {list_deps_dest_file, "/x.d"},
+            %% --
+            {test_extra_mod, gpb_c_test_main},
+            test_extra_no_binary,
+            test_extra_capture_write_file,
+            test_extra_dont_load_code],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts, get_result),
+    [{"/x.d", DepsFileText}] = retrieve_files_written(),
+    [{"./gpb_c_test_main.erl", ["./gpb_c_test_main.proto"]}] =
+        parse_makefile_deps(DepsFileText).
+
+list_deps_more_formats_test() ->
+    MainProto = lf_lines(["import 'a.proto';",
+                          "message M { required uint32 f = 1; }\n"]),
+    ExtraProtos = [{"a.proto", ["message A { required uint32 g = 2; }"]}],
+    CmnOpts = [{list_deps_dest_file, "/x.d"},
+               %% --
+               {test_extra_known_protos, ExtraProtos},
+               {test_extra_mod, gpb_c_test_main},
+               test_extra_no_binary,
+               test_extra_capture_write_file],
+
+    %% Newline-terminated lines
+    Opts1 = [{list_deps, {list_imports, newline_terminated}} | CmnOpts],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts1, get_result),
+    [{"/x.d", "./a.proto\n"}] = retrieve_files_written(),
+
+    %% null-terminated lines
+    Opts2 = [{list_deps, {list_imports, null_terminated}} | CmnOpts],
+    ok = compile_iolist_maybe_errors_or_warnings(MainProto, Opts2, get_result),
+    [{"/x.d", "./a.proto\000"}] = retrieve_files_written().
+
+parse_makefile_deps(Str) ->
+    %% Very simplistic naive approach: If it ends with a colon, it is a
+    %% target, the rest of the words are dependencies. Assume no commands
+    %% are present (ie no commands to create the target from the deps)
+    [Target1 | Words] = gpb_lib:string_lexemes(Str, " \n\\"),
+    parse_mfdeps(Words, drop_trailing_colon(Target1), [], []).
+
+parse_mfdeps([Word | Rest], CurrTarget, CurrDeps, Acc) ->
+    case ends_with_colon(Word) of
+        true ->
+            Acc1 = [{CurrTarget, lists:reverse(CurrDeps)} | Acc],
+            parse_mfdeps(Rest, drop_trailing_colon(Word), [], Acc1);
+        false ->
+            parse_mfdeps(Rest, CurrTarget, [Word | CurrDeps], Acc)
+    end;
+parse_mfdeps([], CurrTarget, CurrDeps, Acc) ->
+    Acc1 = [{CurrTarget, lists:reverse(CurrDeps)} | Acc],
+    lists:reverse(Acc1).
+
+drop_trailing_colon(S) ->
+    ":" ++ Rest = lists:reverse(S),
+    lists:reverse(Rest).
+
+ends_with_colon(S) ->
+    $: == lists:last(S).
+
+do_list_string_io_defs(Mod, Str, Files, Opts) ->
+    do_list_io_defs(Files, [{string_input, {Mod, Str}} | Opts]).
+
+do_list_io_defs(Files, Opts) ->
+    FileReadFile =
+        fun(Path) ->
+                case simple_sim_fs_lookup(Path, Files) of
+                    {found, Data} -> {ok, Data};
+                    not_found     -> {error, enoent}
+                end
+        end,
+    FileReadFileInfo =
+        fun(Path) ->
+                case simple_sim_fs_lookup(Path, Files) of
+                    {found, _Data} -> {ok, #file_info{access=read}};
+                    not_found      -> {error, enoent}
+                end
+        end,
+    FileWriteFile =
+        fun(Path, Data) -> error({unexpected_write, Path, Data})
+        end,
+    FOpt = {file_op, [{read_file, FileReadFile},
+                      {read_file_info, FileReadFileInfo},
+                      {write_file, FileWriteFile}]},
+    Res = case proplists:get_value(string_input, Opts) of
+              {Mod, Str} ->
+                  gpb_compile:string_list_io(Mod, Str, [FOpt | Opts]);
+              undefined ->
+                  [{MainFName, _} | _] = Files,
+                  gpb_compile:list_io(MainFName, [FOpt | Opts])
+          end,
+    case proplists:get_bool(no_normalization, Opts) of
+        false ->
+            list_io_ensure_order(norm_io_info_paths(Res));
+        true ->
+            Res
+    end.
+
+simple_sim_fs_lookup(Path, Files) ->
+    case lists:keyfind(norm_path(Path), 1, Files) of
+        {_NPath, Data} -> {found, iolist_to_binary(lf_lines(Data))};
+        false          -> not_found
+    end.
+
+list_io_ensure_order(Infos) ->
+    Order = [erl_output, hrl_output, nif_cc_output, sources, missing],
+    Wrap = fun(Elem) -> {find_pos(element(1, Elem), 1, Order), Elem} end,
+    Unwrap = fun({_Prio, Elem}) -> Elem end,
+    lists:map(Unwrap, lists:sort(lists:map(Wrap, Infos))).
+
+find_pos(X, Pos, [X | _]) -> Pos;
+find_pos(X, Pos, [_ | Rest]) -> find_pos(X, Pos + 1, Rest).
+
+norm_io_info_paths(Infos) ->
+    lists:map(
+      fun({erl_output, P})    -> {erl_output, norm_path(P)};
+         ({hrl_output, P})    -> {hrl_output, norm_path(P)};
+         ({nif_cc_output, P}) -> {nif_cc_output, norm_path(P)};
+         ({sources, Ps})      -> {sources, norm_paths(Ps)};
+         (X)                  -> X
+      end,
+      Infos).
+
+
+norm_paths(Paths) -> [norm_path(Path) || Path <- Paths].
+
+norm_path("./"++Rest) -> norm_path(Rest); % due to auto-added {i,"."}
+norm_path("/"++_ = Path) -> Path;
+norm_path(RelPath) when is_list(RelPath) -> "/" ++ RelPath;
+norm_path(X) -> X.
 
 %% --- Returning/reporting warnings/errors (and warnings_as_errors) tests -----
 %% ... when compiling to file/binary/defs
@@ -4715,6 +5133,39 @@ no_gen_intospections_test() ->
     {ok, {[{gen_introspect, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]).
 
+makedeps_cmdline_opts_test() ->
+    {ok, {[{list_deps, makefile_rules},
+           list_deps_missing_imports_are_generated,
+           list_deps_makefile_phonies,
+           {list_deps_makefile_target, "src/my_target.erl"}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-M", "-MG", "-MP", "-MT", "src/my_target.erl",
+           "x.proto"]),
+    {ok, {[{list_deps_dest_file, "deps.d"},
+           {list_deps_makefile_target, {quote, "$(src)/my_target.erl"}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-MF", "deps.d",
+           "-MQ", "$(src)/my_target.erl",
+           "x.proto"]),
+    {ok, {[list_deps_and_generate],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-MMD",
+           "x.proto"]),
+    {ok, {[{list_deps, {list_imports, newline_terminated}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-ML",
+           "x.proto"]),
+    {ok, {[{list_deps, {list_imports, null_terminated}}],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-M0",
+           "x.proto"]),
+    ok.
+
 dashes_and_underscores_are_interchangeable_in_options_test() ->
     {ok, {[{target_erlang_version,18}, {target_erlang_version,18}],
           ["x.proto"]}} =
@@ -4849,11 +5300,19 @@ compile_iolist(IoList, ExtraOpts) ->
 compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
     {TestOpts, GpbCompileOpts} =
         lists:partition(fun({test_extra_known_protos, _}) -> true;
+                           (test_extra_no_binary) -> true;
+                           ({test_extra_mod, _}) -> true;
+                           (test_extra_capture_write_file) -> true;
+                           (test_extra_dont_load_code) -> true;
                            (_GpbCompileOpt) -> false
                         end,
                         ExtraOpts0),
     ExtraProtos = proplists:get_value(test_extra_known_protos, TestOpts, []),
-    Mod = find_unused_module(),
+    DoBinary = not proplists:get_bool(test_extra_no_binary, TestOpts),
+    Mod = case proplists:get_value(test_extra_mod, TestOpts) of
+              undefined -> find_unused_module();
+              TM        -> TM
+          end,
     ModProto = f("~s.proto", [Mod]),
     KnownProtos = [{ModProto, IoList} | ExtraProtos],
     ReadFile = fun(F) ->
@@ -4874,26 +5333,45 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
                                    file:read_file_info(F)
                            end
                    end,
-
+    BinaryOpts = [binary || DoBinary],
+    WriteFile =
+        case proplists:get_bool(test_extra_capture_write_file, TestOpts) of
+            true ->
+                Master = self(),
+                fun(FName, Data) ->
+                        Master ! {file_written, {FName, Data}},
+                        ok
+                end;
+            false ->
+                fun(_, _) -> ok end
+        end,
     CompRes = gpb_compile:file(
                 ModProto,
                 [{file_op, [{read_file, ReadFile},
                             {read_file_info, ReadFileInfo},
-                            {write_file, fun(_,_) -> ok end}]},
+                            {write_file, WriteFile}]},
                  {i,"."},
-                 binary, return_errors, return_warnings | GpbCompileOpts]),
+                 return_errors, return_warnings] ++
+                    BinaryOpts ++
+                    GpbCompileOpts),
+    LoadCode = case proplists:get_bool(test_extra_dont_load_code, TestOpts) of
+                   false -> fun(MMod, Code) -> load_code(MMod, Code) end;
+                   true  -> fun(_Mod, _Code) -> ok end
+               end,
     case OnFail of
         must_succeed ->
             %% Mod1 instead of Mod, since some options can change the
             %% module name (module_name_suffix, or epb_compatibility,
             %% for instance)
             {ok, Mod1, Code, []} = CompRes,
-            load_code(Mod1, Code),
+            LoadCode(Mod1, Code),
             Mod1;
         get_result ->
             case CompRes of
+                ok ->
+                    ok;
                 {ok, Mod1, Code, Warnings} -> % Mod1 insead of Mod, see above
-                    load_code(Mod1, Code),
+                    LoadCode(Mod1, Code),
                     {ok, Mod1, Warnings};
                 {error, Reasons, Warnings} ->
                     {error, Reasons, Warnings}
@@ -4905,6 +5383,14 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
                 {error, Reasons, Warnings} ->
                     {error, Reasons, Warnings}
             end
+    end.
+
+retrieve_files_written() ->
+    receive
+        {file_written, {FName, Data}} ->
+            [{FName, lists:flatten(Data)} | retrieve_files_written()]
+    after 10 ->
+            []
     end.
 
 compile_iolist_get_errors_or_warnings(IoList) ->
