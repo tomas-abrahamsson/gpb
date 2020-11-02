@@ -480,15 +480,11 @@ augment_out_commentation(FieldInfos, TEnv) ->
             [FI#field_info{out_comment = false}
              || FI <- FieldInfos];
         #maps{unset_optional=omitted} ->
-            [case gpb_lib:get_field_occurrence(Field) of
-                 optional when not TypespecsCanIndicateMapItemPresence ->
-                     FI#field_info{out_comment = true};
-                 defaulty when not TypespecsCanIndicateMapItemPresence ->
-                     FI#field_info{out_comment = true};
-                 _ ->
-                     FI#field_info{out_comment = false}
-             end
-             || #field_info{field=Field}=FI <- FieldInfos]
+            %% If Erlang 17 or 18, treat also required as optional,
+            %% since we cannot presence on decoding.
+            OutComment = not TypespecsCanIndicateMapItemPresence,
+            [FI#field_info{out_comment = OutComment}
+             || FI <- FieldInfos]
     end.
 
 %% Step:
