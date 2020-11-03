@@ -168,21 +168,19 @@ t_env(Opts) ->
 
 calc_keytype_override([], _TEnv) ->
     no_override;
-calc_keytype_override(Fields, TEnv) ->
+calc_keytype_override(_Fields, TEnv) ->
     #t_env{map_key_type=KeyType,
+           mapping_and_unset=#maps{unset_optional=UnsetOpt},
            can_do_map_presence=TypespecsCanIndicateMapItemPresence}=TEnv,
     case KeyType of
         atom ->
             no_override;
         binary ->
-            HaveMandatoryFields =
-                lists:any(fun(F) ->
-                                  gpb_lib:get_field_occurrence(F) /= optional
-                          end,
-                          Fields),
-            if TypespecsCanIndicateMapItemPresence, HaveMandatoryFields ->
+            if TypespecsCanIndicateMapItemPresence,
+               UnsetOpt == present_undefined ->
                     "binary() := _";
-               TypespecsCanIndicateMapItemPresence, not HaveMandatoryFields ->
+               TypespecsCanIndicateMapItemPresence,
+               UnsetOpt == omitted ->
                     "binary() => _";
                true ->
                     "binary() => _"
