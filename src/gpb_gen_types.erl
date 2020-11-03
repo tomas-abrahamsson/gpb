@@ -40,11 +40,17 @@
          module :: module(),
          nif :: boolean()}).
 
+-record(type_text,
+        {text :: string(),
+         tag :: atom() | undefined}).
+
 %% List of fields with some info/annotations to be rendered
 %% either as record fields
 %% or as map associations
 -record(field_info, % order sort of from left to right
         {field :: #?gpb_field{} | #gpb_oneof{},
+         elem_path :: [atom() | []]  % translation elem path
+                    | undefined,     % initially
          out_comment :: boolean()  % if entire field must be out-commented
                       | undefined, % initially
          name :: string()   % field name, single-quoted if needed
@@ -53,8 +59,13 @@
                   | undefined, % if no default
          type_sep :: string()   % "::" (records) or "=>" or ":=" (maps)
                    | undefined, % initially
-         type_text :: string()
-                    | undefined, % if no type specs
+         base_type_comment :: string()
+                         | undefined, % if no base info
+         type_text :: #type_text{}   % for #?gpb_field{} fields
+                    | [#type_text{}] % for #gpb_oneof{} fields
+                    | undefined,     % if no type specs
+         or_undefined :: boolean() % whether " | undefined"
+                       | undefined,
          comment_chunks :: [string()]}).
 
 format_msg_record(Msg, Fields, AnRes, Opts, Defs) ->
@@ -188,17 +199,212 @@ format_hfields(MsgName, Indent, Fields, AnRes, Opts, Defs, TEnv) ->
 %% Collect info needed later for rendering
 %%
 analyze_field_infos(MsgName, Fields, AnRes, Opts, Defs, TEnv) ->
-    FieldInfos0 = calc_zipped_fields_and_type_str_comments(
-                    MsgName, Fields,
-                    Defs, AnRes, TEnv),
+    FieldInfos0 = [#field_info{field=Field,
+                               comment_chunks = []}
+                   || Field <- Fields],
     lists:foldl(
       fun(F, FieldInfos) -> F(FieldInfos) end,
       FieldInfos0,
-      [fun(FIs) -> augment_field_name_strs(FIs) end,
+      [fun(FIs) -> augment_elem_paths(FIs, MsgName) end,
+       fun(FIs) -> maybe_expand_oneofs(FIs, TEnv) end,
+       fun(FIs) -> add_base_type_comment(FIs, TEnv) end,
+       fun(FIs) -> augment_type_texts(FIs, Defs, AnRes, TEnv) end,
+       fun(FIs) -> apply_type_transforms(FIs, AnRes, TEnv) end,
+       fun(FIs) -> augment_type_or_undefined(FIs, TEnv) end,
+       fun(FIs) -> augment_field_name_strs(FIs) end,
        fun(FIs) -> augment_default_values(FIs, Opts, Defs, TEnv) end,
        fun(FIs) -> augment_type_sep(FIs, TEnv) end,
        fun(FIs) -> augment_out_commentation(FIs, TEnv) end,
+       fun(FIs) -> augment_occurrence(FIs) end,
        fun(FIs) -> augment_field_number(FIs) end]).
+
+-ifndef(NO_HAVE_MAPS).
+%% For debugging: add fun dump_field_infos/1 after interesting steps
+-compile({nowarn_unused_function, dump_field_infos/1}).
+dump_field_infos(FieldInfos) ->
+    io:format(user, "~nFIs=~p~n",
+              [[maps:from_list(
+                  lists:zip(record_info(fields, field_info),
+                            tl(tuple_to_list(FI))))
+                || FI <- FieldInfos]]),
+    FieldInfos.
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+%% Step:
+%% Add elem paths
+augment_elem_paths(FieldInfos, MsgName) ->
+    [FI#field_info{elem_path=[MsgName,gpb_lib:get_field_name(Field)]}
+     || #field_info{field=Field}=FI <- FieldInfos].
+
+%% Step:
+%% If maps with flat oneofs, expand those to #field_info{field = #?gpb_field{}}
+%% elements, with adjusted `elem_path's (for any type spec translations).
+%%
+%% NB: This step may leave #field_info{field = #gpb_oneof{}} if no flat oneofs.
+maybe_expand_oneofs(FieldInfos, TEnv) ->
+    #t_env{mapping_and_unset=MappingAndUnset} = TEnv,
+    case MappingAndUnset of
+        records ->
+            FieldInfos;
+        #maps{oneof=flat} ->
+            expand_oneofs(FieldInfos);
+        #maps{} ->
+            FieldInfos
+    end.
+
+expand_oneofs([F | Rest]) ->
+    case F of
+        #field_info{elem_path=BaseElemPath,
+                    field=#gpb_oneof{fields=OFields}} ->
+            OFieldInfos =
+                [#field_info{elem_path = BaseElemPath ++ [OFName],
+                             field = OField,
+                             comment_chunks = []}
+                 || #?gpb_field{name=OFName}=OField <- OFields],
+            OFieldInfos ++ expand_oneofs(Rest);
+        _ ->
+            [F | expand_oneofs(Rest)]
+    end;
+expand_oneofs([]) ->
+    [].
+
+%% Step:
+%% Add a base type-comment.
+%% (will be removed later for any type-spec translations)
+add_base_type_comment(FieldInfos, TEnv) ->
+    [FI#field_info{base_type_comment = base_type_comment(Field, TEnv)}
+     || #field_info{field=Field}=FI <- FieldInfos].
+
+base_type_comment(#?gpb_field{type=Type}, TEnv) ->
+    #t_env{type_specs=TypeSpecs} = TEnv,
+    case Type of
+        sint32   -> "32 bits";
+        sint64   -> "64 bits";
+        int32    -> "32 bits";
+        int64    -> "64 bits";
+        uint32   -> "32 bits";
+        uint64   -> "64 bits";
+        fixed32  -> "32 bits";
+        fixed64  -> "64 bits";
+        sfixed32 -> "32 bits";
+        sfixed64 -> "64 bits";
+        {enum,E} -> "enum "++atom_to_list(E);
+        _ -> if not TypeSpecs -> ?f("~p", [Type]);
+                true -> undefined
+             end
+    end;
+base_type_comment(#gpb_oneof{}, _TEnv) ->
+    "oneof".
+
+%% Step:
+%% Calculate type text or texts (for oneof not expanded).
+%% The reason for having a list of texts for unexpanded oneofs,
+%% is to be able to replace individual ones in case of type spec translations.
+augment_type_texts(FieldInfos, _Defs, _AnRes, #t_env{type_specs=false}) ->
+    FieldInfos;
+augment_type_texts(FieldInfos, Defs, AnRes, TEnv) ->
+    [FI#field_info{type_text = type_text(Field, Defs, AnRes, TEnv)}
+     || #field_info{field=Field}=FI <- FieldInfos].
+
+type_text(#?gpb_field{type=Type, occurrence=Occurrence}=Field,
+          Defs, AnRes, TEnv) ->
+    TypeStr = type_to_typestr(Type, Defs, AnRes, TEnv),
+    IsMapTypeField = is_map_type_field(Field),
+    case Occurrence of
+        required ->
+            #type_text{text = TypeStr};
+        repeated when IsMapTypeField ->
+            #type_text{text = TypeStr};
+        repeated ->
+            #type_text{text = "[" ++ TypeStr ++ "]"};
+        optional ->
+            #type_text{text = TypeStr};
+        defaulty ->
+            #type_text{text = TypeStr}
+    end;
+type_text(#gpb_oneof{fields=OFields}, Defs, AnRes, TEnv) ->
+    [#type_text{tag=OFName,
+                text=type_to_typestr(OFType, Defs, AnRes, TEnv)}
+     || #?gpb_field{name=OFName, type=OFType} <- OFields].
+
+%% Step:
+%% Apply any type spec translations
+apply_type_transforms(FieldInfos, _AnRes, #t_env{type_specs=false}) ->
+    FieldInfos;
+apply_type_transforms(FieldInfos, AnRes, _TEnv) ->
+    [case has_type_spec_translation(Field, ElemPath, TypeText0, AnRes) of
+         {true, TypeStr} ->
+             FI#field_info{type_text = TypeStr, base_type_comment = undefined};
+         {partly, TypeStrs} ->
+             FI#field_info{type_text = TypeStrs}; % retain "oneof" comment
+         false ->
+             FI
+     end
+     || #field_info{field=Field,
+                    elem_path=ElemPath,
+                    type_text=TypeText0}=FI <- FieldInfos].
+
+has_type_spec_translation(#?gpb_field{occurrence=Occurrence}=Field,
+                          ElemPath, _TypeText0, AnRes) ->
+    case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
+        {true, TypeStr} ->
+            {true, #type_text{text = TypeStr}};
+        false ->
+            IsMapTypeField = is_map_type_field(Field),
+            case Occurrence of
+                required ->
+                    false;
+                repeated when IsMapTypeField ->
+                    false;
+                repeated ->
+                    RElemPath = ElemPath ++ [[]],
+                    case gpb_gen_translators:has_type_spec_translation(
+                           RElemPath, AnRes) of
+                        {true, RTypeStr} ->
+                            {true, #type_text{text = "[" ++ RTypeStr ++ "]"}};
+                        false ->
+                            false
+                    end;
+                optional ->
+                    false;
+                defaulty ->
+                    false
+            end
+    end;
+has_type_spec_translation(#gpb_oneof{}, ElemPath, TypeTexts0, AnRes) ->
+    case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
+        {true, TypeStr} ->
+            {true, #type_text{text = TypeStr}};
+        false ->
+            {partly,
+             lists:map(
+               fun(#type_text{tag=OFName}=TT0) ->
+                       OFElemPath = ElemPath ++ [OFName],
+                       case gpb_gen_translators:has_type_spec_translation(
+                              OFElemPath, AnRes) of
+                           {true, TypeStr} ->
+                               TT0#type_text{text=TypeStr};
+                           false ->
+                               TT0
+                       end
+               end,
+               TypeTexts0)}
+    end.
+
+%% Step:
+%% Add information in " | undefined" to maybe later be added to each type
+augment_type_or_undefined(FieldInfos, TEnv) ->
+    #t_env{mapping_and_unset=MappingAndUnset} = TEnv,
+    OrUndefined = case MappingAndUnset of
+                      records ->
+                          true;
+                      #maps{unset_optional=present_undefined} ->
+                          true;
+                      #maps{unset_optional=omitted} ->
+                          false
+                  end,
+    [FI#field_info{or_undefined = OrUndefined}
+     || #field_info{}=FI <- FieldInfos].
 
 %% Step:
 %% Set the 'name' field
@@ -288,6 +494,24 @@ augment_out_commentation(FieldInfos, TEnv) ->
     end.
 
 %% Step:
+%% Prepend the fields occurrence as a comment.
+augment_occurrence(FieldInfos) ->
+    [case Field of
+         #?gpb_field{occurrence=Occurrence} ->
+            IsMapTypeField = is_map_type_field(Field),
+             Chunks2 = if IsMapTypeField -> Chunks;
+                          Occurrence == required -> ["required" | Chunks];
+                          Occurrence == optional -> ["optional" | Chunks];
+                          Occurrence == defaulty -> ["optional" | Chunks];
+                          Occurrence == repeated -> ["repeated" | Chunks]
+                       end,
+             FI#field_info{comment_chunks = Chunks2};
+         #gpb_oneof{} ->
+             FI#field_info{comment_chunks = Chunks}
+     end
+     || #field_info{field=Field, comment_chunks=Chunks}=FI <- FieldInfos].
+
+%% Step:
 %% Prepend the field's number (from the .proto) as a comment
 augment_field_number(FieldInfos) ->
     [case Field of
@@ -314,8 +538,11 @@ render_field_infos(FieldInfos, Indent) ->
                           name=FName,
                           default=Default,
                           type_sep=TypeSep,
-                          type_text=Type,
-                          comment_chunks=CommentChunks}}) ->
+                          type_text=TypeText,
+                          or_undefined=OrUndefined,
+                          comment_chunks=CommentChunks,
+                          base_type_comment=BaseTypeComment}}) ->
+              Type = render_type_text(TypeText, OrUndefined),
               LineLead = if OutCommented     -> "%% ";
                             not OutCommented -> ""
                          end,
@@ -329,7 +556,7 @@ render_field_infos(FieldInfos, Indent) ->
                                      false -> ""
                                  end
                          end,
-              Comment = gpb_lib:comma_join(CommentChunks),
+              Comment = render_comment(CommentChunks, BaseTypeComment),
               FieldTxt1 = ?f("~s~s~s", [LineLead, FName, DefaultStr]),
               FieldTxt2 = if Type /= undefined ->
                                   %% with type specs
@@ -372,35 +599,27 @@ has_next(I, Last) ->
             false
     end.
 
+render_type_text(#type_text{text=TypeStr}, OrUndefined) ->
+    if OrUndefined     -> TypeStr ++ " | undefined";
+       not OrUndefined -> TypeStr
+    end;
+render_type_text(TypeTexts, OrUndefined) when is_list(TypeTexts) -> % oneof
+    gpb_lib:or_join([?ff("{~p, ~s}", [Tag, TypeStr])
+                     || #type_text{tag=Tag, text=TypeStr} <- TypeTexts]
+                    ++ ["undefined" || OrUndefined]);
+render_type_text(undefined, _) -> % no type specs
+    undefined.
+
+
+render_comment(CommentChunks, BaseTypeComment) ->
+    if BaseTypeComment == undefined ->
+            gpb_lib:comma_join(CommentChunks);
+       is_list(BaseTypeComment) ->
+            gpb_lib:comma_join(CommentChunks ++ [BaseTypeComment])
+    end.
+
 %% --------------------------------------------------------------
 %% Helpers...
-
-calc_zipped_fields_and_type_str_comments(MsgName, Fields, Defs, AnRes,
-                                         TEnv) ->
-    #t_env{type_specs=TypeSpecs,
-           mapping_and_unset=MappingAndUnset} = TEnv,
-    TypeInfos = [calc_type_str_infos(MsgName, Field, TypeSpecs,
-                                     Defs, AnRes, TEnv)
-                 || Field <- Fields],
-    FieldsTypeInfos = lists:zip(Fields, TypeInfos),
-    case MappingAndUnset of
-        records ->
-            [#field_info{field = Field,
-                         type_text = if TypeSpecs -> type_str(TypeInfo);
-                                        true -> undefined
-                                     end,
-                         comment_chunks = type_comments(TypeInfo)}
-             || {Field, TypeInfo} <- FieldsTypeInfos];
-        #maps{oneof=tuples} ->
-            [#field_info{field = Field,
-                         type_text = if TypeSpecs -> type_str(TypeInfo);
-                                        true -> undefined
-                                     end,
-                         comment_chunks = type_comments(TypeInfo)}
-             || {Field, TypeInfo} <- FieldsTypeInfos];
-        #maps{oneof=flat} ->
-            flatten_oneofs(FieldsTypeInfos, TEnv)
-    end.
 
 calc_field_type_sep(#?gpb_field{},
                     #t_env{mapping_and_unset=MappingAndUnset}=TEnv) ->
@@ -450,181 +669,31 @@ mandatory_map_item_type_sep(TEnv) ->
         false -> "=>"
     end.
 
--record(field_type_str_info,
-        {type_str :: string(),
-         type_comment :: string()}).
--record(oneof_type_str_info,
-        {type_strs :: [string()],
-         type_comments :: [string()]}).
-
-calc_type_str_infos(MsgName, #?gpb_field{}=Field, TypeSpecs,
-                    Defs, AnRes, TEnv) ->
-    #field_type_str_info{
-       type_str = field_type_str(MsgName, Field, Defs, AnRes, TEnv),
-       type_comment = field_type_comment(MsgName, Field, TypeSpecs, AnRes)};
-calc_type_str_infos(MsgName, #gpb_oneof{}=Field, TypeSpecs,
-                    Defs, AnRes, TEnv) ->
-    #oneof_type_str_info{
-       type_strs = oneof_type_strs(MsgName, Field, Defs, AnRes, TEnv),
-       type_comments = oneof_type_comments(MsgName, Field, TypeSpecs, AnRes)}.
-
-type_str(#field_type_str_info{type_str=Str})   -> Str;
-type_str(#oneof_type_str_info{type_strs=Strs}) -> gpb_lib:or_join(Strs).
-
-type_comments(#field_type_str_info{type_comment=Comment}) -> [Comment];
-type_comments(#oneof_type_str_info{})                     -> ["oneof"].
-
-flatten_oneofs([F | Rest], #t_env{type_specs=TypeSpecs}=TEnv) ->
-    case F of
-        {#?gpb_field{}=Field,
-         #field_type_str_info{}=TypeInfo} ->
-            TT = if TypeSpecs -> type_str(TypeInfo);
-                    true -> undefined
-                 end,
-            FieldInfo = #field_info{field = Field,
-                                    type_text = TT,
-                                    comment_chunks = type_comments(TypeInfo)},
-            [FieldInfo | flatten_oneofs(Rest, TEnv)];
-        {#gpb_oneof{fields=OFields},
-         #oneof_type_str_info{type_strs=TypeStrs,
-                              type_comments=TypeComments}} ->
-            %% TypeStrs can have a trailing "or undefined",
-            %% so take as many TypeStrs elements as we have OFields
-            TypeStrs1 = lists:sublist(TypeStrs, length(OFields)),
-            FieldInfos =
-                lists:map(
-                  fun({Field, TypeStr, TypeComment}) ->
-                          TT = if TypeSpecs -> TypeStr;
-                                  true -> undefined
-                               end,
-                          #field_info{field = Field,
-                                      type_text = TT,
-                                      comment_chunks = [TypeComment]}
-                  end,
-                  lists:zip3(OFields, TypeStrs1, TypeComments)),
-            FieldInfos ++ flatten_oneofs(Rest, TEnv)
-    end;
-flatten_oneofs([], _TEnv) ->
-    [].
-
-field_type_str(MsgName,
-               #?gpb_field{name=FName, type=Type, occurrence=Occurrence},
-               Defs, AnRes,
-               #t_env{mapping_and_unset=MappingAndUnset}=TEnv) ->
-    OrUndefined = case MappingAndUnset of
-                      records ->
-                          " | undefined";
-                      #maps{unset_optional=present_undefined} ->
-                          " | undefined";
-                      #maps{unset_optional=omitted} ->
-                          ""
-                  end,
-    ElemPath = [MsgName, FName],
-    case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
-        {true, TypeStr} ->
-            %% Even if Occurrence == required, it can still end up undefined,
-            %% for instance if decoding a proto2 message and the input binary
-            %% does not contain it, even though it should.
-            case Occurrence of
-                required -> TypeStr ++ OrUndefined;
-                repeated -> TypeStr ++ OrUndefined;
-                optional -> TypeStr ++ OrUndefined;
-                defaulty -> TypeStr ++ OrUndefined
-            end;
-        false ->
-            TypeStr = type_to_typestr_2(Type, Defs, AnRes, TEnv),
-            case Occurrence of
-                required ->
-                    TypeStr ++ OrUndefined;
-                repeated ->
-                    case Type of
-                        {map,_,_} ->
-                            TypeStr;
-                        _ ->
-                            RElemPath = [MsgName, FName, []],
-                            case gpb_gen_translators:has_type_spec_translation(
-                                   RElemPath, AnRes) of
-                                {true, RTs} ->
-                                    "[" ++ RTs ++ "]";
-                                false ->
-                                    "[" ++ TypeStr ++ "]"
-                            end
-                    end
-                        ++ OrUndefined;
-                optional ->
-                    TypeStr ++ OrUndefined;
-                defaulty ->
-                    TypeStr ++ OrUndefined
-            end
-    end.
-
-oneof_type_strs(MsgName,
-                #gpb_oneof{name=FName, fields=OFields},
-                Defs, AnRes,
-                #t_env{mapping_and_unset=MappingAndUnset}=TEnv) ->
-    OrUndefinedElems = case MappingAndUnset of
-                           records ->
-                               ["undefined"];
-                           #maps{unset_optional=present_undefined} ->
-                               ["undefined"];
-                           #maps{unset_optional=omitted} ->
-                               []
-                       end,
-    OrUndefinedStr = case OrUndefinedElems of
-                         [] -> "";
-                         [U] -> " | " ++ U
-                     end,
-    TagWrap = case MappingAndUnset of
-                  #maps{oneof=flat} ->
-                      fun(_Tag, TypeStr) -> TypeStr end;
-                  _ ->
-                      fun(Tag, TypeStr) -> ?f("{~p, ~s}", [Tag, TypeStr]) end
-              end,
-    ElemPath = [MsgName, FName],
-    case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
-        {true, TypeStr} ->
-            [TypeStr, OrUndefinedStr];
-        false ->
-            [begin
-                 OElemPath = [MsgName, FName, Name],
-                 case gpb_gen_translators:has_type_spec_translation(
-                        OElemPath, AnRes) of
-                     {true, TypeStr} ->
-                         TagWrap(Name, TypeStr);
-                     false ->
-                         TypeStr = type_to_typestr_2(Type, Defs, AnRes, TEnv),
-                         TagWrap(Name, TypeStr)
-                 end
-             end
-             || #?gpb_field{name=Name, type=Type} <- OFields]
-                ++ OrUndefinedElems
-    end.
-
-type_to_typestr_2(sint32, _Defs, _AnRes, _TEnv)   -> "integer()";
-type_to_typestr_2(sint64, _Defs, _AnRes, _TEnv)   -> "integer()";
-type_to_typestr_2(int32, _Defs, _AnRes, _TEnv)    -> "integer()";
-type_to_typestr_2(int64, _Defs, _AnRes, _TEnv)    -> "integer()";
-type_to_typestr_2(uint32, _Defs, _AnRes, _TEnv)   -> "non_neg_integer()";
-type_to_typestr_2(uint64, _Defs, _AnRes, _TEnv)   -> "non_neg_integer()";
-type_to_typestr_2(bool, _Defs, _AnRes, _TEnv)     -> "boolean() | 0 | 1";
-type_to_typestr_2(fixed32, _Defs, _AnRes, _TEnv)  -> "non_neg_integer()";
-type_to_typestr_2(fixed64, _Defs, _AnRes, _TEnv)  -> "non_neg_integer()";
-type_to_typestr_2(sfixed32, _Defs, _AnRes, _TEnv) -> "integer()";
-type_to_typestr_2(sfixed64, _Defs, _AnRes, _TEnv) -> "integer()";
-type_to_typestr_2(float, _Defs, _AnRes, _TEnv)    -> float_spec();
-type_to_typestr_2(double, _Defs, _AnRes, _TEnv)   -> float_spec();
-type_to_typestr_2(string, _Defs, _AnRes, _TEnv)   -> "iodata()";
-type_to_typestr_2(bytes, _Defs, _AnRes, _TEnv)    -> "iodata()";
-type_to_typestr_2({enum,E}, Defs, _AnRes, TEnv) ->
+type_to_typestr(sint32, _Defs, _AnRes, _TEnv)   -> "integer()";
+type_to_typestr(sint64, _Defs, _AnRes, _TEnv)   -> "integer()";
+type_to_typestr(int32, _Defs, _AnRes, _TEnv)    -> "integer()";
+type_to_typestr(int64, _Defs, _AnRes, _TEnv)    -> "integer()";
+type_to_typestr(uint32, _Defs, _AnRes, _TEnv)   -> "non_neg_integer()";
+type_to_typestr(uint64, _Defs, _AnRes, _TEnv)   -> "non_neg_integer()";
+type_to_typestr(bool, _Defs, _AnRes, _TEnv)     -> "boolean() | 0 | 1";
+type_to_typestr(fixed32, _Defs, _AnRes, _TEnv)  -> "non_neg_integer()";
+type_to_typestr(fixed64, _Defs, _AnRes, _TEnv)  -> "non_neg_integer()";
+type_to_typestr(sfixed32, _Defs, _AnRes, _TEnv) -> "integer()";
+type_to_typestr(sfixed64, _Defs, _AnRes, _TEnv) -> "integer()";
+type_to_typestr(float, _Defs, _AnRes, _TEnv)    -> float_spec();
+type_to_typestr(double, _Defs, _AnRes, _TEnv)   -> float_spec();
+type_to_typestr(string, _Defs, _AnRes, _TEnv)   -> "iodata()";
+type_to_typestr(bytes, _Defs, _AnRes, _TEnv)    -> "iodata()";
+type_to_typestr({enum,E}, Defs, _AnRes, TEnv) ->
     enum_typestr(E, Defs, TEnv);
-type_to_typestr_2({msg,M}, _Defs, AnRes, TEnv) ->
+type_to_typestr({msg,M}, _Defs, AnRes, TEnv) ->
     msg_to_typestr(M, AnRes, TEnv);
-type_to_typestr_2({group,G}, _Defs, AnRes, TEnv) ->
+type_to_typestr({group,G}, _Defs, AnRes, TEnv) ->
     msg_to_typestr(G, AnRes, TEnv);
-type_to_typestr_2({map,KT,VT}, Defs, AnRes, TEnv) ->
+type_to_typestr({map,KT,VT}, Defs, AnRes, TEnv) ->
     #t_env{map_type_fields=MapTypeFieldsRepr} = TEnv,
-    KTStr = type_to_typestr_2(KT, Defs, AnRes, TEnv),
-    VTStr = type_to_typestr_2(VT, Defs, AnRes, TEnv),
+    KTStr = type_to_typestr(KT, Defs, AnRes, TEnv),
+    VTStr = type_to_typestr(VT, Defs, AnRes, TEnv),
     MapSep = mandatory_map_item_type_sep(TEnv),
     case MapTypeFieldsRepr of
         '2tuples' -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
@@ -654,67 +723,6 @@ enum_typestr(E, Defs, #t_env{nif=Nif}) ->
     gpb_lib:or_join(
       [?f("~p", [EName]) || {EName, _} <- Enumerations])
         ++ UnknownEnums.
-
-field_type_comment(MsgName,
-                   #?gpb_field{name=FName, occurrence=Occurrence}=Field,
-                   TypeSpec, AnRes) ->
-    PresenceIndication =
-        case Occurrence of
-            defaulty -> "optional";
-            optional -> "optional";
-            required -> "required";
-            repeated -> "repeated"
-        end,
-    ElemPath = [MsgName, FName],
-    TypeComment = field_type_comment_2(Field, ElemPath, TypeSpec, AnRes),
-    if TypeComment == "" -> "(" ++ PresenceIndication ++ ")";
-       TypeComment /= "" -> PresenceIndication ++ ": " ++ TypeComment
-    end.
-
-oneof_type_comments(MsgName, #gpb_oneof{name=FName, fields=OFields},
-                    TypeSpec, AnRes) ->
-    ElemPath = [MsgName, FName],
-    case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
-        {true, _} ->
-            "";
-        false ->
-            [begin
-                 OElemPath = [MsgName, FName, OFName],
-                 field_type_comment_2(OField, OElemPath, TypeSpec, AnRes)
-             end
-             || #?gpb_field{name=OFName}=OField <- OFields]
-    end.
-
-field_type_comment_2(Field, ElemPath, TypeSpec, AnRes) ->
-    case gpb_gen_translators:has_type_spec_translation(ElemPath, AnRes) of
-        {true, _} ->
-            "";
-        false ->
-            field_type_comment_3(Field, TypeSpec)
-    end.
-
-field_type_comment_3(#?gpb_field{type=Type}, true=_TypeSpec) ->
-    case Type of
-        sint32   -> "32 bits";
-        sint64   -> "64 bits";
-        int32    -> "32 bits";
-        int64    -> "64 bits";
-        uint32   -> "32 bits";
-        uint64   -> "64 bits";
-        fixed32  -> "32 bits";
-        fixed64  -> "64 bits";
-        sfixed32 -> "32 bits";
-        sfixed64 -> "64 bits";
-        {enum,E} -> "enum "++atom_to_list(E);
-        _        -> ""
-    end;
-field_type_comment_3(#?gpb_field{type=Type, occurrence=Occurrence}, false) ->
-    case Occurrence of
-        required -> ?f("~w", [Type]);
-        repeated -> "[" ++ ?f("~w", [Type]) ++ "]";
-        optional -> ?f("~w (optional)", [Type]);
-        defaulty -> ?f("~w (optional)", [Type])
-    end.
 
 lineup(BaseIndent, Text, TargetCol) ->
     CurrentCol = BaseIndent + iolist_size(Text),
