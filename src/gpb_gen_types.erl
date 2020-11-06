@@ -273,8 +273,10 @@ add_base_type_comment(FieldInfos, TEnv) ->
     [FI#field_info{base_type_comment = base_type_comment(Field, TEnv)}
      || #field_info{field=Field}=FI <- FieldInfos].
 
-base_type_comment(#?gpb_field{type=Type}, TEnv) ->
-    #t_env{type_specs=TypeSpecs} = TEnv,
+base_type_comment(#?gpb_field{type=Type}=Field, TEnv) ->
+    #t_env{type_specs=TypeSpecs,
+           can_do_map_presence=TypespecsCanIndicateMapItemPresence} = TEnv,
+    IsMapTypeField = is_map_type_field(Field),
     case Type of
         sint32   -> "32 bits";
         sint64   -> "64 bits";
@@ -287,8 +289,13 @@ base_type_comment(#?gpb_field{type=Type}, TEnv) ->
         sfixed32 -> "32 bits";
         sfixed64 -> "64 bits";
         {enum,E} -> "enum "++atom_to_list(E);
-        _ -> if not TypeSpecs -> ?f("~p", [Type]);
-                true -> undefined
+        _ -> if not TypeSpecs ->
+                     ?f("~p", [Type]);
+                not TypespecsCanIndicateMapItemPresence,
+                IsMapTypeField ->
+                     ?f("~p", [Type]);
+                true ->
+                     undefined
              end
     end;
 base_type_comment(#gpb_oneof{}, _TEnv) ->
@@ -685,13 +692,14 @@ type_to_typestr({msg,M}, _Defs, AnRes, TEnv) ->
 type_to_typestr({group,G}, _Defs, AnRes, TEnv) ->
     msg_to_typestr(G, AnRes, TEnv);
 type_to_typestr({map,KT,VT}, Defs, AnRes, TEnv) ->
-    #t_env{map_type_fields=MapTypeFieldsRepr} = TEnv,
+    #t_env{map_type_fields=MapTypeFieldsRepr,
+           can_do_map_presence=TypespecsCanIndicateMapItemPresence} = TEnv,
     KTStr = type_to_typestr(KT, Defs, AnRes, TEnv),
     VTStr = type_to_typestr(VT, Defs, AnRes, TEnv),
-    MapSep = mandatory_map_item_type_sep(TEnv),
-    case MapTypeFieldsRepr of
-        '2tuples' -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
-        maps      -> ?f("#{~s ~s ~s}", [KTStr, MapSep, VTStr])
+    case {MapTypeFieldsRepr, TypespecsCanIndicateMapItemPresence} of
+        {'2tuples', _} -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
+        {maps, true}   -> ?f("#{~s => ~s}", [KTStr, VTStr]); % map can be empty
+        {maps, false}  -> "#{}" % map can be empty
     end.
 
 float_spec() ->
