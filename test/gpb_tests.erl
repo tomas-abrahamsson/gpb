@@ -1116,9 +1116,6 @@ is_hex_digit(D) when $a =< D, D =< $f -> true;
 is_hex_digit(D) when $A =< D, D =< $F -> true;
 is_hex_digit(_) -> false.
 
-%% --vvv------ temporarily only for gpb.erl, not for gpb_compile_tests.erl --
--ifndef(gpb_compile_common_tests).
-
 encode_decode_basic_unknowns_test() ->
     Field1 = #?gpb_field{name=a, fnum=1, rnum=2, type=string,
                          occurrence=optional,
@@ -1196,9 +1193,6 @@ encode_decode_repeated_unknowns_test() ->
     E2 = encode_msg(Msg1, Defs1),
     D2 = decode_msg(E2, msg, Defs2),
     ?assertEqual(Msg0, D2).
-
--endif. % -ifndef(gpb_compile_common_tests).
-%% --^^^------ temporarily only for gpb.erl, not for gpb_compile_tests.erl --
 
 %% -------------------------------------------------------------
 

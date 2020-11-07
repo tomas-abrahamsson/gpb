@@ -37,6 +37,7 @@
 -export([msg_names/1]).
 -export([enum_names/1]).
 -export([contains_messages/1]).
+-export([contains_groups/1]).
 -export([get_field_name/1, get_field_names/1]).
 -export([get_field_rnum/1]).
 -export([get_field_occurrence/1]).
@@ -55,8 +56,11 @@
 -export([classify_field_merge_action/1]).
 -export([flatten_oneof_fields/1]).
 -export([get_field_json_name/1]).
+-export([is_field_for_unknowns/1]).
+-export([defs_contains_fields_for_unknows/1]).
 
 -export([fold_msg_fields/3]).
+-export([fold_msg_or_group_fields_skip_field_for_unknowns/3]).
 -export([fold_msg_or_group_fields/3]).
 -export([fold_msg_or_group_fields_o/3]).
 -export([fold_msgdef_fields/3]).
@@ -190,6 +194,12 @@ contains_messages(Defs) ->
               end,
               Defs).
 
+contains_groups(Defs) ->
+    lists:any(fun({{group, _}, _}) -> true;
+                 (_)               -> false
+              end,
+              Defs).
+
 get_field_names(MsgDef) ->
     [get_field_name(Field) || Field <- MsgDef].
 
@@ -274,8 +284,11 @@ get_field_pass(MsgName, #anres{d_field_pass_method=D}) ->
 get_num_fields(MsgName, #anres{num_fields=D}) ->
     dict:fetch(MsgName, D).
 
-is_packed(#?gpb_field{type=Type, opts=Opts}) ->
-    gpb:is_type_packable(Type) andalso lists:member(packed, Opts).
+is_packed(#?gpb_field{type=Type, opts=Opts}=Field) ->
+    case is_field_for_unknowns(Field) of
+        false -> gpb:is_type_packable(Type) andalso lists:member(packed, Opts);
+        true  -> false % these are never packed
+    end.
 
 is_maptype_field(#?gpb_field{type={map,_,_}}) -> true;
 is_maptype_field(_) -> false.
@@ -331,6 +344,31 @@ get_field_json_name(#?gpb_field{name=FName, opts=Opts}) ->
             Name
     end.
 
+is_field_for_unknowns(#?gpb_field{type=unknown, occurrence=repeated}) ->
+    true;
+is_field_for_unknowns(_) ->
+    false.
+
+defs_contains_fields_for_unknows(Defs) ->
+    {HasWithNoUnknowns, HasWithUnknowns} =
+        lists:foldl(
+          fun({{msg,_Name}, Fields}, {HasWithNoUnknowns, HasWithUnknonws}) ->
+                  case lists:any(fun is_field_for_unknowns/1, Fields) of
+                      true  -> {HasWithNoUnknowns, true};
+                      false -> {true, HasWithUnknonws}
+                  end;
+             (_, Acc) ->
+                  Acc
+          end,
+          {false, false},
+          Defs),
+    case {HasWithNoUnknowns, HasWithUnknowns} of
+        {true,  true}  -> both_with_and_without_field_for_unknowns;
+        {true,  false} -> all_are_without_field_for_unknowns;
+        {false, true}  -> all_are_with_field_for_unknowns;
+        {false, false} -> no_msgs
+    end.
+
 %% Msg iteration --------
 
 %% Loop over all message fields, including oneof-fields
@@ -338,6 +376,17 @@ get_field_json_name(#?gpb_field{name=FName, opts=Opts}) ->
 fold_msg_fields(Fun, InitAcc, Defs) ->
     fold_msg_fields_o(
       fun(MsgName, Field, _IsOneOf, Acc) -> Fun(MsgName, Field, Acc) end,
+      InitAcc,
+      Defs).
+
+fold_msg_or_group_fields_skip_field_for_unknowns(F, InitAcc, Defs) ->
+    gpb_lib:fold_msg_or_group_fields(
+      fun(Type, Name, Field, Acc) ->
+              case gpb_lib:is_field_for_unknowns(Field) of
+                  true  -> Acc; % skip
+                  false -> F(Type, Name, Field, Acc)
+              end
+      end,
       InitAcc,
       Defs).
 
@@ -829,7 +878,17 @@ var_n(S, N) ->
     var("~s~w", [S, N]).
 
 var(Fmt, Args) ->
-    erl_syntax:variable(?ff(Fmt, Args)).
+    erl_syntax:variable('replace_any_$_with_@'(?ff(Fmt, Args))).
+
+'replace_any_$_with_@'(Str) ->
+    %% The character `$' can occur in field names,
+    %% Replace with `@' which can occur in variable names.
+    %% The `@' can actually occur in atoms too, but I think
+    %% `$unknown' looks slightly more erlangy than `@unknown'.
+    lists:map(fun($$) -> $@;
+                 (C)  -> C
+              end,
+              Str).
 
 prefix_var(Prefix, Var) ->
     erl_syntax:variable(Prefix ++ erl_syntax:variable_literal(Var)).

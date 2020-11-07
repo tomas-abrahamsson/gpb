@@ -143,8 +143,9 @@ format_msg_verifiers(Defs, AnRes, Opts) ->
     [format_msg_verifier(MsgName, MsgDef, AnRes, Opts)
      || {_Type, MsgName, MsgDef} <- gpb_lib:msgs_or_groups(Defs)].
 
-format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
-    FNames = gpb_lib:get_field_names(MsgDef),
+format_msg_verifier(MsgName, MsgDef0, AnRes, Opts) ->
+    MsgDef1 = drop_field_for_unknown_if_present(MsgDef0),
+    FNames = gpb_lib:get_field_names(MsgDef1),
     FVars = [gpb_lib:var_f_n(I) || I <- lists:seq(1, length(FNames))],
     MsgVar = ?expr(M),
     {FieldMatching, NonOptKeys} =
@@ -156,7 +157,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                 {gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts),
                  FNames};
             #maps{unset_optional=omitted} ->
-                FMap = gpb_lib:zip_for_non_opt_fields(MsgDef, FVars),
+                FMap = gpb_lib:zip_for_non_opt_fields(MsgDef1, FVars),
                 {?expr('mapmatch' = 'M',
                        [replace_tree('mapmatch', gpb_lib:map_match(FMap, Opts)),
                         replace_tree('M', MsgVar)]),
@@ -174,7 +175,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                              #maps{oneof=tuples} ->
                                  FNames;
                              #maps{oneof=flat} ->
-                                 field_names_oneofs_expanded(MsgDef)
+                                 field_names_oneofs_expanded(MsgDef1)
                          end,
                 Names2 = map_keys_to_strees(Names1, Opts),
                 [?expr(lists:foreach(
@@ -209,7 +210,8 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                mk_type_error({expected_msg,'<MsgName>'}, X, Path)
        end,
        [replace_tree('<msg-match>', FieldMatching),
-        replace_tree('<Path>', if MsgDef == [], ExtraneousFieldsChecks == [] ->
+        replace_tree('<Path>', if MsgDef1 == [],
+                                  ExtraneousFieldsChecks == [] ->
                                        ?expr(_Path);
                                   true ->
                                        ?expr(Path)
@@ -218,7 +220,7 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                       FNames =:= [] -> ?expr(_)
                                    end),
         splice_trees('<verify-fields>',
-                     field_verifiers(MsgName, MsgDef, FVars, MsgVar,
+                     field_verifiers(MsgName, MsgDef1, FVars, MsgVar,
                                      TrUserDataVar,
                                      AnRes, Opts)),
         splice_trees('<maybe-verify-no-extraneous-fields>',
@@ -232,6 +234,10 @@ format_msg_verifier(MsgName, MsgDef, AnRes, Opts) ->
                                  replace_tree('NonOptKeys', NonOptKeys1)]]
                        end),
         replace_term('<MsgName>', MsgName)])].
+
+drop_field_for_unknown_if_present(Fields) ->
+    [Field || Field <- Fields,
+              not gpb_lib:is_field_for_unknowns(Field)].
 
 field_names_oneofs_expanded(MsgDef) ->
     gpb_lib:fold_msgdef_fields(

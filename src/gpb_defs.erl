@@ -28,6 +28,7 @@
 -export([latest_defs_version/0]).
 -export([convert_defs_to_latest_version/1]).
 -export([convert_defs_from_latest_version/2]).
+-export([extend_with_field_for_unknowns/1]).
 
 -export([post_process_one_file/3]).
 -export([post_process_all_files/2]).
@@ -156,6 +157,30 @@ cvt_from_latest_aux(Vsn, TargetVsn, Defs) when Vsn > TargetVsn ->
     case CvtRes of
         {ok, Defs1} -> cvt_from_latest_aux(Vsn - 1, TargetVsn, Defs1);
         {error, Reason} -> {error, Reason}
+    end.
+
+%% @hidden
+extend_with_field_for_unknowns(Defs) ->
+    [case Elem of
+         {{msg, _}, _} -> ensure_field_for_unknowns(Elem);
+         {{group, _}, _} -> ensure_field_for_unknowns(Elem);
+         _ -> Elem
+     end
+     || Elem <- Defs].
+
+ensure_field_for_unknowns({{MsgOrGroup, MsgName}, Fields}=Item) ->
+    case lists:any(fun gpb_lib:is_field_for_unknowns/1, Fields) of
+        true ->
+            Item;
+        false ->
+            FName = '$unknowns', % use an odd char so it won't collide
+            Unknowns = #?gpb_field{name = FName,
+                                   type = unknown,
+                                   fnum = undefined,
+                                   rnum = length(Fields) + 2,
+                                   occurrence = repeated,
+                                   opts = []},
+            {{MsgOrGroup, MsgName}, Fields ++ [Unknowns]}
     end.
 
 %% @hidden

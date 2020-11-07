@@ -175,9 +175,21 @@ format_decoders_top_function_msgs(Defs, AnRes, Opts) ->
         || {{msg,MsgName}, _Fields} <- Defs]]
       || gpb_lib:get_epb_functions_by_opts(Opts)]].
 
-format_aux_decoders(Defs, AnRes, _Opts) ->
+format_aux_decoders(Defs, #anres{unknowns_info=UnknownsInfo}=AnRes, Opts) ->
+    ContainsGroups = gpb_lib:contains_groups(Defs),
     [format_enum_decoders(Defs, AnRes),
-     [format_read_group_fn() || gpb_lib:contains_messages(Defs)]].
+     case UnknownsInfo of
+         no_msgs ->
+             [];
+         both_with_and_without_field_for_unknowns ->
+             [format_read_group_fn(),
+              format_collect_unknown_group_fields(Opts)];
+         all_are_without_field_for_unknowns ->
+             format_read_group_fn();
+         all_are_with_field_for_unknowns ->
+             [format_collect_unknown_group_fields(Opts),
+              [format_read_group_fn() || ContainsGroups]]
+     end].
 
 format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
@@ -233,7 +245,12 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
             [format_msg_decoder_read_field(MsgName, MsgDef, InitExprs,
                                            AnRes),
              format_field_decoders(MsgName, MsgDef, AnRes, Opts),
-             format_field_skippers(MsgName)]),
+             case contains_field_for_unknowns(MsgDef) of
+                 true ->
+                     format_unknown_field_collectors(MsgName, MsgDef, Opts);
+                 false ->
+                     format_field_skippers(MsgName)
+             end]),
     FieldPass = gpb_lib:get_field_pass(MsgName, AnRes),
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     FNames = [FName || {FName, _InitExpr} <- InitExprs],
@@ -431,11 +448,11 @@ decoder_skip_calls(Bindings, MsgName) ->
     Param = fetch_binding('Param', Bindings),
     TrUserDataVar = fetch_binding('TrUserData', Bindings),
     ?expr(case 'wiretype-expr' of
-              0 -> skip_vi('Rest', 0, 0, 0, 'Param', 'TrUserData');
-              1 -> skip_64('Rest', 0, 0, 0, 'Param', 'TrUserData');
-              2 -> skip_ld('Rest', 0, 0, 0, 'Param', 'TrUserData');
+              0 -> skip_vi('Rest', 0, 0, 'FNum', 'Param', 'TrUserData');
+              1 -> skip_64('Rest', 0, 0, 'FNum', 'Param', 'TrUserData');
+              2 -> skip_ld('Rest', 0, 0, 'FNum', 'Param', 'TrUserData');
               3 -> skip_gr('Rest', 0, 0, 'FNum', 'Param', 'TrUserData');
-              5 -> skip_32('Rest', 0, 0, 0, 'Param', 'TrUserData')
+              5 -> skip_32('Rest', 0, 0, 'FNum', 'Param', 'TrUserData')
           end,
           [replace_tree('wiretype-expr', WiretypeExpr),
            replace_tree('Rest', RestExpr),
@@ -451,7 +468,7 @@ decoder_skip_calls(Bindings, MsgName) ->
 
 decoder_field_selectors(MsgName, MsgDef) ->
     lists:append(
-      map_msgdef_fields_o(
+      map_msgdef_fields_o_for_non_unknowns(
         fun(#?gpb_field{name=FName, fnum=FNum, type=Type, occurrence=Occ},
             _IsOneof) ->
                 case Occ == repeated andalso gpb:is_type_packable(Type) of
@@ -486,7 +503,7 @@ decoder_field_selectors(MsgName, MsgDef) ->
         MsgDef)).
 
 format_field_decoders(MsgName, MsgDef, AnRes, Opts) ->
-    map_msgdef_fields_o(
+    map_msgdef_fields_o_for_non_unknowns(
       fun(Field, IsOneof) ->
               format_field_decoder(MsgName, Field, IsOneof, AnRes, Opts)
       end,
@@ -1190,6 +1207,145 @@ format_read_group_fn() ->
      "    <<_:Len/binary, Tl2/binary>> = Tl,\n"
      "    read_gr_b(Tl2, 0, 0, NumBytes1 + Len, 0, FieldNum).\n"].
 
+format_collect_unknown_group_fields(Opts) ->
+    VarData = erl_syntax:variable("Data"),
+    [gpb_codegen:format_fn(
+       collect_group_fields,
+       fun(Bin, FNum, Acc) ->
+               case read_next_field_id(Bin) of
+                   {FNum, 4, Rest} -> % group_end for same field
+                       {lists:reverse(Acc), Rest};
+                   {VFNum, 0, Rest} -> % 0 = varint
+                       {N, Rest2} = read_varint64(Rest, 0, 0),
+                       V = {varint, VFNum, N},
+                       call_self(Rest2, FNum, [V | Acc]);
+                   {B64FNum, 1, <<N:64/little, Rest/binary>>} -> % 1 = fixed 64
+                       V = {fixed64, B64FNum, N},
+                       call_self(Rest, FNum, [V | Acc]);
+                   {LdelimFNum, 2, Rest} -> % 2 = len-delimited
+                       {NBytes, Rest2} = read_varint64(Rest, 0, 0),
+                       <<Data:NBytes/binary, Rest3/binary>> = Rest2,
+                       V = {length_delimited, LdelimFNum, 'maybe copy Data'},
+                       call_self(Rest3, FNum, [V | Acc]);
+                   {GFNum, 3, Rest} -> % 3 = group
+                       {GFields, Rest2} = call_self(Rest, GFNum, []),
+                       V = {group, GFNum, GFields},
+                       call_self(Rest2, FNum, [V | Acc]);
+                   {B32FNum, 5, <<N:32/little, Rest/binary>>} -> % 5 = fixed 32
+                       V = {fixed32, B32FNum, N},
+                       call_self(Rest, FNum, [V | Acc])
+               end
+       end,
+       [replace_tree('maybe copy Data', maybe_copy_bytes(VarData, Opts))]),
+     %%
+     gpb_codegen:format_fn(
+       read_varint64,
+       fun(<<1:1, X:7, Rest/binary>>, N, Acc) when N < ?NB ->
+               call_self(Rest, N + 7, X bsl N + Acc);
+          (<<0:1, X:7, Rest/binary>>, N, Acc) ->
+               {X bsl N + Acc, Rest}
+       end),
+     %%
+     gpb_codegen:format_fn(
+       read_next_field_id,
+       fun(Bin) ->
+               {N, Rest} = read_varint64(Bin, 0, 0),
+               {N bsr 3, N band 7, Rest}
+       end)].
+
+contains_field_for_unknowns(MsgDef) ->
+    lists:any(fun gpb_lib:is_field_for_unknowns/1, MsgDef).
+
+format_unknown_field_collectors(MsgName, MsgDef, Opts) ->
+    %% Decoders expect the collectors to be named 'skip_...', so
+    %% for convenience, just name them like that.
+    CollectVarintFnName = gpb_lib:mk_fn(skip_varint_, MsgName),
+    CollectLenDelimFnName = gpb_lib:mk_fn(skip_length_delimited_, MsgName),
+    CollectGroupFnName = gpb_lib:mk_fn(skip_group_, MsgName),
+    ReadFieldFnName = gpb_lib:mk_fn(dfp_read_field_def_, MsgName),
+    VarData = erl_syntax:variable("Data"),
+    [#?gpb_field{name=UnknownFName}] =
+        [F || F <- MsgDef,
+              gpb_lib:is_field_for_unknowns(F)],
+    Ts = [%% skip_varint_<MsgName>/2,4
+          gpb_codegen:mk_fn(
+            CollectVarintFnName,
+            fun(<<1:1, X:7, Rest/binary>>, N, Acc, F, Msg, TrUserData)
+                  when N < ?NB ->
+                    call_self(Rest, N + 7, X bsl N + Acc, F, Msg, TrUserData);
+               (<<0:1, X:7, Rest/binary>>, N, Acc, FNum,
+                #'MsgName'{'$unknown'=Unknown}=Msg, TrUserData) ->
+                    V = {varint, FNum, X bsl N + Acc},
+                    'call-read-field'(
+                      Rest, 0, 0, 0,
+                      Msg#'MsgName'{'$unknown' = [V | Unknown]},
+                      TrUserData)
+            end,
+            [replace_term('call-read-field', ReadFieldFnName),
+             replace_term('MsgName', MsgName),
+             replace_term('$unknown', UnknownFName)]),
+          %% skip_length_delimited_<MsgName>/4
+          gpb_codegen:mk_fn(
+            CollectLenDelimFnName,
+            fun(<<1:1, X:7, Rest/binary>>, N, Acc, F, Msg, TrUserData)
+                  when N < ?NB ->
+                    call_self(Rest, N+7, X bsl N + Acc, F, Msg, TrUserData);
+               (<<0:1, X:7, Rest/binary>>, N, Acc, FNum,
+                #'MsgName'{'$unknown'=Unknown}=Msg, TrUserData) ->
+                    Length = X bsl N + Acc,
+                    <<Data:Length/binary, Rest2/binary>> = Rest,
+                    V = {length_delimited, FNum, 'maybe copy Data'},
+                    'call-read-field'(
+                      Rest2, 0, 0, 0,
+                      Msg#'MsgName'{'$unknown' = [V | Unknown]},
+                      TrUserData)
+            end,
+            [replace_term('call-read-field', ReadFieldFnName),
+             replace_term('MsgName', MsgName),
+             replace_term('$unknown', UnknownFName),
+             replace_tree('maybe copy Data',
+                         maybe_copy_bytes(VarData, Opts))]),
+          %% skip_group_<MsgName>/4
+          gpb_codegen:mk_fn(
+            CollectGroupFnName,
+            fun(Bin, Z1, Z2, FNum,
+                #'MsgName'{'$unknown'=Unknown}=Msg, TrUserData) ->
+                    {GroupFields, Rest} = collect_group_fields(Bin, FNum, []),
+                    V = {group, FNum, GroupFields},
+                    'call-read-field'(
+                      Rest, Z1, Z2, 0,
+                      Msg#'MsgName'{'$unknown' = [V | Unknown]},
+                      TrUserData)
+            end,
+            [replace_term('call-read-field', ReadFieldFnName),
+             replace_term('MsgName', MsgName),
+             replace_term('$unknown', UnknownFName)]),
+          %% skip_32_<MsgName>/2,4
+          %% skip_64_<MsgName>/2,4
+          [gpb_codegen:mk_fn(
+             gpb_lib:mk_fn(skip_, NumBits, MsgName),
+             fun(<<Bits:'NumBits'/little, Rest/binary>>, Z1, Z2, FNum,
+                #'MsgName'{'$unknown'=Unknown}=Msg, TrUserData) ->
+                     V = {'fixedN', FNum, Bits},
+                     'call-read-field'(
+                       Rest, Z1, Z2, 0,
+                       Msg#'MsgName'{'$unknown' = [V | Unknown]},
+                       TrUserData)
+             end,
+             [replace_term('call-read-field', ReadFieldFnName),
+              replace_term('NumBits', NumBits),
+              replace_term('fixedN', fixed(NumBits)),
+              replace_term('MsgName', MsgName),
+             replace_term('$unknown', UnknownFName)])
+           || NumBits <- [32, 64]]],
+    [#fn{name = skipper,
+         passes_msg = true,
+         tree=T}
+     || T <- lists:flatten(Ts)].
+
+fixed(32) -> fixed32;
+fixed(64) -> fixed64.
+
 format_field_skippers(MsgName) ->
     SkipVarintFnName = gpb_lib:mk_fn(skip_varint_, MsgName),
     SkipLenDelimFnName = gpb_lib:mk_fn(skip_length_delimited_, MsgName),
@@ -1253,11 +1409,14 @@ fetch_binding(Key, Bindings) ->
     dict:fetch(Key, Bindings).
 
 %% The fun takes two args: Fun(#?gpb_field{}, IsOneofField) -> term()
-map_msgdef_fields_o(Fun, Fields) ->
+map_msgdef_fields_o_for_non_unknowns(Fun, Fields) ->
     lists:reverse(
       lists:foldl(
         fun(#?gpb_field{}=Field, Acc) ->
-                [Fun(Field, false) | Acc];
+                case gpb_lib:is_field_for_unknowns(Field) of
+                    true  -> Acc;
+                    false -> [Fun(Field, false) | Acc]
+                end;
            (#gpb_oneof{name=CFName, fields=OFields}, Acc) ->
                 IsOneOf = {true, CFName},
                 lists:foldl(fun(OField, OAcc) -> [Fun(OField, IsOneOf) | OAcc]

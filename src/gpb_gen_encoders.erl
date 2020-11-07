@@ -328,14 +328,24 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
     FEncoder = mk_field_encode_fn_name(MsgName, Field),
     #?gpb_field{occurrence=Occurrence, type=Type, fnum=FNum, name=FName}=Field,
     TrFVar = gpb_lib:prefix_var("Tr", FVar),
-    Transforms = [replace_term('fieldname', FName),
-                  replace_tree('<F>', FVar),
-                  replace_tree('TrF', TrFVar),
-                  replace_term('Tr', Tr(encode)),
-                  replace_tree('TrUserData', TrUserDataVar),
-                  replace_term('<enc>', FEncoder),
-                  replace_tree('<Bin>', PrevBVar),
-                  splice_trees('<Key>', key_to_binary_fields(FNum, Type))],
+    Transforms1 =
+        [replace_term('fieldname', FName),
+         replace_tree('<F>', FVar),
+         replace_tree('TrF', TrFVar),
+         replace_term('Tr', Tr(encode)),
+         replace_tree('TrUserData', TrUserDataVar),
+         replace_term('<enc>', FEncoder),
+         replace_tree('<Bin>', PrevBVar)],
+    IsFieldForUnknowns = gpb_lib:is_field_for_unknowns(Field),
+    Transforms2 =
+        case IsFieldForUnknowns of
+            false ->
+                KeyBinFields = key_to_binary_fields(FNum, Type),
+                [splice_trees('<Key>', KeyBinFields)];
+            true ->
+                []
+        end,
+    Transforms = Transforms2 ++ Transforms1,
     IsEnum = case Type of
                  {enum,_} -> true;
                  _ -> false
@@ -664,17 +674,30 @@ format_special_field_encoders(Defs, AnRes) ->
 format_field_encoder(MsgName, FieldDef, AnRes) ->
     #?gpb_field{occurrence=Occurrence} = FieldDef,
     RFieldDef = FieldDef#?gpb_field{occurrence=required},
+    Occurrence2 =
+        case Occurrence of
+            repeated ->
+                case gpb_lib:is_field_for_unknowns(FieldDef) of
+                    true  -> {repeated, unknown};
+                    false -> {repeated, {packed, gpb_lib:is_packed(FieldDef)}}
+                end;
+            optional -> optional;
+            defaulty -> defaulty;
+            required -> required
+        end,
     [possibly_format_mfield_encoder(MsgName, RFieldDef, AnRes),
-     case {Occurrence, gpb_lib:is_packed(FieldDef)} of
-         {repeated, false} ->
+     case Occurrence2 of
+         {repeated, {packed, false}} ->
              format_repeated_field_encoder2(MsgName, FieldDef, AnRes);
-         {repeated, true} ->
+         {repeated, {packed, true}} ->
              format_packed_field_encoder2(MsgName, FieldDef, AnRes);
-         {optional, false} ->
+         {repeated, unknown} ->
+             format_unknown_field_encoder2(MsgName, FieldDef, AnRes);
+         optional ->
              [];
-         {defaulty, false} ->
+         defaulty ->
              [];
-         {required, false} ->
+         required ->
              []
      end].
 
@@ -762,6 +785,45 @@ format_repeated_field_encoder2(MsgName, FDef, AnRes) ->
       [splice_trees('<KeyBytes>', KeyBytes),
        replace_term('<encode-elem>', ElemEncoderFn),
        replace_term('Tr', Transl)]).
+
+format_unknown_field_encoder2(MsgName, #?gpb_field{}=FDef, _AnRes) ->
+    FnName = mk_field_encode_fn_name(MsgName, FDef),
+    gpb_codegen:format_fn(
+      FnName,
+      fun(Elems, Bin, _TrUserData) ->
+              e_unknown_elems(Elems, Bin)
+      end).
+
+format_unknown_encoder() ->
+    FnName = e_unknown_elems,
+    [gpb_lib:nowarn_unused_function(FnName, 2),
+     gpb_codegen:format_fn(
+       FnName,
+       fun([Elem | Rest], Bin) ->
+               BinR =
+                   case Elem of
+                       {varint, FNum, N} ->
+                           BinF = e_varint(FNum bsl 3, Bin),
+                           e_varint(N, BinF);
+                       {length_delimited, FNum, Data} ->
+                           BinF = e_varint((FNum bsl 3) bor 2, Bin),
+                           BinL = e_varint(byte_size(Data), BinF),
+                           <<BinL/binary, Data/binary>>;
+                       {group, FNum, GroupFields} ->
+                           Bin1 = e_varint((FNum bsl 3) bor 3, Bin), % gr start
+                           Bin2 = call_self(GroupFields, Bin1),
+                           e_varint((FNum bsl 3) bor 4, Bin2); % gr end
+                       {fixed32, FNum, V} ->
+                           BinF = e_varint((FNum bsl 3) bor 5, Bin),
+                           <<BinF/binary, V:32/little>>;
+                       {fixed64, FNum, V} ->
+                           BinF = e_varint((FNum bsl 3) bor 1, Bin),
+                           <<BinF/binary, V:64/little>>
+                   end,
+               call_self(Rest, BinR);
+          ([], Bin) ->
+               Bin
+       end)].
 
 format_packed_field_encoder2(MsgName, #?gpb_field{type=Type}=FDef, AnRes) ->
     case packed_byte_size_can_be_computed(Type) of
@@ -860,6 +922,7 @@ format_unknownsize_packed_field_encoder2(MsgName,
 format_type_encoders() ->
     [format_varlength_field_encoders(),
      format_fixlength_field_encoders(),
+     format_unknown_encoder(),
      format_varint_encoder()].
 
 format_varlength_field_encoders() ->
