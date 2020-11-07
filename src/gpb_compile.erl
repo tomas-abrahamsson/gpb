@@ -2126,6 +2126,10 @@ c() ->
 %%   <dt><a id="cmdline-option-no-gen-introspect"/>
 %%       `-no-gen-introspect'</dt>
 %%   <dd>Do not generate code for introspection.</dd>
+%%   <dt><a id="cmdline-option-preserve-unknown-fields"/>
+%%       `-preserve-unknown-fields'</dt>
+%%   <dd>Preserve unknown fields. An extra field, `$unknowns', will be added
+%%       to each record or map for storing unknown fields.</dd>
 %%   <dt><a id="cmdline-option-W"/>
 %%       `-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
@@ -2543,6 +2547,8 @@ opt_specs() ->
       "       useful with the option -nif.\n"},
      {"no-gen-introspect", {'opt_value()', false}, gen_introspect, "\n"
       "       Do not generate code for introspection.\n"},
+     {"preserve-unknown-fields", undefined, preserve_unknown_fields, "\n"
+      "       Preserve unknown fields.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"

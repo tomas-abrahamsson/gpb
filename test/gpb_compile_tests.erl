@@ -5133,6 +5133,11 @@ no_gen_intospections_test() ->
     {ok, {[{gen_introspect, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]).
 
+preserve_unknown_fields_cmdline_opts_test() ->
+    {ok, {[preserve_unknown_fields], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-preserve-unknown-fields",
+                                         "x.proto"]).
+
 makedeps_cmdline_opts_test() ->
     {ok, {[{list_deps, makefile_rules},
            list_deps_missing_imports_are_generated,
