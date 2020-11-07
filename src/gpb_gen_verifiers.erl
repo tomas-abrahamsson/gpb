@@ -673,8 +673,9 @@ format_enum_verifier(EnumName, EnumMembers, Opts) ->
        FnName,
        fun('<sym>', _Path, _TrUserData) ->
                ok;
-          (V, Path, TrUserData) when is_integer(V) ->
-               v_type_sint32(V, Path, TrUserData);
+          (V, _Path, _TrUserData) when -2147483648 =< V, V =< 2147483647,
+                                       is_integer(V) ->
+               ok;
           (X, Path, _TrUserData) ->
                mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
        end,
@@ -683,16 +684,14 @@ format_enum_verifier(EnumName, EnumMembers, Opts) ->
         replace_term('<EnumName>', EnumName)])].
 
 format_type_verifiers(#anres{used_types=UsedTypes}, Opts) ->
-    NeedSInt32 = (gpb_lib:smember(sint32, UsedTypes) orelse
-                  gpb_lib:any_enum_field_exists(UsedTypes)),
     NeedBool   = gpb_lib:smember(bool, UsedTypes),
     NeedFloat  = gpb_lib:smember(float, UsedTypes),
     NeedDouble = gpb_lib:smember(double, UsedTypes),
     NeedString = gpb_lib:smember(string, UsedTypes),
     NeedBytes  = gpb_lib:smember(bytes, UsedTypes),
-    [[format_int_verifier(sint32, signed, 32, Opts) || NeedSInt32],
-     [format_int_verifier(Type, Signedness, Bits, Opts)
-      || {Type, Signedness, Bits} <- [{sint64,   signed,   64},
+    [[format_int_verifier(Type, Signedness, Bits, Opts)
+      || {Type, Signedness, Bits} <- [{sint32,   signed,   32},
+                                      {sint64,   signed,   64},
                                       {int32,    signed,   32},
                                       {int64,    signed,   64},
                                       {uint32,   unsigned, 32},

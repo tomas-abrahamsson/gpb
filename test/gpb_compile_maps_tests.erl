@@ -695,23 +695,46 @@ type_syntax_for_required_fields_test() ->
     %%     -type m() :: #{req => integer(),
     %%                    opt => string()}.
     %%
-    %% For Erlang/OTP 18 and earlier, only "=>" is available, so do
-    %% the best we can, and generate type specs like this:
+    %% For Erlang/OTP 18 and earlier, only "=>" is available.
+    %% However, since we cannot guarantee presence on decode,
+    %% we can't actually use "=>" either, but must generate all
+    %% fields out-commented, like this:
     %%
-    %%     -type m() :: #{req => integer()
+    %%     -type m() :: #{%% req => integer()
     %%                    %% opt => string()
     %%                   }.
     %%
-    Proto = "message m { required uint32 f = 1; }",
-    CommonOpts = [type_specs, maps],
+    ReqProto = "message m { required uint32 f = 1; }",
+    OptProto = "message m { optional uint32 f = 1; }",
+    RepProto = "message m { repeated uint32 f = 1; }",
+    Common = [type_specs, maps],
 
-    S1 = compile_to_string(Proto, [{target_erlang_version,18} | CommonOpts]),
-    T1 = get_type(S1),
-    [true, false] = [gpb_lib:is_substr(X, T1) || X <- ["=>", ":="]],
+    RqS1 = compile_to_string(ReqProto, [{target_erlang_version,18} | Common]),
+    OpS1 = compile_to_string(OptProto, [{target_erlang_version,18} | Common]),
+    RpS1 = compile_to_string(RepProto, [{target_erlang_version,18} | Common]),
+    RqT1 = get_type(RqS1),
+    OpT1 = get_type(OpS1),
+    RpT1 = get_type(RpS1),
+    [true, false] = [gpb_lib:is_substr(X, RqT1) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, OpT1) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, RpT1) || X <- ["=>", ":="]],
+    ?assertMatch({true, _}, {type_is_out_commented(RqT1), RqT1}),
+    ?assertMatch({true, _}, {type_is_out_commented(OpT1), OpT1}),
+    ?assertMatch({true, _}, {type_is_out_commented(RpT1), RpT1}),
 
-    S2 = compile_to_string(Proto, [{target_erlang_version,19} | CommonOpts]),
-    T2 = get_type(S2),
-    [true, false] = [gpb_lib:is_substr(X, T2) || X <- ["=>", ":="]].
+    RqS2 = compile_to_string(ReqProto, [{target_erlang_version,19} | Common]),
+    OpS2 = compile_to_string(OptProto, [{target_erlang_version,19} | Common]),
+    RpS2 = compile_to_string(RepProto, [{target_erlang_version,19} | Common]),
+    RqT2 = get_type(RqS2),
+    OpT2 = get_type(OpS2),
+    RpT2 = get_type(RpS2),
+    [true, false] = [gpb_lib:is_substr(X, RqT2) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, OpT2) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, RpT2) || X <- ["=>", ":="]],
+    ?assertMatch({false, _}, {type_is_out_commented(RqT2), RqT2}),
+    ?assertMatch({false, _}, {type_is_out_commented(OpT2), OpT2}),
+    ?assertMatch({false, _}, {type_is_out_commented(RpT2), RpT2}),
+    ok.
 
 compile_to_string(Proto, Opts) ->
     Self = self(),
@@ -739,6 +762,12 @@ get_type_3([Line | Rest], Acc) ->
     end;
 get_type_3([], Acc) ->
     gpb_lib:nl_join(lists:reverse(Acc)).
+
+type_is_out_commented(S) ->
+    [hd(strip_ws(zap_map_start(S)))] == "%".
+
+zap_map_start("#{" ++ Tl) -> Tl;
+zap_map_start([_ | Tl]) -> zap_map_start(Tl).
 
 %% merge ------------------------------------------------
 merge_maps_with_opts_present_undefined_test() ->
