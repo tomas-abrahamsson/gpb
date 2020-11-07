@@ -2102,7 +2102,7 @@ c() ->
 %%       No code is generated unless `-MMD' is specified.</dd>
 %%   <dt><a id="cmdline-option-ml"/>
 %%       `-ML'</dt>
-%%   <dd>Print imports, on per line instead of on Makefile format.
+%%   <dd>Print imports, one per line instead of on Makefile format.
 %%       No code is generated unless `-MMD' is specified.</dd>
 %%   <dt><a id="cmdline-option-m0"/>
 %%       `-M0'</dt>
@@ -2522,7 +2522,7 @@ opt_specs() ->
       "       Generate Makefile rule(s) for dependencies.\n"
       "       No code is generated unless -MMD.\n"},
      {"ML", {'opt_value()', {list_imports, newline_terminated}}, list_deps,"\n"
-      "       Print imports, on per line instead of on Makefile format.\n"
+      "       Print imports, one per line instead of on Makefile format.\n"
       "       No code is generated unless -MMD.\n"},
      {"M0", {'opt_value()', {list_imports, null_terminated}}, list_deps, "\n"
       "       Print imports, each terminated by a null character, instead of\n"
