@@ -1,5 +1,11 @@
 -*- coding: utf-8 -*-
 
+Version 4.15.2
+2020-Nov-07
+
+        * Fixes for dialyzer issues in generated code,
+          mostly when generating for Erlang 17 and 18. (#188)
+
 Version 4.15.1
 2020-Nov-01
 
