@@ -181,16 +181,16 @@ format_aux_decoders(Defs, AnRes, _Opts) ->
 
 format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
     %% FIXME: enum values can be negative, but "raw" varints are positive
-    %%        insert a 2-complement in the mapping in order to move computations
-    %%        from run-time to compile-time??
+    %%        insert a 2-complement in the mapping in order to move 
+    %%        computations from run-time to compile-time??
     [gpb_codegen:format_fn(
        gpb_lib:mk_fn(d_enum_, EnumName),
-       fun('<EnumValue>') -> '<EnumSym>';
+       fun('EnumValue') -> 'EnumSym';
           (V) -> V % for yet unknown enums
        end,
-       [repeat_clauses('<EnumValue>',
-                       [[replace_term('<EnumValue>', EnumValue),
-                         replace_term('<EnumSym>', EnumSym)]
+       [repeat_clauses('EnumValue',
+                       [[replace_term('EnumValue', EnumValue),
+                         replace_term('EnumSym', EnumSym)]
                         || {EnumSym, EnumValue} <- gpb_lib:unalias_enum(
                                                      EnumDef)])])
      || {{enum, EnumName}, EnumDef} <- Defs,
@@ -280,12 +280,12 @@ format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes) ->
     Rest = ?expr(Rest),
     {Param, FParam, FParamBinds} =
         gpb_decoders_lib:decoder_read_field_param(MsgName, MsgDef),
-    Bindings = new_bindings([{'<Param>', Param},
-                             {'<FParam>', FParam},
-                             {'<FFields>', FParamBinds},
-                             {'<Key>', Key},
-                             {'<Rest>', Rest},
-                             {'<TrUserData>', ?expr(TrUserData)}]),
+    Bindings = new_bindings([{'Param', Param},
+                             {'FParam', FParam},
+                             {'FFields', FParamBinds},
+                             {'Key', Key},
+                             {'Rest', Rest},
+                             {'TrUserData', ?expr(TrUserData)}]),
     [format_msg_init_decoder(MsgName, InitExprs),
      format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes),
      format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes)].
@@ -294,11 +294,11 @@ format_msg_init_decoder(MsgName, InitExprs) ->
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(decode_msg_, MsgName),
           fun(Bin, TrUserData) ->
-                  '<decode-field-fp>'(Bin, 0, 0, '<init>', TrUserData)
+                  'decode-field-fp'(Bin, 0, 0, 'init', TrUserData)
           end,
-          [replace_term('<decode-field-fp>',
+          [replace_term('decode-field-fp',
                         gpb_lib:mk_fn(dfp_read_field_def_, MsgName)),
-           replace_tree('<init>',
+           replace_tree('init',
                         gpb_lib:record_create(MsgName, InitExprs))]),
     #fn{name = boot,
         initializes_fields = true,
@@ -308,31 +308,31 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
     %% The fast-path decoder directly matches the minimal varint form
     %% of the field-number combined with the wiretype.
     %% Unrecognized fields fall back to the more generic decoder-loop
-    Param = fetch_binding('<Param>', Bindings),
-    FParam = fetch_binding('<FParam>', Bindings),
-    FFields = fetch_binding('<FFields>', Bindings),
+    Param = fetch_binding('Param', Bindings),
+    FParam = fetch_binding('FParam', Bindings),
+    FFields = fetch_binding('FFields', Bindings),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(dfp_read_field_def_, MsgName),
-          fun('<precomputed-binary-match>', Z1, Z2, '<Param>', TrUserData) ->
-                  '<calls-to-field-decoding>';
-             (<<>>, 0, 0, '<FParam>', TrUserData) ->
-                  '<finalize-result>';
-             (Other, Z1, Z2, '<Param>', TrUserData) ->
-                  '<decode-general>'(Other, Z1, Z2, '<Param>', TrUserData)
+          fun('precomputed-binary-match', Z1, Z2, 'Param', TrUserData) ->
+                  'calls-to-field-decoding';
+             (<<>>, 0, 0, 'FParam', TrUserData) ->
+                  'finalize-result';
+             (Other, Z1, Z2, 'Param', TrUserData) ->
+                  'decode-general'(Other, Z1, Z2, 'Param', TrUserData)
           end,
-          [replace_tree('<Param>', Param),
-           replace_tree('<FParam>', FParam),
+          [replace_tree('Param', Param),
+           replace_tree('FParam', FParam),
            repeat_clauses(
-             '<precomputed-binary-match>',
-             [[replace_tree('<precomputed-binary-match>', BinMatch),
-               replace_tree('<calls-to-field-decoding>', FnCall)]
+             'precomputed-binary-match',
+             [[replace_tree('precomputed-binary-match', BinMatch),
+               replace_tree('calls-to-field-decoding', FnCall)]
               || {BinMatch, FnCall} <- decoder_fp(Bindings, MsgName, MsgDef)]),
-           replace_tree('<finalize-result>',
+           replace_tree('finalize-result',
                         gpb_decoders_lib:decoder_finalize_result(
                           Param, FFields,
                           MsgName, ?expr(TrUserData),
                           AnRes)),
-           replace_term('<decode-general>',
+           replace_term('decode-general',
                         gpb_lib:mk_fn(dg_read_field_def_, MsgName))]),
     #fn{name = fastpath,
         has_finalizer = true,
@@ -342,30 +342,30 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
 format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
     %% The more general field selecting decoder
     %% Stuff that ends up here: non-minimal varint forms and field to skip
-    Key = fetch_binding('<Key>', Bindings),
-    Rest = fetch_binding('<Rest>', Bindings),
-    Param = fetch_binding('<Param>', Bindings),
-    FParam = fetch_binding('<FParam>', Bindings),
-    FFields = fetch_binding('<FFields>', Bindings),
+    Key = fetch_binding('Key', Bindings),
+    Rest = fetch_binding('Rest', Bindings),
+    Param = fetch_binding('Param', Bindings),
+    FParam = fetch_binding('FParam', Bindings),
+    FFields = fetch_binding('FFields', Bindings),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(dg_read_field_def_, MsgName),
-          fun(<<1:1, X:7, '<Rest>'/binary>>, N, Acc, '<Param>', TrUserData)
+          fun(<<1:1, X:7, 'Rest'/binary>>, N, Acc, 'Param', TrUserData)
                 when N < (32-7) ->
-                  call_self('<Rest>', N+7, X bsl N + Acc, '<Param>',
+                  call_self('Rest', N+7, X bsl N + Acc, 'Param',
                             TrUserData);
-             (<<0:1, X:7, '<Rest>'/binary>>, N, Acc, '<Param>', TrUserData) ->
-                  '<Key>' = X bsl N + Acc,
-                  '<calls-to-field-decoding-or-skip>';
-             (<<>>, 0, 0, '<FParam>', TrUserData) ->
-                  '<finalize-result>'
+             (<<0:1, X:7, 'Rest'/binary>>, N, Acc, 'Param', TrUserData) ->
+                  'Key' = X bsl N + Acc,
+                  'calls-to-field-decoding-or-skip';
+             (<<>>, 0, 0, 'FParam', TrUserData) ->
+                  'finalize-result'
           end,
-          [replace_tree('<Key>', Key),
-           replace_tree('<Rest>', Rest),
-           replace_tree('<Param>', Param),
-           replace_tree('<FParam>', FParam),
-           replace_tree('<calls-to-field-decoding-or-skip>',
+          [replace_tree('Key', Key),
+           replace_tree('Rest', Rest),
+           replace_tree('Param', Param),
+           replace_tree('FParam', FParam),
+           replace_tree('calls-to-field-decoding-or-skip',
                         decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
-           replace_tree('<finalize-result>',
+           replace_tree('finalize-result',
                         gpb_decoders_lib:decoder_finalize_result(
                           Param, FFields,
                           MsgName, ?expr(TrUserData),
@@ -377,69 +377,69 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
 
 %% compute info for the fast-path field recognition/decoding-call
 decoder_fp(Bindings, MsgName, MsgDef) ->
-    Rest = fetch_binding('<Rest>', Bindings),
-    Param = fetch_binding('<Param>', Bindings),
-    TrUserDataVar = fetch_binding('<TrUserData>', Bindings),
+    Rest = fetch_binding('Rest', Bindings),
+    Param = fetch_binding('Param', Bindings),
+    TrUserDataVar = fetch_binding('TrUserData', Bindings),
     [begin
-         BMatch = ?expr(<<'<field-and-wiretype-bytes>', '<Rest>'/binary>>,
-                        [splice_trees('<field-and-wiretype-bytes>',
+         BMatch = ?expr(<<'field-and-wiretype-bytes', 'Rest'/binary>>,
+                        [splice_trees('field-and-wiretype-bytes',
                                       gpb_lib:varint_to_binary_fields(
                                         Selector)),
-                         replace_tree('<Rest>', Rest)]),
-         FnCall = ?expr('decode_field'('<Rest>', Z1, Z2, '<Param>',
+                         replace_tree('Rest', Rest)]),
+         FnCall = ?expr('decode_field'('Rest', Z1, Z2, 'Param',
                                        'TrUserData'),
                         [replace_term('decode_field', DecodeFn),
-                         replace_tree('<Rest>', Rest),
-                         replace_tree('<Param>', Param),
+                         replace_tree('Rest', Rest),
+                         replace_tree('Param', Param),
                          replace_tree('TrUserData', TrUserDataVar)]),
          {BMatch, FnCall}
      end
      || {Selector, DecodeFn} <- decoder_field_selectors(MsgName, MsgDef)].
 
 decoder_field_calls(Bindings, MsgName, []=_MsgDef, _AnRes) ->
-    Key = fetch_binding('<Key>', Bindings),
-    WiretypeExpr = ?expr('<Key>' band 7, [replace_tree('<Key>', Key)]),
-    Bindings1 = add_binding({'<wiretype-expr>', WiretypeExpr}, Bindings),
+    Key = fetch_binding('Key', Bindings),
+    WiretypeExpr = ?expr('Key' band 7, [replace_tree('Key', Key)]),
+    Bindings1 = add_binding({'wiretype-expr', WiretypeExpr}, Bindings),
     decoder_skip_calls(Bindings1, MsgName);
 decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
-    Key = fetch_binding('<Key>', Bindings),
-    Rest = fetch_binding('<Rest>', Bindings),
-    Param = fetch_binding('<Param>', Bindings),
+    Key = fetch_binding('Key', Bindings),
+    Rest = fetch_binding('Rest', Bindings),
+    Param = fetch_binding('Param', Bindings),
     SkipCalls = decoder_field_calls(Bindings, MsgName, [], AnRes),
-    TrUserDataVar = fetch_binding('<TrUserData>', Bindings),
+    TrUserDataVar = fetch_binding('TrUserData', Bindings),
     FieldSelects = decoder_field_selectors(MsgName, MsgDef),
-    ?expr(case '<Key>' of
-              '<selector>' -> 'decode_field'('<Rest>', 0, 0, '<Param>',
+    ?expr(case 'Key' of
+              'selector' -> 'decode_field'('Rest', 0, 0, 'Param',
                                              'TrUserData');
-              _            -> '<skip-calls>'
+              _            -> 'skip-calls'
        end,
-       [replace_tree('<Key>', Key),
-        repeat_clauses('<selector>',
-                       [[replace_term('<selector>', Selector),
+       [replace_tree('Key', Key),
+        repeat_clauses('selector',
+                       [[replace_term('selector', Selector),
                          replace_term('decode_field', DecodeFn),
-                         replace_tree('<Rest>', Rest),
-                         replace_tree('<Param>', Param)]
+                         replace_tree('Rest', Rest),
+                         replace_tree('Param', Param)]
                         || {Selector, DecodeFn} <- FieldSelects]),
-        replace_tree('<skip-calls>', SkipCalls),
+        replace_tree('skip-calls', SkipCalls),
         replace_tree('TrUserData', TrUserDataVar)]).
 
 decoder_skip_calls(Bindings, MsgName) ->
-    KeyExpr = fetch_binding('<Key>', Bindings),
-    FieldNumExpr = ?expr('<Key>' bsr 3, [replace_tree('<Key>', KeyExpr)]),
-    WiretypeExpr = fetch_binding('<wiretype-expr>', Bindings),
-    RestExpr = fetch_binding('<Rest>', Bindings),
-    Param = fetch_binding('<Param>', Bindings),
-    TrUserDataVar = fetch_binding('<TrUserData>', Bindings),
-    ?expr(case '<wiretype-expr>' of
-              0 -> skip_vi('<Rest>', 0, 0, '<Param>', 'TrUserData');
-              1 -> skip_64('<Rest>', 0, 0, '<Param>', 'TrUserData');
-              2 -> skip_ld('<Rest>', 0, 0, '<Param>', 'TrUserData');
-              3 -> skip_gr('<Rest>', 'FNum', 0, '<Param>', 'TrUserData');
-              5 -> skip_32('<Rest>', 0, 0, '<Param>', 'TrUserData')
+    KeyExpr = fetch_binding('Key', Bindings),
+    FieldNumExpr = ?expr('Key' bsr 3, [replace_tree('Key', KeyExpr)]),
+    WiretypeExpr = fetch_binding('wiretype-expr', Bindings),
+    RestExpr = fetch_binding('Rest', Bindings),
+    Param = fetch_binding('Param', Bindings),
+    TrUserDataVar = fetch_binding('TrUserData', Bindings),
+    ?expr(case 'wiretype-expr' of
+              0 -> skip_vi('Rest', 0, 0, 'Param', 'TrUserData');
+              1 -> skip_64('Rest', 0, 0, 'Param', 'TrUserData');
+              2 -> skip_ld('Rest', 0, 0, 'Param', 'TrUserData');
+              3 -> skip_gr('Rest', 'FNum', 0, 'Param', 'TrUserData');
+              5 -> skip_32('Rest', 0, 0, 'Param', 'TrUserData')
           end,
-          [replace_tree('<wiretype-expr>', WiretypeExpr),
-           replace_tree('<Rest>', RestExpr),
-           replace_tree('<Param>', Param),
+          [replace_tree('wiretype-expr', WiretypeExpr),
+           replace_tree('Rest', RestExpr),
+           replace_tree('Param', Param),
            replace_tree('TrUserData', TrUserDataVar),
            replace_term(skip_vi, gpb_lib:mk_fn(skip_varint_, MsgName)),
            replace_term(skip_64, gpb_lib:mk_fn(skip_64_, MsgName)),
@@ -516,14 +516,14 @@ format_field_decoder(MsgName, Field, IsOneof, AnRes, Opts) ->
 format_non_packed_field_decoder(MsgName, XField, AnRes, Opts) ->
     {#?gpb_field{type=Type}, _IsOneof} = XField,
     case Type of
-        sint32   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        sint64   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        int32    -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        int64    -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        uint32   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        uint64   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        bool     -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        {enum,_} -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
+        sint32   -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        sint64   -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        int32    -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        int64    -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        uint32   -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        uint64   -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        bool     -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        {enum,_} -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
         fixed32  -> format_fixlen_field_decoder(MsgName, XField, AnRes);
         sfixed32 -> format_fixlen_field_decoder(MsgName, XField, AnRes);
         float    -> format_floating_point_field_decoder(MsgName, XField,
@@ -532,10 +532,10 @@ format_non_packed_field_decoder(MsgName, XField, AnRes, Opts) ->
         sfixed64 -> format_fixlen_field_decoder(MsgName, XField, AnRes);
         double   -> format_floating_point_field_decoder(MsgName, XField,
                                                         double, AnRes);
-        string   -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        bytes    -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        {msg,_}  -> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
-        {map,_,_}-> format_vi_based_field_decoder(MsgName, XField, AnRes, Opts);
+        string   -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        bytes    -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        {msg,_}  -> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
+        {map,_,_}-> format_vi_based_field_decoder(MsgName, XField, AnRes,Opts);
         {group,_}-> format_group_field_decoder(MsgName, XField, AnRes)
     end.
 
@@ -551,13 +551,13 @@ format_packed_field_decoder(MsgName, FieldDef, AnRes, Opts) ->
                   Len = X bsl N + Acc,
                   <<PackedBytes:Len/binary, Rest2/binary>> = Rest,
                   NewSeq = decode_packed(PackedBytes, 0, 0, E, TrUserData),
-                  '<call-read-field>'(Rest2, 0, 0,
+                  'call-read-field'(Rest2, 0, 0,
                                       Msg#'MsgName'{field=NewSeq},
                                       TrUserData)
           end,
           [replace_term(decode_packed,
                         gpb_lib:mk_fn(d_packed_field_, MsgName, FName)),
-           replace_term('<call-read-field>',
+           replace_term('call-read-field',
                         gpb_lib:mk_fn(dfp_read_field_def_, MsgName)),
            replace_term('MsgName', MsgName),
            replace_term(field, FName)]),
@@ -664,7 +664,7 @@ format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes,
              ElemPath, decode_repeated_add_elem, AnRes),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
-          fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
+          fun(<<Value:'N'/'T', Rest/binary>>, Z1, Z2, AccSeq, TrUserData) ->
                   call_self(Rest, Z1, Z2,
                             '[New|Acc]'('Tr'(Value, TrUserData), AccSeq,
                                         TrUserData),
@@ -672,8 +672,8 @@ format_dpacked_nonvi(MsgName, #?gpb_field{name=FName}, BitLen, BitTypes,
              (<<>>, _, _, AccSeq, _TrUserData) ->
                   AccSeq
           end,
-          [replace_term('<N>', BitLen),
-           splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes]),
+          [replace_term('N', BitLen),
+           splice_trees('T', [erl_syntax:atom(BT) || BT <- BitTypes]),
            replace_term('Tr', TranslFn),
            replace_term('[New|Acc]', Cons)]),
     #fn{name = packed_fixint,
@@ -685,19 +685,20 @@ format_dpacked_vi(MsgName, #?gpb_field{name=FName}=FieldDef, AnRes, Opts) ->
     TrUserDataVar = ?expr(TrUserData),
     Tr = gpb_gen_translators:mk_find_tr_fn_elem(MsgName, FieldDef, false,
                                                 AnRes),
-    DExpr = decode_int_value(ExtValue, Rest, TrUserDataVar, FieldDef, Tr, Opts),
+    DExpr = decode_int_value(ExtValue, Rest, TrUserDataVar,
+                             FieldDef, Tr, Opts),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_packed_field_, MsgName, FName),
           fun(<<1:1, X:7, Rest/binary>>, N, Acc, AccSeq, TrUserData)
                 when N < ?NB ->
                   call_self(Rest, N + 7, X bsl N + Acc, AccSeq, TrUserData);
              (<<0:1, X:7, Rest/binary>>, N, Acc, AccSeq, TrUserData) ->
-                  {NewFValue, RestF} = '<decode-expr>',
+                  {NewFValue, RestF} = 'decode-expr',
                   call_self(RestF, 0, 0, [NewFValue | AccSeq], TrUserData);
              (<<>>, 0, 0, AccSeq, TrUserData) ->
                   AccSeq
           end,
-          [replace_tree('<decode-expr>', DExpr)]),
+          [replace_tree('decode-expr', DExpr)]),
     #fn{name = packed_vi_based,
         tree = T}.
 
@@ -715,20 +716,21 @@ format_vi_based_field_decoder(MsgName, XFieldDef, AnRes, Opts) ->
                                     TrUserDataVar),
     Tr = gpb_gen_translators:mk_find_tr_fn_elem(MsgName, FieldDef, IsOneof,
                                                 AnRes),
-    DExpr = decode_int_value(ExtValue, Rest, TrUserDataVar, FieldDef, Tr, Opts),
+    DExpr = decode_int_value(ExtValue, Rest, TrUserDataVar,
+                             FieldDef, Tr, Opts),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_field_, MsgName, FName),
           fun(<<1:1, X:7, Rest/binary>>, N, Acc, Msg, TrUserData)
                 when N < ?NB ->
                   call_self(Rest, N + 7, X bsl N + Acc, Msg, TrUserData);
              (<<0:1, X:7, Rest/binary>>, N, Acc, 'InParam', TrUserData) ->
-                  {'FVar', RestF} = '<decode-expr>',
-                  '<call-read-field>'(RestF, 0, 0, 'OutParam', 'TrUserData')
+                  {'FVar', RestF} = 'decode-expr',
+                  'call-read-field'(RestF, 0, 0, 'OutParam', 'TrUserData')
           end,
           [replace_tree('InParam', InParam),
-           replace_term('<call-read-field>', ReadFieldDefFn),
+           replace_term('call-read-field', ReadFieldDefFn),
            replace_tree('FVar', FVar),
-           replace_tree('<decode-expr>', DExpr),
+           replace_tree('decode-expr', DExpr),
            replace_tree('OutParam', OutParam),
            replace_tree('TrUserData', TrUserDataVar)]),
     #fn{name = vi_based,
@@ -907,10 +909,10 @@ merge_field_expr({FieldDef, false}, PrevValue, NewValue,
                      ElemPath,
                      decode_repeated_add_elem,
                      AnRes),
-            ?expr('[New|Acc]'('<New>', '<Acc>', 'TrUserData'),
+            ?expr('[New|Acc]'('New', 'Acc', 'TrUserData'),
                   [replace_term('[New|Acc]', Cons),
-                   replace_tree('<New>', NewValue),
-                   replace_tree('<Acc>', PrevValue),
+                   replace_tree('New', NewValue),
+                   replace_tree('Acc', PrevValue),
                    replace_tree('TrUserData', TrUserDataVar)]);
         msgmerge ->
             FMsgName = case FieldDef of
@@ -954,9 +956,9 @@ merge_field_expr({FieldDef, {true, CFName}}, PrevValue, NewValue,
                    replace_tree('TrUserData', TrUserDataVar)]);
        true ->
             %% Replace
-            ?expr('Tr'({'tag', '<expr>'}, 'TrUserData'),
+            ?expr('Tr'({'tag', 'expr'}, 'TrUserData'),
                   [replace_term('tag', FName),
-                   replace_tree('<expr>', NewValue),
+                   replace_tree('expr', NewValue),
                    replace_term('Tr', CfTransl),
                    replace_tree('TrUserData', TrUserDataVar)])
     end.
@@ -1003,15 +1005,15 @@ format_fixlen_field_decoder(MsgName, XFieldDef, AnRes) ->
     ReadFieldDefFnName = gpb_lib:mk_fn(dfp_read_field_def_, MsgName),
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(d_field_, MsgName, FName),
-          fun(<<Value:'<N>'/'<T>', Rest/binary>>, Z1, Z2, '<InParam>',
+          fun(<<Value:'N'/'T', Rest/binary>>, Z1, Z2, 'InParam',
               'TrUserData') ->
-                  '<call-read-field>'(Rest, Z1, Z2, '<OutParam>', 'TrUserData')
+                  'call-read-field'(Rest, Z1, Z2, 'OutParam', 'TrUserData')
           end,
-          [replace_term('<N>', BitLen),
-           splice_trees('<T>', [erl_syntax:atom(BT) || BT <- BitTypes]),
-           replace_tree('<InParam>', InParam),
-           replace_term('<call-read-field>', ReadFieldDefFnName),
-           replace_tree('<OutParam>', Param2),
+          [replace_term('N', BitLen),
+           splice_trees('T', [erl_syntax:atom(BT) || BT <- BitTypes]),
+           replace_tree('InParam', InParam),
+           replace_term('call-read-field', ReadFieldDefFnName),
+           replace_tree('OutParam', Param2),
            replace_term('Tr', TranslFn),
            replace_tree('TrUserData', TrUserDataVar)]),
     #fn{name = fixlen,
@@ -1031,8 +1033,8 @@ format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes) ->
                                [replace_term('Tr', TranslFn),
                                 replace_tree('OutExpr', OutExpr)]),
              UpdatedOutExpr = updated_merged_param(MsgName, XFieldDef, AnRes,
-                                                   TrOutExpr, PrevValue, MsgVar,
-                                                   TrUserDataVar),
+                                                   TrOutExpr, PrevValue,
+                                                   MsgVar, TrUserDataVar),
              replace_tree(Marker, UpdatedOutExpr)
          end
          || {Marker, OutExpr} <- [{'OutParam', ?expr(Value)},
@@ -1042,7 +1044,7 @@ format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes) ->
     ReadFieldDefFnName = gpb_lib:mk_fn(dfp_read_field_def_, MsgName),
     Replacements =
         [replace_tree('InParam', InParam),
-         replace_term('<call-read-field>', ReadFieldDefFnName),
+         replace_term('call-read-field', ReadFieldDefFnName),
          replace_tree('TrUserData', TrUserDataVar),
          replace_term('Tr', TranslFn)] ++
         OutParamReplacements,
@@ -1052,22 +1054,22 @@ format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes) ->
                   gpb_lib:mk_fn(d_field_, MsgName, FName),
                   fun(<<0:16,128,127, Rest/binary>>, Z1, Z2, 'InParam',
                       'TrUserData') ->
-                          '<call-read-field>'(Rest, Z1, Z2,
+                          'call-read-field'(Rest, Z1, Z2,
                                               'InfinityOutParam',
                                               'TrUserData');
                      (<<0:16,128,255, Rest/binary>>, Z1, Z2, 'InParam',
                       'TrUserData') ->
-                          '<call-read-field>'(Rest, Z1, Z2,
+                          'call-read-field'(Rest, Z1, Z2,
                                               '-InfinityOutParam',
                                               'TrUserData');
                      (<<_:16,1:1,_:7,_:1,127:7, Rest/binary>>, Z1, Z2,
                       'InParam', 'TrUserData') ->
-                          '<call-read-field>'(Rest, Z1, Z2,
+                          'call-read-field'(Rest, Z1, Z2,
                                               'NanOutParam',
                                               'TrUserData');
                      (<<Value:32/little-float, Rest/binary>>, Z1, Z2,
                       'InParam', 'TrUserData') ->
-                          '<call-read-field>'(Rest, Z1, Z2,
+                          'call-read-field'(Rest, Z1, Z2,
                                               'OutParam',
                                               'TrUserData')
                   end,
@@ -1077,22 +1079,22 @@ format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes) ->
                   gpb_lib:mk_fn(d_field_, MsgName, FName),
                   fun(<<0:48,240,127, Rest/binary>>, Z1, Z2, 'InParam',
                       'TrUserData') ->
-                          '<call-read-field>'(Rest, Z1, Z2,
+                          'call-read-field'(Rest, Z1, Z2,
                                               'InfinityOutParam',
                                               'TrUserData');
                      (<<0:48,240,255, Rest/binary>>, Z1, Z2, 'InParam',
                       'TrUserData') ->
-                          '<call-read-field>'(Rest, Z1, Z2,
+                          'call-read-field'(Rest, Z1, Z2,
                                               '-InfinityOutParam',
                                               'TrUserData');
                      (<<_:48,15:4,_:4,_:1,127:7, Rest/binary>>, Z1, Z2,
                       'InParam', 'TrUserData') ->
-                          '<call-read-field>'(Rest, Z1, Z2,
+                          'call-read-field'(Rest, Z1, Z2,
                                               'NanOutParam',
                                               'TrUserData');
                      (<<Value:64/little-float, Rest/binary>>, Z1, Z2,
                       'InParam', 'TrUserData') ->
-                          '<call-read-field>'(Rest, Z1, Z2,
+                          'call-read-field'(Rest, Z1, Z2,
                                               'OutParam',
                                               'TrUserData')
                   end,
@@ -1199,9 +1201,9 @@ format_field_skippers(MsgName) ->
             fun(<<1:1, _:7, Rest/binary>>, Z1, Z2, Msg, TrUserData) ->
                     call_self(Rest, Z1, Z2, Msg, TrUserData);
                (<<0:1, _:7, Rest/binary>>, Z1, Z2, Msg, TrUserData) ->
-                    '<call-read-field>'(Rest, Z1,Z2, Msg, TrUserData)
+                    'call-read-field'(Rest, Z1,Z2, Msg, TrUserData)
             end,
-            [replace_term('<call-read-field>', ReadFieldFnName)]),
+            [replace_term('call-read-field', ReadFieldFnName)]),
           %% skip_length_delimited_<MsgName>/4
           gpb_codegen:mk_fn(
             SkipLenDelimFnName,
@@ -1212,26 +1214,26 @@ format_field_skippers(MsgName) ->
                (<<0:1, X:7, Rest/binary>>, N, Acc, Msg, TrUserData) ->
                     Length = X bsl N + Acc,
                     <<_:Length/binary, Rest2/binary>> = Rest,
-                    '<call-read-field>'(Rest2, 0, 0, Msg, TrUserData)
+                    'call-read-field'(Rest2, 0, 0, Msg, TrUserData)
             end,
-            [replace_term('<call-read-field>', ReadFieldFnName)]),
+            [replace_term('call-read-field', ReadFieldFnName)]),
           %% skip_group_<MsgName>/4
           gpb_codegen:mk_fn(
             SkipGroupFnName,
             fun(Bin, FNum, Z2, Msg, TrUserData) ->
                     {_, Rest} = read_group(Bin, FNum),
-                    '<call-read-field>'(Rest, 0, Z2, Msg, TrUserData)
+                    'call-read-field'(Rest, 0, Z2, Msg, TrUserData)
             end,
-            [replace_term('<call-read-field>', ReadFieldFnName)]),
+            [replace_term('call-read-field', ReadFieldFnName)]),
           %% skip_32_<MsgName>/2,4
           %% skip_64_<MsgName>/2,4
           [gpb_codegen:mk_fn(
              gpb_lib:mk_fn(skip_, NumBits, MsgName),
-             fun(<<_:'<NumBits>', Rest/binary>>, Z1, Z2, Msg, TrUserData) ->
-                     '<call-read-field>'(Rest, Z1, Z2, Msg, TrUserData)
+             fun(<<_:'NumBits', Rest/binary>>, Z1, Z2, Msg, TrUserData) ->
+                     'call-read-field'(Rest, Z1, Z2, Msg, TrUserData)
              end,
-             [replace_term('<call-read-field>', ReadFieldFnName),
-              replace_term('<NumBits>', NumBits)])
+             [replace_term('call-read-field', ReadFieldFnName),
+              replace_term('NumBits', NumBits)])
            || NumBits <- [32, 64]]],
     [#fn{name = skipper,
          passes_msg = true,
