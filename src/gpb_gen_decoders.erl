@@ -811,6 +811,21 @@ decode_int_value(ExtValueExpr, Rest, TrUserDataVar, FieldDef, Tr, Opts) ->
     end.
 
 unpack_bytes(ExtValueExpr, Rest, Tr, TrUserDataVar, Opts) ->
+    BytesVar = erl_syntax:variable("Bytes"),
+    ?expr(begin
+              Len = 'ExtValueExpr',
+              <<Bytes:Len/binary, Rest2/binary>> = 'Rest',
+              Bytes2 = 'maybe copy bytes',
+              {'Tr'(Bytes2, 'TrUserData'), Rest2}
+          end,
+          [replace_tree('ExtValueExpr', ExtValueExpr),
+           replace_tree('Rest', Rest),
+           replace_term('Tr', Tr(decode)),
+           replace_tree('TrUserData', TrUserDataVar),
+           replace_tree('maybe copy bytes',
+                        maybe_copy_bytes(BytesVar, Opts))]).
+
+maybe_copy_bytes(BytesVar, Opts) ->
     Copy = case proplists:get_value(copy_bytes, Opts, auto) of
                auto                            -> true;
                true                            -> true;
@@ -818,37 +833,24 @@ unpack_bytes(ExtValueExpr, Rest, Tr, TrUserDataVar, Opts) ->
                N when is_integer(N)            -> N;
                N when is_float(N)              -> N
            end,
-    Transforms = [replace_tree('ExtValueExpr', ExtValueExpr),
-                  replace_tree('Rest', Rest),
-                  replace_term('Tr', Tr(decode)),
-                  replace_tree('TrUserData', TrUserDataVar)],
     if Copy == false ->
-            ?expr(begin
-                      Len = 'ExtValueExpr',
-                      <<Bytes:Len/binary, Rest2/binary>> = 'Rest',
-                      {'Tr'(Bytes, 'TrUserData'), Rest2}
-                  end,
-                  Transforms);
+            BytesVar;
        Copy == true ->
-            ?expr(begin
-                      Len = 'ExtValueExpr',
-                      <<Bytes:Len/binary, Rest2/binary>> = 'Rest',
-                      {'Tr'(binary:copy(Bytes), 'TrUserData'), Rest2}
-                  end,
-                  Transforms);
+            ?expr(binary:copy('BytesVar'),
+                  [replace_tree('BytesVar', BytesVar)]);
        is_integer(Copy); is_float(Copy) ->
-            ?expr(begin
-                      Len = 'ExtValueExpr',
-                      <<Bytes:Len/binary, Rest2/binary>> = 'Rest',
-                      Res = case binary:referenced_byte_size(Bytes) of
-                                LB when LB >= byte_size(Bytes) * 'Copy' ->
-                                    'Tr'(binary:copy(Bytes), 'TrUserData');
-                                _ ->
-                                    'Tr'(Bytes, 'TrUserData')
-                            end,
-                      {Res, Rest2}
+            %% Assume BytesVar is a variable so we don't
+            %% need to bind it to avoid multiple evaluations
+            %% (in which case we would somehow have to ensure
+            %% unique variables)
+            ?expr(case binary:referenced_byte_size('BytesVar') of
+                      LB when LB >= byte_size('BytesVar') * 'Copy' ->
+                          binary:copy('BytesVar');
+                      _ ->
+                          'BytesVar'
                   end,
-                  [replace_term('Copy', Copy) | Transforms])
+                  [replace_tree('BytesVar', BytesVar),
+                   replace_term('Copy', Copy)])
        end.
 
 format_group_field_decoder(MsgName, XFieldDef, AnRes) ->
