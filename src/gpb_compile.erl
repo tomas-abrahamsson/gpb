@@ -343,9 +343,7 @@ file(File) ->
 %% <dl>
 %%   <dt>`false'</dt><dd>Never copy bytes/(sub-)binaries.</dd>
 %%   <dt>`true'</dt><dd>Always copy bytes/(sub-)binaries.</dd>
-%%   <dt>`auto'</dt><dd>Copy bytes/(sub-)binaries if the beam vm,
-%%           on which the compiler (this module) is running,
-%%           has the `binary:copy/1' function. (This is the default)</dd>
+%%   <dt>`auto'</dt><dd>Synonym for `true'. (This is the default)</dd>
 %%   <dt>integer() | float()</dt><dd>Copy the bytes/(sub-)binaries if the
 %%           message this many times or more larger than the size of the
 %%           bytes/(sub-)binary.</dd>

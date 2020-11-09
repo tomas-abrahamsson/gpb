@@ -811,10 +811,8 @@ decode_int_value(ExtValueExpr, Rest, TrUserDataVar, FieldDef, Tr, Opts) ->
     end.
 
 unpack_bytes(ExtValueExpr, Rest, Tr, TrUserDataVar, Opts) ->
-    CompilerHasBinary = (catch binary:copy(<<1>>)) == <<1>>,
     Copy = case proplists:get_value(copy_bytes, Opts, auto) of
-               auto when not CompilerHasBinary -> false;
-               auto when CompilerHasBinary     -> true;
+               auto                            -> true;
                true                            -> true;
                false                           -> false;
                N when is_integer(N)            -> N;
