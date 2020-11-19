@@ -1229,7 +1229,6 @@ do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
 
 verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_translation_and_nif(Opts) end,
-              fun() -> verify_opts_preserve_unknown_fields_and_nif(Opts) end,
               fun() -> verify_opts_preserve_unknown_fields_and_json(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
               fun() -> verify_opts_flat_oneof(Opts) end,
@@ -1248,15 +1247,6 @@ verify_opts_translation_and_nif(Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     if (TranslType or TranslField) and DoNif ->
             {error, {invalid_options, translation, nif}};
-       true ->
-            ok
-    end.
-
-verify_opts_preserve_unknown_fields_and_nif(Opts) ->
-    Preserve = proplists:get_bool(preserve_unknown_fields, Opts),
-    DoNif = proplists:get_bool(nif, Opts),
-    if Preserve and DoNif ->
-            {error, {invalid_options, preserve_unknown_fields, nif}};
        true ->
             ok
     end.
@@ -1718,8 +1708,6 @@ fmt_err({write_failed, File, Reason}) ->
     ?f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
 fmt_err({invalid_options, translation, nif}) ->
     "Option error: Not supported: both translation option and nif";
-fmt_err({invalid_options, preserve_unknown_fields, nif}) ->
-    "Option error: Not supported: both preserve_unknown_fields and nif";
 fmt_err({invalid_options, preserve_unknown_fields, json}) ->
     "Option error: Not supported: both preserve_unknown_fields and json";
 fmt_err({unsupported_translation, _Type, non_msg_type}) ->
