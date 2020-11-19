@@ -451,7 +451,7 @@ format_nif_cc_local_function_decls(_Mod, Defs, CCMapping, _Opts) ->
 format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
     MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
-    %% About gpb_aa_<...> vs gpb_fa_<...> C variables
+    %% About gpb_aa_<...> vs gpb_fa_<...>/gpb_xa_<...> C variables
     %% ----------------------------------------------
     %% gpb_aa_<...>:
     %% Things that are used as atoms will be in C variables gpb_aa_<...>
@@ -462,6 +462,7 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     %% * oneof tags when _not_ flat oneofs
     %%
     %% gpb_fa_<...>
+    %% gpb_xa_<...>
     %% Map fields names can be either atoms or binaries, depending on
     %% the maps_key_type option. Additionally, with maps_oneof = flat, the
     %% oneof tags will be map keys. Things that will be map keys,
@@ -472,7 +473,10 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     %% * map key field names, ie names of #?gpb_field{}s
     %% * #gpb_oneof{} field names when _not_ flat oneofs (avoid unused vars)
     %% * oneof tags when flat oneofs
-
+    %%
+    %% gpb_xa_<...> are primarily for fields for unknowns with
+    %% fields names out-of-range of ordinary fields: '$unknown'
+    %% in order to guarantee non-collide with ordinary field names.
     {AtomVars, FieldNameVars} = calc_atoms_fields(Defs, AnRes, Opts),
     [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
      if Maps, MapsKeyType == binary ->
@@ -525,7 +529,7 @@ calc_atoms_fields(Defs, AnRes, Opts) ->
          [collect_oneof_names(Defs) || Maps, not FlatMaps],
          [collect_oneof_tags(Defs) || FlatMaps]],
     FieldNames = deep_list_to_unqiue_list(FieldNames0),
-    FieldNameVars = [{mk_c_var(gpb_fa_, minus_to_m(A)), A} || A <- FieldNames],
+    FieldNameVars = [{mk_c_field_var(A), A} || A <- FieldNames],
     {AtomVars1, FieldNameVars}.
 
 collect_record_names(Defs) ->
@@ -1068,7 +1072,7 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
                         [if I == 1 -> "";
                             I >  1 -> "else "
                          end,
-                         mk_c_var(gpb_fa_, gpb_lib:get_field_name(Field)),
+                         mk_c_field_var(gpb_lib:get_field_name(Field)),
                          ElemIndex,
                          gpb_lib:split_indent_iolist(
                            4,
@@ -1566,7 +1570,7 @@ format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
               DestVar = ?f("elem~w",[I]),
               gpb_lib:split_indent_iolist(
                 4,
-                [[?f("key~w = gpb_fa_~s;\n", [I, FName]) || Maps],
+                [[?f("key~w = ~s;\n", [I, mk_c_field_var(FName)]) || Maps],
                  format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field,
                                               Defs, CCMapping, Opts)]);
           #gpb_oneof{} ->
@@ -1588,9 +1592,9 @@ format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
          #maps{unset_optional=present_undefined} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [?f("    enif_make_map_put(env, res,\n"
-                  "                      mk_key(env, gpb_fa_~s), elem~w,\n"
+                  "                      mk_key(env, ~s), elem~w,\n"
                   "                      &res);\n",
-                  [gpb_lib:get_field_name(Field), I])
+                  [mk_c_field_var(gpb_lib:get_field_name(Field)), I])
                || {I, Field} <- IFields]];
          #maps{unset_optional=omitted} ->
              [?f("    res = enif_make_new_map(env);\n"),
@@ -1631,14 +1635,14 @@ calc_oneof_key_value_updaters(I, #gpb_oneof{name=FName}, Opts) ->
              end,
              fun() -> ?f("elem~w = gpb_x_no_value", [I]) end};
         #maps{oneof=tuples}  ->
-            {fun(_Tag) -> ?f("key~w = gpb_fa_~s", [I, FName]) end,
+            {fun(_Tag) -> ?f("key~w = ~s", [I, mk_c_field_var(FName)]) end,
              fun(Tag,V) ->
                      ?f("elem~w = enif_make_tuple2(env, gpb_aa_~s, ~s)",
                         [I, Tag, V])
              end,
              fun() -> ?f("elem~w = gpb_x_no_value", [I]) end};
         #maps{oneof=flat} ->
-            {fun(Tag) -> ?f("key~w = gpb_fa_~s", [I, Tag]) end,
+            {fun(Tag) -> ?f("key~w = ~s", [I, mk_c_field_var(Tag)]) end,
              fun(_Tag,V) -> ?f("elem~w = ~s", [I, V]) end,
              fun() -> ?f("elem~w = gpb_x_no_value", [I]) end}
     end.
@@ -2097,6 +2101,30 @@ is_dotted(S) when is_list(S) -> gpb_lib:is_substr(".", S).
             Sym;
         true ->
             underscore_suffix(Sym)
+    end.
+
+mk_c_field_var(A) ->
+    S = atom_to_list(A),
+    HasOnlyVarChars = lists:all(fun is_c_var_char/1, S),
+    if HasOnlyVarChars ->
+            mk_c_var(gpb_xa_, A);
+       true ->
+            mk_c_var(gpb_xa_, transform_non_c_chars(S))
+    end.
+
+is_c_var_char(UC) when $A =< UC, UC =< $Z -> true;
+is_c_var_char(LC) when $a =< LC, LC =< $z -> true;
+is_c_var_char(D)  when $0 =< D, D =< $9 -> true;
+is_c_var_char($_) -> true;
+is_c_var_char(_) -> false.
+
+transform_non_c_chars(S) ->
+    lists:flatten([transform_c_var_char(C) || C <- S]).
+
+transform_c_var_char(C) ->
+    case is_c_var_char(C) of
+        true  -> C;
+        false -> ?f("x~2.16.0b", [C])
     end.
 
 underscore_suffix(A) when is_atom(A) ->
