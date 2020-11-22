@@ -445,7 +445,7 @@ format_nif_cc_local_function_decls(_Mod, Defs, CCMapping, _Opts) ->
            ["static ERL_NIF_TERM ",UnpackFnName,["(ErlNifEnv *env, ",
                                                  "const ",CMsgType," *m);\n"]]]
       end
-      || {{msg, MsgName}, _Fields} <- Defs],
+      || MsgName <- gpb_lib:msg_or_group_names(Defs)],
      "\n"].
 
 format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
