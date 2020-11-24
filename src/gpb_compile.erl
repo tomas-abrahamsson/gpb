@@ -2937,7 +2937,7 @@ scan_and_parse_string(S, FName, Opts) ->
                         {ok, Result} ->
                             {ok, Result};
                         {error, Reason} ->
-                            {error, {parse_error, FName, Reason}}
+                            {error, {post_process, Reason}}
                     end;
                 {error, {_Line, _Module, _ErrInfo}=Reason} ->
                     {error, {parse_error, FName, Reason}};
