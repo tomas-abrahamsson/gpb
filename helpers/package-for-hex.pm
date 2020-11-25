@@ -102,7 +102,7 @@ defmodule Gpb.Mixfile do
      maintainers: ["Tomas Abrahamsson"],
      licenses: ["LGPL 2.1"],
      links: %{"GitHub" => "https://github.com/tomas-abrahamsson/gpb"},
-     build_tools: ["rebar", "make"]]
+     build_tools: ["rebar3", "make"]]
    end
 end
 
