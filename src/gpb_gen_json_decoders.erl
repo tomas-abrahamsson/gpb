@@ -1489,7 +1489,7 @@ format_json_type_helpers(Defs, #anres{used_types=UsedTypes}, Opts) ->
                      || {Str, Sym} <- StrSyms])])]
       end
       || {{enum,EnumName}, Enums} <- Defs,
-         NeedEnumType],
+         gpb_lib:smember({enum,EnumName}, UsedTypes)],
      [%% Extra enum helper(s)
       case proplists:get_bool(json_case_insensitive_enum_parsing, Opts) of
           true ->
