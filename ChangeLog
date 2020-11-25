@@ -1,5 +1,18 @@
 -*- coding: utf-8 -*-
 
+Version 4.16.0
+2020-Nov-26
+
+	* Add an option preserve_unknown_fields (-preserve-unknown-fields)
+	  If set, each message will have one extra field, '$unknowns'
+	  in which info on any unknown fields are saved during
+	  decoding, and which will be re-encoded after all other
+	  field during encoding. (#189)
+	* Handle also proto3 syntax for extend Msg { Field; ... } (#190)
+	* Bugfix generation of json enum decoders for enums
+	  not in any message (#192)
+	* Set rebar3 as hex build tool. (#191)
+
 Version 4.15.2
 2020-Nov-07
 
