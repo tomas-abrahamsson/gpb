@@ -436,6 +436,20 @@ decoding_enums_case_insensitively_test() ->
     {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"ee-B">>}], 'EnumMsg'),
     unload_code(M1).
 
+
+with_enums_not_in_any_msg_proto() ->
+    "
+     syntax=\"proto3\";
+     message EnumMsg   { EE f = 1; };
+     enum EE { EE_A=0; EE_B=1; };
+     enum FF { FF_A=0; FF_B=1; };
+    ".
+
+decoding_with_enums_not_in_any_msg_test() ->
+    M1 = compile_iolist(with_enums_not_in_any_msg_proto(), [json]),
+    {'EnumMsg', 'EE_B'} = M1:from_json([{<<"f">>, <<"EE_B">>}], 'EnumMsg'),
+    ok.
+
 types_defaults_proto() ->
     "syntax=\"proto3\";\n"
         ++ strip_occurrence(various_types_proto()).
