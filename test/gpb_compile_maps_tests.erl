@@ -1062,6 +1062,58 @@ bypassed_wrappers_maps_test() ->
     _ = Mod3:module_info(),
     unload_code(Mod3).
 
+encode_decode_basic_unknowns_test() ->
+    DefsM1 = "message msg { optional string a = 1; }",
+    DefsM2 = "message msg {
+                 optional string   a = 1;
+                 optional int32   n2 = 2; // varint
+                 optional fixed64 n3 = 3; // 64 bits
+                 optional bytes   n4 = 4; // length-delimited
+                 optional group   n5 = 5 { optional int32 g = 10 } ;
+                 optional fixed32 n6 = 6; // 32 bits
+              }",
+
+    Mod1 = compile_iolist(DefsM1, [maps, preserve_unknown_fields]),
+    Mod2 = compile_iolist(DefsM2, [maps, preserve_unknown_fields]),
+    Msg0 = #{a => "abc",
+             n2 => 2, n3 => 3, n4 => <<4,4>>, n5 => #{g => 5}, n6 => 6},
+    E1 = Mod2:encode_msg(Msg0, msg),
+    %% Decode with Defs1, unknown fields should end up in '$unknown'
+    %% Then encode this with the unknowns
+    #{a := "abc",
+      '$unknowns' := [_,_,_,_,_]} = Msg1 = Mod1:decode_msg(E1, msg),
+    E2 = Mod1:encode_msg(Msg1, msg),
+    %% decode with richer defs, should get back orig:
+    D2 = Mod2:decode_msg(E2, msg),
+    ?assertMatch(#{a := "abc",
+                   n2 := 2, n3 := 3, n4 := <<4,4>>, n5 := #{g := 5}, n6 := 6},
+                 D2),
+    unload_code(Mod1),
+    unload_code(Mod2).
+
+encode_decode_repeated_unknowns_test() ->
+    DefsM1 = "message msg { optional string a = 1; }",
+    DefsM2 = "message msg {
+                 optional string a  = 1;
+                 repeated int32  nr = 2;
+              }",
+    Mod1 = compile_iolist(DefsM1, [maps, preserve_unknown_fields]),
+    Mod2 = compile_iolist(DefsM2, [maps, preserve_unknown_fields]),
+    Msg0 = #{a => "abc", nr => [17,18,19,20]},
+    E1 = Mod2:encode_msg(Msg0, msg),
+    %% A repeated non-'packed' will be encoded as several fields, one
+    %% for each element in the repeated sequence, so expect 4 unknowns:
+    #{a := "abc",
+      '$unknowns' := [_,_,_,_]=Unknowns} = Msg1 = Mod1:decode_msg(E1, msg),
+    %% The order of the unknowns is important, check that:
+    [{varint,2,17},{varint,2,18},{varint,2,19},{varint,2,20}] = Unknowns,
+    E2 = Mod1:encode_msg(Msg1, msg),
+    D2 = Mod2:decode_msg(E2, msg),
+    ?assertMatch(#{a := "abc",
+                   nr := [17,18,19,20]},
+                 D2),
+    unload_code(Mod1),
+    unload_code(Mod2).
 
 %% nif ------------------------------------------------
 
@@ -1074,7 +1126,8 @@ nif_test_() ->
        ?nif_if_supported(nif_encode_decode_binary_keys),
        ?nif_if_supported(nif_encode_decode_mapfields),
        ?nif_if_supported(nif_with_mapfields_as_maps),
-       ?nif_if_supported(bypass_wrappers_maps_nif)]).
+       ?nif_if_supported(bypass_wrappers_maps_nif),
+       ?nif_if_supported(nif_preserve_unknown_fields)]).
 
 nif_encode_decode_present_undefined(features) -> [oneof];
 nif_encode_decode_present_undefined(title) ->
@@ -1348,6 +1401,86 @@ bypass_wrappers_maps_nif() ->
                         OrigMsg = M:decode_msg_bpw1(Encoded)
                 end)
       end).
+
+nif_preserve_unknown_fields(features) -> [];
+nif_preserve_unknown_fields(title) -> "Nif with preserve_unknown_fields".
+nif_preserve_unknown_fields() ->
+    %% Decode a populated Big or Rep message as a Small message
+    %% to make test that we unpack unknowns.
+    %% Vice versa un packing the Small with unknowns and we
+    %% should get back the original.
+    DefsTxt = "syntax='proto2';
+               message Big {
+                 required string a = 1;
+                 optional int32   n2 = 2; // varint
+               }
+               message Rep {
+                 required string a = 1;
+                 repeated int32 n2 = 2;
+               }
+               message Small {
+                 required string a = 1;
+               }
+              ",
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_preserve_unknwon_fields_maps,
+              Opts = [nif, maps, preserve_unknown_fields],
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Big1 = #{a => "abc",
+                                 n2 => 102},
+                        BigEnc1 = M:encode_msg(Big1, 'Big'),
+                        Small1  = M:decode_msg(BigEnc1, 'Small'),
+                        ?assertMatch(#{a := "abc",
+                                       '$unknowns' := [{varint, 2, 102}]},
+                                     Small1),
+                        SmallEnc1 = M:encode_msg(Small1, 'Small'),
+                        Big2 = M:decode_msg(SmallEnc1, 'Big'),
+                        ?assertMatch(#{a := "abc", n2 := 102},
+                                     Big2),
+
+                        %% Check repeated:
+                        Rep1 = #{a => "abc", n2 => [17,18,19,20]},
+                        RepEnc1 = M:encode_msg(Rep1, 'Rep'),
+                        #{a := "abc",
+                          '$unknowns' := [_,_,_,_]=Unknowns} = Small2 =
+                            M:decode_msg(RepEnc1, 'Small'),
+                        [{varint,2,17},{varint,2,18},
+                         {varint,2,19},{varint,2,20}] = Unknowns,
+                        RepEnc2 = M:encode_msg(Small2, 'Small'),
+                        #{a := "abc", n2 := [17,18,19,20]} =
+                            M:decode_msg(RepEnc2, 'Rep'),
+                        ok
+                end)
+      end),
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_preserve_unknwon_fields_bin_keys_maps,
+              Opts = [nif, maps, {maps_key_type, binary},
+                      preserve_unknown_fields],
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        %% Check only Big <--> Small for binary keys
+                        Big1 = #{<<"a">> => "abc",
+                                 <<"n2">> => 102},
+                        BigEnc1 = M:encode_msg(Big1, 'Big'),
+                        Small1  = M:decode_msg(BigEnc1, 'Small'),
+                        ?assertMatch(#{<<"a">> := "abc",
+                                       <<"$unknowns">> := [{varint, 2, 102}]},
+                                     Small1),
+                        SmallEnc1 = M:encode_msg(Small1, 'Small'),
+                        Big2 = M:decode_msg(SmallEnc1, 'Big'),
+                        ?assertMatch(#{<<"a">> := "abc", <<"n2">> := 102},
+                                     Big2),
+                        ok
+                end)
+      end),
+    ok.
 
 -compile({nowarn_unused_function, with_tmpdir/1}).
 with_tmpdir(F) ->

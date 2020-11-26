@@ -700,7 +700,9 @@ type_to_typestr({map,KT,VT}, Defs, AnRes, TEnv) ->
         {'2tuples', _} -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
         {maps, true}   -> ?f("#{~s => ~s}", [KTStr, VTStr]); % map can be empty
         {maps, false}  -> "#{}" % map can be empty
-    end.
+    end;
+type_to_typestr(unknown, _Defs, _AnRes, _TEnv) ->
+    "term()".
 
 float_spec() ->
     "float() | integer() | infinity | '-infinity' | nan".

@@ -145,12 +145,13 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_json_api_check_if_needed(Opts),
        format_nif_cc_json_includes_if_needed(Opts),
        format_nif_cc_byte_size_macros(Defs),
-       format_nif_cc_local_function_decls(Mod, Defs, CCMapping, Opts),
+       format_nif_cc_local_function_decls(Mod, Defs, CCMapping, AnRes, Opts),
        format_nif_cc_mk_consts(Mod, Defs, AnRes, Opts),
        format_nif_cc_mk_atoms(Mod, Defs, AnRes, Opts),
        format_nif_cc_mk_is_key(Mod, Defs, AnRes, Opts),
        format_nif_cc_mk_mk_key(Mod, Defs, AnRes, Opts),
        format_nif_cc_utf8_conversion(Mod, Defs, AnRes, Opts),
+       format_nif_cc_unknown_pack_unpack(AnRes),
        format_nif_cc_encoders(Mod, Defs, CCMapping, Opts),
        format_nif_cc_packers(Mod, Defs, CCMapping, Opts),
        format_nif_cc_decoders(Mod, Defs, CCMapping, Opts),
@@ -434,7 +435,8 @@ format_nif_cc_byte_size_macros(Defs) ->
       "#endif\n"]
      || gpb_lib:contains_messages(Defs)].
 
-format_nif_cc_local_function_decls(_Mod, Defs, CCMapping, _Opts) ->
+format_nif_cc_local_function_decls(_Mod, Defs, CCMapping, AnRes, _Opts) ->
+    #anres{unknowns_info=UnknownsInfo} = AnRes,
     [[begin
           PackFnName = mk_c_fn(p_msg_, MsgName),
           UnpackFnName = mk_c_fn(u_msg_, MsgName),
@@ -445,13 +447,44 @@ format_nif_cc_local_function_decls(_Mod, Defs, CCMapping, _Opts) ->
            ["static ERL_NIF_TERM ",UnpackFnName,["(ErlNifEnv *env, ",
                                                  "const ",CMsgType," *m);\n"]]]
       end
-      || {{msg, MsgName}, _Fields} <- Defs],
+      || MsgName <- gpb_lib:msg_or_group_names(Defs)],
+     case UnknownsInfo of
+         both_with_and_without_field_for_unknowns ->
+             format_nif_cc_local_functions_for_unknowns();
+         all_are_without_field_for_unknowns ->
+             [];
+         all_are_with_field_for_unknowns ->
+             format_nif_cc_local_functions_for_unknowns();
+         no_msgs ->
+             []
+     end,
      "\n"].
+
+format_nif_cc_local_functions_for_unknowns() ->
+    ["static int\n"
+     "pack_unknown_fields(\n"
+     "    ErlNifEnv *env,\n"
+     "    ::google::protobuf::UnknownFieldSet *ufset,\n"
+     "    ERL_NIF_TERM unknowns);\n"
+     "static int\n"
+     "pack_unknown_msg_fields(\n"
+     "    ErlNifEnv *env,\n"
+     "    ::google::protobuf::Message *m,\n"
+     "    ERL_NIF_TERM unknowns);\n"
+     "static ERL_NIF_TERM\n"
+     "unpack_unknown_fields(\n"
+     "    ErlNifEnv *env,\n"
+     "    const ::google::protobuf::UnknownFieldSet &fields);\n"
+     "static ERL_NIF_TERM\n"
+     "unpack_unknown_msg_fields(\n"
+     "    ErlNifEnv *env,\n"
+     "    const ::google::protobuf::Message *m);\n"].
 
 format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
     MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
-    %% About gpb_aa_<...> vs gpb_fa_<...> C variables
+    #anres{unknowns_info=UnknownsInfo} = AnRes,
+    %% About gpb_aa_<...> vs gpb_fa_<...>/gpb_xa_<...> C variables
     %% ----------------------------------------------
     %% gpb_aa_<...>:
     %% Things that are used as atoms will be in C variables gpb_aa_<...>
@@ -462,6 +495,7 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     %% * oneof tags when _not_ flat oneofs
     %%
     %% gpb_fa_<...>
+    %% gpb_xa_<...>
     %% Map fields names can be either atoms or binaries, depending on
     %% the maps_key_type option. Additionally, with maps_oneof = flat, the
     %% oneof tags will be map keys. Things that will be map keys,
@@ -472,8 +506,21 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
     %% * map key field names, ie names of #?gpb_field{}s
     %% * #gpb_oneof{} field names when _not_ flat oneofs (avoid unused vars)
     %% * oneof tags when flat oneofs
-
+    %%
+    %% gpb_xa_<...> are primarily for fields for unknowns with
+    %% fields names out-of-range of ordinary fields: '$unknown'
+    %% in order to guarantee non-collide with ordinary field names.
     {AtomVars, FieldNameVars} = calc_atoms_fields(Defs, AnRes, Opts),
+    AtomsForUnknowns = case UnknownsInfo of
+                           both_with_and_without_field_for_unknowns ->
+                               vars_atoms_for_unknowns();
+                           all_are_without_field_for_unknowns ->
+                               [];
+                           all_are_with_field_for_unknowns ->
+                               vars_atoms_for_unknowns();
+                           no_msgs ->
+                               []
+                       end,
     [[?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_Atom} <- AtomVars],
      if Maps, MapsKeyType == binary ->
              [?f("static const char *~s = \"~s\";\n", [Var, Atom])
@@ -482,6 +529,7 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
              [?f("static ERL_NIF_TERM ~s;\n", [Var])
               || {Var,_Atom} <- FieldNameVars]
      end,
+     [?f("static ERL_NIF_TERM ~s;\n", [Var]) || {Var,_} <- AtomsForUnknowns],
      "\n",
      ["static void install_atoms(ErlNifEnv *env)\n"
       "{\n",
@@ -493,6 +541,8 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
               [?f("    ~s = enif_make_atom(env, \"~s\");\n", [Var, Atom])
                || {Var, Atom} <- FieldNameVars]
       end,
+      [?f("    ~s = enif_make_atom(env, \"~s\");\n", [Var, Atom])
+       || {Var, Atom} <- AtomsForUnknowns],
       "}\n",
       "\n"]].
 
@@ -525,7 +575,7 @@ calc_atoms_fields(Defs, AnRes, Opts) ->
          [collect_oneof_names(Defs) || Maps, not FlatMaps],
          [collect_oneof_tags(Defs) || FlatMaps]],
     FieldNames = deep_list_to_unqiue_list(FieldNames0),
-    FieldNameVars = [{mk_c_var(gpb_fa_, minus_to_m(A)), A} || A <- FieldNames],
+    FieldNameVars = [{mk_c_field_var(A), A} || A <- FieldNames],
     {AtomVars1, FieldNameVars}.
 
 collect_record_names(Defs) ->
@@ -575,6 +625,10 @@ minus_to_m(A) ->
         "-"++Rest -> "m"++Rest;
         _         -> A
     end.
+
+vars_atoms_for_unknowns() ->
+    Atoms = [varint, fixed64, length_delimited, group, fixed32],
+    [{mk_c_var(gpb_ua_, A), A} || A <- Atoms].
 
 format_nif_cc_mk_consts(_Mod, _Defs, AnRes, _Opts) ->
     case is_any_field_of_type_bool(AnRes) of
@@ -883,6 +937,201 @@ format_nif_cc_utf8_conversion_code(Opts) ->
      end,
      "\n"].
 
+format_nif_cc_unknown_pack_unpack(#anres{unknowns_info=UnknownsInfo}) ->
+    case UnknownsInfo of
+        both_with_and_without_field_for_unknowns ->
+            format_nif_cc_unknown_pack_unpack_aux();
+        all_are_with_field_for_unknowns ->
+            format_nif_cc_unknown_pack_unpack_aux();
+        all_are_without_field_for_unknowns ->
+            "";
+        no_msgs ->
+            ""
+    end.
+
+format_nif_cc_unknown_pack_unpack_aux() ->
+    ["static int\n"
+     "pack_unknown_fields(ErlNifEnv *env,\n"
+     "                    ::google::protobuf::UnknownFieldSet *ufset,\n"
+     "                    ERL_NIF_TERM unknowns)\n"
+     "{\n"
+     "    while (!enif_is_empty_list(env, unknowns))\n"
+     "    {\n"
+     "        ERL_NIF_TERM head, tail;\n"
+     "        if (!enif_get_list_cell(env, unknowns, &head, &tail))\n"
+     "            return 0;\n"
+     "\n"
+     "        int arity;\n"
+     "        const ERL_NIF_TERM *tuple;\n"
+     "        \n"
+     "\n"
+     "        if (!enif_get_tuple(env, head, &arity, &tuple))\n"
+     "            return 0;\n"
+     "        if (arity != 3)\n"
+     "            return 0;\n"
+     "\n"
+     "        ErlNifUInt64 fnum;\n"
+     "        if (!enif_get_uint64(env, tuple[1], &fnum))\n"
+     "            return 0;\n"
+     "\n"
+     "        if (enif_is_identical(gpb_ua_varint, tuple[0]))\n"
+     "        {\n"
+     "            ErlNifUInt64 v;\n"
+     "            if (!enif_get_uint64(env, tuple[2], &v))\n"
+     "                return 0;\n"
+     "            ufset->AddVarint(fnum, v);\n"
+     "        }\n"
+     "        else if (enif_is_identical(gpb_ua_fixed64, tuple[0]))\n"
+     "        {\n"
+     "            ErlNifUInt64 v;\n"
+     "            if (!enif_get_uint64(env, tuple[2], &v))\n"
+     "                return 0;\n"
+     "            ufset->AddFixed64(fnum, v);\n"
+     "        }\n"
+     "        else if (enif_is_identical(gpb_ua_length_delimited, tuple[0])\n"
+     "                 && arity == 3)\n"
+     "        {\n"
+     "            ErlNifBinary bin;\n"
+     "            ::std::string *s;\n"
+     "            if (!enif_inspect_binary(env, tuple[2], &bin))\n"
+     "                return 0;\n"
+     "            s = ufset->AddLengthDelimited(fnum);\n"
+     "            s->insert(0, (const char *)bin.data, (size_t)bin.size);\n"
+     "        }\n"
+     "        else if (enif_is_identical(gpb_ua_group, tuple[0])\n"
+     "                 && arity == 3)\n"
+     "        {\n"
+     "            if (!enif_is_list(env, tuple[2]))\n"
+     "                return 0;            \n"
+     "            ::google::protobuf::UnknownFieldSet *set2 = \n"
+     "                ufset->AddGroup(fnum);\n"
+     "            if (!pack_unknown_fields(env, set2, tuple[2]))\n"
+     "                return 0;\n"
+     "        }\n"
+     "        else if (enif_is_identical(gpb_ua_fixed32, tuple[0]))\n"
+     "        {\n"
+     "            unsigned int v;\n"
+     "            if (!enif_get_uint(env, tuple[2], &v))\n"
+     "                return 0;\n"
+     "            ufset->AddFixed32(fnum, v);\n"
+     "        }\n"
+     "        else\n"
+     "            return 0;\n"
+     "\n"
+     "        unknowns = tail;\n"
+     "    }\n"
+     "    return 1;\n"
+     "}\n"
+     "\n"
+     "static int\n"
+     "pack_unknown_msg_fields(ErlNifEnv *env,\n"
+     "                        ::google::protobuf::Message *m,\n"
+     "                        ERL_NIF_TERM unknowns)\n"
+     "{\n"
+     "    const ::google::protobuf::Reflection *r = m->GetReflection();\n"
+     "    ::google::protobuf::UnknownFieldSet *ufset = \n"
+     "        r->MutableUnknownFields(m);\n"
+     "    return pack_unknown_fields(env, ufset, unknowns);\n"
+     "}\n"
+     "\n"
+     "/* Return an Erlang list of unknowns\n"
+     " * Each unknown is:\n"
+     " *   {varint, FNum, N} |\n"
+     " *   {fixed, FNum, 32, N} |\n"
+     " *   {fixed, FNum, 64, N} |\n"
+     " *   {length_delimited, FNum, <<...>>} |\n"
+     " *   {group, FNum, [unknown()]}\n"
+     " * when FNum :: non_neg_integer()  (32 bits)\n"
+     " *      N    :: non_neg_integer()  (32 | 64 bits)\n"
+     " */\n"
+     "static ERL_NIF_TERM\n"
+     "unpack_unknown_fields(ErlNifEnv *env,\n"
+     "                      const ::google::protobuf::UnknownFieldSet &fields)\n"
+     "{\n"
+     "    int num_fields = fields.field_count();\n"
+     "    ERL_NIF_TERM uelem[num_fields];\n"
+     "    int i;\n"
+     "\n"
+     "    for (i = 0; i < num_fields; i++)\n"
+     "    {\n"
+     "        const ::google::protobuf::UnknownField &f = fields.field(i);\n"
+     "        switch (f.type())\n"
+     "        {\n"
+     "            case ::google::protobuf::UnknownField::Type::TYPE_VARINT:\n"
+     "                {\n"
+     "                    ERL_NIF_TERM fnum = enif_make_uint(\n"
+     "                                          env, f.number());\n"
+     "                    ERL_NIF_TERM n = enif_make_uint64(\n"
+     "                                          env, f.varint());\n"
+     "                    \n"
+     "                    uelem[i] = enif_make_tuple3(\n"
+     "                                 env, gpb_ua_varint, fnum, n);\n"
+     "                }\n"
+     "                break;\n"
+     "            case ::google::protobuf::UnknownField::Type::TYPE_FIXED64:\n"
+     "                {\n"
+     "                    ERL_NIF_TERM fnum = enif_make_uint(\n"
+     "                                          env, f.number());\n"
+     "                    ERL_NIF_TERM n = enif_make_uint64(\n"
+     "                                       env, f.fixed64());\n"
+     "                    uelem[i] = enif_make_tuple3(\n"
+     "                                 env, gpb_ua_fixed64, fnum, n);\n"
+     "                }\n"
+     "                break;\n"
+     "            case ::google::protobuf::UnknownField::Type::TYPE_LENGTH_DELIMITED:\n"
+     "                {\n"
+     "                    ERL_NIF_TERM fnum = enif_make_uint(\n"
+     "                                          env, f.number());\n"
+     "                    const ::std::string &f_s = f.length_delimited();\n"
+     "                    unsigned char *b_s;\n"
+     "                    ERL_NIF_TERM bin;\n"
+     "                    BYTE_SIZE_TYPE byteSize = f_s.length();\n"
+     "                    b_s = enif_make_new_binary(env, byteSize, &bin);\n"
+     "                    memmove(b_s, f_s.data(), byteSize);\n"
+     "                    uelem[i] = enif_make_tuple3(\n"
+     "                                  env,\n"
+     "                                  gpb_ua_length_delimited,\n"
+     "                                  fnum, bin);\n"
+     "                }\n"
+     "                break;\n"
+     "            case ::google::protobuf::UnknownField::Type::TYPE_GROUP:\n"
+     "                {\n"
+     "                    ERL_NIF_TERM fnum = enif_make_uint(\n"
+     "                                          env, f.number());\n"
+     "                    const ::google::protobuf::UnknownFieldSet &g = \n"
+     "                              f.group();\n"
+     "                    ERL_NIF_TERM u = unpack_unknown_fields(env, g);\n"
+     "                    uelem[i] = enif_make_tuple3(\n"
+     "                                 env, gpb_ua_group, fnum, u);\n"
+     "                }\n"
+     "                break;\n"
+     "            case ::google::protobuf::UnknownField::Type::TYPE_FIXED32:\n"
+     "                {\n"
+     "                    ERL_NIF_TERM fnum = enif_make_uint(\n"
+     "                                          env, f.number());\n"
+     "                    ERL_NIF_TERM n = enif_make_uint(\n"
+     "                                       env, f.fixed32());\n"
+     "                    uelem[i] = enif_make_tuple3(\n"
+     "                                  env, gpb_ua_fixed32, fnum, n);\n"
+     "                }\n"
+     "                break;\n"
+     "            default:\n"
+     "                break;\n"
+     "        }\n"
+     "    }\n"
+     "    return enif_make_list_from_array(env, uelem, num_fields);\n"
+     "}\n"
+     "\n"
+     "static ERL_NIF_TERM\n"
+     "unpack_unknown_msg_fields(ErlNifEnv *env,\n"
+     "                          const ::google::protobuf::Message *m)\n"
+     "{\n"
+     "    const ::google::protobuf::Reflection *r = m->GetReflection();\n"
+     "    const ::google::protobuf::UnknownFieldSet &fields =\n"
+     "              r->GetUnknownFields(*m);\n"
+     "    return unpack_unknown_fields(env, fields);\n"
+     "}\n"].
+
 format_nif_cc_foot(Mod, Defs, Opts) ->
     ["static int\n",
      "load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)\n",
@@ -1068,7 +1317,7 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
                         [if I == 1 -> "";
                             I >  1 -> "else "
                          end,
-                         mk_c_var(gpb_fa_, gpb_lib:get_field_name(Field)),
+                         mk_c_field_var(gpb_lib:get_field_name(Field)),
                          ElemIndex,
                          gpb_lib:split_indent_iolist(
                            4,
@@ -1126,8 +1375,7 @@ optional_to_mandatory(#gpb_oneof{}=Field) ->
 
 format_nif_cc_field_packer(SrcVar, MsgVar, #?gpb_field{}=Field,
                            Defs, CCMapping, Opts) ->
-    #?gpb_field{occurrence=Occurrence, type=Type}=Field,
-    case Occurrence of
+    case categorize_field_kind(Field) of
         required ->
             format_nif_cc_field_packer_single(SrcVar, MsgVar, Field,
                                               Defs, CCMapping, Opts, set);
@@ -1138,14 +1386,13 @@ format_nif_cc_field_packer(SrcVar, MsgVar, #?gpb_field{}=Field,
             format_nif_cc_field_packer_optional(SrcVar, MsgVar, Field,
                                                 Defs, CCMapping, Opts);
         repeated ->
-            case Type of
-                {map,_,_} ->
-                    format_nif_cc_field_packer_maptype(SrcVar, MsgVar, Field,
-                                                       Defs, CCMapping, Opts);
-                _ ->
-                    format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field,
-                                                        Defs, CCMapping, Opts)
-            end
+            format_nif_cc_field_packer_repeated(SrcVar, MsgVar, Field,
+                                                Defs, CCMapping, Opts);
+        map ->
+            format_nif_cc_field_packer_maptype(SrcVar, MsgVar, Field,
+                                               Defs, CCMapping, Opts);
+        unknowns ->
+            format_nif_cc_field_packer_unknowns(SrcVar, MsgVar)
     end;
 format_nif_cc_field_packer(SrcVar, MsgVar, #gpb_oneof{}=Field,
                            Defs, CCMapping, Opts) ->
@@ -1487,6 +1734,13 @@ format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field,
           8, format_nif_cc_field_packer_single(
                {"ik", "iv"}, MsgVar, Field, Defs, CCMapping, Opts, add))]).
 
+format_nif_cc_field_packer_unknowns(SrcVar, MsgVar) ->
+    ?f("{\n"
+       "    if (!pack_unknown_msg_fields(env, ~s, ~s))\n"
+       "        return 0;\n"
+       "}\n",
+       [MsgVar, SrcVar]).
+
 format_nif_cc_decoders(Mod, Defs, CCMapping, Opts) ->
     [format_nif_cc_decoder(Mod, MsgName, Fields, CCMapping, Opts)
      || {{msg, MsgName}, Fields} <- Defs].
@@ -1566,7 +1820,7 @@ format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
               DestVar = ?f("elem~w",[I]),
               gpb_lib:split_indent_iolist(
                 4,
-                [[?f("key~w = gpb_fa_~s;\n", [I, FName]) || Maps],
+                [[?f("key~w = ~s;\n", [I, mk_c_field_var(FName)]) || Maps],
                  format_nif_cc_field_unpacker(DestVar, "m", MsgName, Field,
                                               Defs, CCMapping, Opts)]);
           #gpb_oneof{} ->
@@ -1588,9 +1842,9 @@ format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
          #maps{unset_optional=present_undefined} ->
              [?f("    res = enif_make_new_map(env);\n"),
               [?f("    enif_make_map_put(env, res,\n"
-                  "                      mk_key(env, gpb_fa_~s), elem~w,\n"
+                  "                      mk_key(env, ~s), elem~w,\n"
                   "                      &res);\n",
-                  [gpb_lib:get_field_name(Field), I])
+                  [mk_c_field_var(gpb_lib:get_field_name(Field)), I])
                || {I, Field} <- IFields]];
          #maps{unset_optional=omitted} ->
              [?f("    res = enif_make_new_map(env);\n"),
@@ -1631,22 +1885,21 @@ calc_oneof_key_value_updaters(I, #gpb_oneof{name=FName}, Opts) ->
              end,
              fun() -> ?f("elem~w = gpb_x_no_value", [I]) end};
         #maps{oneof=tuples}  ->
-            {fun(_Tag) -> ?f("key~w = gpb_fa_~s", [I, FName]) end,
+            {fun(_Tag) -> ?f("key~w = ~s", [I, mk_c_field_var(FName)]) end,
              fun(Tag,V) ->
                      ?f("elem~w = enif_make_tuple2(env, gpb_aa_~s, ~s)",
                         [I, Tag, V])
              end,
              fun() -> ?f("elem~w = gpb_x_no_value", [I]) end};
         #maps{oneof=flat} ->
-            {fun(Tag) -> ?f("key~w = gpb_fa_~s", [I, Tag]) end,
+            {fun(Tag) -> ?f("key~w = ~s", [I, mk_c_field_var(Tag)]) end,
              fun(_Tag,V) -> ?f("elem~w = ~s", [I, V]) end,
              fun() -> ?f("elem~w = gpb_x_no_value", [I]) end}
     end.
 
 format_nif_cc_field_unpacker(DestVar, MsgVar, _MsgName, #?gpb_field{}=Field,
                              Defs, CCMapping, Opts) ->
-    #?gpb_field{occurrence=Occurrence, type=Type}=Field,
-    case Occurrence of
+    case categorize_field_kind(Field) of
         required ->
             format_nif_cc_present_field_unpacker_single(DestVar, MsgVar, Field,
                                                         Defs, CCMapping);
@@ -1657,16 +1910,13 @@ format_nif_cc_field_unpacker(DestVar, MsgVar, _MsgName, #?gpb_field{}=Field,
             format_nif_cc_present_field_unpacker_single(DestVar, MsgVar, Field,
                                                         Defs, CCMapping);
         repeated ->
-            case Type of
-                {map,_,_} ->
-                    format_nif_cc_field_unpacker_maptype(DestVar, MsgVar,
-                                                         Field, Defs,
-                                                         CCMapping, Opts);
-                _ ->
-                    format_nif_cc_field_unpacker_repeated(DestVar, MsgVar,
-                                                          Field,
-                                                          Defs, CCMapping)
-            end
+            format_nif_cc_field_unpacker_repeated(DestVar, MsgVar, Field,
+                                                  Defs, CCMapping);
+        map ->
+            format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field,
+                                                 Defs, CCMapping, Opts);
+        unknowns ->
+            format_nif_cc_present_field_unpacker_unknowns(DestVar, MsgVar)
     end.
 
 format_nif_cc_field_oneof_unpacker(MsgVar, MsgName,
@@ -1881,6 +2131,9 @@ format_nif_cc_field_unpacker_maptype(DestVar, MsgVar, Field,
      "    }\n",
      "}\n"].
 
+format_nif_cc_present_field_unpacker_unknowns(DestVar, MsgVar) ->
+    ?f("~s = unpack_unknown_msg_fields(env, ~s);\n",
+       [DestVar, MsgVar]).
 
 format_nif_cc_to_jsoners(Mod, Defs, CCMapping, Opts) ->
     [format_nif_cc_to_jsoner(Mod, MsgName, Fields, CCMapping, Opts)
@@ -2045,6 +2298,28 @@ mk_cctype_name(Type, _CCMapping) ->
         float    -> "float"
     end.
 
+categorize_field_kind(#?gpb_field{occurrence=Occurrence, type=Type}=Field) ->
+    case Occurrence of
+        required ->
+            required;
+        optional ->
+            optional;
+        defaulty ->
+            defaulty;
+        repeated ->
+            case Type of
+                {map, _, _} ->
+                    map;
+                _ ->
+                    case gpb_lib:is_field_for_unknowns(Field) of
+                        true ->
+                            unknowns;
+                        false ->
+                            repeated
+                    end
+            end
+    end.
+
 initialize_map_iterator(Indent, IteratorVarName) ->
     ?f("#if ~s\n"
        "~s = ERL_NIF_MAP_ITERATOR_FIRST;\n"
@@ -2097,6 +2372,30 @@ is_dotted(S) when is_list(S) -> gpb_lib:is_substr(".", S).
             Sym;
         true ->
             underscore_suffix(Sym)
+    end.
+
+mk_c_field_var(A) ->
+    S = atom_to_list(A),
+    HasOnlyVarChars = lists:all(fun is_c_var_char/1, S),
+    if HasOnlyVarChars ->
+            mk_c_var(gpb_xa_, A);
+       true ->
+            mk_c_var(gpb_xa_, transform_non_c_chars(S))
+    end.
+
+is_c_var_char(UC) when $A =< UC, UC =< $Z -> true;
+is_c_var_char(LC) when $a =< LC, LC =< $z -> true;
+is_c_var_char(D)  when $0 =< D, D =< $9 -> true;
+is_c_var_char($_) -> true;
+is_c_var_char(_) -> false.
+
+transform_non_c_chars(S) ->
+    lists:flatten([transform_c_var_char(C) || C <- S]).
+
+transform_c_var_char(C) ->
+    case is_c_var_char(C) of
+        true  -> C;
+        false -> ?f("x~2.16.0b", [C])
     end.
 
 underscore_suffix(A) when is_atom(A) ->

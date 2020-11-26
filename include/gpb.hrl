@@ -38,7 +38,8 @@
                               % | map()      iff option `maps'
         | {group,atom()}      % record()     name is <msg name>_<field name>
                               % | map()      iff option `maps'
-        | {map,gpb_map_key(),gpb_map_value()}. % [{K,V}] | map()
+        | {map,gpb_map_key(),gpb_map_value()} % [{K,V}] | map()
+        | unknown.            % iff option `preserve_unknown_fields'
 
 %% An intermediary type temporarily used internally within gpb during parsing,
 %% neither returned from gpb, nor accepted as input go gpb.

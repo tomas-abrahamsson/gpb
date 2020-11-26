@@ -180,6 +180,7 @@
                boolean_opt(ignore_wellknown_types_directory) |
                {proto_defs_version, integer()} |
                {introspect_proto_defs_version, integer() | preferably_1} |
+               boolean_opt(preserve_unknown_fields) |
                {list_deps, list_deps_format()} |
                {list_deps_dest_file, filename()} |
                boolean_opt(list_deps_missing_imports_are_generated) |
@@ -343,9 +344,7 @@ file(File) ->
 %% <dl>
 %%   <dt>`false'</dt><dd>Never copy bytes/(sub-)binaries.</dd>
 %%   <dt>`true'</dt><dd>Always copy bytes/(sub-)binaries.</dd>
-%%   <dt>`auto'</dt><dd>Copy bytes/(sub-)binaries if the beam vm,
-%%           on which the compiler (this module) is running,
-%%           has the `binary:copy/1' function. (This is the default)</dd>
+%%   <dt>`auto'</dt><dd>Synonym for `true'. (This is the default)</dd>
 %%   <dt>integer() | float()</dt><dd>Copy the bytes/(sub-)binaries if the
 %%           message this many times or more larger than the size of the
 %%           bytes/(sub-)binary.</dd>
@@ -878,6 +877,14 @@ file(File) ->
 %% for introspection. One rationale for this is option is to reduce the size of
 %% the generated code.
 %%
+%% <a id="option-preserve_unknown_fields"/>
+%% The `preserve_unknown_fields' option will add a field to records and
+%% maps. On decoding, info on unknown fields will be stored in here,
+%% such that the unknown fields can be preserved on encoding.
+%% An unknown field is a field with an unknown number. Without this option,
+%% such fields are skipped on decoding. There is no guarantee that
+%% a message with unknowns will be byte-by-byte identical when re-encoded.
+%%
 %% <a id="option-ignore_wellknown_types_directory"/>
 %% The `{ignore_wellknown_types_directory, true}' option will stop gpb from
 %% looking rom a well known types directory by trying to locate the `priv'
@@ -1204,10 +1211,14 @@ do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
     Warns0 = check_unpackables_marked_as_packed(Defs),
     Warns1 = check_maps_flat_oneof_may_fail_on_compilation(Opts),
     Warns = Warns0 ++ Warns1,
-    AnRes = gpb_analyzer:analyze_defs(Defs, Sources, Renamings, Opts),
-    case verify_opts(Defs, Opts) of
+    Defs1 = case proplists:get_bool(preserve_unknown_fields, Opts) of
+                true  -> gpb_defs:extend_with_field_for_unknowns(Defs);
+                false -> Defs
+            end,
+    AnRes = gpb_analyzer:analyze_defs(Defs1, Sources, Renamings, Opts),
+    case verify_opts(Defs1, Opts) of
         ok ->
-            Res1 = do_proto_defs_aux2(Defs, DefsNoRenamings,
+            Res1 = do_proto_defs_aux2(Defs1, DefsNoRenamings,
                                       clean_module_name(Mod), AnRes, Opts),
             return_or_report_warnings_or_errors(Res1, Warns, Opts,
                                                 get_output_format(Opts));
@@ -1218,6 +1229,7 @@ do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
 
 verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_translation_and_nif(Opts) end,
+              fun() -> verify_opts_preserve_unknown_fields_and_json(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
               fun() -> verify_opts_flat_oneof(Opts) end,
               fun() -> verify_opts_no_gen_mergers(Opts) end]).
@@ -1235,6 +1247,15 @@ verify_opts_translation_and_nif(Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
     if (TranslType or TranslField) and DoNif ->
             {error, {invalid_options, translation, nif}};
+       true ->
+            ok
+    end.
+
+verify_opts_preserve_unknown_fields_and_json(Opts) ->
+    Preserve = proplists:get_bool(preserve_unknown_fields, Opts),
+    DoJson = gpb_lib:json_by_opts(Opts),
+    if Preserve and DoJson ->
+            {error, {invalid_options, preserve_unknown_fields, json}};
        true ->
             ok
     end.
@@ -1687,6 +1708,8 @@ fmt_err({write_failed, File, Reason}) ->
     ?f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
 fmt_err({invalid_options, translation, nif}) ->
     "Option error: Not supported: both translation option and nif";
+fmt_err({invalid_options, preserve_unknown_fields, json}) ->
+    "Option error: Not supported: both preserve_unknown_fields and json";
 fmt_err({unsupported_translation, _Type, non_msg_type}) ->
     "Option to translate is supported only for message types, for now";
 fmt_err({invalid_options, epb_functions, maps}) ->
@@ -2091,6 +2114,10 @@ c() ->
 %%   <dt><a id="cmdline-option-no-gen-introspect"/>
 %%       `-no-gen-introspect'</dt>
 %%   <dd>Do not generate code for introspection.</dd>
+%%   <dt><a id="cmdline-option-preserve-unknown-fields"/>
+%%       `-preserve-unknown-fields'</dt>
+%%   <dd>Preserve unknown fields. An extra field, `$unknowns', will be added
+%%       to each record or map for storing unknown fields.</dd>
 %%   <dt><a id="cmdline-option-W"/>
 %%       `-Werror', `-W1', `-W0', `-W', `-Wall'</dt>
 %%   <dd>`-Werror' means treat warnings as errors<br></br>
@@ -2508,6 +2535,8 @@ opt_specs() ->
       "       useful with the option -nif.\n"},
      {"no-gen-introspect", {'opt_value()', false}, gen_introspect, "\n"
       "       Do not generate code for introspection.\n"},
+     {"preserve-unknown-fields", undefined, preserve_unknown_fields, "\n"
+      "       Preserve unknown fields.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"
       "       Treat warnings as errors\n"},
      {"W1", undefined, report_warnings, "\n"
@@ -3176,7 +3205,7 @@ utf8_decode(B) ->
     end.
 
 check_unpackables_marked_as_packed(Defs) ->
-    gpb_lib:fold_msg_or_group_fields(
+    gpb_lib:fold_msg_or_group_fields_skip_field_for_unknowns(
       fun(_, MsgName, #?gpb_field{name=FName, type=Type, opts=Opts}, Acc) ->
               case {lists:member(packed, Opts), gpb:is_type_packable(Type)} of
                   {true, false} ->

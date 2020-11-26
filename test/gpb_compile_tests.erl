@@ -3254,7 +3254,8 @@ nif_code_test_() ->
        ?nif_if_supported(nif_with_renamings),
        ?nif_if_supported(nif_with_opt_but_no_package),
        ?nif_if_supported(nif_without_mergers),
-       ?nif_if_supported(nif_p3_optional)]).
+       ?nif_if_supported(nif_p3_optional),
+       ?nif_if_supported(nif_preserve_unknown_fields)]).
 
 increase_timeouts({Descr, Tests}) ->
     %% On my slow 1.6 GHz Atom N270 machine, the map field test takes
@@ -4086,6 +4087,94 @@ nif_p3_optional() ->
                         ok
                 end)
       end).
+
+nif_preserve_unknown_fields(features) -> [];
+nif_preserve_unknown_fields(title) -> "Nif with preserve_unknown_fields".
+nif_preserve_unknown_fields() ->
+    with_tmpdir(
+      fun(TmpDir) ->
+              M = gpb_nif_preserve_unknwon_fields,
+              %% Decode a populated Big or Rep message as a Small message
+              %% to make test that we unpack unknowns.
+              %% Vice versa un packing the Small with unknowns and we
+              %% should get back the original.
+              DefsTxt = "syntax='proto2';
+                         message Big {
+                           required string a = 1;
+                           optional int32   n2 = 2; // varint
+                           optional fixed64 n3 = 3; // 64 bits
+                           optional bytes   n4 = 4;  // length-delimited
+                           optional group   N5 = 5 {
+                             optional int32   g2 = 22; // varint
+                             optional fixed64 g3 = 23; // 64 bits
+                             optional bytes   g4 = 24;  // length-delimited
+                             optional group   G5 = 25 {
+                               optional int32   gg2 = 32; // varint
+                             };
+                             optional fixed32 g6 = 26; // 32 bits
+                           };
+                           optional fixed32 n6 = 6;  // 32 bits
+                         }
+                         message Rep {
+                           required string a = 1;
+                           repeated int32 n2 = 2;
+                         }
+                         message Small {
+                           required string a = 1;
+                         }
+                        ",
+              Opts = [nif, preserve_unknown_fields],
+              {ok, Code} = compile_nif_msg_defs(M, DefsTxt, TmpDir, Opts),
+              in_separate_vm(
+                TmpDir, M, Code,
+                fun() ->
+                        Big1 = {'Big',
+                                "abc", % field a
+                                102,                   % n2 varint
+                                103,                   % n3 fixed64
+                                <<104,104>>,           % n4 length-delimited
+                                {'Big.N5',             % n5 group
+                                 122,                  %   g2 varint
+                                 123,                  %   g3 64-bits
+                                 <<124,124>>,          %   g4 length-delimited
+                                 {'Big.N5.G5',232,[]}, %   g5 group
+                                 126,                  %   g6 fixed32
+                                 []},                  % '$unknowns'
+                                106,                   % n6 fixed32
+                                []},                   % '$unknowns'
+                        BigEnc1 = M:encode_msg(Big1),
+                        Small1  = M:decode_msg(BigEnc1, 'Small'),
+                        ?assertMatch({'Small',
+                                      "abc",
+                                      %% Unknowns:
+                                      [{varint, 2, 102},
+                                       {fixed64, 3, 103},
+                                       {length_delimited, 4, <<104,104>>},
+                                       {group, 5,
+                                        [{varint, 22, 122},
+                                         {fixed64, 23, 123},
+                                         {length_delimited, 24, <<124,124>>},
+                                         {group, 25, [{varint,32, 232}]},
+                                         {fixed32, 26, 126}]},
+                                       {fixed32, 6, 106}]},
+                                     Small1),
+                        SmallEnc1 = M:encode_msg(Small1),
+                        Big2 = M:decode_msg(SmallEnc1, 'Big'),
+                        ?assertEqual(Big1, Big2),
+
+                        %% Check repeated:
+                        Rep1 = {'Rep', "abc", [17,18,19,20], []},
+                        RepEnc1 = M:encode_msg(Rep1),
+                        {'Small', "abc", [_,_,_,_]=Unknowns} = Small2 =
+                            M:decode_msg(RepEnc1, 'Small'),
+                        [{varint,2,17},{varint,2,18},
+                         {varint,2,19},{varint,2,20}] = Unknowns,
+                        RepEnc2 = M:encode_msg(Small2),
+                        Rep1 = M:decode_msg(RepEnc2, 'Rep'),
+                        ok
+                end)
+      end).
+
 
 compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir) ->
     compile_nif_msg_defs(M, MsgDefsOrIoList, TmpDir, []).
@@ -5132,6 +5221,11 @@ no_gen_mergers_test() ->
 no_gen_intospections_test() ->
     {ok, {[{gen_introspect, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]).
+
+preserve_unknown_fields_cmdline_opts_test() ->
+    {ok, {[preserve_unknown_fields], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-preserve-unknown-fields",
+                                         "x.proto"]).
 
 makedeps_cmdline_opts_test() ->
     {ok, {[{list_deps, makefile_rules},

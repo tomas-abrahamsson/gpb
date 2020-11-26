@@ -18,7 +18,11 @@
           map_types,          % :: sets:set({map,_,_})
           map_value_types,    % :: {boolean(), boolean()} % submsgs?/nonsubmsgs?
           group_occurrences,  % :: dict:dict() %% GroupName -> repeated | ...
-          has_p3_opt_strings, % :: boolean()
+          has_p3_opt_strings, % :: boolean(),
+          unknowns_info,      % :: both_with_and_without_field_for_unknowns |
+                              %    all_are_without_field_for_unknowns |
+                              %    all_are_with_field_for_unknowns |
+                              %    no_msgs
           renamings           % :: no_renamings | gpb_names:renamings().
         }).
 -record(maps, {

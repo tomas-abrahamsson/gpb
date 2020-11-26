@@ -41,6 +41,7 @@ analyze_defs(Defs, Sources, Renamings, Opts) ->
     MapMsgEnums = enums_for_maps_as_msgs(MapTypes, Defs),
     Translations = compute_translations(Defs, Opts),
     KnownMsgSize = find_msgsizes_known_at_compile_time(MapsAsMsgs ++ Defs),
+    UnknownsInfo = gpb_lib:defs_contains_fields_for_unknows(Defs),
     #anres{source_filenames    = Sources,
            used_types          = find_used_types(Defs),
            known_msg_size      = KnownMsgSize,
@@ -56,6 +57,7 @@ analyze_defs(Defs, Sources, Renamings, Opts) ->
            map_value_types     = compute_map_value_types(MapTypes),
            group_occurrences   = find_group_occurrences(Defs),
            has_p3_opt_strings  = has_p3_opt_strings(Defs),
+           unknowns_info       = UnknownsInfo,
            renamings           = Renamings}.
 
 find_map_types(Defs) ->
@@ -109,8 +111,11 @@ find_used_types(Defs) ->
       fun(_Type, _MsgName, #?gpb_field{type={map,KeyType,ValueType}}, Acc) ->
               Acc1 = sets:add_element(KeyType, Acc),
               sets:add_element(ValueType, Acc1);
-         (_Type, _MsgName, #?gpb_field{type=Type}, Acc) ->
-              sets:add_element(Type, Acc)
+         (_Type, _MsgName, #?gpb_field{type=Type}=Field, Acc) ->
+              case gpb_lib:is_field_for_unknowns(Field) of
+                  false -> sets:add_element(Type, Acc);
+                  true  -> Acc
+              end
       end,
       sets:new(),
       Defs).

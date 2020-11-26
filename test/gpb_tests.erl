@@ -1116,6 +1116,84 @@ is_hex_digit(D) when $a =< D, D =< $f -> true;
 is_hex_digit(D) when $A =< D, D =< $F -> true;
 is_hex_digit(_) -> false.
 
+encode_decode_basic_unknowns_test() ->
+    Field1 = #?gpb_field{name=a, fnum=1, rnum=2, type=string,
+                         occurrence=optional,
+                         opts=[]},
+    FieldU = #?gpb_field{name='$unknown', fnum=undefined, rnum=0,
+                         type=unknown, occurrence=repeated,
+                         opts=[]},
+    Defs1 = [{{msg, msg}, [Field1,
+                           FieldU#?gpb_field{rnum=3}]}],
+    Defs2 = [{{msg, msg}, [Field1,
+                           %% varint:
+                           #?gpb_field{name=n2, fnum=2, rnum=3, type=int32,
+                                       occurrence=optional,
+                                       opts=[]},
+                           %% 64 bits
+                           #?gpb_field{name=n3, fnum=3, rnum=4, type=fixed64,
+                                       occurrence=optional,
+                                       opts=[]},
+                           %% length-delimited
+                           #?gpb_field{name=n4, fnum=4, rnum=5, type=bytes,
+                                       occurrence=optional,
+                                       opts=[]},
+                           %% group
+                           #?gpb_field{name=n5, fnum=5, rnum=6,
+                                       type={group, gr},
+                                       occurrence=optional,
+                                       opts=[]},
+                           %% 32 bits
+                           #?gpb_field{name=n6, fnum=6, rnum=7, type=fixed32,
+                                       occurrence=optional,
+                                       opts=[]},
+                           %% --
+                           FieldU#?gpb_field{rnum=8}]},
+             {{group,gr}, [#?gpb_field{name=a, fnum=10, rnum=2, type=int32,
+                                       occurrence=optional,
+                                       opts=[]}]}],
+    Msg0 = {msg, "abc", 2, 3, <<4,4>>, {gr,5}, 6, []},
+    E1 = encode_msg(Msg0, Defs2),
+    %% Decode with Defs1, unknown fields should end up in '$unknown'
+    %% Then encode this with the unknowns
+    {msg, "abc", [_,_,_,_,_]=Unknowns} = Msg1 = decode_msg(E1, msg, Defs1),
+    [{varint, 2, 2},
+      {fixed64, 3, 3},
+      {length_delimited, 4, <<4,4>>},
+      {group, 5, [{varint, 10, 5}]},
+      {fixed32, 6, 6}] = Unknowns,
+    E2 = encode_msg(Msg1, Defs1),
+    %% decode with richer defs, should get back orig:
+    D2 = decode_msg(E2, msg, Defs2),
+    ?assertEqual(Msg0, D2).
+
+encode_decode_repeated_unknowns_test() ->
+    Field1 = #?gpb_field{name=a, fnum=1, rnum=2, type=string,
+                         occurrence=optional,
+                         opts=[]},
+    FieldU = #?gpb_field{name='$unknown', fnum=undefined, rnum=0,
+                         type=unknown, occurrence=repeated,
+                         opts=[]},
+    Defs1 = [{{msg, msg}, [Field1,
+                           FieldU#?gpb_field{rnum=3}]}],
+    Defs2 = [{{msg, msg}, [Field1,
+                           %% varint:
+                           #?gpb_field{name=nr, fnum=2, rnum=3, type=int32,
+                                       occurrence=repeated,
+                                       opts=[]},
+                           %% --
+                           FieldU#?gpb_field{rnum=4}]}],
+    Msg0 = {msg, "abc", [17,18,19,20], []},
+    E1 = encode_msg(Msg0, Defs2),
+    %% A repeated non-'packed' will be encoded as several fields, one
+    %% for each element in the repeated sequence, so expect 4 unknowns:
+    {msg, "abc", [_,_,_,_]=Unknowns} = Msg1 = decode_msg(E1, msg, Defs1),
+    %% The order of the unknowns is important, check that:
+    [{varint,2,17},{varint,2,18},{varint,2,19},{varint,2,20}] = Unknowns,
+    E2 = encode_msg(Msg1, Defs1),
+    D2 = decode_msg(E2, msg, Defs2),
+    ?assertEqual(Msg0, D2).
+
 %% -------------------------------------------------------------
 
 merging_second_required_integer_overrides_first_test() ->

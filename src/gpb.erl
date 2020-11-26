@@ -297,8 +297,9 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
     WireType = Key band 7,
     case find_field(FieldNum, MsgDef) of
         false ->
-            Rest2 = skip_field(Rest, FieldNum, WireType),
-            decode_field(Rest2, MsgDef, MsgDefs, Msg);
+            {Msg2, Rest2} = skip_field_or_collect_unknown(
+                              Rest, FieldNum, WireType, Msg, MsgDef),
+            decode_field(Rest2, MsgDef, MsgDefs, Msg2);
         {#?gpb_field{type=FieldType, rnum=RNum}=FieldDef, IsOneof} ->
             case fielddef_matches_wiretype_get_info(WireType, FieldDef) of
                 {yes,packed} ->
@@ -318,8 +319,9 @@ decode_field(Bin, MsgDef, MsgDefs, Msg) when byte_size(Bin) > 0 ->
                                        Msg),
                     decode_field(Rest2, MsgDef, MsgDefs, NewMsg);
                 no ->
-                    Rest2 = skip_field(Rest, FieldNum, WireType),
-                    decode_field(Rest2, MsgDef, MsgDefs, Msg)
+                    {Msg2, Rest2} = skip_field_or_collect_unknown(
+                                      Rest, FieldNum, WireType, Msg, MsgDef),
+                    decode_field(Rest2, MsgDef, MsgDefs, Msg2)
             end
     end;
 decode_field(<<>>, MsgDef, _MsgDefs, Record0) ->
@@ -380,25 +382,48 @@ decode_wiretype(3) -> group_start;
 decode_wiretype(4) -> group_end;
 decode_wiretype(5) -> bits32.
 
+skip_field_or_collect_unknown(Bin, FieldNum, WireType, Msg, MsgDef) ->
+    case [F || F <- MsgDef, is_field_for_unknowns(F)] of
+        [] ->
+            {_Unknown, Rest} = skip_field(Bin, FieldNum, WireType),
+            {Msg, Rest};
+        [#?gpb_field{rnum=RNum}] ->
+            {Unknown, Rest} = skip_field(Bin, FieldNum, WireType),
+            Msg2 = append_to_element(RNum, Unknown, Msg),
+            {Msg2, Rest}
+    end.
+
 skip_field(Bin, FieldNum, WireType) ->
     case decode_wiretype(WireType) of
         varint ->
-            {_N, Rest} = decode_varint(Bin, 64),
-            Rest;
+            {N, Rest} = decode_varint(Bin, 64),
+            {{varint, FieldNum, N}, Rest};
         bits64 ->
-            <<_:64, Rest/binary>> = Bin,
-            Rest;
+            <<N:64/little, Rest/binary>> = Bin,
+            {{fixed64, FieldNum, N}, Rest};
         length_delimited ->
             {Len, Rest} = decode_varint(Bin, 64),
-            <<_:Len/binary, Rest2/binary>> = Rest,
-            Rest2;
+            <<Data:Len/binary, Rest2/binary>> = Rest,
+            {{length_delimited, FieldNum, Data}, Rest2};
         group_start ->
-            {_, Rest} = read_group(Bin, FieldNum),
-            Rest;
+            %% read_group will return the group as a binary,
+            %% but internal format for unknown groups is [unknown_field()]
+            {GroupData, Rest} = read_group(Bin, FieldNum),
+            GroupFields = skipped_group_fields(GroupData, []),
+            {{group, FieldNum, GroupFields}, Rest};
         bits32 ->
-            <<_:32, Rest/binary>> = Bin,
-            Rest
+            <<N:32/little, Rest/binary>> = Bin,
+            {{fixed32, FieldNum, N}, Rest}
     end.
+
+skipped_group_fields(Bin, Acc) when Bin =/= <<>> ->
+    {Key, Rest} = decode_varint(Bin, 32),
+    FieldNum = Key bsr 3,
+    WireType = Key band 7,
+    {Skipped, Rest2} = skip_field(Rest, FieldNum, WireType),
+    skipped_group_fields(Rest2, [Skipped | Acc]);
+skipped_group_fields(<<>>, Acc) ->
+    lists:reverse(Acc).
 
 decode_packed(FieldType, Bin, MsgDefs, Seq0) ->
     {Len, Rest} = decode_varint(Bin, 64),
@@ -765,13 +790,15 @@ encode_group(Msg, MsgDefs) ->
     MsgDef = keyfetch({group, GroupName}, MsgDefs),
     encode_2(MsgDef, Msg, MsgDefs, <<>>).
 
-encode_2([#?gpb_field{occurrence=Occurrence}=Field | Rest], Msg, MsgDefs, Acc) ->
+encode_2([#?gpb_field{}=Field | Rest], Msg, MsgDefs, Acc) ->
     EncodedField =
-        case {Occurrence, is_packed(Field)} of
-            {repeated, true} ->
+        case classify_field_for_encoding(Field) of
+            repeated_packed ->
                 encode_packed(Field, Msg, MsgDefs);
-            _ ->
-                encode_field(Field, Msg, MsgDefs)
+            normal_field ->
+                encode_field(Field, Msg, MsgDefs);
+            unknowns ->
+                encode_unknowns(Field, Msg, MsgDefs)
         end,
     encode_2(Rest, Msg, MsgDefs, <<Acc/binary, EncodedField/binary>>);
 encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc) ->
@@ -787,6 +814,19 @@ encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc) ->
     end;
 encode_2([], _Msg, _MsgDefs, Acc) ->
     Acc.
+
+classify_field_for_encoding(#?gpb_field{occurrence=Occurrence}=Field) ->
+    case is_field_for_unknowns(Field) of
+        true ->
+            unknowns;
+        false ->
+            case {Occurrence, is_packed(Field)} of
+                {repeated, true} ->
+                    repeated_packed;
+                _ ->
+                    normal_field
+            end
+    end.
 
 encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
     case element(RNum, Msg) of
@@ -937,6 +977,37 @@ encode_value(Value, Type, MsgDefs) ->
             MsgDefs1 = [map_item_tmp_def(KeyType, ValueType) | MsgDefs],
             encode_value({MsgName,Key,Value1}, {msg,MsgName}, MsgDefs1)
     end.
+
+encode_unknowns(#?gpb_field{rnum=RNum}, Msg, _MsgDefs) ->
+    encode_unknown_fields(element(RNum, Msg)).
+
+encode_unknown_fields(Fields) ->
+    lists:foldl(
+      fun(Unknown, Acc) ->
+              case Unknown of
+                  {varint, FieldNum, N} ->
+                      Key = encode_fnum_type(FieldNum, int32),
+                      NBin = encode_varint(N),
+                      <<Acc/binary, Key/binary, NBin/binary>>;
+                  {fixed64, FieldNum, N} ->
+                      Key = encode_fnum_type(FieldNum, fixed64),
+                      <<Acc/binary, Key/binary, N:64/little>>;
+                  {length_delimited, FieldNum, Data} ->
+                      Key = encode_fnum_type(FieldNum, string),
+                      Len = encode_varint(byte_size(Data)),
+                      <<Acc/binary, Key/binary, Len/binary, Data/binary>>;
+                  {group, FieldNum, GroupFields} ->
+                      GS = encode_fnum_type(FieldNum, group_start),
+                      GroupData = encode_unknown_fields(GroupFields),
+                      GE = encode_fnum_type(FieldNum, group_end),
+                      <<Acc/binary, GS/binary, GroupData/binary, GE/binary>>;
+                  {fixed32, FieldNum, N} ->
+                      Key = encode_fnum_type(FieldNum, fixed32),
+                      <<Acc/binary, Key/binary, N:32/little>>
+              end
+      end,
+      <<>>,
+      Fields).
 
 %% @doc Encode a wire type for a protobuf field type.
 -spec encode_wiretype(gpb_field_type()) -> non_neg_integer().
@@ -1138,9 +1209,16 @@ verify_group(V, GroupName, _MsgDefs, Path) ->
 verify_fields(Msg, Fields, Path, MsgDefs) when tuple_size(Msg)
                                                == length(Fields) + 1 ->
     lists:foreach(
-      fun(#?gpb_field{name=Name, type=Type, rnum=RNum, occurrence=Occurrence}) ->
-              Value = element(RNum, Msg),
-              verify_value(Value, Type, Occurrence, Path++[Name], MsgDefs);
+      fun(#?gpb_field{name=Name, type=Type, rnum=RNum,
+                      occurrence=Occurrence}=Field) ->
+              case is_field_for_unknowns(Field) of
+                  false ->
+                      Value = element(RNum, Msg),
+                      verify_value(Value, Type, Occurrence, Path++[Name],
+                                   MsgDefs);
+                  true ->
+                      ok
+              end;
          (#gpb_oneof{name=Name, rnum=RNum, fields=OFields}) ->
               case element(RNum, Msg) of
                   {FName, Value} ->
@@ -1766,6 +1844,11 @@ keyfetch(Key, KVPairs) ->
             erlang:error({error, {no_such_key, Key, KVPairs}})
     end.
 
+is_field_for_unknowns(#?gpb_field{type=unknown, occurrence=repeated}) ->
+    true;
+is_field_for_unknowns(_) ->
+    false.
+
 version_format_test() ->
     ok = assert_version_format("2"),
     ok = assert_version_format("2.1"),
@@ -1847,7 +1930,8 @@ test_run_skip_field(Bin) ->
     {Key, Rest} = decode_varint(Bin),
     WireType = encode_wiretype(group_start),
     {FieldNum, WireType} = {Key bsr 3, Key band 7},
-    skip_field(Rest, FieldNum, WireType).
+    {_, Rest2} = skip_field(Rest, FieldNum, WireType),
+    Rest2.
 
 mk_group_start(FieldNum) ->
     encode_varint((FieldNum bsl 3) bor encode_wiretype(group_start)).
