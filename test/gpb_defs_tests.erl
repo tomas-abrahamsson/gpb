@@ -931,6 +931,26 @@ nested_extended_block_test() ->
      {{msg_containment,"a"},_}] =
         AllDefs.
 
+extend_with_proto3_syntax_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"a.proto",
+                  ["syntax='proto3';",
+                   "message A {",
+                   "}",
+                   "",
+                   "extend A {",
+                   "  int32 b = 42;",
+                   "}"]}],
+                []),
+    [{file, _},
+     {proto3_msgs,_},
+     {proto_defs_version, _},
+     {syntax,"proto3"},
+     {{enum_containment, _}, _},
+     {{msg,'A'},[#?gpb_field{name=b, occurrence=defaulty}]},
+     {{msg_containment,"a"},_}] =
+        AllDefs.
+
 group_test() ->
     {ok,Defs} = parse_lines(["message m1 {",
                              "  required m2 f = 1;",

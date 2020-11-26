@@ -309,7 +309,8 @@ flatten_qualify_defnames(Defs, Root) ->
                     rootward_names(Root, Name) ++
                     rootward_names(empty_pkg_root(), Name),
                 {Fields2, Defs2} = flatten_fields(FieldsOrDefs, Root),
-                [{{extend,{eref2,Root,FullNameCandidates}},Fields2} | Defs2] ++
+                ERef2 = {eref2,Root,Name,FullNameCandidates},
+                [{{extend,ERef2},Fields2} | Defs2] ++
                     Acc;
            ({{service, Name}, RPCs}, Acc) ->
                 FullName = prepend_path(Root, Name),
@@ -473,7 +474,7 @@ resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
       Reasons,
       Rpcs).
 
-resolve_extend_refs({eref2, Ctxt, ExtendeeCandidates}, Fields, Defs,
+resolve_extend_refs({eref2, Ctxt, _Name, ExtendeeCandidates}, Fields, Defs,
                     Root, Acc) ->
     case resolve_ref_candidates(Defs, ExtendeeCandidates) of
         {found, {msg,NewToBeExtended}} ->
@@ -1400,6 +1401,11 @@ to_fields_d2(Defs, OccHandler, Errors0) ->
                   to_fields_msg2(MsgName, MsgElems, OccHandler, Errors),
               MsgDef1 = {{msg,MsgName}, MsgElems1},
               {MsgDef1, Errors1};
+         ({{extend,{eref2,_Root,Name,_Cadidates}=ERef2}, Fields}, Errors) ->
+              {Elems1, Errors1} =
+                  to_fields_msg2(Name, Fields, OccHandler, Errors),
+              Extend1 = {{extend,ERef2}, Elems1},
+              {Extend1, Errors1};
          (Other, Errors) ->
               {Other, Errors}
       end,
