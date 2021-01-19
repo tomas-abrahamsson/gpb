@@ -1,17 +1,17 @@
--*- coding: utf-8 -*-
+-*- coding: utf-8; indent-tabs-mode: nil -*-
 
 Version 4.16.0
 2020-Nov-26
 
-	* Add an option preserve_unknown_fields (-preserve-unknown-fields)
-	  If set, each message will have one extra field, '$unknowns'
-	  in which info on any unknown fields are saved during
-	  decoding, and which will be re-encoded after all other
-	  field during encoding. (#189)
-	* Handle also proto3 syntax for extend Msg { Field; ... } (#190)
-	* Bugfix generation of json enum decoders for enums
-	  not in any message (#192)
-	* Set rebar3 as hex build tool. (#191)
+        * Add an option preserve_unknown_fields (-preserve-unknown-fields)
+          If set, each message will have one extra field, '$unknowns'
+          in which info on any unknown fields are saved during
+          decoding, and which will be re-encoded after all other
+          field during encoding. (#189)
+        * Handle also proto3 syntax for extend Msg { Field; ... } (#190)
+        * Bugfix generation of json enum decoders for enums
+          not in any message (#192)
+        * Set rebar3 as hex build tool. (#191)
 
 Version 4.15.2
 2020-Nov-07
@@ -36,11 +36,11 @@ Version 4.15.0
 Version 4.14.2
 2020-Oct-17
 
-	* Apply renames to the enum type also in export_type. Thanks
-	  to Jonas Boberg. (#185, #186)
-	* Bugfix gpb:msg_to_map/3 for proto3 messages.
-	* Fix map associations in type specs and instead indicate
-	  proto presence in comments.
+        * Apply renames to the enum type also in export_type. Thanks
+          to Jonas Boberg. (#185, #186)
+        * Bugfix gpb:msg_to_map/3 for proto3 messages.
+        * Fix map associations in type specs and instead indicate
+          proto presence in comments.
 
 Version 4.14.1
 2020-Sep-05
@@ -674,757 +674,757 @@ Version 3.26.6
 Version 3.26.5
 2016-Dec-10
 
-	* Consider also messages also for map fields when calculating
-	order of messages, so that type specs for record fields come in
-	the right order. Thanks to Tristan Sloughter.
+        * Consider also messages also for map fields when calculating
+        order of messages, so that type specs for record fields come in
+        the right order. Thanks to Tristan Sloughter.
 
 Version 3.26.4
 2016-Oct-21
 
-	* Add api functions gpb_compile:{locate,read}_import/2 and
-	gpb_parse:fetch_imports/1 to facilitate eg proto file dependency
-	tracking.
+        * Add api functions gpb_compile:{locate,read}_import/2 and
+        gpb_parse:fetch_imports/1 to facilitate eg proto file dependency
+        tracking.
 
-	* Add -types and convert @spec doc tags to proper -specs.
+        * Add -types and convert @spec doc tags to proper -specs.
 
 Version 3.26.3
 2016-Oct-05
 
-	* Fix dialyzer issue with Erlang 19 in the generated code.  Thanks
-	to Sargun Dhillon for reporting. The generated code for merging
-	messages unnecessarily/erroneously checked required scalar fields
-	for undefined.
+        * Fix dialyzer issue with Erlang 19 in the generated code.  Thanks
+        to Sargun Dhillon for reporting. The generated code for merging
+        messages unnecessarily/erroneously checked required scalar fields
+        for undefined.
 
 Version 3.26.2
 2016-Oct-04
 
-	* Integrate with Travis CI. Thanks to Luke Bakken.
+        * Integrate with Travis CI. Thanks to Luke Bakken.
 
-	* Improve unit tests:
-	- increased timeouts for slow machines
-	- eunit test bug fixes for hosts running a 32 bit os
-	- bug fix for nif tests for when Google's protobuf library
-	  is not installed on the host
+        * Improve unit tests:
+        - increased timeouts for slow machines
+        - eunit test bug fixes for hosts running a 32 bit os
+        - bug fix for nif tests for when Google's protobuf library
+          is not installed on the host
 
 Version 3.26.1
 2016-Sep-27
 
-	* Don't generate auxiliary functions id/2, cons/3,
-	lists_reverse/2, 'erlang_++'/3 if they are not used.
-	Thanks to Tristan Sloughter for reporting.
+        * Don't generate auxiliary functions id/2, cons/3,
+        lists_reverse/2, 'erlang_++'/3 if they are not used.
+        Thanks to Tristan Sloughter for reporting.
 
 Version 3.26.0
 2016-Sep-21
 
-	* New option {target_erlang_version,N}. Thanks to Eric
-	Meadows-Jönsson for suggensting this.
+        * New option {target_erlang_version,N}. Thanks to Eric
+        Meadows-Jönsson for suggensting this.
 
-	* New options defaults_for_omitted_optionals and
-	type_defaults_for_omitted_optionals.  Also improved
-	epb_compatibility when fields have [default=...] specified.
-	Thanks to Luke Bakken for finding and analyzing this.
+        * New options defaults_for_omitted_optionals and
+        type_defaults_for_omitted_optionals.  Also improved
+        epb_compatibility when fields have [default=...] specified.
+        Thanks to Luke Bakken for finding and analyzing this.
 
-	* Fix for accessing bin/protoc-erl via symlinks. Thanks to
-	Wang Chao.
+        * Fix for accessing bin/protoc-erl via symlinks. Thanks to
+        Wang Chao.
 
-	* Clarified licensing conditions. Thanks to Luke Bakken for
-	proposing this.
+        * Clarified licensing conditions. Thanks to Luke Bakken for
+        proposing this.
 
-	* Fixes for type-default handling for proto3.
+        * Fixes for type-default handling for proto3.
 
-	* Fixes for Erlang 19 (eunit and dialyzer)
+        * Fixes for Erlang 19 (eunit and dialyzer)
 
 Version 3.25.2
 2016-Aug-25
 
-	* New options: mapfields_as_maps, defs_as_maps and msgs_as_maps
-	(-mapfields-as-maps, -defs-as-maps and -msgs-as-maps). Previously,
-	these were all the same maps option, but now the maps option
-	merely expands to the above.
+        * New options: mapfields_as_maps, defs_as_maps and msgs_as_maps
+        (-mapfields-as-maps, -defs-as-maps and -msgs-as-maps). Previously,
+        these were all the same maps option, but now the maps option
+        merely expands to the above.
 
 Version 3.25.1
 2016-Aug-24
 
-	* New option, epb_functions, to control generation of epb
-	compatibility functions encode/1, decode/2 etc. The
-	epb_compatibility option now implies also epb_functions.
+        * New option, epb_functions, to control generation of epb
+        compatibility functions encode/1, decode/2 etc. The
+        epb_compatibility option now implies also epb_functions.
 
-	* Fix for the by_proto sub-option to msg_name_prefix for map-type
-	fields. Thanks to Tristan Sloughter.
+        * Fix for the by_proto sub-option to msg_name_prefix for map-type
+        fields. Thanks to Tristan Sloughter.
 
-	* Add parsing of stream indicator to rpc service definitions.
+        * Add parsing of stream indicator to rpc service definitions.
 
-	* Fix bug in fetch_rpc_def/2 for options maps (-maps) and
-	defs_as_proplists (-pldefs).
+        * Fix bug in fetch_rpc_def/2 for options maps (-maps) and
+        defs_as_proplists (-pldefs).
 
 Version 3.25.0
 2016-Aug-16
 
-	* Fix a crash for message name prefixing and suffixing or
-	lower-casing for oneof, and also handle this for map<_,_> fields.
-	Thanks to Tristan Sloughter.
-	* Add an option, msg_name_to_snake_case, to turn SomeMsgName into
-	some_msg_name. Thanks to Tristan Sloughter.
-	* Improve rebar3 compatibility. Thanks to Tristan Sloughter.
-	* Make it possible to specify msg name prefix on a per-proto-file
-	basis using the by_proto sub-option. Thanks to Tristan Sloughter.
-	* Make the epb_compatibility option also imply the
-	msg_name_to_lower option, and a "_pb" module_name_suffix option.
-	* Add gpb_compile:string/2,3 to compile from a string
-	* Add an option, import_fetcher to make it possible to specify
-	an alternate source of imported files, instead of using the file
-	system.
-	* Add examples to the README
+        * Fix a crash for message name prefixing and suffixing or
+        lower-casing for oneof, and also handle this for map<_,_> fields.
+        Thanks to Tristan Sloughter.
+        * Add an option, msg_name_to_snake_case, to turn SomeMsgName into
+        some_msg_name. Thanks to Tristan Sloughter.
+        * Improve rebar3 compatibility. Thanks to Tristan Sloughter.
+        * Make it possible to specify msg name prefix on a per-proto-file
+        basis using the by_proto sub-option. Thanks to Tristan Sloughter.
+        * Make the epb_compatibility option also imply the
+        msg_name_to_lower option, and a "_pb" module_name_suffix option.
+        * Add gpb_compile:string/2,3 to compile from a string
+        * Add an option, import_fetcher to make it possible to specify
+        an alternate source of imported files, instead of using the file
+        system.
+        * Add examples to the README
 
 Version 3.24.4
 2016-Aug-08
 
-	* Proto3: Fix encoding of repeated fields of types string, bytes
-	and sub messages. These were erroneously defaulted to packed.
-	* Proto3: Fix parsing of unused fields: non-repeated message
-	fields are optional, but were erroneously parsed as required,
-	thanks to Tyler Margison for fixing.
-	* A new Erlang Protobuffs option: epb_compatibility (-epb):
-	If this option is specified, generate also functions encode/1,
-	decode/1, encode_<MsgName>/1 and decode_<MsgName>/1.
-	* Simplified interface for verifying translators for
-	google.protobuf.Any messages: the '$errorf' is deprecated.
+        * Proto3: Fix encoding of repeated fields of types string, bytes
+        and sub messages. These were erroneously defaulted to packed.
+        * Proto3: Fix parsing of unused fields: non-repeated message
+        fields are optional, but were erroneously parsed as required,
+        thanks to Tyler Margison for fixing.
+        * A new Erlang Protobuffs option: epb_compatibility (-epb):
+        If this option is specified, generate also functions encode/1,
+        decode/1, encode_<MsgName>/1 and decode_<MsgName>/1.
+        * Simplified interface for verifying translators for
+        google.protobuf.Any messages: the '$errorf' is deprecated.
 
 Version 3.24.3
 2016-Jul-29
 
-	* Decode unknown enums to integers. Integers are allowed for
-	encoding, for symmetry. Thanks to Eric Meadows-Jönsson for
-	suggesting.
-	* Fix epb compat function when the .proto contained no
-	messages, and the maps option was specified.
-	* Fix a bad type spec for the generated encode_msg, to make
-	dialyzer happier again about the generated code.
+        * Decode unknown enums to integers. Integers are allowed for
+        encoding, for symmetry. Thanks to Eric Meadows-Jönsson for
+        suggesting.
+        * Fix epb compat function when the .proto contained no
+        messages, and the maps option was specified.
+        * Fix a bad type spec for the generated encode_msg, to make
+        dialyzer happier again about the generated code.
 
 Version 3.24.2
 2016-Jul-25
 
-	* Fix parsing of rpc method options. Thanks to Tony Han for
-	reporting.
+        * Fix parsing of rpc method options. Thanks to Tony Han for
+        reporting.
 
 Version 3.24.1
 2016-Jul-25
 
-	* In 3.24.0, the input encoding was effectively changed to UTF-8,
-	whereas it previously was not defined, but in practice
-	it was latin1. Now, both for backwards compatibility, and also
-	for similarity with the behaviour of Google protobuf, treat the
-	input format as UTF-8 if possible, and fallback to latin1.
+        * In 3.24.0, the input encoding was effectively changed to UTF-8,
+        whereas it previously was not defined, but in practice
+        it was latin1. Now, both for backwards compatibility, and also
+        for similarity with the behaviour of Google protobuf, treat the
+        input format as UTF-8 if possible, and fallback to latin1.
 
 Version 3.24.0
 2016-Jul-23
 
-	* Several improvements for compatibility with Erlang protobuffs,
-	thanks to Luke Bakken for all of these:
-	-- bool fields: Accept also 0 and 1 on encoding
-	-- bytes fields: Accept also iolists on encoding
-	-- API: Add compatibility functions encode/1 and decode/2
-	* Accept an UTF-8 byte order mark (BOM). This is accepted by Google
-	protobuf 3.0.0. Thanks to Julius Beckmann for highlighting this.
-	* Related to the UTF-8 BOM, UTF-8-decode the input .proto files, and
-	UTF-8-encode the generated files.
+        * Several improvements for compatibility with Erlang protobuffs,
+        thanks to Luke Bakken for all of these:
+        -- bool fields: Accept also 0 and 1 on encoding
+        -- bytes fields: Accept also iolists on encoding
+        -- API: Add compatibility functions encode/1 and decode/2
+        * Accept an UTF-8 byte order mark (BOM). This is accepted by Google
+        protobuf 3.0.0. Thanks to Julius Beckmann for highlighting this.
+        * Related to the UTF-8 BOM, UTF-8-decode the input .proto files, and
+        UTF-8-encode the generated files.
 
 Version 3.23.2
 2016-Jul-19
 
-	* Bugfix compilation error with rebar on Erlang R16 and earlier.
+        * Bugfix compilation error with rebar on Erlang R16 and earlier.
 
 Version 3.23.1
 2016-Jul-19
 
-	* It is now possible to pass user-data---via an option to the
-	generated encode_msg, decode_msg, merge_msgs and verify_msg
-	functions---to translators for google.protobuf.Any messages.
-	* Type specs for strings now say iolist, because this is what they
-	accept on encoding. On decoding, they always return strings or
-	binaries depending on the strings_as_binary (-strbin) option.
-	* Correct benchmark measurements.
+        * It is now possible to pass user-data---via an option to the
+        generated encode_msg, decode_msg, merge_msgs and verify_msg
+        functions---to translators for google.protobuf.Any messages.
+        * Type specs for strings now say iolist, because this is what they
+        accept on encoding. On decoding, they always return strings or
+        binaries depending on the strings_as_binary (-strbin) option.
+        * Correct benchmark measurements.
 
 Version 3.23.0
 2016-Jul-12
 
-	* Add possibility---the any_translate option---to specify a
-	callback for translating (packing on encode and unpacking on
-	decode) google.protobuf.Any types.
+        * Add possibility---the any_translate option---to specify a
+        callback for translating (packing on encode and unpacking on
+        decode) google.protobuf.Any types.
 
 Version 3.22.5
 2016-Jun-30
 
-	* Bugfix a regression, which was introduced in 3.22.4, so that it
-	is now again possible use integers for floating point fields, in
-	the call to encode_msg. Thanks to Ilya Khaprov for spotting this.
+        * Bugfix a regression, which was introduced in 3.22.4, so that it
+        is now again possible use integers for floating point fields, in
+        the call to encode_msg. Thanks to Ilya Khaprov for spotting this.
 
 Version 3.22.4
 2016-Jun-30
 
-	* For floats, handle infinity, and not a number.  They are
-	represented as the atoms infinity, '-infinity' and nan.  Thanks to
-	Ilya Khaprov for reporting this and hinting at a solution.
+        * For floats, handle infinity, and not a number.  They are
+        represented as the atoms infinity, '-infinity' and nan.  Thanks to
+        Ilya Khaprov for reporting this and hinting at a solution.
 
 Version 3.22.3
 2016-Jun-15
 
-	* Running the eunit tests previously caused the files x.erl and
-	x.hrl to be created as a side-effect, this has been fixed: they
-	are no longer created.
-	* Don't include the timestamp in a comment in the generated source
-	code, for the purpose of reproducible builds.
+        * Running the eunit tests previously caused the files x.erl and
+        x.hrl to be created as a side-effect, this has been fixed: they
+        are no longer created.
+        * Don't include the timestamp in a comment in the generated source
+        code, for the purpose of reproducible builds.
 
 Version 3.22.2
 2016-Jun-04
 
-	* For proto3, automatically find well-known types in imports,
-	without the user explicitly having to specify include paths.
-	This is done by adding an internal include path last.
+        * For proto3, automatically find well-known types in imports,
+        without the user explicitly having to specify include paths.
+        This is done by adding an internal include path last.
 
 Version 3.22.1
 2016-Jun-03
 
-	* Fix an bug in the generated code in Erlang 17. An attribute to
-	mute dialyzer, for generated verifiers, wasn't available until
-	Erlang 18, but erroneously used with too old Erlang versions.
-	* Fix an bug in the generated code for fields of type
-	map<KeyType,ValueType> for Erlang 17. A syntax that wasn't
-	available until Erlang 18 was erroneously used already
-	with Erlang 17.
+        * Fix an bug in the generated code in Erlang 17. An attribute to
+        mute dialyzer, for generated verifiers, wasn't available until
+        Erlang 18, but erroneously used with too old Erlang versions.
+        * Fix an bug in the generated code for fields of type
+        map<KeyType,ValueType> for Erlang 17. A syntax that wasn't
+        available until Erlang 18 was erroneously used already
+        with Erlang 17.
 
 Version 3.22.0
 2016-Jun-03
 
-	* Add proto3 support to a rudimentary level: support for the new
-	syntax and semantics, but not yet any well-known types, or any
-	JSON mapping.
-	* Fix more dialyzer errors in the generated code.
-	* For Erlang 19, use := for the type specs for maps for mandatory
-	fields (required and repeated). For earlier Erlang versions,
-	fallback to using the => notation.
-	* Improve the error when an import file is not found, to make it
-	easier to trouble-shoot search path problems.
+        * Add proto3 support to a rudimentary level: support for the new
+        syntax and semantics, but not yet any well-known types, or any
+        JSON mapping.
+        * Fix more dialyzer errors in the generated code.
+        * For Erlang 19, use := for the type specs for maps for mandatory
+        fields (required and repeated). For earlier Erlang versions,
+        fallback to using the => notation.
+        * Improve the error when an import file is not found, to make it
+        easier to trouble-shoot search path problems.
 
 Version 3.21.3
 2016-May-30
 
-	* Add support for extending messages in other packages.  As part
-	of this, also fixup resolution of what 'extend' refers to.
-	Thanks to Steven Gravell for reporting and providing code
-	outlining the way to go.
-	* Fix a bug if a message is 'extend'ed more than once.
+        * Add support for extending messages in other packages.  As part
+        of this, also fixup resolution of what 'extend' refers to.
+        Thanks to Steven Gravell for reporting and providing code
+        outlining the way to go.
+        * Fix a bug if a message is 'extend'ed more than once.
 
 Version 3.21.2
 2016-May-27
 
-	* Make it easier to HiPE compile benchmarks. Thanks to Luke
-	Bakken.
-	* Fix dialyzer error in the generated code, in verifiers for
-	repeated fields, with the -Wunmatched_returns flag to dialyzer.
-	Thanks to Luke Bakken for reporting this.
+        * Make it easier to HiPE compile benchmarks. Thanks to Luke
+        Bakken.
+        * Fix dialyzer error in the generated code, in verifiers for
+        repeated fields, with the -Wunmatched_returns flag to dialyzer.
+        Thanks to Luke Bakken for reporting this.
 
 Version 3.21.1
 2016-May-25
 
-	* Improve performance slightly for maps by replacing calls to
-	maps:find with map matching expressions. On the benchmarks, it
-	only yields a 2-7% speedup, but the generated code looks nicer.
-	* Refine the type definitions in gpb.hrl
-	* Make dialyzer happy about gpb. (It is also happy about generated
-	code.)
-	* Several benchmark updates:
-	-- Make it easier to run benchmarks for code generated with -maps.
-	-- Update the benchmarks/README.txt, thanks to Luke Bakken.
-	-- Use pkg-config if present to get protobuf lib information,
-	   thanks to Luke Bakken.
-	-- Use which to find protoc command, else use PROTOC or PROTOHOME,
-	   thanks to Luke Bakken.
-	-- Pass CXXFLAGS to C++ compiler so that include path to erl_nif.h
-	   can be specified, thanks to Luke Bakken.
+        * Improve performance slightly for maps by replacing calls to
+        maps:find with map matching expressions. On the benchmarks, it
+        only yields a 2-7% speedup, but the generated code looks nicer.
+        * Refine the type definitions in gpb.hrl
+        * Make dialyzer happy about gpb. (It is also happy about generated
+        code.)
+        * Several benchmark updates:
+        -- Make it easier to run benchmarks for code generated with -maps.
+        -- Update the benchmarks/README.txt, thanks to Luke Bakken.
+        -- Use pkg-config if present to get protobuf lib information,
+           thanks to Luke Bakken.
+        -- Use which to find protoc command, else use PROTOC or PROTOHOME,
+           thanks to Luke Bakken.
+        -- Pass CXXFLAGS to C++ compiler so that include path to erl_nif.h
+           can be specified, thanks to Luke Bakken.
 
 Version 3.21.0
 2016-May-17
 
-	* Add support for map fields, ie fields of type
-	map<KeyType,ValueType>. Only scalars (but not enums) and strings
-	(not bytes) are allowed as keys. Any type, except maps, is
-	allowed as value. Map fields are about to make it into Google
-	protobuf 3.0.0, which as of this writing is still in beta. It
-	appears it will be available in 3.0.0 for both proto2 and proto3
-	syntaxes. (So far, gpb does not support proto3 at all.) Map fields
-	have been tested with Google protobuf 3.0.0-beta2.
-	The erlang-internal representation of a map<_,_> field is a list
-	of 2-tuples---the order is undefined on decoding---or an Erlang map
-	if the maps option is used.
-	* Some option texts have been improved for the "protoc-erl --help"
-	command.
-	* With the maps option specified, the generated verifier now produces
-	a more helpful error if any non-optional fields are missing from
-	the map.
-	* The descriptor proto has been updated (the -descr option).
-	* The README has been updated.
+        * Add support for map fields, ie fields of type
+        map<KeyType,ValueType>. Only scalars (but not enums) and strings
+        (not bytes) are allowed as keys. Any type, except maps, is
+        allowed as value. Map fields are about to make it into Google
+        protobuf 3.0.0, which as of this writing is still in beta. It
+        appears it will be available in 3.0.0 for both proto2 and proto3
+        syntaxes. (So far, gpb does not support proto3 at all.) Map fields
+        have been tested with Google protobuf 3.0.0-beta2.
+        The erlang-internal representation of a map<_,_> field is a list
+        of 2-tuples---the order is undefined on decoding---or an Erlang map
+        if the maps option is used.
+        * Some option texts have been improved for the "protoc-erl --help"
+        command.
+        * With the maps option specified, the generated verifier now produces
+        a more helpful error if any non-optional fields are missing from
+        the map.
+        * The descriptor proto has been updated (the -descr option).
+        * The README has been updated.
 
 Version 3.20.3
 2016-May-04
 
-	* Encode negative int32 values using 64 bits, for interop with
-	other implementations. On decoding, assume either 32 or 64 bit
-	encodings can appear. This is what Google's protobuf (C++) does.
-	The same goes for negative enums. Thanks to YeJun Su for
-	reporting.
+        * Encode negative int32 values using 64 bits, for interop with
+        other implementations. On decoding, assume either 32 or 64 bit
+        encodings can appear. This is what Google's protobuf (C++) does.
+        The same goes for negative enums. Thanks to YeJun Su for
+        reporting.
 
 Version 3.20.2
 2016-Apr-08
 
-	* Don't try to generate default values for maps. Thanks to
-	Louis-Philippe Gauthier.
-	* Accept the syntax="proto2"; statement, but so far only "proto2".
-	Thanks to Louis-Philippe Gauthier for suggesting support of the
-	syntax statement.
+        * Don't try to generate default values for maps. Thanks to
+        Louis-Philippe Gauthier.
+        * Accept the syntax="proto2"; statement, but so far only "proto2".
+        Thanks to Louis-Philippe Gauthier for suggesting support of the
+        syntax statement.
 
 Version 3.20.1
 2016-Mar-17
 
-	* Bugfix the generated NIF code: if the .proto file specifies
-	package, then any enums must be specified with namespace. Thanks
-	to vesperusiak for reporting.
+        * Bugfix the generated NIF code: if the .proto file specifies
+        package, then any enums must be specified with namespace. Thanks
+        to vesperusiak for reporting.
 
 Version 3.20.0
 2016-Mar-01
 
-	* Add an option {erlc_compile_options,Str} (-erlc_compile_options Str)
-	for inserting a -compile(Str) option into the generated code.
-	Thanks to Guilherme Andrade.
+        * Add an option {erlc_compile_options,Str} (-erlc_compile_options Str)
+        for inserting a -compile(Str) option into the generated code.
+        Thanks to Guilherme Andrade.
 
 Version 3.19.0
 2016-Feb-04
 
-	* Add an option msg_name_to_lower (Cmdline: -msgtolower) for
-	changing all message name to lower case. Thanks to Roowe.
+        * Add an option msg_name_to_lower (Cmdline: -msgtolower) for
+        changing all message name to lower case. Thanks to Roowe.
 
 Version 3.18.10
 2015-Nov-27
 
-	* Fix bug with extend inside a message body. Thanks to Michael
-	Ries.
+        * Fix bug with extend inside a message body. Thanks to Michael
+        Ries.
 
 Version 3.18.9
 2015-Nov-17
 
-	* Support extend inside a message body. Thanks to Michael Ries.
+        * Support extend inside a message body. Thanks to Michael Ries.
 
 Version 3.18.8
 2015-Jun-24
 
-	* Fix another decoding/merging bug for maps with the option
-	maps_unset_optional=omitted, this time for oneof with sub messages
-	to be merged. This bug, too, was found with the quickcheck and
-	gpb-eqc.
+        * Fix another decoding/merging bug for maps with the option
+        maps_unset_optional=omitted, this time for oneof with sub messages
+        to be merged. This bug, too, was found with the quickcheck and
+        gpb-eqc.
 
 Version 3.18.7
 2015-Jun-17
 
-	* Fix typos in comments and texts. Thanks to Giacomo Olgeni for
-	spotting and fixing many.
+        * Fix typos in comments and texts. Thanks to Giacomo Olgeni for
+        spotting and fixing many.
 
 Version 3.18.6
 2015-Jun-10
 
-	* Implement support for maps in NIFs. As part of this, rework the
-	eunit tests to run the NIFs in a separate erlang vm, for stability.
+        * Implement support for maps in NIFs. As part of this, rework the
+        eunit tests to run the NIFs in a separate erlang vm, for stability.
 
 Version 3.18.5
 2015-May-29
 
-	* Fix a few decoding/merging bugs for maps with option
-	maps_unset_optional set to omitted. The bugs were found with the
-	help of quickcheck and the gpb-eqc.
-	* The gpb_compile_descr module was forgotten in the gpb.app.src
-	file, now it is included.
+        * Fix a few decoding/merging bugs for maps with option
+        maps_unset_optional set to omitted. The bugs were found with the
+        help of quickcheck and the gpb-eqc.
+        * The gpb_compile_descr module was forgotten in the gpb.app.src
+        file, now it is included.
 
 Version 3.18.4
 2015-May-09
 
-	* Include also the build in the hex.pm package. Thanks to Tilman
-	Holschuh for finding it out.
+        * Include also the build in the hex.pm package. Thanks to Tilman
+        Holschuh for finding it out.
 
 Version 3.18.3
 2015-May-08
 
-	* Include the protoc-erl in the hex.pm package. Thanks to Tilman
-	Holschuh for finding it out.
+        * Include the protoc-erl in the hex.pm package. Thanks to Tilman
+        Holschuh for finding it out.
 
 Version 3.18.2
 2015-May-08
 
-	* Bugfix the version tag in the hex.pm package. Thanks to Tilman
-	Holschuh.
-	* Bugfix decoding, for fields with optional submessages, for maps,
-	generated with the option maps_unset_optional set to omitted.
+        * Bugfix the version tag in the hex.pm package. Thanks to Tilman
+        Holschuh.
+        * Bugfix decoding, for fields with optional submessages, for maps,
+        generated with the option maps_unset_optional set to omitted.
 
 Version 3.18.1
 2015-Apr-29
 
-	* Bugfix the helper/package-for-hex.pm about the file name change
-	rebar.config -> rebar.config.script
+        * Bugfix the helper/package-for-hex.pm about the file name change
+        rebar.config -> rebar.config.script
 
 Version 3.18.0
 2015-Apr-29
 
-	* Add an option, maps_unset_optional, for omitting optional
-	values, for maps. With this option, there can now be an enumerator
-	value that is 'undefined' without any confusion if it is
-	optional. Thanks to Brett Bethke for prompting this to get
-	implemented.
-	* Test the generated code also for maps. This is ifdef-protected,
-	so it still works with older Erlang versions, but maps are not
-	tested then, of course. Due to this, the rebar.config has now
-	turned into rebar.config.script.
-	* Update the benchmarks to newer software versions and newer
-	hardware.
+        * Add an option, maps_unset_optional, for omitting optional
+        values, for maps. With this option, there can now be an enumerator
+        value that is 'undefined' without any confusion if it is
+        optional. Thanks to Brett Bethke for prompting this to get
+        implemented.
+        * Test the generated code also for maps. This is ifdef-protected,
+        so it still works with older Erlang versions, but maps are not
+        tested then, of course. Due to this, the rebar.config has now
+        turned into rebar.config.script.
+        * Update the benchmarks to newer software versions and newer
+        hardware.
 
 Version 3.17.13
 2015-Apr-16
 
-	* Bugfix verification of strings with the strings_as_binary
-	(-strbin) option. Thanks to Tilman Holschuh for fixing and to Luis
-	Rascão for adding a test for it.
+        * Bugfix verification of strings with the strings_as_binary
+        (-strbin) option. Thanks to Tilman Holschuh for fixing and to Luis
+        Rascão for adding a test for it.
 
 Version 3.17.12
 2015-Mar-08
 
-	* Bugfix exported types for CamelCase message names. Thanks to
-	Louis-Philippe Gauthier for fixing and to Luis Rascão for adding a
-	test for it.
+        * Bugfix exported types for CamelCase message names. Thanks to
+        Louis-Philippe Gauthier for fixing and to Luis Rascão for adding a
+        test for it.
 
 Version 3.17.11
 2015-Feb-23
 
-	* When generating typespecs, generate types for messages, and
-	export those types. Thanks to Luis Rascão.
+        * When generating typespecs, generate types for messages, and
+        export those types. Thanks to Luis Rascão.
 
 Version 3.17.10
 2015-Feb-17
 
-	* Fix Issues Building on Windows/Cygwin. Thanks to Brett Bethke.
+        * Fix Issues Building on Windows/Cygwin. Thanks to Brett Bethke.
 
 Version 3.17.9
 2015-Jan-30
 
-	* When generating typespecs, generate types for enums, and export
-	those types. Thanks to Luis Rascão.
+        * When generating typespecs, generate types for enums, and export
+        those types. Thanks to Luis Rascão.
 
 Version 3.17.8
 2015-Jan-25
 
-	* Add support for the enum "option allow_alias = true;" which
-	allows more than one enum to have the same numerical value. Gpb
-	will decode to the first defined enum symbol. Gpb no longer
-	supports allow_alias = false. This option appeared in Google
-	Protobuf version 2.5.0. Thanks to bb4242 for reporting.
+        * Add support for the enum "option allow_alias = true;" which
+        allows more than one enum to have the same numerical value. Gpb
+        will decode to the first defined enum symbol. Gpb no longer
+        supports allow_alias = false. This option appeared in Google
+        Protobuf version 2.5.0. Thanks to bb4242 for reporting.
 
 Version 3.17.7
 2015-Jan-07
 
-	* Bugfix type specs for strings when using the strings_as_binaries
-	option. Thanks to Luis Rascão.
+        * Bugfix type specs for strings when using the strings_as_binaries
+        option. Thanks to Luis Rascão.
 
 Version 3.17.6
 2014-Dec-30
 
-	* Bugfix NIF linking in eunit tests on Mac. Thanks to Luis
-	Rascão.
+        * Bugfix NIF linking in eunit tests on Mac. Thanks to Luis
+        Rascão.
 
 Version 3.17.5
 2014-Dec-15
 
-	* Bugfix generated NIF code for with the -strbin option: the
-	utf8_to_uint32 function was unused, as was (mostly) the
-	utf8_count_codepoints. Thanks to Louis-Philippe Gauthier for
-	reporting.
+        * Bugfix generated NIF code for with the -strbin option: the
+        utf8_to_uint32 function was unused, as was (mostly) the
+        utf8_count_codepoints. Thanks to Louis-Philippe Gauthier for
+        reporting.
 
 Version 3.17.4
 2014-Dec-12
 
-	* Bugfix generated NIF code for enums defined within
-	messages. Thanks to Louis-Philippe Gauthier for reporting and
-	providing an initial solution.
-	* Bugfix generated NIF code for strings with the -strbin (or
-	strings_as_binaries) option. Thanks to Louis-Philippe Gauthier for
-	reporting and providing a solution.
+        * Bugfix generated NIF code for enums defined within
+        messages. Thanks to Louis-Philippe Gauthier for reporting and
+        providing an initial solution.
+        * Bugfix generated NIF code for strings with the -strbin (or
+        strings_as_binaries) option. Thanks to Louis-Philippe Gauthier for
+        reporting and providing a solution.
 
 
 Version 3.17.3
 2014-Dec-02
 
-	* Bugfix parsing of files that specify a package, and import other
-	files that also specify a(nother) package. Thanks to Wang Chao for
-	asking the question prompting me to fix this.
-	* Add a -pkgs command line option, for use_packages.
+        * Bugfix parsing of files that specify a package, and import other
+        files that also specify a(nother) package. Thanks to Wang Chao for
+        asking the question prompting me to fix this.
+        * Add a -pkgs command line option, for use_packages.
 
 Version 3.17.2
 2014-Nov-13
 
-	* Rework the option parsing. No functional changes.
-	* in helpers/git-hooks/pre-push, allow push of non-tagged
-	non-master branches to github.
+        * Rework the option parsing. No functional changes.
+        * in helpers/git-hooks/pre-push, allow push of non-tagged
+        non-master branches to github.
 
 Version 3.17.1
 2014-Oct-29
 
-	* Bugfix decoding oneof when for sub messages, in the data-driven
-	decoder in gpb. When the same oneof sub message appeared twice,
-	the oneof field was overwritten instead of merged. This did not
-	affect generated code. It only affected the gpb:decode_msg/3.
+        * Bugfix decoding oneof when for sub messages, in the data-driven
+        decoder in gpb. When the same oneof sub message appeared twice,
+        the oneof field was overwritten instead of merged. This did not
+        affect generated code. It only affected the gpb:decode_msg/3.
 
 Version 3.17.0
 2014-Oct-26
 
-	* Support oneof fields. It appeared in protobuf 2.6.0, and is
-	essentially several optional fields sharing the same record
-	position (memory in the C++ alternative).
-	* Make the name of the two records for fields and rpcs
-	configurable. They ought to have been prefixed with gpb_ long ago,
-	but that was not done. At least now, it is possible to redefine
-	the record names, in case of clashes.
-	* Handle services in descriptors.
-	* Bugfix compilation for descriptors.
+        * Support oneof fields. It appeared in protobuf 2.6.0, and is
+        essentially several optional fields sharing the same record
+        position (memory in the C++ alternative).
+        * Make the name of the two records for fields and rpcs
+        configurable. They ought to have been prefixed with gpb_ long ago,
+        but that was not done. At least now, it is possible to redefine
+        the record names, in case of clashes.
+        * Handle services in descriptors.
+        * Bugfix compilation for descriptors.
         * Add an option `warnings_as_errors' along with command line
-	options -Werror, -Wall, -W1, -W0 and -W, that mimimcs the options
-	to erlc. This also adds a new return value for failures: error.
+        options -Werror, -Wall, -W1, -W0 and -W, that mimimcs the options
+        to erlc. This also adds a new return value for failures: error.
 
 Version 3.16.0
 2014-Oct-13
 
-	* When generating NIF code, also do the encoding in the
-	NIF. Previously, the encoding was still done using plain Erlang,
-	only decoding was in the NIF. Now the NIF does both encoding and
-	decoding.
-	* Fix potential memory leak when decoding, for odd/unusual error
-	cases.
+        * When generating NIF code, also do the encoding in the
+        NIF. Previously, the encoding was still done using plain Erlang,
+        only decoding was in the NIF. Now the NIF does both encoding and
+        decoding.
+        * Fix potential memory leak when decoding, for odd/unusual error
+        cases.
 
 Version 3.15.0
 2014-Oct-13
 
-	* Specify that the NIF should run in a cpu-bound dirty scheduler
-	when supported. This currently requires Erlang 17.3 built with
-	--enable-dirty-schedulers. Thanks to Louis-Philippe Gauthier for
-	asking the question, prompting me get it done.
+        * Specify that the NIF should run in a cpu-bound dirty scheduler
+        when supported. This currently requires Erlang 17.3 built with
+        --enable-dirty-schedulers. Thanks to Louis-Philippe Gauthier for
+        asking the question, prompting me get it done.
 
 Version 3.14.0
 2014-Oct-01
 
-	* In the Makefile, allow ERL and ERLC to be overridden via
-	environment variables, thanks to Graham Crowe.
-	* Avoid, and attempt to handle, unicode output in compilation
-	errors in eunit tests.
+        * In the Makefile, allow ERL and ERLC to be overridden via
+        environment variables, thanks to Graham Crowe.
+        * Avoid, and attempt to handle, unicode output in compilation
+        errors in eunit tests.
 
 Version 3.13.0
 2014-Sep-17
 
-	* New way to invoke the compiler: bin/protoc-erl. Thanks to Luis
-	Rascão for the implementation.
+        * New way to invoke the compiler: bin/protoc-erl. Thanks to Luis
+        Rascão for the implementation.
 
 Version 3.12.2
 2014-Sep-16
 
-	* Fix a race condition in the Makefile between all and doc
-	* Elide falsely failing nif tests with 17 on 32 bits with an
-	erlang vm compiled with gcc 4.9.0 or newer.
+        * Fix a race condition in the Makefile between all and doc
+        * Elide falsely failing nif tests with 17 on 32 bits with an
+        erlang vm compiled with gcc 4.9.0 or newer.
 
 Version 3.12.1
 2014-Aug-12
 
-	* Update the README, with info on meta data for services. Thanks
-	to Luis Rascão.
+        * Update the README, with info on meta data for services. Thanks
+        to Luis Rascão.
 
 Version 3.12.0
 2014-Aug-12
 
-	* Add support for retrieving meta data for services. Rename
-	gpb_compile:msg_defs/2,3 into gpb_compile:proto_defs/2,3, but
-	retain the old function name and option names for backwards
-	compatibility. Thanks to Luis Rascão for the implementation.
+        * Add support for retrieving meta data for services. Rename
+        gpb_compile:msg_defs/2,3 into gpb_compile:proto_defs/2,3, but
+        retain the old function name and option names for backwards
+        compatibility. Thanks to Luis Rascão for the implementation.
 
 Version 3.11.0
 2014-Jul-20
 
-	* Add helpers for packaging to hex.pm. Thanks to Dylan Lukes and
-	Paul Schoenfelder for prompting this.
-	* Version numbers revisited, the version on github is now intended
-	to always be reltools compliant, ie: to always consist of only
-	integers and dots. Thanks to Volodymyr Kyrychenko
-	for taking the initiative to this.
+        * Add helpers for packaging to hex.pm. Thanks to Dylan Lukes and
+        Paul Schoenfelder for prompting this.
+        * Version numbers revisited, the version on github is now intended
+        to always be reltools compliant, ie: to always consist of only
+        integers and dots. Thanks to Volodymyr Kyrychenko
+        for taking the initiative to this.
 
 Version 3.10
 2014-Jun-26
 
-	* Bugfix verification of optional sub message fields, thanks to
-	Klas Johansson.
-	* Fix compilation warnings with Erlang/OTP 17.0
-	* Improve/bugfix eunit tests in gpb_codegen_tests and
-	gpb_compile_tests (compilation warning and nif include path issue,
-	respectively)
+        * Bugfix verification of optional sub message fields, thanks to
+        Klas Johansson.
+        * Fix compilation warnings with Erlang/OTP 17.0
+        * Improve/bugfix eunit tests in gpb_codegen_tests and
+        gpb_compile_tests (compilation warning and nif include path issue,
+        respectively)
 
 Version 3.9
 2014-Feb-04
 
-	* Avoid single field map access---ie expressions on the form
-	X#{key}---since neither the maps pre-release, nor the rc1 of R17
-	supports it. Use matching to access such fields instead. This
-	applies to records as well as maps. Performance is unaltered.
+        * Avoid single field map access---ie expressions on the form
+        X#{key}---since neither the maps pre-release, nor the rc1 of R17
+        supports it. Use matching to access such fields instead. This
+        applies to records as well as maps. Performance is unaltered.
 
 Version 3.8
 2014-Feb-01
 
-	* Bugfix generated code when there are no messages defined.
-	Thanks to Graham Crowe for reporting.
-	* Add possibility to suffix message/record and names and module
-	names.
+        * Bugfix generated code when there are no messages defined.
+        Thanks to Graham Crowe for reporting.
+        * Add possibility to suffix message/record and names and module
+        names.
 
 Version 3.7.1
 2013-Dec-14
 
-	* Bugfix a race condition in the Makefile. Thanks to Graham Crowe
-	for fruitful discussions.
-	* Rework the workaround for the bug in the syntax_tools in R16B03,
-	so that the code that uses the parse transform need not change.
-	Handle the odd case entirely in the parse transform.
+        * Bugfix a race condition in the Makefile. Thanks to Graham Crowe
+        for fruitful discussions.
+        * Rework the workaround for the bug in the syntax_tools in R16B03,
+        so that the code that uses the parse transform need not change.
+        Handle the odd case entirely in the parse transform.
 
 Version 3.7
 2013-Dec-13
 
-	* Add a (GNU) Makefile, for projects that prefer to build this
-	way. Thanks to Graham Crowe for suggestions and ideas.
-	* Rework/fix the substitution in gpb_version.hrl.
-	* Add support for Erlang/OTP R16B03, by working around a
-	bug in syntax_tools (reversion of local implicit funs).
-	* Change the months in this file, from numeric to 3-letters, to
-	avoid ambiguities with different ways of writing dates in various
-	parts of the world.
+        * Add a (GNU) Makefile, for projects that prefer to build this
+        way. Thanks to Graham Crowe for suggestions and ideas.
+        * Rework/fix the substitution in gpb_version.hrl.
+        * Add support for Erlang/OTP R16B03, by working around a
+        bug in syntax_tools (reversion of local implicit funs).
+        * Change the months in this file, from numeric to 3-letters, to
+        avoid ambiguities with different ways of writing dates in various
+        parts of the world.
 
 Version 3.6
 2013-Nov-13
 
-	* Add nif support for the strings_as_binaries (-strbin) option,
-	thanks to Louis-Philippe Gauthier for reporting this.
-	* Add an is_binary guard to the top-level generated decode_msg/2
-	function. Thanks to Klas Johansson for suggesting this.
+        * Add nif support for the strings_as_binaries (-strbin) option,
+        thanks to Louis-Philippe Gauthier for reporting this.
+        * Add an is_binary guard to the top-level generated decode_msg/2
+        function. Thanks to Klas Johansson for suggesting this.
 
 Version 3.5
 2013-Oct-27
 
-	* Licence change: from LGPL 2 to LGPL 2.1
+        * Licence change: from LGPL 2 to LGPL 2.1
 
 Version 3.4
 2013-Oct-27
 
-	* Licence modification/clarification: clarify that the licence (in
-	the file COPYING.LIB) does not cover code generated with gpb.
+        * Licence modification/clarification: clarify that the licence (in
+        the file COPYING.LIB) does not cover code generated with gpb.
 
 Version 3.3
 2013-Oct-27
 
-	* Fix several errors in the gpb.app.src so that it works with
-	Elixir and Relex, thanks to Paulo Almeida.
-	* When decoding, reject messages with invalid varints.
-	Invaid varints are encoded with too many bits. Previously,
-	decoding a varint with very many bits (ie: with very many leading
-	bytes > 128) would cause the Erlang VM to construct a very large
-	number when decoding the varint. This would cause the Erlang VM to
-	use excessive cpu resources and could eventually cause the Erlang
-	VM to run out of memory. Now parsing fails immediately reading too
-	many varint bits.
-	* Fix a bug when generating code for maps.
-	* Teach the benchmarks to do maps, and also improve
-	various other benchmark related things.
+        * Fix several errors in the gpb.app.src so that it works with
+        Elixir and Relex, thanks to Paulo Almeida.
+        * When decoding, reject messages with invalid varints.
+        Invaid varints are encoded with too many bits. Previously,
+        decoding a varint with very many bits (ie: with very many leading
+        bytes > 128) would cause the Erlang VM to construct a very large
+        number when decoding the varint. This would cause the Erlang VM to
+        use excessive cpu resources and could eventually cause the Erlang
+        VM to run out of memory. Now parsing fails immediately reading too
+        many varint bits.
+        * Fix a bug when generating code for maps.
+        * Teach the benchmarks to do maps, and also improve
+        various other benchmark related things.
 
 Version 3.2
 2013-Sep-16
 
-	* Add preliminary support for maps, for generating code that
-	encodes from and decodes to maps, as well as merges and verifies
-	maps. The maps support is experimental.
-	* Bugfix verification of integers: the wrong error reason could be
-	generated for integers out of range.
-	* Bugfix various dialyzer issues.
+        * Add preliminary support for maps, for generating code that
+        encodes from and decodes to maps, as well as merges and verifies
+        maps. The maps support is experimental.
+        * Bugfix verification of integers: the wrong error reason could be
+        generated for integers out of range.
+        * Bugfix various dialyzer issues.
 
 Version 3.1
 2013-Sep-05
 
-	* Bugfix compilation of several files (only the first file
-	was actually compiled, even if several files were specified)
-	* Add possibility to generate and encode a descriptor, which is a
-	self-describing byte-blob according to descriptor.proto.
-	* Add possibility to make the generated code compile-time
-	independent of gpb by generating the introspection information to
-	proplists instead of to #field{} records. The latter required
-	including gpb.hrl at compiletime. (There's no run-time dependency)
-	* Add possibility to prefix message/record and names and module
-	names to avoid name collisions.
-	* Add -type to the command line options, thanks to Louis-Philippe
-	Gauthier. Previously it existed only as an Erlang API option.
+        * Bugfix compilation of several files (only the first file
+        was actually compiled, even if several files were specified)
+        * Add possibility to generate and encode a descriptor, which is a
+        self-describing byte-blob according to descriptor.proto.
+        * Add possibility to make the generated code compile-time
+        independent of gpb by generating the introspection information to
+        proplists instead of to #field{} records. The latter required
+        including gpb.hrl at compiletime. (There's no run-time dependency)
+        * Add possibility to prefix message/record and names and module
+        names to avoid name collisions.
+        * Add -type to the command line options, thanks to Louis-Philippe
+        Gauthier. Previously it existed only as an Erlang API option.
 
 Version 3.0
 2013-Aug-24
-	* Improve decoding performance by roughly 8--19%
-	* Completely rewrite the code generator. Use a parse-transform
-	  instead of formatting and assembling strings.
-	* Minor improvement in the generated code for version_as_list.
+        * Improve decoding performance by roughly 8--19%
+        * Completely rewrite the code generator. Use a parse-transform
+          instead of formatting and assembling strings.
+        * Minor improvement in the generated code for version_as_list.
 
 Version 2.3
 2013-Aug-18
-	* Fix Rebar compile on non-GNU systems, such as Mac OS X, thanks
-	to Everton Ribeiro.
-	* Bugfix (mostly) rare compilation breakage: depending on the
-	date/time of generation, a new-line was inserted, causing a
-	compilation error.
-	* Ignore non-version-like tags
+        * Fix Rebar compile on non-GNU systems, such as Mac OS X, thanks
+        to Everton Ribeiro.
+        * Bugfix (mostly) rare compilation breakage: depending on the
+        date/time of generation, a new-line was inserted, causing a
+        compilation error.
+        * Ignore non-version-like tags
 
 Version 2.2
 2013-Jul-13
 
-	* Wrap generated skip-functions with quotes. Thanks to jesse-ad.
-	* Experimental support for calling protoc code via a NIF
-	* Empty lists are now default values for repeated fields. Thanks
-	to Martin Donath.
-	* New option, use_packages for prepending the package name found
-	in the proto file, to the message names. Thanks to Martin Donath.
-	* New option: strings_as_binaries (-strbin), for returning strings
-	as binaries. Thanks to Lars Thorsen for suggesting this option.
-	* New option: {o_erl,Dir} (-o-erl Dir), {o_hrl,Dir} (-o-hrl Dir)
-	and {o_nif_cc,Dir} (-o-nif-cc Dir) to specify destination
-	directory by file type. Thanks to Patrik Sandahl for suggesting
-	those options.
-	* New option: include_as_lib (-il) to include gpb.hrl as a
-	library. This makes it easier to integrate with rebar. Thanks to
-	Martin Donath.
-	* Generate introspection functions for enum conversions:
-	M:enum_symbol_by_value/2, M:enum_value_by_symbol/2,
-	M:enum_symbol_by_value_<Enum>/1, M:enum_value_by_symbol_<Enum>/1;
-	thanks to Patrik Sandahl for suggesting those functions.
-	* Bugfix name resolution. Thanks to Heiner Bunjes for reporting
-	the bug. This prompted a major rewrite of the name resolution code
-	that was originally a quick patch-work, and not in very good shape.
-	* Handle C-style comments. Thanks to Patrik Sandahl for reporting
-	this bug.
-	* Add a section to the README.md showing rebar integration, thanks
-	to Bin Wang for asking the question that prompted me to write it
-	up.
-	* Bugfix command line option parsing using the -extra alternative.
-	* Benchmark code improvements.
-	* Build: version number: defined format and enforced/verified
-	consistency between gpb_version.hrl and src/gpb.app.src: using the
-	git tag as the source of information.
+        * Wrap generated skip-functions with quotes. Thanks to jesse-ad.
+        * Experimental support for calling protoc code via a NIF
+        * Empty lists are now default values for repeated fields. Thanks
+        to Martin Donath.
+        * New option, use_packages for prepending the package name found
+        in the proto file, to the message names. Thanks to Martin Donath.
+        * New option: strings_as_binaries (-strbin), for returning strings
+        as binaries. Thanks to Lars Thorsen for suggesting this option.
+        * New option: {o_erl,Dir} (-o-erl Dir), {o_hrl,Dir} (-o-hrl Dir)
+        and {o_nif_cc,Dir} (-o-nif-cc Dir) to specify destination
+        directory by file type. Thanks to Patrik Sandahl for suggesting
+        those options.
+        * New option: include_as_lib (-il) to include gpb.hrl as a
+        library. This makes it easier to integrate with rebar. Thanks to
+        Martin Donath.
+        * Generate introspection functions for enum conversions:
+        M:enum_symbol_by_value/2, M:enum_value_by_symbol/2,
+        M:enum_symbol_by_value_<Enum>/1, M:enum_value_by_symbol_<Enum>/1;
+        thanks to Patrik Sandahl for suggesting those functions.
+        * Bugfix name resolution. Thanks to Heiner Bunjes for reporting
+        the bug. This prompted a major rewrite of the name resolution code
+        that was originally a quick patch-work, and not in very good shape.
+        * Handle C-style comments. Thanks to Patrik Sandahl for reporting
+        this bug.
+        * Add a section to the README.md showing rebar integration, thanks
+        to Bin Wang for asking the question that prompted me to write it
+        up.
+        * Bugfix command line option parsing using the -extra alternative.
+        * Benchmark code improvements.
+        * Build: version number: defined format and enforced/verified
+        consistency between gpb_version.hrl and src/gpb.app.src: using the
+        git tag as the source of information.
 
 Version 2.1
 2011-Oct-31  Tomas Abrahamsson  <tomas.abrahamsson@gmail.com>
 
-	* Package names are dotted rather than with underscores
-	* New generated introspection function: M:get_package_name/0.
+        * Package names are dotted rather than with underscores
+        * New generated introspection function: M:get_package_name/0.
 
 Version 2.0
 2011-Jul-10  Tomas Abrahamsson  <tab@lysator.liu.se>
 
-	* First public version
+        * First public version

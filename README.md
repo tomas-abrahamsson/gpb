@@ -580,10 +580,13 @@ for building outside of a git work tree, run the
 `helpers/export-from-git` script from a git work tree. The export script
 will create a tar file with the version number already substituted.
 
-In particular, the requirement on a git work tree (to get the
-version number right) unfortunately also means that it does not work
-to build github's automatically created release tar balls.
+When downloading a version from github, make sure to grab the 
+*gpb-_<x.y.z>_.tar.gz* files, since these have been created
+using the export-from-git script.
 
+Avoid Github's automatic _Source code_ zip or tar.gz archives for gpb,
+as the version numbering is not correct in these, or re-export them
+with the `--override-version=<x>` option to the `export-from-git` helper.
 
 Related projects
 ----------------
