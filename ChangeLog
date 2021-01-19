@@ -1,5 +1,13 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.16.1
+2020-Jan-19
+
+        * Create Github releases on upload of new tagged versions.
+          This is done by a workflow script.
+        * Bugfix the export-from-git helper script.
+          Except for this fix, this release contains no functional change.
+
 Version 4.16.0
 2020-Nov-26
 
