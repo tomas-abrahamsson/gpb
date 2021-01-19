@@ -1,0 +1,23 @@
+#! /bin/bash
+
+cdup=$(git rev-parse --show-toplevel) &&
+cd "$cdup" || {
+    echo >&2 "Cannot chdir to $cdup, the toplevel of the working tree"
+    exit 1
+}
+
+cat ChangeLog | \
+    awk '/Version.*[0-9]+/ {
+    do {
+        if ($0 ~ / {8,}+/)
+        {
+            print substr($0, 9);
+        }
+        else
+        {
+            print $0;
+        }
+        getline;
+    } while ($0 !~ /Version.*[0-9.]+/)
+    exit;
+}'

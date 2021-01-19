@@ -2,8 +2,17 @@
 
 usage () {
     cat <<EOF
-Usage: $(basename "$0")
-Demonstration script to create a tar file of gpb,
+Usage: $(basename "$0") [options]
+Options:
+    --override-version=VERSION
+        Normally the version is automatically extracted from the git
+        history.  This option allows to overwride it to a specific value.
+        One usecase is in a github workflow action where either tags
+        are not pesent, or the git history is not present due to a shallow
+        checkout (for instance due to an old git version in a docker),
+        but the version is known anyway.
+
+Script to create a tar file of gpb,
 such that it can build outside of the gpb git repo.
 EOF
 }
@@ -17,9 +26,25 @@ cd "$cdup" || {
 dest_dir=$(mktemp -d "tmp-export-XXXXXXXX")
 trap "ec=\$?; /bin/rm -rf '$dest_dir'; exit \$ec" 0 INT QUIT TERM
 
+vsn=undefined
+opts_done=false
+get_opt_val () { echo "${1#*=}"; }
+while [ $opts_done = false ]
+do
+    case "$1" in
+        --override-version=*) vsn=$(get_opt_val "$1"); shift;;
+        --help|-h) usage; exit 0;;
+        -*) echo "Unrecognized option '$1'" >&2; exit 1;;
+        *) opts_done=true;;
+    esac
+done
+
 set -e
 
-vsn=$(git describe --always --tags --match '[0-9]*.[0-9]*')
+if [ x"$vsn" = xundefined ]
+then
+    vsn=$(git describe --always --tags --match '[0-9]*.[0-9]*')
+fi
 echo "Exporting version $vsn -> gpb-$vsn.tar.gz"
 
 mkdir "$dest_dir/gpb-$vsn"
