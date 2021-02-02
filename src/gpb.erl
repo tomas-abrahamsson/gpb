@@ -1359,8 +1359,7 @@ mk_type_error(Error, ValueSeen, Path) ->
     Path2 = if Path == [] ->
                     top_level;
                true ->
-                    PStr = gpb_lib:dot_join([atom_to_list(E) || E <- Path]),
-                    list_to_atom(PStr)
+                    gpb_lib:dot_join([atom_to_list(E) || E <- Path])
             end,
     erlang:error({gpb_type_error, {Error, [{value, ValueSeen},{path, Path2}]}}).
 

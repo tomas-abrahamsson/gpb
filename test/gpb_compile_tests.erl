@@ -1683,7 +1683,7 @@ verify_callback_with_and_without_errorf_test() ->
                 {decode,{?MODULE,any_d_atom,['$1']}},
                 {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
     ok = Mod1:verify_msg(#m1{a=abc}),
-    ?assertError({gpb_type_error,{not_an_atom,[{value,123},{path,'m1.a'}]}},
+    ?assertError({gpb_type_error,{not_an_atom,[{value,123},{path,"m1.a"}]}},
                  Mod1:verify_msg(#m1{a=123})),
     unload_code(Mod1),
 
@@ -1695,7 +1695,7 @@ verify_callback_with_and_without_errorf_test() ->
                 {decode,{?MODULE,any_d_atom,['$1']}},
                 {verify,{?MODULE,any_v_atom,['$1']}}]}]), % no '$errorf'
     ok = Mod2:verify_msg(#m1{a=abc}),
-    ?assertError({gpb_type_error,{oops_no_atom,[{value,123},{path,'m1.a'}]}},
+    ?assertError({gpb_type_error,{oops_no_atom,[{value,123},{path,"m1.a"}]}},
                  Mod2:verify_msg(#m1{a=123})),
     unload_code(Mod2).
 

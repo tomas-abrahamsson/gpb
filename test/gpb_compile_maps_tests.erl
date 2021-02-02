@@ -355,7 +355,7 @@ required_group_test() ->
     B = Mod:encode_msg(M, m1),
     M = Mod:decode_msg(B, m1),
     ok = Mod:verify_msg(#{g => #{gf => 17}}, m1),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g.gf'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.g.gf"}]}},
                  Mod:verify_msg(#{g => #{gf => x}}, m1)),
     unload_code(Mod).
 
@@ -381,11 +381,11 @@ repeated_and_optional_group_test() ->
     ok = Mod:verify_msg(#{g => []}, m1),
     ok = Mod:verify_msg(#{g => [#{gf => 17},#{gf => 18}]}, m1),
     ok = Mod:verify_msg(#{g => [], h => #{hf => 4711}}, m1),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.g"}]}},
                  Mod:verify_msg(#{g => #{gf => x}}, m1)),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g.gf'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.g.gf"}]}},
                  Mod:verify_msg(#{g => [#{gf => x}]}, m1)),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.h.hf'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.h.hf"}]}},
                  Mod:verify_msg(#{g => [], h => #{hf => x}}, m1)),
     unload_code(Mod).
 
