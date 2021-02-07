@@ -90,8 +90,9 @@ format_maps_as_msgs_record_defs(MapsAsMsgs) ->
 
 format_export_types(Defs, AnRes, Opts) ->
     #t_env{type_specs=TypeSpecs} = TEnv = t_env(Opts),
+    AllMsgsTypesText = format_all_msgs_types(Defs, AnRes, TEnv),
     if not TypeSpecs ->
-            "";
+            AllMsgsTypesText;
        TypeSpecs ->
             iolist_to_binary(
               ["%% enumerated types\n",
@@ -111,7 +112,54 @@ format_export_types(Defs, AnRes, Opts) ->
                   [gpb_lib:comma_join(
                      ["'"++atom_to_list(Name)++"'/0"
                       || {_, Name, _} <- gpb_lib:msgs_or_groups(Defs)])]),
-               "\n"])
+               "\n",
+               AllMsgsTypesText])
+    end.
+
+format_all_msgs_types(Defs, AnRes,
+                      #t_env{type_specs=TypeSpecs,
+                             mapping_and_unset=MappingAndUnset}) ->
+    MsgNames = gpb_lib:msg_names(Defs),
+    StrNames = if MsgNames == [] ->
+                       "none()";
+                  MsgNames /= [] ->
+                       gpb_lib:or_join([?f("~p", [Nm]) || Nm <- MsgNames])
+               end,
+
+    StrTypes =
+        if MsgNames == [] ->
+                "none()";
+           not TypeSpecs,
+           MappingAndUnset == records ->
+                gpb_lib:or_join([?f("#~p{}", [Nm]) || Nm <- MsgNames]);
+           not TypeSpecs,
+           is_record(MappingAndUnset, maps) ->
+                "map()";
+           TypeSpecs ->
+                TypeNames = [rename_msg_type(Name, AnRes) || Name <- MsgNames],
+                gpb_lib:or_join([?f("~p()", [Nm]) || Nm <- TypeNames])
+        end,
+
+    %% Use "$" to so types won't collide with messages' types.
+    MsgNamesType = ?f("-type '$msg_name'() :: ~s.~n", [StrNames]),
+    MsgsType = ?f("-type '$msg'() :: ~s.~n", [StrTypes]),
+
+    ExportTypes = "-export_type(['$msg_name'/0, '$msg'/0]).\n",
+
+    if MsgNames == [],
+       not TypeSpecs ->
+            %% No type specs and no messages: no -spec for eg encode_msg
+            %% will refer to this, so don't generate anything
+            "";
+       TypeSpecs ->
+            [MsgNamesType,
+             MsgsType,
+             ExportTypes];
+       not TypeSpecs ->
+            %% The generated encode_msg (eg) will refer to this,
+            %% but don't export the types.
+            [MsgNamesType,
+             MsgsType]
     end.
 
 format_enum_typespec(Enum, Enumeration, AnRes) ->
