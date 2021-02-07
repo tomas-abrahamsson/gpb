@@ -1762,7 +1762,7 @@ format_warning(X) ->
 -spec c() -> no_return().
 c() ->
     io:format("No proto files specified.~n"),
-    show_help(),
+    show_help([]),
     halt(0).
 
 %% @doc This function is intended as a command line interface for the compiler.
@@ -2198,10 +2198,10 @@ init_args_to_argv(InitArgs) ->
 c(Opts, Args) ->
     case determine_cmdline_op(Opts, Args) of
         error  ->
-            show_help(),
+            show_help(Opts),
             halt(1);
         show_help  ->
-            show_help(),
+            show_help(Opts),
             halt(0);
         show_version  ->
             show_version(),
@@ -2796,7 +2796,15 @@ determine_cmdline_op(Opts, FileNames) ->
                      end
     end.
 
-show_help() ->
+show_help(Opts) ->
+    case proplists:get_value(show_usage_fn, Opts) of
+        undefined ->
+            show_help_c();
+        Fn ->
+            Fn()
+    end.
+
+show_help_c() ->
     io:format(
       "gpb version ~s~n"
       "Usage: erl <erlargs> [gpb-opts] -s ~p c <ProtoFile>.proto~n"

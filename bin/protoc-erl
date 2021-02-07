@@ -6,7 +6,8 @@ main(Argv) ->
     setup_code_path(),
     case gpb_compile:parse_opts_and_args(Argv) of
         {ok, {Opts, Files}} ->
-            gpb_compile:c(Opts, Files); %% will halt
+            Opts1 = Opts ++ [{show_usage_fn, fun() -> show_usage() end}],
+            gpb_compile:c(Opts1, Files); %% will halt
         {error, Reason} ->
             io:format("Error: ~s.~n", [Reason]),
             show_usage(),
@@ -54,6 +55,6 @@ find_raw_file(Name, {ok, Name1}) ->
     find_raw_file(AbsoluteName, file:read_link(AbsoluteName)).
 
 show_usage() ->
-    io:format("usage: ~s [options] X.proto [...]~n",
+    io:format("Usage: ~s [options] X.proto [...]~n",
               [filename:basename(escript:script_name())]),
     gpb_compile:show_args().
