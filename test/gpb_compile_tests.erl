@@ -3040,8 +3040,8 @@ failure_to_write_output_files_not_ignored_test() ->
         [mk_fileop_opt([{write_file, fun("X.erl", _) -> ok;
                                         ("X.hrl", _) -> {error, eacces}
                                      end} | CommonFileOpOpts]) | CommonOpts],
-    {error, _Reason, []}=Err1 = gpb_compile:file("X.proto", WriteErlFailsOpts),
-    {error, _Reason, []}=Err2 = gpb_compile:file("X.proto", WriteHrlFailsOpts),
+    {error, _Reason1, []}=Err1 = gpb_compile:file("X.proto", WriteErlFailsOpts),
+    {error, _Reason2, []}=Err2 = gpb_compile:file("X.proto", WriteHrlFailsOpts),
     gpb_compile:format_error(Err1),
     gpb_compile:format_error(Err2).
 
