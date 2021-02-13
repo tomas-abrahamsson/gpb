@@ -285,14 +285,25 @@
 -define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
 -endif. % -ifdef(OTP_RELEASE).
 
+-record(path,
+        {%% The path as located eg on the file system
+         %% via the {i,Dir} options:
+         full :: source(),
+         %% The top .proto as originally specified, or imports
+         %% as specified in import statements.
+         orig :: source(),
+         %% Used if source is supplied from string, otherwise undefined
+         data :: {Mod::module(), Src::string()} | undefined}).
+
 -record(import_env,
         {opts     :: opts(),
          importer :: undefined | import_fetcher_fun()
                      %% If the importer accidentally returns something else:
                    | fun((string) -> any()),
-         i_paths  :: [string()],
+         i_paths  :: [#path{}],
          cur_dir  :: undefined % if not available
-                   | string()}).
+                   | string(),
+         errors :: [Reason::term()]}).
 
 %% @equiv file(File, [])
 -spec file(string()) -> comp_ret().
@@ -2856,26 +2867,37 @@ parse_file_or_string(In, Opts) ->
     end.
 
 parse_input(Input, ImEnv) ->
-    {{Acc, _N}, Sources} =
+    {Res, Sources} =
         process_each_input_once(
-          fun(In, {{ok, Acc}, N}) ->
-                  Level = if N == 0 -> top_level;
-                             N >= 1 -> import
-                          end,
-                  case parse_one_input(In, ImEnv, Level) of
-                      {ok, {Defs, Imports, _InputLocation}} ->
-                          {Imports, {{ok, [Defs | Acc]}, N + 1}};
-                      {error, {Reason, _InputLocation}} ->
-                          {[], {{error, Reason}, N + 1}}
+          fun({ok_read, {Content, Path}}, {ok, Acc}) ->
+                  case parse_one_input(Path, Content, ImEnv) of
+                      {ok, {Defs, Imports}} ->
+                          {Imports, {ok, [Defs | Acc]}};
+                      {error, Reason} ->
+                          ToEnqueue = [],
+                          {ToEnqueue, {error, Reason}}
                   end;
-             (_In, {{error, Reason}, N}) ->
-                  {[], {{error, Reason}, N + 1}}
+             ({error, {locate, _FileName, Reason}}, {ok, _Acc}) ->
+                  %% The Reason already contains the file path, due to being
+                  %% exposed also from locate_import/2.
+                  ToEnqueue = [],
+                  {ToEnqueue, {error, Reason}};
+             ({error, {read, _Path, Reason}}, {ok, _Acc}) ->
+                  %% The Reason already contains the file path, due to being
+                  %% exposed also from read_import/2.  so don't wrap it again.
+                  ToEnqueue = [],
+                  {ToEnqueue, {error, Reason}};
+             (_In, {error, Reason}) ->
+                  ToEnqueue = [],
+                  {ToEnqueue, {error, Reason}}
           end,
-          {{ok, []}, 0},
-          queue:from_list([Input])),
-    case Acc of
+          {ok, []},
+          queue:from_list([Input]),
+          ImEnv),
+    case Res of
         {ok, AllDefs} ->
-            {ok, {lists:append(lists:reverse(AllDefs)), Sources}};
+            SourceFiles = [path_to_filename(Path, full) || Path <- Sources],
+            {ok, {lists:append(lists:reverse(AllDefs)), SourceFiles}};
         {error, Reason} ->
             {error, Reason}
     end.
@@ -2884,66 +2906,117 @@ collect_inputs(Input, Opts) ->
     Opts1 = add_curr_dir_as_include_if_needed(Opts),
     Opts2 = ensure_include_path_to_wellknown_types(Opts1),
     ImEnv = new_import_env(Opts2),
-    {{Imports, Missing}, _} =
+    {{ImportPaths, Missing}, _} =
         process_each_input_once(
-          fun(In, {AccImports, AccMissing}) ->
-                  Level = if AccImports == [], AccMissing == [] -> top_level;
-                             true -> import
-                          end,
-                  case parse_one_input(In, ImEnv, Level) of
-                      {ok, {_Defs, MoreImports, InputLocation}} ->
-                          Acc1 = {[InputLocation | AccImports], AccMissing},
+          fun({ok_read, {Content, Path}}, {AccImports, AccMissing}) ->
+                  case parse_one_input(Path, Content, ImEnv) of
+                      {ok, {_Defs, MoreImports}} ->
+                          Acc1 = {[Path | AccImports], AccMissing},
                           {MoreImports, Acc1};
-                      {error, {{import_not_found, Import, _},_InputLocation}}->
-                          Acc1 = {AccImports, [Import | AccMissing]},
-                          {[], Acc1};
-                      {error, {{fetcher_issue, Import, _}, _InputLocation}} ->
-                          Acc1 = {AccImports, [Import | AccMissing]},
-                          {[], Acc1};
-                      {error, {_Reason, InputLocation}} ->
-                          Acc1 = {[InputLocation | AccImports], AccMissing},
+                      {error, _Reason} ->
+                          Acc1 = {[Path | AccImports], AccMissing},
                           {[], Acc1}
-                  end
+                  end;
+             ({error, {locate, Import, _Reason}}, {AccImports, AccMissing}) ->
+                  Acc1 = {AccImports, [Import | AccMissing]},
+                  {[], Acc1};
+             ({error, {read, Path, _Reason}}, {AccImports, AccMissing}) ->
+                  FileName = path_to_filename(Path, orig),
+                  Acc1 = {AccImports, [FileName | AccMissing]},
+                  {[], Acc1}
           end,
           {[], []},
-          queue:from_list([Input])),
+          queue:from_list([Input]),
+          ImEnv),
+    Imports = [Orig || #path{orig=Orig} <- ImportPaths],
     {lists:reverse(Imports), lists:reverse(Missing)}.
 
-parse_one_input(In, #import_env{opts=Opts}=ImEnv, ToplevelOrImport) ->
-    case locate_read_import_int(In, ImEnv, ToplevelOrImport) of
-        {ok, {Contents, InputLocation}} ->
-            FName = file_name_from_input(In),
-            case scan_and_parse_string(Contents, FName, Opts) of
-                {ok, Defs} ->
-                    Imports = gpb_defs:fetch_imports(Defs),
-                    {ok, {Defs, Imports, InputLocation}};
-                {error, Reason} ->
-                    {error, {Reason, InputLocation}}
+%% Like lists:foldl, but over a queue, but process each only once
+%%
+%% The queue consists of paths in the form of strings, since an
+%% import statement specifies a string.
+%%
+%% To check whether we've seen an import already, we compare full
+%% paths, as located using the {i,Dir} options in order.
+%%
+%% This means we do not know until after trying to locate the
+%% import, whether we've already seen it or not. We cannot use
+%% the paths in the queue to do that.
+%%
+%% An import is located using only the {i,Dir} options, ie, the
+%% importing .proto's dir is not used as basis for locating the
+%% import. This is how protoc works, as well.
+process_each_input_once(F, AccIn, Queue, ImEnv) ->
+    %% First time is reading a file or string, the import_fetcher
+    %% is only used for imports, so it is not used for the first locate/read.
+    ImEnvFirstTime = ImEnv#import_env{importer = undefined},
+    %% Iterate over the queue
+    {AccOut, _N, PathsSeen} =
+        process_input_queue(
+          fun(Input, {Acc, I, PathsSeen}) ->
+                  CurImEnv = if I == 0 -> ImEnvFirstTime;
+                                I > 0  -> ImEnv
+                             end,
+                  CheckSeen =
+                      fun(Path) -> is_input_already_seen(Path, PathsSeen) end,
+                  NextI = I + 1,
+                  case locate_read_input_once(Input, CheckSeen, CurImEnv) of
+                      {ok_read, {Content, Path}} ->
+                          QEl = {ok_read, {Content, Path}},
+                          {ToEnqueue, Acc2} = F(QEl, Acc),
+                          Seen2 = [Path | PathsSeen],
+                          {ToEnqueue, {Acc2, NextI, Seen2}};
+                      {already_seen, _Path} ->
+                          ToEnqueue = [],
+                          {ToEnqueue, {Acc, NextI, PathsSeen}};
+                      {error, {locate, Reason}} ->
+                          QEl = {error, {locate, Input, Reason}},
+                          {ToEnqueue, Acc2} = F(QEl, Acc),
+                          {ToEnqueue, {Acc2, NextI, PathsSeen}};
+                      {error, {read, Path, Reason}} ->
+                          QEl = {error, {read, Path, Reason}},
+                          {ToEnqueue, Acc2} = F(QEl, Acc),
+                          Seen2 = [Path | PathsSeen],
+                          {ToEnqueue, {Acc2, NextI, Seen2}}
+                  end
+          end,
+          {AccIn, 0, []},
+          Queue),
+    {AccOut, lists:reverse(PathsSeen)}.
+
+is_input_already_seen(#path{full=Path}, Paths) ->
+    lists:keymember(Path, #path.full, Paths).
+
+locate_read_input_once(Input, CheckSeen, ImEnv) ->
+    case locate_import_aux(Input, ImEnv) of
+        {ok, Path} ->
+            IsAlreadySeen = CheckSeen(Path),
+            if IsAlreadySeen ->
+                    {already_seen, Path};
+               not IsAlreadySeen ->
+                    case read_import_aux(Path, ImEnv) of
+                        {ok, {Content, _Path}} ->
+                            {ok_read, {Content, Path}};
+                        {error, Reason} ->
+                            {error, {read, Path, Reason}};
+                        restart_locate_from_file ->
+                            ImEnv2 = ImEnv#import_env{importer = undefined},
+                            locate_read_input_once(Input, CheckSeen, ImEnv2)
+                    end
             end;
         {error, Reason} ->
-            {error, {Reason, In}}
+            {error, {locate, Reason}}
     end.
 
-process_each_input_once(F, AccIn, Queue) ->
-    {AccOut, Seen} =
-        process_input_queue(
-          fun(Input, {Acc1, Seen1}) ->
-                  Seen2 = [file_name_from_input(Input) | Seen1],
-                  {ToEnqueue1, Acc2} = F(Input, Acc1),
-                  ToEnqueue2 = filter_unseen(ToEnqueue1, Seen2, []),
-                  {ToEnqueue2, {Acc2, Seen2}}
-          end,
-          {AccIn, []},
-          Queue),
-    {AccOut, lists:reverse(Seen)}.
-
-filter_unseen([Elem | Rest], Seen, Acc) ->
-    case lists:member(Elem, Acc) orelse lists:member(Elem, Seen) of
-        true  -> filter_unseen(Rest, Seen, Acc);
-        false -> filter_unseen(Rest, Seen, [Elem | Acc])
-    end;
-filter_unseen([], _Seen, Acc) ->
-    lists:reverse(Acc).
+parse_one_input(#path{orig=In}, Content, #import_env{opts=Opts}) ->
+    FName = file_name_from_input(In),
+    case scan_and_parse_string(Content, FName, Opts) of
+        {ok, Defs} ->
+            Imports = gpb_defs:fetch_imports(Defs),
+            {ok, {Defs, Imports}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %% A bit like lists:foldl, but over a queue, and
 %% the F returns more elements to fold over as well as an acc.
@@ -2960,6 +3033,12 @@ process_input_queue(F, Acc, Queue) ->
 
 add_curr_dir_as_include_if_needed(Opts) ->
     ImportDirs = [Dir || {i,Dir} <- Opts],
+    %% FIXME: maybe need to add "." first if not present?? Or rework
+    %%        based on current dir? (if available)
+    %% Change of semantics in this commit?
+    %%   - now: import dir options {i,Dir}
+    %%   - previously: based from current dir
+    %% (re-describe the above in a more clear way??)
     case lists:member(".", ImportDirs) of
         true  -> Opts;
         false -> Opts ++ [{i,"."}]
@@ -3011,42 +3090,6 @@ default_scanner_parser() ->
         _     -> new
     end.
 
-locate_read_import_int({_Mod, Str}, _ImEnv, _IsToplevelOrImport) ->
-    {ok, {Str, from_input_string}};
-locate_read_import_int(Proto, ImEnv, top_level) ->
-    locate_read_import_aux(Proto, ImEnv);
-locate_read_import_int(Import, #import_env{importer=Importer}=ImEnv, import) ->
-    if Importer == undefined ->
-            locate_read_import_aux(Import, ImEnv);
-       is_function(Importer, 1) ->
-            case Importer(Import) of
-                from_file ->
-                    locate_read_import_aux(Import, ImEnv);
-                {ok, Contents} when is_list(Contents) ->
-                    case lists:all(fun is_integer/1, Contents) of
-                        true ->
-                            {ok, {Contents, {from_fetched, Import}}};
-                        false ->
-                            error({bad_fetcher_return,
-                                   {not_a_string, Contents},
-                                   Import})
-                    end;
-                {error, Reason} ->
-                    {error, {fetcher_issue, Import, Reason}};
-                X ->
-                    error({bad_fetcher_return, Import, X})
-            end
-    end.
-
-
-locate_read_import_aux(Import, #import_env{opts=Opts}=ImEnv) ->
-    case locate_import_aux(Import, ImEnv) of
-        {ok, File} ->
-            read_import_int(File, Opts);
-        {error, _} = Error ->
-            Error
-    end.
-
 %% @doc Locate an import target.  This function might be potentially
 %% useful for instance in an intercepting `import_fetcher' fun that
 %% just wants to record the accessed imports.
@@ -3054,30 +3097,61 @@ locate_read_import_aux(Import, #import_env{opts=Opts}=ImEnv) ->
                                          {error, reason()}.
 locate_import(ProtoFileName, Opts) ->
     ImEnv = new_import_env(Opts),
-    locate_import_aux(ProtoFileName, ImEnv).
+    case locate_import_aux(ProtoFileName, ImEnv) of
+        {ok, #path{orig=Orig}} ->
+            {ok, Orig};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 new_import_env(Opts) ->
     Opts1 = ensure_include_path_to_wellknown_types(Opts),
     Importer = proplists:get_value(import_fetcher, Opts1),
-    Cwd = case file_get_cwd(Opts) of
-              {ok, D}    -> D;
-              {error, _} -> undefined
-          end,
-    ImportPaths = [Path || {i, Path} <- Opts1],
-    #import_env{opts = Opts1,
-                importer = Importer,
-                i_paths = ImportPaths,
-                cur_dir = Cwd}.
+    case file_get_cwd(Opts) of
+        {ok, Cwd} ->
+            ImportPaths = [absolutify_path(Path, Cwd) || {i, Path} <- Opts1],
+            #import_env{opts = Opts1,
+                        importer = Importer,
+                        i_paths = ImportPaths,
+                        cur_dir = Cwd,
+                        errors = []};
+        {error, Reason} ->
+            {ImportPaths, Relative} =
+                partition_import_opts_on_relativity(Opts),
+            Errors = [{relative_but_no_cwd, RPath, Reason}
+                      || RPath <- Relative],
+            #import_env{opts = Opts1,
+                        importer = Importer,
+                        i_paths = ImportPaths,
+                        cur_dir = undefined,
+                        errors = Errors}
+    end.
 
-locate_import_aux(ProtoFileName, #import_env{i_paths=ImportPaths}=ImEnv) ->
-    locate_import_aux2(ImportPaths, ProtoFileName, ImEnv, []).
 
-locate_import_aux2([Path | Rest], Import, ImEnv, Tried) ->
+locate_import_aux({Mod, Str}, _ImEnv) ->
+    Source = from_input_string,
+    {ok, #path{full = Source,
+               orig = Source,
+               data = {Mod, Str}}};
+locate_import_aux(ProtoFileName,
+                  #import_env{importer=Importer, i_paths=ImportPaths}=ImEnv) ->
+    if Importer == undefined ->
+            %% Search the file system
+            locate_import_aux2(ImportPaths, ProtoFileName, ImEnv, []);
+       is_function(Importer) ->
+            Source = {from_fetched, ProtoFileName},
+            {ok, #path{full = Source,
+                       orig = Source}}
+    end.
+
+locate_import_aux2([#path{full=Path, orig=Orig} | Rest],
+                   Import, ImEnv, Tried) ->
     #import_env{opts=Opts} = ImEnv,
     File = filename:join(Path, Import),
     case file_read_file_info(File, Opts) of
         {ok, #file_info{access = A}} when A == read; A == read_write ->
-            {ok, File};
+            {ok, #path{full = File,
+                       orig = filename:join(Orig, Import)}};
         {ok, #file_info{}} ->
             locate_import_aux2(Rest, Import, ImEnv, Tried);
         {error, Reason} ->
@@ -3086,24 +3160,56 @@ locate_import_aux2([Path | Rest], Import, ImEnv, Tried) ->
 locate_import_aux2([], Import, _ImEnv, Tried) ->
     {error, {import_not_found, Import, Tried}}.
 
+
 %% @doc Read an import file.  This function might be potentially
 %% useful for instance in an intercepting `import_fetcher' fun that
 %% just wants to record the accessed imports.
 -spec read_import(string(), opts()) -> {ok, string()} | {error, reason()}.
 read_import(File, Opts) ->
-    case read_import_int(File, Opts) of
+    Path = #path{full = File,
+                 orig = File},
+    ImEnv = new_import_env(Opts),
+    case read_import_aux(Path, ImEnv) of
         {ok, {S, _Path}} -> {ok, S};
         {error, Reason}  -> {error, Reason}
     end.
 
-read_import_int(File, Opts) ->
+read_import_aux(#path{data={_Mod, Str}}, _ImEnv) ->
+    Path = #path{full = from_input_string,
+                 orig = from_input_string},
+    {ok, {Str, Path}};
+read_import_aux(#path{}=Path, #import_env{importer=Importer}=ImEnv) ->
+    if Importer == undefined ->
+            read_import_aux2(Path, ImEnv);
+       is_function(Importer, 1) ->
+            #path{full={from_fetched, FileName}} = Path,
+            case Importer(FileName) of
+                from_file ->
+                    restart_locate_from_file;
+                {ok, Contents} when is_list(Contents) ->
+                    case lists:all(fun is_integer/1, Contents) of
+                        true ->
+                            {ok, {Contents, Path}};
+                        false ->
+                            error({bad_fetcher_return,
+                                   {not_a_string, Contents},
+                                   FileName})
+                    end;
+                {error, Reason} ->
+                    {error, {fetcher_issue, FileName, Reason}};
+                X ->
+                    error({bad_fetcher_return, FileName, X})
+            end
+    end.
+
+read_import_aux2(#path{orig=File}=Path, #import_env{opts=Opts}) ->
     case file_read_file(File, Opts) of
         {ok,B} ->
             case utf8_decode(B) of
                 {ok, {utf8, S}} ->
-                    {ok, {S, File}};
+                    {ok, {S, Path}};
                 {ok, {latin1, S}} ->
-                    {ok, {S, File}};
+                    {ok, {S, Path}};
                 {error, Reason} ->
                     {error, {utf8_decode_failed, Reason, File}}
             end;
@@ -3756,4 +3862,60 @@ possibly_probe_defs(Defs, Opts) ->
     case proplists:get_value(probe_defs, Opts, '$no') of
         '$no' -> ok;
         Fn    -> Fn(Defs)
+    end.
+
+partition_import_opts_on_relativity(Opts) ->
+    {Paths, Relatives} =
+        lists:foldl(
+          fun({i, Path}, {Ps, Rs}) ->
+                  case filename:pathtype(Path) of
+                      relative       -> {Ps, [Path | Rs]};
+                      volumerelative -> {Ps, [Path | Rs]};
+                      absolute ->
+                          P = #path{full = Path,
+                                    orig = Path},
+                          {[P | Ps], Rs}
+                  end;
+             (_OtherOpt, Acc) ->
+                  Acc
+          end,
+          {[], []},
+          Opts),
+    {lists:reverse(Paths), lists:reverse(Relatives)}.
+
+absolutify_path(Path, Cwd) ->
+    #path{full = normalize_path(filename:join(Cwd, Path)),
+          orig = Path}.
+
+normalize_path(P) ->
+    filename:join(norm_comp(filename:split(P), [])).
+
+norm_comp([".." | Rest], [Top])     -> norm_comp(Rest, [Top]);
+norm_comp([".." | Rest], [_ | Par]) -> norm_comp(Rest, Par);
+norm_comp(["." | Rest], Acc)        -> norm_comp(Rest, Acc);
+norm_comp([Elem | Rest], Acc)       -> norm_comp(Rest, [Elem | Acc]);
+norm_comp([], Acc)                  -> lists:reverse(Acc).
+
+path_to_filename(Path, OrigOrFull) ->
+    case OrigOrFull of
+        orig ->
+            case Path of
+                #path{data = {Mod, _Src},
+                      orig = from_input_string} ->
+                    atom_to_list(Mod) ++ ".proto";
+                #path{orig={from_fetched, ImportFileName}} ->
+                    ImportFileName;
+                #path{orig=OrigFile} ->
+                    OrigFile
+            end;
+        full ->
+            case Path of
+                #path{data = {Mod, _Src},
+                      full = from_input_string} ->
+                    atom_to_list(Mod) ++ ".proto";
+                #path{full={from_fetched, ImportFileName}} ->
+                    ImportFileName;
+                #path{full=OrigFile} ->
+                    OrigFile
+            end
     end.
