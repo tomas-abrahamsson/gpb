@@ -411,7 +411,8 @@ mk_fileop_opt(NonDefaults) ->
     NonDefaults1 = [case Op of
                         read_file_info -> {Op, mk_with_basename_1(Fn)};
                         read_file      -> {Op, mk_with_basename_1(Fn)};
-                        write_file     -> {Op, mk_with_basename_2(Fn)}
+                        write_file     -> {Op, mk_with_basename_2(Fn)};
+                        get_cwd        -> {Op, fun() -> {ok, "/"} end}
                     end
                     || {Op, Fn} <- NonDefaults],
     {file_op, NonDefaults1 ++ mk_default_file_ops()}.
@@ -422,7 +423,8 @@ mk_with_basename_2(Fn) -> fun(Path, A) -> Fn(filename:basename(Path), A) end.
 mk_default_file_ops() ->
     [{read_file_info, fun(_FileName) -> {ok, #file_info{access=read}} end},
      {read_file,      fun(_FileName) -> {error, enoent} end},
-     {write_file,     fun(_FileName, _Bin) -> ok end}].
+     {write_file,     fun(_FileName, _Bin) -> ok end},
+     {get_cwd,        fun() -> {ok, "/"} end}].
 
 mk_defs_probe_sender_opt(SendTo) ->
     {probe_defs, fun(Defs) -> SendTo ! {defs, Defs} end}.
@@ -2634,7 +2636,8 @@ simple_sim_fs_file_op_opt(Files) ->
         end,
     {file_op, [{read_file, FileReadFile},
                {read_file_info, FileReadFileInfo},
-               {write_file, FileWriteFile}]}.
+               {write_file, FileWriteFile},
+               {get_cwd, fun() -> {ok, "/"} end}]}.
 
 simple_sim_fs_lookup(Path, Files) ->
     case lists:keyfind(norm_path(Path), 1, Files) of
@@ -5471,7 +5474,8 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
                 ModProto,
                 [{file_op, [{read_file, ReadFile},
                             {read_file_info, ReadFileInfo},
-                            {write_file, WriteFile}]},
+                            {write_file, WriteFile},
+                            {get_cwd, fun() -> {ok, "/"} end}]},
                  {i,"."},
                  return_errors, return_warnings] ++
                     BinaryOpts ++
@@ -5543,7 +5547,8 @@ compile_to_string_get_hrl(Proto, Opts) ->
                                         _ -> ok
                                     end,
                                     ok
-                            end}],
+                            end},
+               {get_cwd, fun() -> {ok, "/"} end}],
     PS = lists:flatten(Proto),
     ok = gpb_compile:string(some_module, PS, [Opts | [{file_op, FileOps}]]),
     {data,Bin} = ?recv({data,_}),

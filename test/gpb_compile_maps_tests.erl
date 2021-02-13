@@ -419,7 +419,8 @@ defs_as_maps_means_no_include_of_gpb_hrl_test() ->
                                                 _ -> ok
                                             end,
                                             ok
-                                    end}]}]),
+                                    end},
+                       {get_cwd, fun() -> {ok, "/"} end}]}]),
     {data,Bin} = ?recv({data,_}),
     %% Check that (only) one -include line is present:
     %% "dummy_defs_as_maps.hrl" (since no option msgs_as_maps)

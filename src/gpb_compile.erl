@@ -290,7 +290,9 @@
          importer :: undefined | import_fetcher_fun()
                      %% If the importer accidentally returns something else:
                    | fun((string) -> any()),
-         i_paths  :: [string()]}).
+         i_paths  :: [string()],
+         cur_dir  :: undefined % if not available
+                   | string()}).
 
 %% @equiv file(File, [])
 -spec file(string()) -> comp_ret().
@@ -3057,10 +3059,15 @@ locate_import(ProtoFileName, Opts) ->
 new_import_env(Opts) ->
     Opts1 = ensure_include_path_to_wellknown_types(Opts),
     Importer = proplists:get_value(import_fetcher, Opts1),
+    Cwd = case file_get_cwd(Opts) of
+              {ok, D}    -> D;
+              {error, _} -> undefined
+          end,
     ImportPaths = [Path || {i, Path} <- Opts1],
     #import_env{opts = Opts1,
                 importer = Importer,
-                i_paths = ImportPaths}.
+                i_paths = ImportPaths,
+                cur_dir = Cwd}.
 
 locate_import_aux(ProtoFileName, #import_env{i_paths=ImportPaths}=ImEnv) ->
     locate_import_aux2(ImportPaths, ProtoFileName, ImEnv, []).
@@ -3723,6 +3730,9 @@ file_read_file_info(FileName, Opts) ->
 
 file_write_file(FileName, Bin, Opts) ->
     file_op(write_file, [FileName, Bin], Opts).
+
+file_get_cwd(Opts) ->
+    file_op(get_cwd, [], Opts).
 
 possibly_write_file(FileName, Bin, Opts) when is_binary(Bin) ->
     file_op(write_file, [FileName, Bin], Opts);
