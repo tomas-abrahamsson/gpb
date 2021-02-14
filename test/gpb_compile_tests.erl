@@ -2229,6 +2229,24 @@ ignores_packed_for_nonpackable_repeated_on_encoding_test() ->
     %% just the elements one after the other.
     <<10,3,"abc",10,3,"def">> = M:encode_msg({m1, ["abc", "def"]}).
 
+%% --- locate_import and read_import ----------
+
+read_import_test() ->
+    Opts = [mk_fileop_opt([{read_file, fun(_) -> {ok, <<"zz">>} end}])],
+    %% Test mainly the return value format/type,
+    %% assume the internal working is covered by other tests.
+    {ok, "zz"} = gpb_compile:read_import("/z.proto", Opts).
+
+locate_import_test() ->
+    FileSystem =
+        [{"/a.proto", ["aa"]},
+         {"/b/b.proto", ["bb"]}],
+    FOpt = simple_sim_fs_file_op_opt(FileSystem),
+    Opts = [{i,"/"}, {i,"/b"}, FOpt],
+    %% Test mainly the return value format/type,
+    %% assume the internal working is covered by other tests.
+    {ok, "/b/b.proto"} = gpb_compile:locate_import("b.proto", Opts).
+
 %% --- io listing ----------
 
 list_io_from_file_test() ->
@@ -2581,6 +2599,22 @@ do_list_string_io_defs(Mod, Str, Files, Opts) ->
     do_list_io_defs(Files, [{string_input, {Mod, Str}} | Opts]).
 
 do_list_io_defs(Files, Opts) ->
+    FOpt = simple_sim_fs_file_op_opt(Files),
+    Res = case proplists:get_value(string_input, Opts) of
+              {Mod, Str} ->
+                  gpb_compile:string_list_io(Mod, Str, [FOpt | Opts]);
+              undefined ->
+                  [{MainFName, _} | _] = Files,
+                  gpb_compile:list_io(MainFName, [FOpt | Opts])
+          end,
+    case proplists:get_bool(no_normalization, Opts) of
+        false ->
+            list_io_ensure_order(norm_io_info_paths(Res));
+        true ->
+            Res
+    end.
+
+simple_sim_fs_file_op_opt(Files) ->
     FileReadFile =
         fun(Path) ->
                 case simple_sim_fs_lookup(Path, Files) of
@@ -2598,22 +2632,9 @@ do_list_io_defs(Files, Opts) ->
     FileWriteFile =
         fun(Path, Data) -> error({unexpected_write, Path, Data})
         end,
-    FOpt = {file_op, [{read_file, FileReadFile},
-                      {read_file_info, FileReadFileInfo},
-                      {write_file, FileWriteFile}]},
-    Res = case proplists:get_value(string_input, Opts) of
-              {Mod, Str} ->
-                  gpb_compile:string_list_io(Mod, Str, [FOpt | Opts]);
-              undefined ->
-                  [{MainFName, _} | _] = Files,
-                  gpb_compile:list_io(MainFName, [FOpt | Opts])
-          end,
-    case proplists:get_bool(no_normalization, Opts) of
-        false ->
-            list_io_ensure_order(norm_io_info_paths(Res));
-        true ->
-            Res
-    end.
+    {file_op, [{read_file, FileReadFile},
+               {read_file_info, FileReadFileInfo},
+               {write_file, FileWriteFile}]}.
 
 simple_sim_fs_lookup(Path, Files) ->
     case lists:keyfind(norm_path(Path), 1, Files) of

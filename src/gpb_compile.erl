@@ -3033,7 +3033,7 @@ locate_read_import_aux(Import, Opts) ->
     ImportPaths = [Path || {i, Path} <- Opts],
     case locate_import_aux(ImportPaths, Import, Opts, []) of
         {ok, File} ->
-            read_import(File, Opts);
+            read_import_int(File, Opts);
         {error, _} = Error ->
             Error
     end.
@@ -3066,6 +3066,12 @@ locate_import_aux([], Import, _Opts, Tried) ->
 %% just wants to record the accessed imports.
 -spec read_import(string(), opts()) -> {ok, string()} | {error, reason()}.
 read_import(File, Opts) ->
+    case read_import_int(File, Opts) of
+        {ok, {S, _Path}} -> {ok, S};
+        {error, Reason}  -> {error, Reason}
+    end.
+
+read_import_int(File, Opts) ->
     case file_read_file(File, Opts) of
         {ok,B} ->
             case utf8_decode(B) of
