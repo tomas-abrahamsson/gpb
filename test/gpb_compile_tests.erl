@@ -3140,11 +3140,18 @@ compile_and_assert_that_format_x_produces_iolist(Contents,
             {i,"."},
             return_errors, return_warnings] ++ ExtraOpts,
     Res = gpb_compile:file("X.proto", Opts),
-    Txt = case Res of
-              {error, _Reason, _Warns} when FormatWhat == format_error ->
-                  gpb_compile:format_error(Res);
-              {ok, Warns} when FormatWhat == format_warning ->
-                  [gpb_compile:format_warning(Warn) || Warn <- Warns]
+    Txt = try
+              case Res of
+                  {error, _Reason, _Warns} when FormatWhat == format_error ->
+                      gpb_compile:format_error(Res);
+                  {ok, Warns} when FormatWhat == format_warning ->
+                      [gpb_compile:format_warning(Warn) || Warn <- Warns]
+              end
+          catch ?STACKTRACE(Class, Reason, Stack)
+                  %% for debugging, if gpb_compile:format_error crashes:
+                  io:format("Res from gpb_compile:file =~n"
+                            "  ~p~n", [Res]),
+                  erlang:raise(Class, Reason, Stack)
           end,
     assert_is_iolist_contains_phrases(Txt, Res, ExpectedPhrases).
 
