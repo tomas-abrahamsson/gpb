@@ -3395,7 +3395,8 @@ guess_features_aux(S) ->
 protoc_opts(Features) ->
     {ok, ProtocVersion} = cachingly_find_protoc_version(),
     P3Optional = lists:member(p3_optional, Features),
-    if P3Optional, ProtocVersion >= [3,12] ->
+    if P3Optional,
+       [3,12] =< ProtocVersion, ProtocVersion < [3,15] ->
             [{protoc_opts, "--experimental_allow_proto3_optional"}];
        true ->
             []
