@@ -106,31 +106,24 @@ format_encoders_top_function_no_msgs(Opts) ->
 format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
-    MsgNames = gpb_lib:msg_names(Defs),
-    MsgType =
-        case Mapping of
-            records ->
-                gpb_lib:or_join([?f("#~p{}", [M]) || M <- MsgNames]);
-            maps ->
-                case gpb_lib:get_type_specs_by_opts(Opts) of
-                    false ->
-                        "map()";
-                    true ->
-                        gpb_lib:or_join([?f("~p()", [M]) || M <- MsgNames])
-                end
-        end,
+    MsgType = "'$msg'()",
+    MsgNamesType = "'$msg_name'()",
     OrList = case Mapping of
                  records -> " | list()";
                  maps -> ""
              end,
     DoNif = proplists:get_bool(nif, Opts),
-    [[[?f("-spec encode_msg(~s) -> binary().~n", [MsgType]),
+    [[[gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 1, Opts),
+       ?f("-spec encode_msg(~s) -> ~s.~n",
+          [MsgType, ret_type_all_msgs(Defs)]),
        gpb_codegen:format_fn(
          encode_msg,
          fun(Msg) when tuple_size(Msg) >= 1 ->
                  encode_msg(Msg, element(1, Msg), [])
          end)] || Mapping == records],
-     ?f("-spec encode_msg(~s, atom()~s) -> binary().~n", [MsgType, OrList]),
+     gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 2, Opts),
+     ?f("-spec encode_msg(~s, ~s~s) -> ~s.~n",
+        [MsgType, MsgNamesType, OrList, ret_type_all_msgs(Defs)]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, MsgName) when is_atom(MsgName) ->
@@ -140,7 +133,9 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
        end,
        [repeat_clauses('Msg', [[replace_tree('Msg', ?expr(Msg))]
                                || Mapping == records])]),
-     ?f("-spec encode_msg(~s, atom(), list()) -> binary().~n", [MsgType]),
+     gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 3, Opts),
+     ?f("-spec encode_msg(~s, ~s, list()) -> ~s.~n",
+        [MsgType, MsgNamesType, ret_type_all_msgs(Defs)]),
      gpb_codegen:format_fn(
        encode_msg,
        fun(Msg, MsgName, Opts) ->
@@ -178,15 +173,20 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
                                       true  -> [?expr(TrUserData)]
                                    end)]),
      [[?f("%% epb compatibility\n"),
-       ?f("-spec encode(_) -> binary().~n"),
+       gpb_lib:no_underspecs_dialyzer_attr(encode, 1, Opts),
+       ?f("-spec encode(_) -> ~s.~n", [ret_type_all_msgs(Defs)]),
        gpb_codegen:format_fn(
          encode,
          fun(Msg) -> encode_msg(Msg) end),
-       [[?f("-spec ~p(_) -> binary().~n", [gpb_lib:mk_fn(encode_, MsgName)]),
-         gpb_codegen:format_fn(
-           gpb_lib:mk_fn(encode_, MsgName),
-           fun(Msg) -> encode_msg(Msg) end)]
-        || {{msg,MsgName}, _Fields} <- Defs]]
+       [[begin
+             FnName = gpb_lib:mk_fn(encode_, MsgName),
+             gpb_lib:no_underspecs_dialyzer_attr(FnName, 1, Opts),
+             ?f("-spec ~p(_) -> ~s.~n", [FnName, ret_type_msg(MsgDef)]),
+             gpb_codegen:format_fn(
+               gpb_lib:mk_fn(encode_, MsgName),
+               fun(Msg) -> encode_msg(Msg) end)
+         end]
+        || {{msg,MsgName}, _Fields}=MsgDef <- Defs]]
       || gpb_lib:get_epb_functions_by_opts(Opts)]].
 
 format_aux_encoders(Defs, AnRes, _Opts) ->
@@ -1125,3 +1125,31 @@ format_is_empty_string(#anres{has_p3_opt_strings=true}) ->
           (<<>>) -> false;
           ([]) -> false
        end)].
+
+ret_type_all_msgs(Defs) ->
+    case at_least_one_msg_is_nonempty(Defs) of
+        true  -> "binary()";
+        false -> "<<>>"
+    end.
+
+at_least_one_msg_is_nonempty([{{msg, _MsgName}, _Fields}=MsgDef | Rest]) ->
+    case msg_is_nonempty(MsgDef) of
+        true  -> true;
+        false -> at_least_one_msg_is_nonempty(Rest)
+    end;
+at_least_one_msg_is_nonempty([_ | Rest]) ->
+    at_least_one_msg_is_nonempty(Rest);
+at_least_one_msg_is_nonempty([]) ->
+    false.
+
+ret_type_msg(MsgDef) ->
+    %% Dialyzer -Wunderspecs will warn if the message is empty,
+    %% and we say encode_msg returns binary(), because the spec
+    %% is then "more allowing than the success typing."
+    case msg_is_nonempty(MsgDef) of
+        true  -> "binary()";
+        false -> "<<>>"
+    end.
+
+msg_is_nonempty({{msg, _MsgName}, Fields}) ->
+    Fields =/= [].

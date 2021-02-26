@@ -130,6 +130,7 @@
 -export([iolist_to_utf8_or_escaped_binary/2]).
 -export([nowarn_unused_function/2]).
 -export([nowarn_dialyzer_attr/3]).
+-export([no_underspecs_dialyzer_attr/3]).
 
 -export([drop_filename_ext/1]).
 -export([copy_filename_ext/2]).
@@ -1100,6 +1101,24 @@ nowarn_dialyzer_attr(FnName,Arity,Opts) ->
 
 can_do_dialyzer_attr(Opts) ->
     is_target_major_version_at_least(18, Opts).
+
+no_underspecs_dialyzer_attr(FnName, Arity, Opts) ->
+    %% Silence 'dialyzer -Wunderspecs' warnings about functions' specs
+    %% being allowing more than the success typing. It can be difficult
+    %% to generate very accurate specs.
+    %%
+    %% This dialyzer warning was added in Erlang 24, using it an earlier
+    %% Erlang will result in a warning about an unknown dialyzer warning
+    %% option.
+    case can_do_no_underspecs_dialyzer_attr(Opts) of
+        true ->
+            ?f("-dialyzer({no_underspecs, ~p/~w}).~n", [FnName, Arity]);
+        false ->
+            ""
+    end.
+
+can_do_no_underspecs_dialyzer_attr(Opts) ->
+    is_target_major_version_at_least(24, Opts).
 
 nowarn_unused_function(FnName, Arity) ->
     ?f("-compile({nowarn_unused_function,~p/~w}).~n", [FnName,Arity]).

@@ -898,10 +898,9 @@ format_prettify_path_with_lists_join() ->
       fun([]) ->
               top_level;
          (PathR) ->
-              list_to_atom(
-                lists:append(
-                  lists:join(".", lists:map(fun atom_to_list/1,
-                                            lists:reverse(PathR)))))
+              lists:append(
+                lists:join(".", lists:map(fun atom_to_list/1,
+                                          lists:reverse(PathR))))
       end).
 
 format_prettify_path_with_string_join() ->
@@ -910,9 +909,9 @@ format_prettify_path_with_string_join() ->
       fun([]) ->
               top_level;
          (PathR) ->
-              list_to_atom(string:join(lists:map(fun atom_to_list/1,
-                                                 lists:reverse(PathR)),
-                                       "."))
+              string:join(lists:map(fun atom_to_list/1,
+                                    lists:reverse(PathR)),
+                          ".")
       end).
 
 map_keys_to_strees(Keys, Opts) ->

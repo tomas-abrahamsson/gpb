@@ -1596,9 +1596,9 @@ verify_path_when_failure_test() ->
                  verify_msg(bad_msg, MsgDefs)),
     ?assertError({gpb_type_error, {_, [_, {path, _}]}},
                  verify_msg({m1}, MsgDefs)),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.a'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.a"}]}},
                  verify_msg(#m1{a = bad_msg}, MsgDefs)),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.a.b'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.a.b"}]}},
                  verify_msg(#m1{a = #m2{b=x}}, MsgDefs)).
 
 verify_required_group_test() ->
@@ -1614,7 +1614,7 @@ verify_required_group_test() ->
                                            type=fixed32,
                                            occurrence=required, opts=[]}]}],
     ok = verify_msg({m1, {'m1.g', 17}}, Defs),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g.gf'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.g.gf"}]}},
                  verify_msg({m1, {'m1.g', x}}, Defs)).
 
 verify_repeated_and_optional_group_test() ->
@@ -1633,11 +1633,11 @@ verify_repeated_and_optional_group_test() ->
     ok = verify_msg({m1, [], undefined}, Defs),
     ok = verify_msg({m1, [{'m1.g',17},{'m1.g',18}], undefined}, Defs),
     ok = verify_msg({m1, [], {'m1.h', 4711}}, Defs),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.g"}]}},
                  verify_msg({m1, {'m1.g', x}, undefined}, Defs)),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.g.gf'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.g.gf"}]}},
                  verify_msg({m1, [{'m1.g', x}], undefined}, Defs)),
-    ?assertError({gpb_type_error, {_, [_, {path, 'm1.h.hf'}]}},
+    ?assertError({gpb_type_error, {_, [_, {path, "m1.h.hf"}]}},
                  verify_msg({m1, [], {'m1.h', x}}, Defs)).
 
 -ifndef(NO_HAVE_MAPS).

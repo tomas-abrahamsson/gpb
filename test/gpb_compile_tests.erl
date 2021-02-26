@@ -411,7 +411,8 @@ mk_fileop_opt(NonDefaults) ->
     NonDefaults1 = [case Op of
                         read_file_info -> {Op, mk_with_basename_1(Fn)};
                         read_file      -> {Op, mk_with_basename_1(Fn)};
-                        write_file     -> {Op, mk_with_basename_2(Fn)}
+                        write_file     -> {Op, mk_with_basename_2(Fn)};
+                        get_cwd        -> {Op, fun() -> {ok, "/"} end}
                     end
                     || {Op, Fn} <- NonDefaults],
     {file_op, NonDefaults1 ++ mk_default_file_ops()}.
@@ -422,7 +423,8 @@ mk_with_basename_2(Fn) -> fun(Path, A) -> Fn(filename:basename(Path), A) end.
 mk_default_file_ops() ->
     [{read_file_info, fun(_FileName) -> {ok, #file_info{access=read}} end},
      {read_file,      fun(_FileName) -> {error, enoent} end},
-     {write_file,     fun(_FileName, _Bin) -> ok end}].
+     {write_file,     fun(_FileName, _Bin) -> ok end},
+     {get_cwd,        fun() -> {ok, "/"} end}].
 
 mk_defs_probe_sender_opt(SendTo) ->
     {probe_defs, fun(Defs) -> SendTo ! {defs, Defs} end}.
@@ -1683,7 +1685,7 @@ verify_callback_with_and_without_errorf_test() ->
                 {decode,{?MODULE,any_d_atom,['$1']}},
                 {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
     ok = Mod1:verify_msg(#m1{a=abc}),
-    ?assertError({gpb_type_error,{not_an_atom,[{value,123},{path,'m1.a'}]}},
+    ?assertError({gpb_type_error,{not_an_atom,[{value,123},{path,"m1.a"}]}},
                  Mod1:verify_msg(#m1{a=123})),
     unload_code(Mod1),
 
@@ -1695,7 +1697,7 @@ verify_callback_with_and_without_errorf_test() ->
                 {decode,{?MODULE,any_d_atom,['$1']}},
                 {verify,{?MODULE,any_v_atom,['$1']}}]}]), % no '$errorf'
     ok = Mod2:verify_msg(#m1{a=abc}),
-    ?assertError({gpb_type_error,{oops_no_atom,[{value,123},{path,'m1.a'}]}},
+    ?assertError({gpb_type_error,{oops_no_atom,[{value,123},{path,"m1.a"}]}},
                  Mod2:verify_msg(#m1{a=123})),
     unload_code(Mod2).
 
@@ -2229,6 +2231,24 @@ ignores_packed_for_nonpackable_repeated_on_encoding_test() ->
     %% just the elements one after the other.
     <<10,3,"abc",10,3,"def">> = M:encode_msg({m1, ["abc", "def"]}).
 
+%% --- locate_import and read_import ----------
+
+read_import_test() ->
+    Opts = [mk_fileop_opt([{read_file, fun(_) -> {ok, <<"zz">>} end}])],
+    %% Test mainly the return value format/type,
+    %% assume the internal working is covered by other tests.
+    {ok, "zz"} = gpb_compile:read_import("/z.proto", Opts).
+
+locate_import_test() ->
+    FileSystem =
+        [{"/a.proto", ["aa"]},
+         {"/b/b.proto", ["bb"]}],
+    FOpt = simple_sim_fs_file_op_opt(FileSystem),
+    Opts = [{i,"/"}, {i,"/b"}, FOpt],
+    %% Test mainly the return value format/type,
+    %% assume the internal working is covered by other tests.
+    {ok, "/b/b.proto"} = gpb_compile:locate_import("b.proto", Opts).
+
 %% --- io listing ----------
 
 list_io_from_file_test() ->
@@ -2581,6 +2601,22 @@ do_list_string_io_defs(Mod, Str, Files, Opts) ->
     do_list_io_defs(Files, [{string_input, {Mod, Str}} | Opts]).
 
 do_list_io_defs(Files, Opts) ->
+    FOpt = simple_sim_fs_file_op_opt(Files),
+    Res = case proplists:get_value(string_input, Opts) of
+              {Mod, Str} ->
+                  gpb_compile:string_list_io(Mod, Str, [FOpt | Opts]);
+              undefined ->
+                  [{MainFName, _} | _] = Files,
+                  gpb_compile:list_io(MainFName, [FOpt | Opts])
+          end,
+    case proplists:get_bool(no_normalization, Opts) of
+        false ->
+            list_io_ensure_order(norm_io_info_paths(Res));
+        true ->
+            Res
+    end.
+
+simple_sim_fs_file_op_opt(Files) ->
     FileReadFile =
         fun(Path) ->
                 case simple_sim_fs_lookup(Path, Files) of
@@ -2598,22 +2634,10 @@ do_list_io_defs(Files, Opts) ->
     FileWriteFile =
         fun(Path, Data) -> error({unexpected_write, Path, Data})
         end,
-    FOpt = {file_op, [{read_file, FileReadFile},
-                      {read_file_info, FileReadFileInfo},
-                      {write_file, FileWriteFile}]},
-    Res = case proplists:get_value(string_input, Opts) of
-              {Mod, Str} ->
-                  gpb_compile:string_list_io(Mod, Str, [FOpt | Opts]);
-              undefined ->
-                  [{MainFName, _} | _] = Files,
-                  gpb_compile:list_io(MainFName, [FOpt | Opts])
-          end,
-    case proplists:get_bool(no_normalization, Opts) of
-        false ->
-            list_io_ensure_order(norm_io_info_paths(Res));
-        true ->
-            Res
-    end.
+    {file_op, [{read_file, FileReadFile},
+               {read_file_info, FileReadFileInfo},
+               {write_file, FileWriteFile},
+               {get_cwd, fun() -> {ok, "/"} end}]}.
 
 simple_sim_fs_lookup(Path, Files) ->
     case lists:keyfind(norm_path(Path), 1, Files) of
@@ -3040,8 +3064,8 @@ failure_to_write_output_files_not_ignored_test() ->
         [mk_fileop_opt([{write_file, fun("X.erl", _) -> ok;
                                         ("X.hrl", _) -> {error, eacces}
                                      end} | CommonFileOpOpts]) | CommonOpts],
-    {error, _Reason, []}=Err1 = gpb_compile:file("X.proto", WriteErlFailsOpts),
-    {error, _Reason, []}=Err2 = gpb_compile:file("X.proto", WriteHrlFailsOpts),
+    {error, _Reason1, []}=Err1 = gpb_compile:file("X.proto", WriteErlFailsOpts),
+    {error, _Reason2, []}=Err2 = gpb_compile:file("X.proto", WriteHrlFailsOpts),
     gpb_compile:format_error(Err1),
     gpb_compile:format_error(Err2).
 
@@ -3119,11 +3143,18 @@ compile_and_assert_that_format_x_produces_iolist(Contents,
             {i,"."},
             return_errors, return_warnings] ++ ExtraOpts,
     Res = gpb_compile:file("X.proto", Opts),
-    Txt = case Res of
-              {error, _Reason, _Warns} when FormatWhat == format_error ->
-                  gpb_compile:format_error(Res);
-              {ok, Warns} when FormatWhat == format_warning ->
-                  [gpb_compile:format_warning(Warn) || Warn <- Warns]
+    Txt = try
+              case Res of
+                  {error, _Reason, _Warns} when FormatWhat == format_error ->
+                      gpb_compile:format_error(Res);
+                  {ok, Warns} when FormatWhat == format_warning ->
+                      [gpb_compile:format_warning(Warn) || Warn <- Warns]
+              end
+          catch ?STACKTRACE(Class, Reason, Stack)
+                  %% for debugging, if gpb_compile:format_error crashes:
+                  io:format("Res from gpb_compile:file =~n"
+                            "  ~p~n", [Res]),
+                  erlang:raise(Class, Reason, Stack)
           end,
     assert_is_iolist_contains_phrases(Txt, Res, ExpectedPhrases).
 
@@ -3395,7 +3426,8 @@ guess_features_aux(S) ->
 protoc_opts(Features) ->
     {ok, ProtocVersion} = cachingly_find_protoc_version(),
     P3Optional = lists:member(p3_optional, Features),
-    if P3Optional, ProtocVersion >= [3,12] ->
+    if P3Optional,
+       [3,12] =< ProtocVersion, ProtocVersion < [3,15] ->
             [{protoc_opts, "--experimental_allow_proto3_optional"}];
        true ->
             []
@@ -5443,7 +5475,8 @@ compile_iolist_maybe_errors_or_warnings(IoList, ExtraOpts0, OnFail) ->
                 ModProto,
                 [{file_op, [{read_file, ReadFile},
                             {read_file_info, ReadFileInfo},
-                            {write_file, WriteFile}]},
+                            {write_file, WriteFile},
+                            {get_cwd, fun() -> {ok, "/"} end}]},
                  {i,"."},
                  return_errors, return_warnings] ++
                     BinaryOpts ++
@@ -5515,7 +5548,8 @@ compile_to_string_get_hrl(Proto, Opts) ->
                                         _ -> ok
                                     end,
                                     ok
-                            end}],
+                            end},
+               {get_cwd, fun() -> {ok, "/"} end}],
     PS = lists:flatten(Proto),
     ok = gpb_compile:string(some_module, PS, [Opts | [{file_op, FileOps}]]),
     {data,Bin} = ?recv({data,_}),
