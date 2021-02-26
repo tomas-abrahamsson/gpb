@@ -1330,7 +1330,6 @@ verify_opts_no_gen_mergers(Opts) ->
 msg_defs(Mod, Defs) ->
     msg_defs(Mod, Defs, []).
 
-%% @spec msg_defs(Mod, Defs, Opts) -> CompRet
 %% @equiv proto_defs(Mod, Defs, Opts)
 %% @doc Deprecated, use proto_defs/2 instead.
 -spec msg_defs(module(), gpb_defs:defs(), opts()) -> comp_ret().
@@ -1666,9 +1665,6 @@ make_quote("$" ++ Rest) -> "$$" ++ make_quote(Rest);
 make_quote([C | Rest]) -> [C | make_quote(Rest)];
 make_quote("") -> "".
 
-%% @spec format_error({error, Reason} | Reason) -> io_list()
-%%           Reason = term()
-%%
 %% @doc Produce a plain-text error message from a reason returned by
 %% for instance {@link file/2} or {@link proto_defs/2}.
 -spec format_error(Err) -> iolist() when
