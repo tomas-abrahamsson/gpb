@@ -113,13 +113,15 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
                  maps -> ""
              end,
     DoNif = proplists:get_bool(nif, Opts),
-    [[[?f("-spec encode_msg(~s) -> ~s.~n",
+    [[[gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 1, Opts),
+       ?f("-spec encode_msg(~s) -> ~s.~n",
           [MsgType, ret_type_all_msgs(Defs)]),
        gpb_codegen:format_fn(
          encode_msg,
          fun(Msg) when tuple_size(Msg) >= 1 ->
                  encode_msg(Msg, element(1, Msg), [])
          end)] || Mapping == records],
+     gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 2, Opts),
      ?f("-spec encode_msg(~s, ~s~s) -> ~s.~n",
         [MsgType, MsgNamesType, OrList, ret_type_all_msgs(Defs)]),
      gpb_codegen:format_fn(
@@ -131,6 +133,7 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
        end,
        [repeat_clauses('Msg', [[replace_tree('Msg', ?expr(Msg))]
                                || Mapping == records])]),
+     gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 3, Opts),
      ?f("-spec encode_msg(~s, ~s, list()) -> ~s.~n",
         [MsgType, MsgNamesType, ret_type_all_msgs(Defs)]),
      gpb_codegen:format_fn(
@@ -170,15 +173,19 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
                                       true  -> [?expr(TrUserData)]
                                    end)]),
      [[?f("%% epb compatibility\n"),
+       gpb_lib:no_underspecs_dialyzer_attr(encode, 1, Opts),
        ?f("-spec encode(_) -> ~s.~n", [ret_type_all_msgs(Defs)]),
        gpb_codegen:format_fn(
          encode,
          fun(Msg) -> encode_msg(Msg) end),
-       [[?f("-spec ~p(_) -> ~s.~n",
-            [gpb_lib:mk_fn(encode_, MsgName), ret_type_msg(MsgDef)]),
-         gpb_codegen:format_fn(
-           gpb_lib:mk_fn(encode_, MsgName),
-           fun(Msg) -> encode_msg(Msg) end)]
+       [[begin
+             FnName = gpb_lib:mk_fn(encode_, MsgName),
+             gpb_lib:no_underspecs_dialyzer_attr(FnName, 1, Opts),
+             ?f("-spec ~p(_) -> ~s.~n", [FnName, ret_type_msg(MsgDef)]),
+             gpb_codegen:format_fn(
+               gpb_lib:mk_fn(encode_, MsgName),
+               fun(Msg) -> encode_msg(Msg) end)
+         end]
         || {{msg,MsgName}, _Fields}=MsgDef <- Defs]]
       || gpb_lib:get_epb_functions_by_opts(Opts)]].
 
