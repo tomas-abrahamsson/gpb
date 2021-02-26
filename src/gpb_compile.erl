@@ -3148,14 +3148,21 @@ locate_import_aux2([#path{full=Path, orig=Orig} | Rest],
                    Import, ImEnv, Tried) ->
     #import_env{opts=Opts} = ImEnv,
     File = filename:join(Path, Import),
-    case file_read_file_info(File, Opts) of
-        {ok, #file_info{access = A}} when A == read; A == read_write ->
-            {ok, #path{full = File,
-                       orig = filename:join(Orig, Import)}};
-        {ok, #file_info{}} ->
+    case lists:keymember(File, 1, Tried) of
+        true ->
+            %% can happen if Import is a full path
             locate_import_aux2(Rest, Import, ImEnv, Tried);
-        {error, Reason} ->
-            locate_import_aux2(Rest, Import, ImEnv, [{File,Reason} | Tried])
+        false ->
+            case file_read_file_info(File, Opts) of
+                {ok, #file_info{access = A}} when A == read; A == read_write ->
+                    {ok, #path{full = File,
+                               orig = filename:join(Orig, Import)}};
+                {ok, #file_info{}} ->
+                    locate_import_aux2(Rest, Import, ImEnv, Tried);
+                {error, Reason} ->
+                    Tried2 = [{File,Reason} | Tried],
+                    locate_import_aux2(Rest, Import, ImEnv, Tried2)
+            end
     end;
 locate_import_aux2([], Import, _ImEnv, Tried) ->
     {error, {import_not_found, Import, Tried}}.
