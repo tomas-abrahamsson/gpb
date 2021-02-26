@@ -1,5 +1,22 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.16.2
+2021-Feb-27
+
+        * Rework the import handling to check full paths when checking
+          if an proto to import has already been seen. #194
+        * In a verifier error, emit the faulty field as a string
+          instead of as an atom to avoid hitting the system limit
+          of 255 chars during the making of the error re ason. #195
+        * Fix spec for empty messages to work with dialyzer -Wunderspecs #196
+          Also emit -dialyzer({no_underspecs, <fn>/<arity>}) on erl >= 24.
+        * Fix the Erlang type of string fields: change to unicode:chardata()
+          from iodata() to allow for unicode code points >255. #200
+          For clarity, the encoding always worked with such code points,
+          it was just the field's type that was wrong.
+        * Fix help text when using protoc-erl.
+        * A few fixes for Erlang 24 (doc building and in an eunit test)
+
 Version 4.16.1
 2021-Jan-19
 
