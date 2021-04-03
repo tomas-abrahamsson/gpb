@@ -100,7 +100,8 @@
          rnum   :: pos_integer()   % field number in the record
                  | undefined,      % temporarily, during parsing
          fields :: [#?gpb_field{}] % all fields have the same rnum
-                 | undefined       % temporarily in some phases
+                 | undefined,      % temporarily in some phases
+         opts = [] :: [term()]
         }).
 
 -record(?gpb_rpc, % NB: record name is (currently) `rpc' (not `gpb_rpc')!

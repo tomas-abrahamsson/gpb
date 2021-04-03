@@ -517,8 +517,15 @@ p_map_key_type([?w("string") | Rest])   -> {string, Rest}.
 p_oneof([?w("oneof"), ?w(Name/binary), ?t('{') | Rest]) ->
     Rest2 = skip_semicolon(Rest),
     {Elems, [?t('}') | Rest3]} = p_oneof_elems(Rest2, []),
+    {Opts, OFields} = lists:partition(
+                        fun({{option, _OptName, _OptValue}}) -> true;
+                           (_Other) -> false
+                        end,
+                        Elems),
+    Opts1 = [{OptName,OptVal} || {{option, OptName, OptVal}} <- Opts],
     Field = #gpb_oneof{name = word_value(Name),
-                       fields = Elems},
+                       fields = OFields,
+                       opts = Opts1},
     Rest4 = skip_semicolon(Rest3),
     {Field, Rest4};
 p_oneof(Tokens) ->
@@ -527,9 +534,10 @@ p_oneof(Tokens) ->
 p_oneof_elems(Tokens, Acc) ->
     case Tokens of
         [?w("option") | _] ->
-            {_Opt, Rest} = p_option(Tokens),
+            {Opt, Rest} = p_option(Tokens),
             Rest2 = skip_semicolon(Rest),
-            p_oneof_elems(Rest2, Acc);
+            Acc1 = [{Opt} | Acc],
+            p_oneof_elems(Rest2, Acc1);
         _ ->
             {Field, Rest} = p_field_or_group(optional, Tokens),
             Rest2 = skip_semicolon(Rest),

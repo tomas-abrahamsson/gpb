@@ -355,7 +355,7 @@ parses_custom_option_in_oneof_test() ->
     [{file, _},
      {proto_defs_version, _},
      {{enum_containment, _}, _},
-     {{msg,x}, [#gpb_oneof{}]},
+     {{msg,x}, [#gpb_oneof{opts=[{[my_option], -1}]}]},
      {{msg_containment, _}, _}] =
         AllDefs.
 
