@@ -275,8 +275,8 @@ p_enum_fields(Tokens, Acc) ->
             p_enum_fields(Rest, [Reserved | Acc]);
         [?w(Name/binary), ?t('=') | Rest] ->
             {Value, Rest2} = p_integer_const(Rest),
-            EnumField = {word_value(Name), Value, []},
-            {_EOpts, Rest3} = p_maybe_opt_list(Rest2),
+            {EOpts, Rest3} = p_maybe_opt_list(Rest2),
+            EnumField = {word_value(Name), Value, EOpts},
             Rest4 = skip_semicolon(Rest3),
             Acc1 = [EnumField | Acc],
             p_enum_fields(Rest4, Acc1);
