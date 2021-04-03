@@ -370,6 +370,13 @@ $(ebin)/gpb_lib.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_names.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_parse.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_parse_old.beam: $(incdir)/gpb.hrl
+$(ebin)/gpb_compile_descr.beam: $(incdir)/gpb.hrl 
+$(test)/gpb_compile_tests.beam: $(incdir)/gpb.hrl
+$(test)/gpb_compile_maps_tests.beam: $(incdir)/gpb.hrl
+$(test)/gpb_names_tests.beam: $(incdir)/gpb.hrl
+$(test)/gpb_defs_tests.beam: $(incdir)/gpb.hrl
+$(test)/gpb_json_tests.beam: $(incdir)/gpb.hrl
+$(test)/gpb_tests.beam: $(incdir)/gpb.hrl
 
 # To compile gpb_codegen_tests, we first need the parse transform in gpb_codegen
 $(test)/gpb_codegen_tests.beam: $(ebin)/gpb_codegen.beam
