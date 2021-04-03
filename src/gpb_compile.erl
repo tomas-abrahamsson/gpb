@@ -179,6 +179,7 @@
                boolean_opt(gen_introspect) |
                boolean_opt(ignore_wellknown_types_directory) |
                {proto_defs_version, integer()} |
+               boolean_opt(introspect_get_proto_defs) |
                {introspect_proto_defs_version, integer() | preferably_1} |
                boolean_opt(preserve_unknown_fields) |
                {list_deps, list_deps_format()} |
@@ -921,6 +922,13 @@ file(File) ->
 %% The `introspect_proto_defs_version' can be used to specify the version
 %% returned by the generated introspection functions, default is 1
 %% if possible, else 2.
+%%
+%% <a id="option-introspect_get_proto_defs"/>
+%% When the `introspect_get_proto_defs' option is set, the introspection
+%% function will include `get_proto_defs/0' instead of `get_msg_defs/0'. The
+%% `get_msg_defs/0' returns a list of messages and enums, while the
+%% `get_proto_defs/0' returns the same definitions returned when the
+%% `to_proto_defs' option is used.
 %%
 %% <a id="option-list_deps"/>
 %% <a id="option-list_deps_dest_file"/>
@@ -2130,6 +2138,10 @@ c() ->
 %%   <dt><a id="cmdline-option-no-gen-introspect"/>
 %%       `-no-gen-introspect'</dt>
 %%   <dd>Do not generate code for introspection.</dd>
+%%   <dt><a id="cmdline-option-introspect-get_proto_defs"/>
+%%       `-introspect-get_proto_defs'</dt>
+%%   <dd>For introspection, generate a `get_proto_defs/0' function\n"
+%%       instead of `get_msg_defs/0'.</dd>
 %%   <dt><a id="cmdline-option-preserve-unknown-fields"/>
 %%       `-preserve-unknown-fields'</dt>
 %%   <dd>Preserve unknown fields. An extra field, `$unknowns', will be added
@@ -2551,6 +2563,9 @@ opt_specs() ->
       "       useful with the option -nif.\n"},
      {"no-gen-introspect", {'opt_value()', false}, gen_introspect, "\n"
       "       Do not generate code for introspection.\n"},
+     {"introspect-get_proto_defs", undefined, introspect_get_proto_defs, "\n"
+      "       For introspection, generate a get_proto_defs/0 function\n"
+      "       instead of get_msg_defs/0.\n"},
      {"preserve-unknown-fields", undefined, preserve_unknown_fields, "\n"
       "       Preserve unknown fields.\n"},
      {"Werror",undefined, warnings_as_errors, "\n"

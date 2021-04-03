@@ -721,6 +721,38 @@ introspection_multiple_rpcs_test() ->
     ?assertError(_, M:fetch_rpc_def(s1, req_aa)),
     unload_code(M).
 
+introspection_get_proto_defs_test() ->
+    Proto = ["enum e1 { a=0; b=1; }",
+             "message m1 { required e1 f2=1; }",
+             "message m2 { required e1 f2=1; }",
+             "service s1 {",
+             "  rpc req1(m1) returns (m2);",
+             "  rpc req2(m2) returns (m1);",
+             "}",
+             "service s2 {",
+             "  rpc req21(m2) returns (m1);",
+             "  rpc req22(m1) returns (m2);",
+             "}"],
+    {ok, MsgDefs} = gpb_compile:string(x, lf_lines(Proto), [to_proto_defs]),
+    MsgDefs1 = normalize_file_names(MsgDefs),
+    M = compile_iolist(Proto, [introspect_get_proto_defs]),
+    ?assertError(undef, M:get_msg_defs()),
+    MsgDefs2 = M:get_proto_defs(),
+    MsgDefs3 = normalize_file_names(MsgDefs2),
+    ?assertEqual(MsgDefs1, MsgDefs3),
+    unload_code(M).
+
+normalize_file_names(Defs) ->
+    lists:map(
+      fun({file,{_,_}})                -> {file, {"x", "x.proto"}};
+         ({{msg_containment,_},C})     -> {{msg_containment,"x"},C};
+         ({{enum_containment,_},C})    -> {{enum_containment,"x"},C};
+         ({{service_containment,_},C}) -> {{service_containment,"x"},C};
+         ({{rpc_containment,_},C})     -> {{rpc_containment,"x"},C};
+         (Other)                       -> Other
+      end,
+      Defs).
+
 service_name_to_from_binary_binary_test() ->
     Proto = ["package foo.bar;",
              "message M { required uint32 f1=1; }",
@@ -5252,7 +5284,10 @@ no_gen_mergers_test() ->
 
 no_gen_intospections_test() ->
     {ok, {[{gen_introspect, false}], ["x.proto"]}} =
-        gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]).
+        gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]),
+    {ok, {[introspect_get_proto_defs], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-introspect-get_proto_defs",
+                                         "x.proto"]).
 
 preserve_unknown_fields_cmdline_opts_test() ->
     {ok, {[preserve_unknown_fields], ["x.proto"]}} =

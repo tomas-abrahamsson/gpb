@@ -31,8 +31,11 @@
 
 -import(gpb_lib, [replace_term/2, replace_tree/2, repeat_clauses/2]).
 
-format_exports(Defs, _AnRes, _Opts) ->
-    [?f("-export([get_msg_defs/0]).~n"),
+format_exports(Defs, _AnRes, Opts) ->
+    GetProtoDefs = proplists:get_bool(introspect_get_proto_defs, Opts),
+    [if GetProtoDefs     -> ?f("-export([get_proto_defs/0]).~n");
+        not GetProtoDefs -> ?f("-export([get_msg_defs/0]).~n")
+     end,
      ?f("-export([get_msg_names/0]).~n"),
      ?f("-export([get_group_names/0]).~n"),
      ?f("-export([get_msg_or_group_names/0]).~n"),
@@ -68,6 +71,7 @@ format_exports(Defs, _AnRes, _Opts) ->
      ?f("-export([get_protos_by_pkg_name_as_fqbin/1]).~n")].
 
 format_introspection(Defs, AnRes, Opts) ->
+    GetProtoDefs = proplists:get_bool(introspect_get_proto_defs, Opts),
     Package = proplists:get_value(package, Defs, ''),
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     MsgInfos  = compute_msg_infos(MsgDefs, Package, AnRes, Opts),
@@ -77,10 +81,17 @@ format_introspection(Defs, AnRes, Opts) ->
     ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
     ServiceInfos = compute_service_renaming_infos(ServiceDefs, Package,
                                                   AnRes, Opts),
-    [gpb_codegen:format_fn(
-       get_msg_defs, fun() -> '<Defs>' end,
-       [replace_tree('<Defs>', msg_def_trees(EnumDefs, MsgDefs, GroupDefs,
-                                             Opts))]),
+    [if GetProtoDefs ->
+             gpb_codegen:format_fn(
+               get_proto_defs, fun() -> '<Defs>' end,
+               [replace_tree('<Defs>', proto_def_trees(Defs, Opts))]);
+        not GetProtoDefs ->
+             gpb_codegen:format_fn(
+               get_msg_defs, fun() -> '<Defs>' end,
+               [replace_tree('<Defs>',
+                             msg_def_trees(EnumDefs, MsgDefs, GroupDefs,
+                                           Opts))])
+     end,
      "\n",
      gpb_codegen:format_fn(
        get_msg_names, fun() -> '<Names>' end,
@@ -165,6 +176,16 @@ format_introspection(Defs, AnRes, Opts) ->
      ?f("~n"),
      format_get_protos_by_pkg_name_as_fqbin(Defs)].
 
+proto_def_trees(Defs, Opts) ->
+    Trees =
+        lists:map(
+          fun({{msg,_Name}, _}=Elem) -> msg_def_tree(Elem, Opts);
+             ({{group,_Name}, _}=Elem) -> group_def_tree(Elem, Opts);
+             ({{service,_Name}, _}=Elem) -> service_def_tree(Elem, Opts);
+             (Other) -> erl_parse:abstract(Other)
+          end,
+          Defs),
+    erl_syntax:list(Trees).
 
 msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
