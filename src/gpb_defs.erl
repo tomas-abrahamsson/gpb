@@ -48,8 +48,12 @@
 -type def() :: {proto_defs_version, version()} |
                {{msg, Name::atom()}, [field()]} |
                {{group, Name::atom()}, [field()]} |
-               {{enum, Name::atom()}, [{Sym::atom(), Value::integer()} |
-                                       {option, Name::atom(), Val::term()}]} |
+               {{enum, Name::atom()},
+                %% Defs format 2:
+                [{Sym::atom(), Value::integer()} |
+                 {option, Name::atom(), Val::term()}] |
+                %% Defs format 3:
+                [{Sym::atom(), Value::integer(), [Opt::ee_option()]}]} |
                {{service, Name::atom()}, [#?gpb_rpc{}]} |
                {package, Name::atom()} |
                {syntax, string()} | % "proto2" | "proto3"
@@ -60,6 +64,7 @@
                {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
                {import, ProtoFile::string()} |
                {{msg_options, MsgName::atom()}, [msg_option()]} |
+               {{enum_options, MsgName::atom()}, [enum_option()]} |
                {{msg_containment, ProtoName::string()}, [MsgName::atom()]} |
                {{pkg_containment, ProtoName::string()}, PkgName::atom()} |
                {{service_containment, ProtoName::string()},
@@ -71,6 +76,8 @@
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
+-type enum_option() :: {atom() | [NameComponent::atom()], OptionValue::term()}.
+-type ee_option() :: {atom() | [NameComponent::atom()], OptionValue::term()}.
 -type version() :: integer().
 
 %% @doc Return a list of supported versions of the definition format.
@@ -88,7 +95,7 @@
 %% normal Erlang terms with for instance `=<'.
 -spec supported_defs_versions() -> [version()].
 supported_defs_versions() ->
-    [1, 2].
+    [1, 2, 3].
 
 %% @doc Return the earliest supported proto defs version.
 earliest_supported_defs_version() ->
@@ -124,7 +131,8 @@ cvt_to_latest_aux(LatestVsn, LatestVsn, Defs) ->
     ensure_proto_defs_versionized(Defs, LatestVsn);
 cvt_to_latest_aux(Vsn, LatestVsn, Defs) when Vsn < LatestVsn ->
     CvtRes = case Vsn of
-                 1 -> cvt_defs_1_to_2(Defs)
+                 1 -> cvt_defs_1_to_2(Defs);
+                 2 -> cvt_defs_2_to_3(Defs)
              end,
     case CvtRes of
         {ok, Defs1} -> cvt_to_latest_aux(Vsn + 1, LatestVsn, Defs1)
@@ -152,6 +160,7 @@ cvt_from_latest_aux(TargetVsn, TargetVsn, Defs) ->
     ensure_proto_defs_versionized(Defs, TargetVsn);
 cvt_from_latest_aux(Vsn, TargetVsn, Defs) when Vsn > TargetVsn ->
     CvtRes = case Vsn of
+                 3 -> cvt_defs_3_to_2(Defs);
                  2 -> cvt_defs_2_to_1(Defs)
              end,
     case CvtRes of
@@ -189,7 +198,7 @@ post_process_one_file(FileName, Defs, Opts) ->
     case find_package_def(Defs, Opts) of
         {ok, Package} ->
             Defs1 = handle_proto_syntax_version_one_file(
-                      join_any_msg_options(
+                      join_any_elem_options(
                         convert_default_values(
                           flatten_qualify_defnames(Defs, Package)))),
             case tmp_fields_to_fields(Defs1) of
@@ -366,7 +375,7 @@ flatten_fields(FieldsOrDefs, FullName) ->
              ({reserved_names, Ns}, {Fs,Ds}) ->
                   Def = {{reserved_names,FullName}, Ns},
                   {Fs, [Def | Ds]};
-             ({option,OptName,OptValue}, {Fs,Ds}) ->
+             ({{option,OptName,OptValue}}, {Fs,Ds}) ->
                   {Fs, [{{msg_option,FullName},{OptName,OptValue}} | Ds]};
              (Def, {Fs,Ds}) ->
                   QDefs = flatten_qualify_defnames([Def], FullName),
@@ -385,6 +394,8 @@ flatten_enum_elems(EnumElemsOrDefs, FullName) ->
              ({reserved_names, Ns}, {Es,Ds}) ->
                   Def = {{reserved_names,FullName}, Ns},
                   {Es, [Def | Ds]};
+             ({{option,OptName,OptValue}}, {Fs,Ds}) ->
+                  {Fs, [{{enum_option,FullName},{OptName,OptValue}} | Ds]};
              (Other, {Es,Ds}) ->
                   {[Other | Es], Ds}
           end,
@@ -605,19 +616,31 @@ convert_default_values_field(#gpb_oneof{fields=OFs}=Field) ->
     OFs2 = lists:map(fun convert_default_values_field/1, OFs),
     Field#gpb_oneof{fields=OFs2}.
 
-join_any_msg_options(Defs) ->
-    {NonMsgOptDefs, MsgOptsDict} =
+-record(elem_dicts, {msg=dict:new(),
+                     enum=dict:new()}).
+join_any_elem_options(Defs) ->
+    {NonOptDefs, Dicts} =
         lists:foldl(
-          fun({{msg_option,MsgName},Opt}, {Ds,MsgOptsDict}) ->
-                  {Ds, dict:append(MsgName, Opt, MsgOptsDict)};
-             (OtherDef, {Ds, MsgOptsDict}) ->
-                  {[OtherDef | Ds], MsgOptsDict}
+          fun({{msg_option,MsgName},Opt}, {Ds, #elem_dicts{msg=D0}=Dicts}) ->
+                  D1 = dict:append(MsgName, Opt, D0),
+                  Dicts1 = Dicts#elem_dicts{msg=D1},
+                  {Ds, Dicts1};
+             ({{enum_option,EName},Opt}, {Ds, #elem_dicts{enum=D0}=Dicts}) ->
+                  D1 = dict:append(EName, Opt, D0),
+                  Dicts1 = Dicts#elem_dicts{enum=D1},
+                  {Ds, Dicts1};
+             (OtherDef, {Ds, Dicts}) ->
+                  {[OtherDef | Ds], Dicts}
           end,
-          {[], dict:new()},
+          {[], #elem_dicts{}},
           Defs),
-    MsgOpts = [{{msg_options, MsgName}, MsgOpts}
-               || {MsgName, MsgOpts} <- dict:to_list(MsgOptsDict)],
-    lists:reverse(NonMsgOptDefs, MsgOpts).
+    #elem_dicts{msg=MsgOptsDict,
+                enum=EnumOptsDict} = Dicts,
+    MsgOpts = [{{msg_options, MsgName}, Opts}
+               || {MsgName, Opts} <- dict:to_list(MsgOptsDict)],
+    EnumOpts = [{{enum_options, EnumName}, Opts}
+               || {EnumName, Opts} <- dict:to_list(EnumOptsDict)],
+    lists:reverse(NonOptDefs, EnumOpts++MsgOpts).
 
 handle_proto_syntax_version_one_file(Defs) ->
     case proplists:get_value(syntax, Defs) of
@@ -793,7 +816,7 @@ verify_scalar_default_if_present(MsgName, FieldName, Type, Default, AllDefs) ->
             case lists:keysearch({enum, Ref}, 1, AllDefs) of
                 {value, {{enum,Ref}, Enumerators}} ->
                     case lists:keysearch(Default, 1, Enumerators) of
-                        {value, {Default, _Value}} ->
+                        {value, {Default, _Value, _EeOpts}} ->
                             ok;
                         false ->
                             {error,
@@ -1136,6 +1159,8 @@ reformat_names(Defs) ->
                       {{reserved_names,reformat_name(Name)}, FieldNames};
                  ({{msg_options,MsgName}, Opt}) ->
                       {{msg_options,reformat_name(MsgName)}, Opt};
+                 ({{enum_options,EnumName}, Opt}) ->
+                      {{enum_options,reformat_name(EnumName)}, Opt};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -1451,6 +1476,8 @@ ensure_proto_defs_versionized(Defs, Version) ->
             {ok, [{proto_defs_version, Version} | Defs1]}
     end.
 
+%% --upgrade--
+
 cvt_defs_1_to_2(Defs) ->
     %% Convert occurrence = optional -> defaulty for proto3 msg fields
     P3Msgs = proplists:get_value(proto3_msgs, Defs, []),
@@ -1474,6 +1501,68 @@ cvt_defs_1_to_2(Defs) ->
               Item
       end
       || Item <- Defs]}.
+
+
+cvt_defs_2_to_3(Defs) ->
+    {ok, cvt_defs_2_to_3_aux(Defs)}.
+
+cvt_defs_2_to_3_aux([{{enum,EName}, Elems} | Rest]) ->
+    %% Extend enumerators with an empty options
+    %% Lift any enumeration options to an {{enum_options, Name} Opts} entry.
+    {Enumerators, EOptions} =
+        lists:partition(
+          fun({_Sym, _Value}) -> true;
+             ({option,_OptName,_OptVal}) -> false
+          end,
+          Elems),
+    Elems2 = [{Sym, Value, []} || {Sym, Value} <- Enumerators],
+    EDef2 = {{enum, EName}, Elems2},
+    if EOptions == [] ->
+            [EDef2 | cvt_defs_2_to_3_aux(Rest)];
+       EOptions /= [] ->
+            EOptElems = [{OptName, OptValue}
+                         || {option, OptName, OptValue} <- EOptions],
+            EOptionsDef = {{enum_options, EName}, EOptElems},
+            [EDef2, EOptionsDef | cvt_defs_2_to_3_aux(Rest)]
+    end;
+cvt_defs_2_to_3_aux([OtherDef | Rest]) ->
+    [OtherDef | cvt_defs_2_to_3_aux(Rest)];
+cvt_defs_2_to_3_aux([]) ->
+    [].
+
+%% --downgrade--
+
+cvt_defs_3_to_2(Defs) ->
+    %% For any {{enum_options, EName}, Opts}, insert the Opts
+    %% into the corresponding Elems in {{enum, EName}, Elems}
+    %%
+    %% Also: For each {Sym, Name, _Opts} in Elems, drop _Opts
+
+    {Defs2, EOptionsDefs} =
+        lists:partition(
+          fun({{enum_options, _EName}, _EOpts}) -> false;
+             (_OtherElem) -> true
+          end,
+          Defs),
+    {ok, cvt_defs_3_to_2_aux(Defs2, EOptionsDefs)}.
+
+cvt_defs_3_to_2_aux([{{enum, EName}, Elems} | Rest], EOptionsDefs) ->
+    Elems2 = [{Sym, Value} || {Sym, Value, _Opts} <- Elems],
+    case lists:keyfind({enum_options, EName}, 1, EOptionsDefs) of
+        {{enum_options, EName}, EOptions} ->
+            OptElems = [{option, OptName, OptValue}
+                        || {OptName, OptValue} <- EOptions],
+            Def2 = {{enum, EName}, OptElems ++ Elems2},
+            [Def2 | cvt_defs_3_to_2_aux(Rest, EOptionsDefs)];
+        false ->
+            Def2 = {{enum, EName}, Elems2},
+            [Def2 | cvt_defs_3_to_2_aux(Rest, EOptionsDefs)]
+    end;
+cvt_defs_3_to_2_aux([OtherDef | Rest], EOptionsDefs) ->
+    [OtherDef | cvt_defs_3_to_2_aux(Rest, EOptionsDefs)];
+cvt_defs_3_to_2_aux([], _) ->
+    [].
+
 
 cvt_defs_2_to_1(Defs) ->
     %% Convert occurrence = defaulty -> optional for proto3 msg fields

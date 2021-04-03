@@ -5406,6 +5406,35 @@ can_return_proto_defs_on_version_2_test() ->
     end,
     ok.
 
+can_return_proto_defs_on_version_3_test() ->
+    Contents = <<"syntax='proto3';\n",
+                 "enum Ee { a = 0; }\n">>,
+
+    %% Check the version of the returned proto defs.
+    {ok, MsgDefs} =
+        gpb_compile:file(
+          "X.proto",
+          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+           {i,"."},
+           to_proto_defs, report_warnings,
+           {proto_defs_version,3}]),
+    3 = proplists:get_value(proto_defs_version, MsgDefs),
+    M1 = compile_defs(MsgDefs, [{introspect_proto_defs_version,3}]),
+    try
+        M1MsgDefs = M1:get_msg_defs(),
+        {_, [{a,0,[]}]} = lists:keyfind({enum,'Ee'}, 1, M1MsgDefs)
+    after unload_code(M1)
+    end,
+
+    %% Check introspection format option also when compiling directly to code
+    M2 = compile_iolist(Contents, [{introspect_proto_defs_version,3}]),
+    try
+        M2MsgDefs = M2:get_msg_defs(),
+        {_, [{a,0,[]}]} = lists:keyfind({enum,'Ee'}, 1, M2MsgDefs)
+    after unload_code(M2)
+    end,
+    ok.
+
 %% --- auxiliaries -----------------
 
 %% vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv

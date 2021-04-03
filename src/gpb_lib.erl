@@ -223,10 +223,8 @@ map_type_to_msg_name(KeyType, ValueType) ->
 %% The "option allow_alias = true;" inside an enum X { ... }
 %% says it is ok to have multiple symbols that map to the same numeric value.
 %% Appeared in protobuf 2.5.0.
-unalias_enum([{_Sym,Value}=Enum | Rest]) ->
-    [Enum | unalias_enum([E || {_,V}=E <- Rest, V /= Value])];
-unalias_enum([{option,_Name,_Value} | Rest]) ->
-    unalias_enum(Rest);
+unalias_enum([{_Sym, Value, _Opt}=Enum | Rest]) ->
+    [Enum | unalias_enum([E || {_,V,_}=E <- Rest, V /= Value])];
 unalias_enum([]) ->
     [].
 

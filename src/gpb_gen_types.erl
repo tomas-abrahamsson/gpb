@@ -165,7 +165,7 @@ format_all_msgs_types(Defs, AnRes,
 format_enum_typespec(Enum, Enumeration, AnRes) ->
     Enum1 = rename_enum_type(Enum, AnRes),
     Enumerators = gpb_lib:or_join([?f("~p", [EName])
-                                   || {EName, _} <- Enumeration]),
+                                   || {EName, _, _} <- Enumeration]),
     ?f("-type ~p() :: ~s.", [Enum1, Enumerators]).
 
 format_enum_export(Enum, AnRes) ->
@@ -773,7 +773,7 @@ enum_typestr(E, Defs, #t_env{nif=Nif}) ->
                    end,
     {value, {{enum,E}, Enumerations}} = lists:keysearch({enum,E}, 1, Defs),
     gpb_lib:or_join(
-      [?f("~p", [EName]) || {EName, _} <- Enumerations])
+      [?f("~p", [EName]) || {EName, _, _} <- Enumerations])
         ++ UnknownEnums.
 
 lineup(BaseIndent, Text, TargetCol) ->

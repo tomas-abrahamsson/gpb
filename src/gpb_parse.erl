@@ -269,13 +269,13 @@ p_enum_fields(Tokens, Acc) ->
     case Tokens of
         [?w("option") | _] ->
             {Option, Rest} = p_option(Tokens),
-            p_enum_fields(Rest, [Option | Acc]);
+            p_enum_fields(Rest, [{Option} | Acc]);
         [?w("reserved") | _] ->
             {Reserved, Rest} = p_reserved(Tokens),
             p_enum_fields(Rest, [Reserved | Acc]);
         [?w(Name/binary), ?t('=') | Rest] ->
             {Value, Rest2} = p_integer_const(Rest),
-            EnumField = {word_value(Name), Value},
+            EnumField = {word_value(Name), Value, []},
             {_EOpts, Rest3} = p_maybe_opt_list(Rest2),
             Rest4 = skip_semicolon(Rest3),
             Acc1 = [EnumField | Acc],
@@ -368,7 +368,8 @@ p_msg_elem(Tokens) ->
         ?w("reserved") ->
             p_reserved(Tokens);
         ?w("option") ->
-            p_option(Tokens);
+            {Option, Rest} = p_option(Tokens),
+            {{Option}, Rest};
         ?w("map") ->
             p_map(Tokens);
         ?w("required") ->

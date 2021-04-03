@@ -200,7 +200,7 @@ parses_circular_messages_test() ->
         do_process_sort_defs(Elems).
 
 parses_enum_def_test() ->
-    {ok, [{{enum,e1}, [{ee1,1},{ee2,2}]}]} =
+    {ok, [{{enum,e1}, [{ee1,1,[]},{ee2,2,[]}]}]} =
         parse_lines(
           ["enum e1 {",
            "  ee1 = 1;",
@@ -208,7 +208,7 @@ parses_enum_def_test() ->
            "}"]).
 
 parses_nested_enum_def_test() ->
-    {ok, [{{msg,'Msg'}, [{{enum,e1}, [{ee1,1},{ee2,2}]},
+    {ok, [{{msg,'Msg'}, [{{enum,e1}, [{ee1,1,[]},{ee2,2,[]}]},
                          #?gpb_field{name=ef}]}]} =
         parse_lines(
           ["message Msg {"
@@ -269,8 +269,9 @@ parses_enum_option_test() ->
                                "}"]),
     [{file, _},
      {proto_defs_version, _},
-     {{enum,e1}, [{option, allow_alias, true}, {ee1,1},{ee2,1}]},
+     {{enum,e1}, [{ee1,1,[]},{ee2,1,[]}]},
      {{enum_containment, _}, [_]},
+     {{enum_options, e1}, [{allow_alias, true}]},
      {{msg_containment,_}, []}] =
         do_process_sort_defs(Elems).
 
@@ -283,14 +284,15 @@ parses_enum_with_custom_option_test() ->
                                "}"]),
     [{file, _},
      {proto_defs_version, _},
-     {{enum,e1}, [{option, my_e1_option, true},
-                  {option, 'my_e1_option.x',true},
-                  {ee1,1},{ee2,2}]},
+     {{enum,e1}, [{ee1,1,[]},
+                  {ee2,2,[]}]},
      {{enum_containment, _}, [_]},
+     {{enum_options, e1}, [{[my_e1_option], true},
+                           {[my_e1_option,x], true}]},
      {{msg_containment,_}, []}] =
         do_process_sort_defs(Elems).
 
-parses_custom_option_test() ->
+parses_msg_with_custom_option_test() ->
     AllDefs = parse_sort_several_file_lines(
                 [{"descriptor.proto",
                   ["package google.protobuf;"
@@ -1138,7 +1140,7 @@ parses_empty_enum_statement_test() ->
     {ok,Defs} = parse_lines(["enum e1 { ; ; ee1=1;;; }"]),
     [{file, _},
      {proto_defs_version, _},
-     {{enum,e1}, [{ee1,1}]},
+     {{enum,e1}, [{ee1,1,[]}]},
      {{enum_containment, _}, [e1]},
      {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
 
@@ -1363,7 +1365,7 @@ proto3_enum_with_reserved_numbers_and_names_test() ->
     [{file, _},
      {proto_defs_version, _},
      {syntax,_},
-     {{enum,'m1.e1'}, [{'A',0}]},
+     {{enum,'m1.e1'}, [{'A',0,[]}]},
      {{enum_containment, _}, _},
      {{msg,m1}, [#?gpb_field{name=f1, type={enum,'m1.e1'}}]},
      {{msg_containment,_}, _},
@@ -1923,6 +1925,25 @@ proto_defs_versions_test() ->
              {gpb_defs:convert_defs_to_latest_version(EarlierVsnDefs), Vsn}
      end
      || Vsn <- EarlierVersions].
+
+convert_proto_defs_to_from_version_3_test() ->
+    Defs2    = [{proto_defs_version, 2},
+                {{enum, e1}, [{option, [my_opt1], true},
+                              {option, [my_opt2], 17},
+                              {a, 0},
+                              {b, 1}]}],
+    Defs2to3 = [{proto_defs_version, 3},
+                {{enum, e1}, [{a, 0, []},
+                              {b, 1, []}]},
+                {{enum_options, e1}, [{[my_opt1], true},
+                                      {[my_opt2], 17}]}],
+    Defs3    = [{proto_defs_version, 3},
+                {{enum, e1}, [{a, 0, [{[my_ee_opt], 42}]},
+                              {b, 1, []}]},
+                {{enum_options, e1}, [{[my_opt1], true},
+                                      {[my_opt2], 17}]}],
+    {ok, Defs2to3} = gpb_defs:convert_defs_to_latest_version(Defs2),
+    {ok, Defs2} = gpb_defs:convert_defs_from_latest_version(Defs3, 2).
 
 do_parse_verify_defs(Lines) ->
     do_parse_verify_defs(Lines, []).

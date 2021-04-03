@@ -211,7 +211,7 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
                             [replace_term('<EnumSym>', EnumSym),
                              splice_trees('<varint-bytes>', ViBytes)]
                         end
-                        || {EnumSym, EnumValue} <- EnumDef])])
+                        || {EnumSym, EnumValue, _} <- EnumDef])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         gpb_lib:smember({enum,EnumName}, UsedTypes)].
 

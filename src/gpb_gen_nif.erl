@@ -233,10 +233,11 @@ calc_cc_mapping(Defs, #anres{renamings=Renamings}, Opts) ->
                                         [CPkg, EPrefix, 'sym_to_c++'(Sym)])
                             end,
                   CCEnums =
-                      [{Sym, MkCCSym(Sym)} || {Sym, _Val} <- Enums],
+                      [{Sym, MkCCSym(Sym)} || {Sym, _Val, _} <- Enums],
                   UnaliasedEnums = gpb_lib:unalias_enum(Enums),
                   UnaliasedCCEnums =
-                      [{Sym, MkCCSym(Sym)} || {Sym, _Val} <- UnaliasedEnums],
+                      [{Sym, MkCCSym(Sym)}
+                       || {Sym, _Val, _} <- UnaliasedEnums],
                   Info = #cc_enum{type=CCType,
                                   enums=CCEnums,
                                   unaliased_enums=UnaliasedCCEnums},
@@ -582,7 +583,7 @@ collect_record_names(Defs) ->
     [MsgName || {_, MsgName, _Fields} <- gpb_lib:msgs_or_groups(Defs)].
 
 collect_enum_syms(Defs) ->
-    [[Sym || {Sym, _V} <- EnumDef] || {{enum, _}, EnumDef} <- Defs].
+    [[Sym || {Sym, _V, _} <- EnumDef] || {{enum, _}, EnumDef} <- Defs].
 
 collect_constants(AnRes) ->
     [case is_any_field_of_type_enum(AnRes) of

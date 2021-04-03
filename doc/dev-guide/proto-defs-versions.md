@@ -152,3 +152,44 @@ the message was a proto3 message or not (using the `proto3_msgs`
 item.)  In version 2, `occurrence=defaulty` indicates proto3 handling
 and `occurrence=optional` indicates proto2 handling, there is no longer
 any need to also check whether a message is proto3 or not.
+
+
+Version 3
+---------
+
+In version 3, options and enums have changed.
+
+Enumerators in version 2 were `{Sym,Value}` but in version 3, they are:
+
+```
+   {Symbol::atom(), Value::integer(), Options::list()}
+```
+
+Also, enumeration options are moved out to a separate
+`{{enum_options, EnumName}, Options}` entry, like how it is for `msg_options`.
+
+Example: Given the following proto file:
+```
+  enum E1 {
+    option (my_option) = true;
+    A = 0 [(my_enumerator_option) = true];
+  }
+```
+
+the definitions in version 3 vs 2 look like:
+```
+  [{proto_defs_version, 3},
+   ...
+   {{enum,'E1'}, [{'A', 0, [{[my_enumerator_option], true}]}]}]
+   {{enum_options, 'E1'}, [{[my_option], true}]}
+   ...]
+
+vs
+
+  [{proto_defs_version, 2},
+   ...
+   %% In version 2, the my_enumerator_option is not included
+   {{enum,'E1'}, [{option, [my_option], true},
+                  {a, 0}]}
+   ...]
+```
