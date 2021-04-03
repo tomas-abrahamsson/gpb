@@ -217,12 +217,8 @@ post_process_all_files(Defs, Opts) ->
                                   shorten_file_paths(
                                     reformat_names(
                                       extend_msgs(Defs2)))))),
-                    case versionize_defs(Defs3, Opts) of
-                        {ok, Defs4} ->
-                            {ok, Defs4};
-                        {error, Reasons} ->
-                            {error, Reasons}
-                    end;
+                    Defs4 = versionize_defs(Defs3),
+                    {ok, Defs4};
                 {error, Reasons} ->
                     {error, Reasons}
             end;
@@ -1078,9 +1074,6 @@ fmt_err({p3_unallowed_occurrence, MsgName, Field, Occurrence}) ->
 fmt_err({missing_occurrence, MsgName, Field}) ->
     ?f("in msg ~s, field ~s: missing 'optional' or 'required' or 'repeated'",
        [name_to_dstr(MsgName), Field]);
-fmt_err({request_of_unsupported_proto_defs_version, Requested, Supported}) ->
-    ?f("request of unsupported proto_defs_version ~w (supported: ~w)",
-       [Requested, Supported]);
 fmt_err({convert_from_unsupported_proto_defs_version, Found, Supported}) ->
     ?f("supplied proto_defs_version ~w is unsupported (supported: ~w)",
        [Found, Supported]);
@@ -1323,16 +1316,8 @@ shorten_meta_info(Mapping, Defs) ->
       end,
       Defs).
 
-versionize_defs(Defs, Opts) ->
-    LatestVsn = latest_defs_version(),
-    case proplists:get_value(proto_defs_version, Opts, LatestVsn) of
-        LatestVsn ->
-            {ok, [{proto_defs_version, LatestVsn} | Defs]};
-        X ->
-            Supported = supported_defs_versions(),
-            Reason = {request_of_unsupported_proto_defs_version, X, Supported},
-            {error, [Reason]}
-    end.
+versionize_defs(Defs) ->
+    [{proto_defs_version, latest_defs_version()} | Defs].
 
 possibly_hint_use_packages_opt(Reasons, Defs, Opts) ->
     UsePackagesOptPresent = case proplists:get_value(use_packages, Opts) of

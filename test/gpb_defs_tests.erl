@@ -1903,26 +1903,26 @@ proto_defs_versions_test() ->
     Unhandled = [{proto_defs_version, -17} | Rest],
     {error, R1} = gpb_defs:convert_defs_to_latest_version(Unhandled),
     ?assert(is_io_list(gpb_defs:format_error(R1))),
+    {error, R2} = gpb_defs:convert_defs_from_latest_version(AllDefs, -17),
+    ?assert(is_io_list(gpb_defs:format_error(R2))),
     %% Converting latest to itself should always work (identity)
     {ok, AllDefs} = gpb_defs:convert_defs_to_latest_version(AllDefs),
 
-    %% Try requesting conversion to an unhandled version
-    {error, R2} = parse_several_file_lines(Fs, [{proto_defs_version, -17}],
-                                           expect_error, verify_imports),
-    ?assert(is_io_list(gpb_defs:format_post_process_error({error, R2}))),
-
     %% Requesting conversion to latest supported should always work (identity)
-    Latest = lists:max(gpb_defs:supported_defs_versions()),
-    AllDefs = parse_several_file_lines(Fs, [{proto_defs_version, Latest}],
-                                       expect_success, verify_imports),
+    {ok, AllDefs} = gpb_defs:convert_defs_to_latest_version(AllDefs),
 
-    EarliestSupportedVsn = gpb_defs:earliest_supported_defs_version(),
-    {ok, _Defs} = gpb_defs:convert_defs_from_latest_version(
-                    AllDefs,
-                    EarliestSupportedVsn),
-    {error, R3} = gpb_defs:convert_defs_from_latest_version(AllDefs, -17),
-    ?assert(is_io_list(gpb_defs:format_error({error, R3}))),
-    ok.
+    %% Converting to every ealier (supported) version and back to latest,
+    %% should always work:
+    Latest = lists:max(gpb_defs:supported_defs_versions()),
+    EarlierVersions = gpb_defs:supported_defs_versions() -- [Latest],
+    [begin
+         {{ok, EarlierVsnDefs}, Vsn} =
+             {gpb_defs:convert_defs_from_latest_version(AllDefs, Vsn), Vsn},
+         Vsn = proplists:get_value(proto_defs_version, EarlierVsnDefs),
+         {{ok, _}, Vsn} =
+             {gpb_defs:convert_defs_to_latest_version(EarlierVsnDefs), Vsn}
+     end
+     || Vsn <- EarlierVersions].
 
 do_parse_verify_defs(Lines) ->
     do_parse_verify_defs(Lines, []).
