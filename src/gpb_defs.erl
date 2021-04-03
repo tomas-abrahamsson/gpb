@@ -65,6 +65,7 @@
                {import, ProtoFile::string()} |
                {{msg_options, MsgName::atom()}, [msg_option()]} |
                {{enum_options, MsgName::atom()}, [enum_option()]} |
+               {{service_options, MsgName::atom()}, [service_option()]} |
                {{msg_containment, ProtoName::string()}, [MsgName::atom()]} |
                {{pkg_containment, ProtoName::string()}, PkgName::atom()} |
                {{service_containment, ProtoName::string()},
@@ -78,6 +79,8 @@
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
 -type enum_option() :: {atom() | [NameComponent::atom()], OptionValue::term()}.
 -type ee_option() :: {atom() | [NameComponent::atom()], OptionValue::term()}.
+-type service_option() :: {atom() | [NameComponent::atom()],
+                           OptionValue::term()}.
 -type version() :: integer().
 
 %% @doc Return a list of supported versions of the definition format.
@@ -344,7 +347,8 @@ flatten_qualify_defnames(Defs, Root) ->
                     Acc;
            ({{service, Name}, RPCs}, Acc) ->
                 FullName = prepend_path(Root, Name),
-                [{{service,FullName}, RPCs} | Acc];
+                {RPCs2, Defs2} = flatten_service_elems(RPCs, FullName),
+                [{{service,FullName}, RPCs2} | Defs2] ++ Acc;
            (OtherElem, Acc) ->
                 [OtherElem | Acc]
         end,
@@ -402,6 +406,19 @@ flatten_enum_elems(EnumElemsOrDefs, FullName) ->
           {[],[]},
           EnumElemsOrDefs),
     {lists:reverse(EnumElems2), Defs2}.
+
+flatten_service_elems(Elems, FullName) ->
+    {Elems2, Defs2} =
+        lists:foldl(
+          fun({{option, OptName, OptValue}}, {Es, Ds}) ->
+                  {Es, [{{service_option,FullName}, {OptName,OptValue}} | Ds]};
+             (Other, {Es, Ds}) ->
+                  {[Other | Es], Ds}
+          end,
+          {[],[]},
+          Elems),
+    {lists:reverse(Elems2), Defs2}.
+
 
 %% Resolve any refs
 resolve_refs(Defs) ->
@@ -617,7 +634,8 @@ convert_default_values_field(#gpb_oneof{fields=OFs}=Field) ->
     Field#gpb_oneof{fields=OFs2}.
 
 -record(elem_dicts, {msg=dict:new(),
-                     enum=dict:new()}).
+                     enum=dict:new(),
+                     service=dict:new()}).
 join_any_elem_options(Defs) ->
     {NonOptDefs, Dicts} =
         lists:foldl(
@@ -629,18 +647,26 @@ join_any_elem_options(Defs) ->
                   D1 = dict:append(EName, Opt, D0),
                   Dicts1 = Dicts#elem_dicts{enum=D1},
                   {Ds, Dicts1};
+             ({{service_option,SName},Opt},
+              {Ds, #elem_dicts{service=D0}=Dicts}) ->
+                  D1 = dict:append(SName, Opt, D0),
+                  Dicts1 = Dicts#elem_dicts{service=D1},
+                  {Ds, Dicts1};
              (OtherDef, {Ds, Dicts}) ->
                   {[OtherDef | Ds], Dicts}
           end,
           {[], #elem_dicts{}},
           Defs),
     #elem_dicts{msg=MsgOptsDict,
-                enum=EnumOptsDict} = Dicts,
+                enum=EnumOptsDict,
+                service=ServiceOptsDict} = Dicts,
     MsgOpts = [{{msg_options, MsgName}, Opts}
                || {MsgName, Opts} <- dict:to_list(MsgOptsDict)],
     EnumOpts = [{{enum_options, EnumName}, Opts}
                || {EnumName, Opts} <- dict:to_list(EnumOptsDict)],
-    lists:reverse(NonOptDefs, EnumOpts++MsgOpts).
+    ServiceOpts = [{{service_options, ServiceName}, Opts}
+                   || {ServiceName, Opts} <- dict:to_list(ServiceOptsDict)],
+    lists:reverse(NonOptDefs, EnumOpts++MsgOpts++ServiceOpts).
 
 handle_proto_syntax_version_one_file(Defs) ->
     case proplists:get_value(syntax, Defs) of
@@ -1161,6 +1187,8 @@ reformat_names(Defs) ->
                       {{msg_options,reformat_name(MsgName)}, Opt};
                  ({{enum_options,EnumName}, Opt}) ->
                       {{enum_options,reformat_name(EnumName)}, Opt};
+                 ({{service_options,ServiceName}, Opt}) ->
+                      {{service_options,reformat_name(ServiceName)}, Opt};
                  (OtherElem) ->
                       OtherElem
               end,

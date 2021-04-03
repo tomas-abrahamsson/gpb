@@ -743,8 +743,9 @@ p_rpc_defs(Tokens, Acc) ->
         [?t('}') | _] ->
             {lists:reverse(Acc), Tokens};
         [?w("option") | _] ->
-            {_Opt, Rest} = p_option(Tokens),
-            p_rpc_defs(Rest, Acc);
+            {Opt, Rest} = p_option(Tokens),
+            Acc1 = [{Opt} | Acc],
+            p_rpc_defs(Rest, Acc1);
         [?w("rpc") | _] ->
             {Rpc, Rest} = p_rpc_def(Tokens),
             Acc1 = [Rpc | Acc],

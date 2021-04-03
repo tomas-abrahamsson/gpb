@@ -375,7 +375,8 @@ parses_custom_option_in_services_test() ->
      {{msg_containment, _}, _},
      {{rpc_containment, _}, _},
      {{service, _}, _},
-     {{service_containment, _}, _}] =
+     {{service_containment, _}, _},
+     {{service_options,s}, [{[my_option],-17}]}] =
         AllDefs.
 
 parse_uninterpreted_option_block_test() ->
