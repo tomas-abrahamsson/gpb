@@ -379,6 +379,20 @@ parses_custom_option_in_services_test() ->
      {{service_options,s}, [{[my_option],-17}]}] =
         AllDefs.
 
+parses_file_options_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"x.proto",
+                  ["option (my_opt_1) = 42;"
+                   "option (my_opt_2) = 'a';"]}],
+                []),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{msg_containment, _}, _},
+     {option, [my_opt_1], 42},
+     {option, [my_opt_2], "a"}] =
+        AllDefs.
+
 parse_uninterpreted_option_block_test() ->
     AllDefs = parse_sort_several_file_lines(
                 [{"x.proto",
