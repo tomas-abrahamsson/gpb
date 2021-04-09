@@ -1602,7 +1602,10 @@ proto3_type_default(Type, MsgDefs) ->
         float    -> 0.0;
         {map,_KT,_VT} -> [];
         {enum, _EnumName}=Key ->
-            {Key,[{Sym0,_V0} | _]} = lists:keyfind(Key, 1, MsgDefs),
+            {Key, Defs} = lists:keyfind(Key, 1, MsgDefs),
+            %% Enum definitions might contain options ({option, Symbol, Value}),
+            %% clear those out before picking the first symbol name.
+            [{Sym0, _V0} | _] = [D || {_S, _V} = D <- Defs],
             Sym0
     end.
 
