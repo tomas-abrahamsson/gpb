@@ -147,9 +147,9 @@ is always considered to not be set.
 
 In version 1, when processing a `#?gpb_field{}` with
 `occurrence=optional`, to invoke the correct handling as described
-above, it was also necessary to also check the to also check whether
-the message was a proto3 message or not (using the `proto3_msgs`
-item.)  In version 2, `occurrence=defaulty` indicates proto3 handling
+above, it was also necessary to also check whether the message
+was a proto3 message or not (using the `proto3_msgs` item.)
+In version 2, `occurrence=defaulty` indicates proto3 handling
 and `occurrence=optional` indicates proto2 handling, there is no longer
 any need to also check whether a message is proto3 or not.
 
