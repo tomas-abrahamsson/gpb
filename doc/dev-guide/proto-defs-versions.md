@@ -193,3 +193,73 @@ vs
                   {a, 0}]}
    ...]
 ```
+
+Version 4
+---------
+
+In version 4, the representation of custom options has changed.
+
+This concerns options and custom options on file-level, in messages and
+fields, in, enumerations and enum values and in services.  Options for
+rpc methods are a bit of a different story though: they now look like 
+options in any other positions, which was not the case previously.
+
+Still in version 4, custom option names are not resolved, but instead
+preserved as they occor in the .proto file, though on erlang format.
+
+The table below summarizes the option format versions.
+
+| In the `.proto` | format ≥ 4       | format ≤ 3        | rpc opts ≤ 3    |
+| --------------- | ---------------- | ----------------- | --------------- |
+| `opt_name`      | `opt_name`       | `opt_name`        | `opt_name`      |
+| `(custom_opt)`  | `[{custom_opt}]` | `[custom_opt]`    | `custom_opt`    |
+| `(pkg.opt)`     | `[{pkg,opt}]`    | `[pkg,'.',opt]`   | `'pkg...opt'`   |
+| `(pkg.opt).f`   | `[{pkg,opt},f]`  | `[pkg,'.',opt,f]` | `'pkg...opt.f'` |
+| `(opt).f.g`     | `[{opt},f,g]`    | `[opt,f,g]`       | `'opt.f.g'`     |
+| `(p).(f).g`     | `[{p},{f},g]`    | `[p,f,g]`         | `'p.f.g'`       |
+| `(.p).g`        | `[{'.',p},g]`    | `['.',p,'.',f,g]` | `'..p...f.g'`   |
+
+Below is an example of proto definitions to indicate where
+these option names have changed format. This example does not
+show all places where (custom) options can occur, but highlights
+where the options in the table above occur.
+
+```
+.proto:
+
+   enum E1 {
+     allow_alias = true;
+     (my_custom_option) = 1;
+     (other_custom_opt).x = "abc";
+     A = 0 [(a_opt) = 1];
+   }
+   message M1 {
+     option (b_opt) = true;
+     required uint32 f = 1 [packed, deprecated=false, (c_opt).d=2];
+   }
+   service S1 {
+     rpc Cc (M1) returns (M1) {
+       option (m_opt) = 1;
+     }
+   }
+
+Defs:
+
+   [{proto_defs_version, 4},
+    ...
+    {{enum, 'E1'}, [{'A', 0, [{[{a_opt}], 1}]}
+                   ]},
+    {{enum_options,'E1'}, [{allow_alias,true},
+                           {[{my_custom_option}], 1},
+                           {[{other_custom_option},x], "abc"}]},
+    ...
+    {{msg, 'M1'}, [#?gpb_field{name=f, opts=[{packed,true},
+                                             {deprecated,false},
+                                             {[{c_opt},d], 2}]}]},
+    {{msg_options,'M1'}, [{[{b_opt}], true}}]},
+    ...
+    {{service,'S1'}, [#?gpb_rpc{opts=[{[{m_opt}], 1}]}]}
+    %%                                 ^^^^^^^^^
+    %%                                 rpc opts in the table above
+    ...]
+```

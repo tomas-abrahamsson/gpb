@@ -42,6 +42,8 @@
 
 -include("../include/gpb.hrl").
 
+-include_lib("eunit/include/eunit.hrl").
+
 -define(is_non_empty_string(Str), (is_list(Str) andalso is_integer(hd(Str)))).
 
 -type defs() :: [def()].
@@ -52,7 +54,7 @@
                 %% Defs format 2:
                 [{Sym::atom(), Value::integer()} |
                  {option, Name::atom(), Val::term()}] |
-                %% Defs format 3:
+                %% Defs format 3+:
                 [{Sym::atom(), Value::integer(), [Opt::ee_option()]}]} |
                {{service, Name::atom()}, [#?gpb_rpc{}]} |
                {package, Name::atom()} |
@@ -98,7 +100,7 @@
 %% normal Erlang terms with for instance `=<'.
 -spec supported_defs_versions() -> [version()].
 supported_defs_versions() ->
-    [1, 2, 3].
+    [1, 2, 3, 4].
 
 %% @doc Return the earliest supported proto defs version.
 earliest_supported_defs_version() ->
@@ -135,7 +137,8 @@ cvt_to_latest_aux(LatestVsn, LatestVsn, Defs) ->
 cvt_to_latest_aux(Vsn, LatestVsn, Defs) when Vsn < LatestVsn ->
     CvtRes = case Vsn of
                  1 -> cvt_defs_1_to_2(Defs);
-                 2 -> cvt_defs_2_to_3(Defs)
+                 2 -> cvt_defs_2_to_3(Defs);
+                 3 -> cvt_defs_3_to_4(Defs)
              end,
     case CvtRes of
         {ok, Defs1} -> cvt_to_latest_aux(Vsn + 1, LatestVsn, Defs1)
@@ -163,6 +166,7 @@ cvt_from_latest_aux(TargetVsn, TargetVsn, Defs) ->
     ensure_proto_defs_versionized(Defs, TargetVsn);
 cvt_from_latest_aux(Vsn, TargetVsn, Defs) when Vsn > TargetVsn ->
     CvtRes = case Vsn of
+                 4 -> cvt_defs_4_to_3(Defs);
                  3 -> cvt_defs_3_to_2(Defs);
                  2 -> cvt_defs_2_to_1(Defs)
              end,
@@ -491,7 +495,7 @@ resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
                   {found, {msg, MArg}} ->
                       case resolve_ref(Defs, Return, Root, FullName) of
                           {found, {msg, MReturn}} ->
-                              NewOpts = [{reformat_name(Name), Value}
+                              NewOpts = [{Name, Value}
                                          || {option,Name,Value} <- Opts],
                               NewRpc = #?gpb_rpc{name=RpcName,
                                                  input=MArg,
@@ -1558,7 +1562,133 @@ cvt_defs_2_to_3_aux([OtherDef | Rest]) ->
 cvt_defs_2_to_3_aux([]) ->
     [].
 
+cvt_defs_3_to_4(Defs) ->
+    %% Should we attempt to consider packages to get more accurate
+    %% name components?
+    %% Eg if an option is [o,p,f,x] and there some other {package,'o,p'},
+    %% in Defs, then a more accurate upgrade translation is [{o,p,f},x]
+    %% Though, there are still cases we can't handle.
+    %% And for now, we don't use the options.
+    {ok, lists:map(
+           fun({{service, _ServiceName}=Key, Rpcs3}) ->
+                   Rpcs4 =
+                       lists:map(
+                         fun(#?gpb_rpc{opts=Opts}=R) ->
+                                 R#?gpb_rpc{opts=rpc_opts_3_to_4(Opts)}
+                         end,
+                         Rpcs3),
+                   {Key, Rpcs4};
+              (Other) ->
+                   Other
+           end,
+           Defs)}.
+
+rpc_opts_3_to_4(Opts) ->
+    lists:map(
+      fun({Name, Value}) -> {rpc_opt_name_3_to_4(Name), Value};
+         (Other)         -> Other % example: packed
+      end,
+      Opts).
+
+rpc_opt_name_3_to_4(Name) ->
+    case gpb_lib:string_lexemes(atom_to_list(Name), ".") of
+        [_NotDotted] -> Name;
+        Parts -> [list_to_atom(Part) || Part <- Parts]
+    end.
+
 %% --downgrade--
+
+cvt_defs_4_to_3(Defs) ->
+    {ok, lists:map(
+           fun({{msg,_MsgName}=Key, Fields}) ->
+                   {Key, field_opts_4_to_3(Fields)};
+              ({{msg_options, _MsgName}=Key, Opts}) ->
+                   {Key, opts_4_to_3(Opts)};
+              ({{enum,_EnumName}=Key, EnumElems4}) ->
+                   EnumElems3 =
+                       lists:map(
+                         fun({Sym, Val, Opts}) ->
+                                 {Sym, Val, opts_4_to_3(Opts)}
+                         end,
+                         EnumElems4),
+                   {Key, EnumElems3};
+              ({{enum_options, _EnumName}=Key, Opts}) ->
+                   {Key, opts_4_to_3(Opts)};
+              ({{service, _ServiceName}=Key, Rpcs4}) ->
+                   Rpcs3 =
+                       lists:map(
+                         fun(#?gpb_rpc{opts=Opts}=R) ->
+                                 R#?gpb_rpc{opts=rpc_opts_4_to_3(Opts)}
+                         end,
+                         Rpcs4),
+                   {Key, Rpcs3};
+              ({{service_options, _ServiceName}=Key, Opts}) ->
+                   {Key, opts_4_to_3(Opts)};
+              (Other) ->
+                   Other
+           end,
+           Defs)}.
+
+field_opts_4_to_3(Fields) ->
+    lists:map(
+      fun(#?gpb_field{opts=Opts}=F) ->
+              F#?gpb_field{opts = opts_4_to_3(Opts)};
+         (#gpb_oneof{fields=Fs, opts=Opts}=F) ->
+              F#gpb_oneof{fields = field_opts_4_to_3(Fs),
+                          opts   = opts_4_to_3(Opts)}
+      end,
+      Fields).
+
+opts_4_to_3(Opts) ->
+    lists:map(
+      fun({Name, Value}) when is_list(Name) -> {opt_name_4_to_3(Name), Value};
+         ({OtherName, Value})               -> {OtherName, Value};
+         (Other)                            -> Other % example: packed
+      end,
+      Opts).
+
+%% Example: [{pkg,custom_opt},f] -> [pkg,'.',custom_opt,f]
+opt_name_4_to_3([ExtComponents | Rest]) when is_tuple(ExtComponents) ->
+    Dotted = case tuple_to_list(ExtComponents) of
+                 ['.' | More] -> ['.' | gpb_lib:ljoin('.', More)];
+                 Comps        -> gpb_lib:ljoin('.', Comps)
+             end,
+    Dotted ++ opt_name_4_to_3(Rest);
+opt_name_4_to_3([NameComponent | Rest]) ->
+    [NameComponent | opt_name_4_to_3(Rest)];
+opt_name_4_to_3([]) ->
+    [].
+
+rpc_opts_4_to_3(Opts) ->
+    lists:map(
+      fun({Name, Value}) when is_list(Name) -> {rpc_opt_name_43(Name), Value};
+         ({OtherName, Value})               -> {OtherName, Value};
+         (Other)                            -> Other % example: packed
+      end,
+      Opts).
+
+%% Example:[{pkg,a,custom_option},subfield] -> 'pkg.a.custom_option.subfield'
+rpc_opt_name_43(OptName) ->
+    Components = opt_name_4_to_3(OptName),
+    list_to_atom(gpb_lib:dot_join([atom_to_list(P) || P <- Components])).
+
+opt_name_4_to_3_test() ->
+    [custom_opt] = opt_name_4_to_3([{custom_opt}]),         % (custom_opt)
+    [pkg,'.',opt] = opt_name_4_to_3([{pkg,opt}]),           % (pkg.opt)
+    [pkg,'.',opt,f] = opt_name_4_to_3([{pkg,opt},f]),       % (pkg.opt).f
+    [opt,f,g] = opt_name_4_to_3([{opt},f,g]),               % (opt).f.g
+    [p,f,g] = opt_name_4_to_3([{p},{f},g]),                 % (p).(f).g
+    ['.',p,'.',f,g] = opt_name_4_to_3([{'.',p},{'.',f},g]), % (.p).(.f).g
+    ok.
+
+rpc_opt_name_43_test() ->
+    custom_opt = rpc_opt_name_43([{custom_opt}]),       % (custom_opt)
+    'pkg...opt' = rpc_opt_name_43([{pkg,opt}]),         % (pkg.opt)
+    'pkg...opt.f' = rpc_opt_name_43([{pkg,opt},f]),     % (pkg.opt).f
+    'opt.f.g' = rpc_opt_name_43([{opt},f,g]),           % (opt).f.g
+    'p.f.g' = rpc_opt_name_43([{p},{f},g]),             % (p).(f).g
+    '..p...f.g' = rpc_opt_name_43([{'.',p},{'.',f},g]), % (.p).(.f).g
+    ok.
 
 cvt_defs_3_to_2(Defs) ->
     %% For any {{enum_options, EName}, Opts}, insert the Opts

@@ -150,6 +150,8 @@
 -export([camel_case/1]).
 -export([lower_camel_case/1]).
 
+-export([ljoin/2]).
+
 -include("../include/gpb.hrl").
 
 
@@ -1227,3 +1229,18 @@ camel_case([], _) ->
 
 capitalize_letter(C) ->
     C + ($A - $a).
+
+-ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
+%% Improve by making a separate test for lists:join (added in erl19)
+%% instead of piggybacking on the test for erl20 string functions.
+
+ljoin(Sep, List) ->
+    lists:join(Sep, List).
+
+-else. % NO_HAVE_ERL20_STR_FUNCTIONS
+
+ljoin(_Sep, []) -> [];
+ljoin(_Sep, [Elem]) -> [Elem];
+ljoin(Sep, [Hd | Rest]) -> [Hd, Sep | ljoin(Sep, Rest)].
+
+-endif. % NO_HAVE_ERL20_STR_FUNCTIONS

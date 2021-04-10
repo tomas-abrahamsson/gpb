@@ -850,28 +850,28 @@ p_opt_nm2(Tokens, Acc) ->
 
 opt_name_acc_new(Name) when is_atom(Name) ->
     Name;
-opt_name_acc_new(DottedName) when is_list(DottedName) ->
-    lists:reverse(DottedName).
+opt_name_acc_new(Name) when is_tuple(Name) ->
+    [Name].
 
 opt_name_acc_add(Name, Acc) when is_atom(Name) ->
     Acc1 = ensure_atom_list(Acc),
     [Name | Acc1];
-opt_name_acc_add(DottedName, Acc) when is_list(DottedName) ->
+opt_name_acc_add(Name, Acc) when is_tuple(Name) ->
     Acc1 = ensure_atom_list(Acc),
-    lists:reverse(DottedName, Acc1).
+    [Name | Acc1].
 
-opt_name_acc_finalize(A) when is_atom(A) -> A;
-opt_name_acc_finalize(L) when is_list(L) -> lists:reverse(L).
+opt_name_acc_finalize(A) when is_atom(A)  -> A;
+opt_name_acc_finalize(L) when is_list(L)  -> lists:reverse(L).
 
-ensure_atom_list(A) when is_atom(A) -> [A];
-ensure_atom_list(L) when is_list(L) -> L.
+ensure_atom_list(A) when is_atom(A)  -> [A];
+ensure_atom_list(L) when is_list(L)  -> L.
 
 p_option_name_part(Tokens) ->
     case Tokens of
         [?t('(') | Rest] ->
             case p_dotted_name(Rest) of
                 {DottedName, [?t(')') | Rest2]} ->
-                    {DottedName, Rest2};
+                    {list_to_tuple(undot_but_first(DottedName)), Rest2};
                 _ ->
                     ?syntax_error(Rest, "expected option name")
             end;
@@ -880,6 +880,12 @@ p_option_name_part(Tokens) ->
         _ ->
             ?syntax_error(Tokens, "expected option name")
     end.
+
+undot_but_first(['.' | Rest]) -> ['.' | undot2(Rest)];
+undot_but_first(Components)   -> undot2(Components).
+
+undot2(Components) ->
+    lists:filter(fun(C) -> C /= '.' end, Components).
 
 %% opt_list -> opt ',' opt_list
 %% opt_list -> opt
