@@ -721,6 +721,38 @@ introspection_multiple_rpcs_test() ->
     ?assertError(_, M:fetch_rpc_def(s1, req_aa)),
     unload_code(M).
 
+introspection_get_proto_defs_test() ->
+    Proto = ["enum e1 { a=0; b=1; }",
+             "message m1 { required e1 f2=1; }",
+             "message m2 { required e1 f2=1; }",
+             "service s1 {",
+             "  rpc req1(m1) returns (m2);",
+             "  rpc req2(m2) returns (m1);",
+             "}",
+             "service s2 {",
+             "  rpc req21(m2) returns (m1);",
+             "  rpc req22(m1) returns (m2);",
+             "}"],
+    {ok, MsgDefs} = gpb_compile:string(x, lf_lines(Proto), [to_proto_defs]),
+    MsgDefs1 = normalize_file_names(MsgDefs),
+    M = compile_iolist(Proto, [introspect_get_proto_defs]),
+    ?assertError(undef, M:get_msg_defs()),
+    MsgDefs2 = M:get_proto_defs(),
+    MsgDefs3 = normalize_file_names(MsgDefs2),
+    ?assertEqual(MsgDefs1, MsgDefs3),
+    unload_code(M).
+
+normalize_file_names(Defs) ->
+    lists:map(
+      fun({file,{_,_}})                -> {file, {"x", "x.proto"}};
+         ({{msg_containment,_},C})     -> {{msg_containment,"x"},C};
+         ({{enum_containment,_},C})    -> {{enum_containment,"x"},C};
+         ({{service_containment,_},C}) -> {{service_containment,"x"},C};
+         ({{rpc_containment,_},C})     -> {{rpc_containment,"x"},C};
+         (Other)                       -> Other
+      end,
+      Defs).
+
 service_name_to_from_binary_binary_test() ->
     Proto = ["package foo.bar;",
              "message M { required uint32 f1=1; }",
@@ -5252,7 +5284,10 @@ no_gen_mergers_test() ->
 
 no_gen_intospections_test() ->
     {ok, {[{gen_introspect, false}], ["x.proto"]}} =
-        gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]).
+        gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]),
+    {ok, {[introspect_get_proto_defs], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-introspect-get_proto_defs",
+                                         "x.proto"]).
 
 preserve_unknown_fields_cmdline_opts_test() ->
     {ok, {[preserve_unknown_fields], ["x.proto"]}} =
@@ -5367,6 +5402,35 @@ can_return_proto_defs_on_version_2_test() ->
     M2 = compile_iolist(Contents, [{introspect_proto_defs_version,2}]),
     try
         [#?gpb_field{name=field1, occurrence=defaulty}] = M2:find_msg_def('Msg')
+    after unload_code(M2)
+    end,
+    ok.
+
+can_return_proto_defs_on_version_3_test() ->
+    Contents = <<"syntax='proto3';\n",
+                 "enum Ee { a = 0; }\n">>,
+
+    %% Check the version of the returned proto defs.
+    {ok, MsgDefs} =
+        gpb_compile:file(
+          "X.proto",
+          [mk_fileop_opt([{read_file, fun(_) -> {ok, Contents} end}]),
+           {i,"."},
+           to_proto_defs, report_warnings,
+           {proto_defs_version,3}]),
+    3 = proplists:get_value(proto_defs_version, MsgDefs),
+    M1 = compile_defs(MsgDefs, [{introspect_proto_defs_version,3}]),
+    try
+        M1MsgDefs = M1:get_msg_defs(),
+        {_, [{a,0,[]}]} = lists:keyfind({enum,'Ee'}, 1, M1MsgDefs)
+    after unload_code(M1)
+    end,
+
+    %% Check introspection format option also when compiling directly to code
+    M2 = compile_iolist(Contents, [{introspect_proto_defs_version,3}]),
+    try
+        M2MsgDefs = M2:get_msg_defs(),
+        {_, [{a,0,[]}]} = lists:keyfind({enum,'Ee'}, 1, M2MsgDefs)
     after unload_code(M2)
     end,
     ok.

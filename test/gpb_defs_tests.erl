@@ -200,7 +200,7 @@ parses_circular_messages_test() ->
         do_process_sort_defs(Elems).
 
 parses_enum_def_test() ->
-    {ok, [{{enum,e1}, [{ee1,1},{ee2,2}]}]} =
+    {ok, [{{enum,e1}, [{ee1,1,[]},{ee2,2,[]}]}]} =
         parse_lines(
           ["enum e1 {",
            "  ee1 = 1;",
@@ -208,7 +208,7 @@ parses_enum_def_test() ->
            "}"]).
 
 parses_nested_enum_def_test() ->
-    {ok, [{{msg,'Msg'}, [{{enum,e1}, [{ee1,1},{ee2,2}]},
+    {ok, [{{msg,'Msg'}, [{{enum,e1}, [{ee1,1,[]},{ee2,2,[]}]},
                          #?gpb_field{name=ef}]}]} =
         parse_lines(
           ["message Msg {"
@@ -269,8 +269,9 @@ parses_enum_option_test() ->
                                "}"]),
     [{file, _},
      {proto_defs_version, _},
-     {{enum,e1}, [{option, allow_alias, true}, {ee1,1},{ee2,1}]},
+     {{enum,e1}, [{ee1,1,[]},{ee2,1,[]}]},
      {{enum_containment, _}, [_]},
+     {{enum_options, e1}, [{allow_alias, true}]},
      {{msg_containment,_}, []}] =
         do_process_sort_defs(Elems).
 
@@ -283,14 +284,15 @@ parses_enum_with_custom_option_test() ->
                                "}"]),
     [{file, _},
      {proto_defs_version, _},
-     {{enum,e1}, [{option, my_e1_option, true},
-                  {option, 'my_e1_option.x',true},
-                  {ee1,1},{ee2,2}]},
+     {{enum,e1}, [{ee1,1,[{[{my_e_option}], 12}]},
+                  {ee2,2,[{[{my_e_option},x], "abc"}]}]},
      {{enum_containment, _}, [_]},
+     {{enum_options, e1}, [{[{my_e1_option}], true},
+                           {[{my_e1_option},x], true}]},
      {{msg_containment,_}, []}] =
         do_process_sort_defs(Elems).
 
-parses_custom_option_test() ->
+parses_msg_with_custom_option_test() ->
     AllDefs = parse_sort_several_file_lines(
                 [{"descriptor.proto",
                   ["package google.protobuf;"
@@ -327,15 +329,15 @@ parses_custom_option_test() ->
      {{enum_containment,"x"}, []},
      {{msg,'google.protobuf.FieldOptions'}, [#?gpb_field{name=my_f_option}]},
      {{msg,'google.protobuf.MessageOptions'}, [#?gpb_field{name=my_m_option}]},
-     {{msg,'x.t'},[#?gpb_field{name=f1,opts=[{[my_f_option],true}]},
-                   #?gpb_field{name=f2,opts=[{[my_f_option,x],false}]}]},
+     {{msg,'x.t'},[#?gpb_field{name=f1,opts=[{[{my_f_option}],true}]},
+                   #?gpb_field{name=f2,opts=[{[{my_f_option},x],false}]}]},
      {{msg,'x.t.s'},[]},
      {{msg_containment,_}, ['google.protobuf.FieldOptions',
                             'google.protobuf.MessageOptions']},
      {{msg_containment,_}, ['x.t', 'x.t.s']},
-     {{msg_options,'x.t'},[{[my_m_option],"t1"},
-                           {[my_m_option],"t2"}]},
-     {{msg_options,'x.t.s'},[{[my_m_option],"s"}]},
+     {{msg_options,'x.t'},[{[{my_m_option}],"t1"},
+                           {[{my_m_option}],"t2"}]},
+     {{msg_options,'x.t.s'},[{[{my_m_option}],"s"}]},
      {{pkg_containment, "descriptor"}, 'google.protobuf'},
      {{pkg_containment, "x"}, x}] =
         AllDefs.
@@ -353,7 +355,7 @@ parses_custom_option_in_oneof_test() ->
     [{file, _},
      {proto_defs_version, _},
      {{enum_containment, _}, _},
-     {{msg,x}, [#gpb_oneof{}]},
+     {{msg,x}, [#gpb_oneof{opts=[{[{my_option}], -1}]}]},
      {{msg_containment, _}, _}] =
         AllDefs.
 
@@ -373,7 +375,22 @@ parses_custom_option_in_services_test() ->
      {{msg_containment, _}, _},
      {{rpc_containment, _}, _},
      {{service, _}, _},
-     {{service_containment, _}, _}] =
+     {{service_containment, _}, _},
+     {{service_options,s}, [{[{my_option}],-17}]}] =
+        AllDefs.
+
+parses_file_options_test() ->
+    AllDefs = parse_sort_several_file_lines(
+                [{"x.proto",
+                  ["option (my_opt_1) = 42;"
+                   "option (my_opt_2) = 'a';"]}],
+                []),
+    [{file, _},
+     {proto_defs_version, _},
+     {{enum_containment, _}, _},
+     {{msg_containment, _}, _},
+     {option, [{my_opt_1}], 42},
+     {option, [{my_opt_2}], "a"}] =
         AllDefs.
 
 parse_uninterpreted_option_block_test() ->
@@ -388,10 +405,10 @@ parse_uninterpreted_option_block_test() ->
     [{file, _},
      {proto_defs_version, _},
      {{enum_containment, _}, _},
-     {{msg,m}, [#?gpb_field{opts=[{[my_opt3],{uninterpreted, S3}}]}]},
+     {{msg,m}, [#?gpb_field{opts=[{[{my_opt3}],{uninterpreted, S3}}]}]},
      {{msg_containment, _}, _},
-     {option,[my_opt1], {uninterpreted, S1}},
-     {option,[my_opt2], {uninterpreted, S2}}] =
+     {option,[{my_opt1}], {uninterpreted, S1}},
+     {option,[{my_opt2}], {uninterpreted, S2}}] =
         AllDefs,
     {true, _} = {is_flat_string(S1), S1},
     {true, _} = {is_flat_string(S2), S3},
@@ -1092,9 +1109,9 @@ parses_rpc_streams_and_options_test() ->
        #?gpb_rpc{name=r2, input_stream=true, output_stream=false},
        #?gpb_rpc{name=r3, input_stream=false, output_stream=true},
        #?gpb_rpc{name=r4, input_stream=true, output_stream=true},
-       #?gpb_rpc{name=r5, opts=[{'a',1}]},
-       #?gpb_rpc{name=r6, opts=[{'a.b',1}]},
-       #?gpb_rpc{name=r7, opts=[{'a.b.c',1}]}]=Rpcs},
+       #?gpb_rpc{name=r5, opts=[{a,1}]},
+       #?gpb_rpc{name=r6, opts=[{[{a},b],1}]},
+       #?gpb_rpc{name=r7, opts=[{[{a,b},c],1}]}]=Rpcs},
      {{service_containment, _}, _}] =
         do_process_sort_defs(Defs),
     %% Check all input(arg)/output(return) messages too
@@ -1138,7 +1155,7 @@ parses_empty_enum_statement_test() ->
     {ok,Defs} = parse_lines(["enum e1 { ; ; ee1=1;;; }"]),
     [{file, _},
      {proto_defs_version, _},
-     {{enum,e1}, [{ee1,1}]},
+     {{enum,e1}, [{ee1,1,[]}]},
      {{enum_containment, _}, [e1]},
      {{msg_containment,_}, _}] = do_process_sort_defs(Defs).
 
@@ -1363,7 +1380,7 @@ proto3_enum_with_reserved_numbers_and_names_test() ->
     [{file, _},
      {proto_defs_version, _},
      {syntax,_},
-     {{enum,'m1.e1'}, [{'A',0}]},
+     {{enum,'m1.e1'}, [{'A',0,[]}]},
      {{enum_containment, _}, _},
      {{msg,m1}, [#?gpb_field{name=f1, type={enum,'m1.e1'}}]},
      {{msg_containment,_}, _},
@@ -1903,26 +1920,120 @@ proto_defs_versions_test() ->
     Unhandled = [{proto_defs_version, -17} | Rest],
     {error, R1} = gpb_defs:convert_defs_to_latest_version(Unhandled),
     ?assert(is_io_list(gpb_defs:format_error(R1))),
+    {error, R2} = gpb_defs:convert_defs_from_latest_version(AllDefs, -17),
+    ?assert(is_io_list(gpb_defs:format_error(R2))),
     %% Converting latest to itself should always work (identity)
     {ok, AllDefs} = gpb_defs:convert_defs_to_latest_version(AllDefs),
 
-    %% Try requesting conversion to an unhandled version
-    {error, R2} = parse_several_file_lines(Fs, [{proto_defs_version, -17}],
-                                           expect_error, verify_imports),
-    ?assert(is_io_list(gpb_defs:format_post_process_error({error, R2}))),
-
     %% Requesting conversion to latest supported should always work (identity)
-    Latest = lists:max(gpb_defs:supported_defs_versions()),
-    AllDefs = parse_several_file_lines(Fs, [{proto_defs_version, Latest}],
-                                       expect_success, verify_imports),
+    {ok, AllDefs} = gpb_defs:convert_defs_to_latest_version(AllDefs),
 
-    EarliestSupportedVsn = gpb_defs:earliest_supported_defs_version(),
-    {ok, _Defs} = gpb_defs:convert_defs_from_latest_version(
-                    AllDefs,
-                    EarliestSupportedVsn),
-    {error, R3} = gpb_defs:convert_defs_from_latest_version(AllDefs, -17),
-    ?assert(is_io_list(gpb_defs:format_error({error, R3}))),
-    ok.
+    %% Converting to every ealier (supported) version and back to latest,
+    %% should always work:
+    Latest = lists:max(gpb_defs:supported_defs_versions()),
+    EarlierVersions = gpb_defs:supported_defs_versions() -- [Latest],
+    [begin
+         {{ok, EarlierVsnDefs}, Vsn} =
+             {gpb_defs:convert_defs_from_latest_version(AllDefs, Vsn), Vsn},
+         Vsn = proplists:get_value(proto_defs_version, EarlierVsnDefs),
+         {{ok, _}, Vsn} =
+             {gpb_defs:convert_defs_to_latest_version(EarlierVsnDefs), Vsn}
+     end
+     || Vsn <- EarlierVersions].
+
+convert_proto_defs_to_from_version_3_test() ->
+    Defs2    = [{proto_defs_version, 2},
+                {{enum, e1}, [{option, [my_opt1], true},
+                              {option, [my_opt2], 17},
+                              {a, 0},
+                              {b, 1}]}],
+    Defs2to4 = [{proto_defs_version, 4},
+                {{enum, e1}, [{a, 0, []},
+                              {b, 1, []}]},
+                {{enum_options, e1}, [{[my_opt1], true},
+                                      {[my_opt2], 17}]}],
+    Defs3    = [{proto_defs_version, 3},
+                {{enum, e1}, [{a, 0, [{[my_ee_opt], 42}]},
+                              {b, 1, []}]},
+                {{enum_options, e1}, [{[my_opt1], true},
+                                      {[my_opt2], 17}]}],
+    {ok, Defs2to4} = gpb_defs:convert_defs_to_latest_version(Defs2),
+    {ok, Defs2} = gpb_defs:convert_defs_from_latest_version(Defs3, 2).
+
+convert_proto_defs_to_from_version_4_test() ->
+    %% How the option name looks:
+    %% Assume a custom option looking like this
+    %% in the .proto: (p.q).r
+    Custom3       = [p,'.',q,r],
+    CustomRpc3    = 'p...q.r',
+    Custom3to4    = [p,'.',q,r], % best effort
+    CustomRpc3to4 = [p,q,r],     % best effort
+    Custom4       = [{p,q},r],
+    CustomRpc4    = [{p,q},r],
+    %% --
+    Field3 = #?gpb_field{name = a, fnum = 1, rnum = 2, type = uint32,
+                         occurrence = repeated,
+                         opts = [{Custom3, true},
+                                 packed,
+                                 {default,[]}]},
+    OField3 = Field3#?gpb_field{name = a1, fnum = 3, rnum = 3},
+    Oneof3  = #gpb_oneof{name = c, rnum = 3,
+                         fields = [OField3],
+                         opts = [{Custom3, true}, deprecated]},
+    Rpc3 = #?gpb_rpc{name = r1, input = m1, output = m1,
+                     input_stream = true, output_stream = true,
+                     opts = [{CustomRpc3, true}, deprecated]},
+    Field3to4 = Field3#?gpb_field{opts = [{Custom3to4, true},
+                                          packed,
+                                          {default,[]}]},
+    %% -
+    Oneof3to4 = Oneof3#gpb_oneof{
+                  fields = [OField3#?gpb_field{opts = [{Custom3to4, true},
+                                                       packed,
+                                                       {default,[]}]}],
+                  opts = [{Custom3to4, true}, deprecated]},
+    Rpc3to4 = Rpc3#?gpb_rpc{opts = [{CustomRpc3to4, true}, deprecated]},
+    %% -
+    Field4 = Field3#?gpb_field{opts = [{Custom4, true}, packed,{default,[]}]},
+    Oneof4 = Oneof3#gpb_oneof{
+               fields = [OField3#?gpb_field{opts = [{Custom4, true},
+                                                    packed,
+                                                    {default,[]}]}],
+               opts = [{Custom4, true}, deprecated]},
+    Rpc4 = Rpc3#?gpb_rpc{opts = [{CustomRpc4, true}, deprecated]},
+    %% -
+    Defs3    = [{proto_defs_version, 3},
+                {package,'x.y'},
+                {{msg,m1},[Field3, Oneof3]},
+                {{msg_options,m1},
+                 [{Custom3, true}, packed,{default,[]}]},
+                {{enum,e1}, [{a,0,[{Custom3, true}, deprecated]}]},
+                {{enum_options,e1}, [{Custom3, true}, deprecated]},
+                {{service,s1}, [Rpc3]},
+                {{service_options,s1},
+                 [{Custom3, true}, deprecated]}],
+    Defs3to4 = [{proto_defs_version, 4},
+                {package,'x.y'},
+                {{msg,m1},[Field3to4, Oneof3to4]},
+                {{msg_options,m1},
+                 [{Custom3to4, true}, packed,{default,[]}]},
+                {{enum,e1}, [{a,0,[{Custom3to4, true}, deprecated]}]},
+                {{enum_options,e1}, [{Custom3to4, true}, deprecated]},
+                {{service,s1}, [Rpc3to4]},
+                {{service_options,s1},
+                 [{Custom3to4, true}, deprecated]}],
+    Defs4    = [{proto_defs_version, 4},
+                {package,'x.y'},
+                {{msg,m1},[Field4, Oneof4]},
+                {{msg_options,m1},
+                 [{Custom4, true}, packed,{default,[]}]},
+                {{enum,e1}, [{a,0,[{Custom4, true}, deprecated]}]},
+                {{enum_options,e1}, [{Custom4, true}, deprecated]},
+                {{service,s1}, [Rpc4]},
+                {{service_options,s1},
+                 [{Custom4, true}, deprecated]}],
+    {ok, Defs3to4} = gpb_defs:convert_defs_to_latest_version(Defs3),
+    {ok, Defs3} = gpb_defs:convert_defs_from_latest_version(Defs4, 3).
 
 do_parse_verify_defs(Lines) ->
     do_parse_verify_defs(Lines, []).

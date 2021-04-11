@@ -35,6 +35,7 @@
 %% -- analysis -----------------------------------------------------
 
 analyze_defs(Defs, Sources, Renamings, Opts) ->
+    ProtoDefsVsnElem = find_or_make_proto_defs_version_elem(Defs),
     MapTypes = find_map_types(Defs),
     MapsAsMsgs = map_types_to_msgs(MapTypes),
     DMapsAsMsgs = map_types_to_msgs_for_decoding(MapTypes),
@@ -50,8 +51,8 @@ analyze_defs(Defs, Sources, Renamings, Opts) ->
            num_fields          = find_num_fields(MapsAsMsgs ++ Defs),
            d_field_pass_method = compute_decode_field_pass_methods(
                                    MapsAsMsgs ++ Defs, Opts),
-           maps_as_msgs        = MapsAsMsgs ++ MapMsgEnums,
-           dec_maps_as_msgs    = DMapsAsMsgs ++ MapMsgEnums,
+           maps_as_msgs        = ProtoDefsVsnElem ++ MapsAsMsgs ++ MapMsgEnums,
+           dec_maps_as_msgs    = ProtoDefsVsnElem ++ DMapsAsMsgs ++ MapMsgEnums,
            translations        = Translations,
            map_types           = MapTypes,
            map_value_types     = compute_map_value_types(MapTypes),
@@ -59,6 +60,10 @@ analyze_defs(Defs, Sources, Renamings, Opts) ->
            has_p3_opt_strings  = has_p3_opt_strings(Defs),
            unknowns_info       = UnknownsInfo,
            renamings           = Renamings}.
+
+find_or_make_proto_defs_version_elem(Defs) ->
+    Vsn = proplists:get_value(proto_defs_version, Defs, 1),
+    [{proto_defs_version, Vsn}].
 
 find_map_types(Defs) ->
     gpb_lib:fold_msg_or_group_fields(
@@ -252,7 +257,7 @@ all_enum_values_encode_to_same_size(EnumName, Defs) ->
                      <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
                      byte_size(gpb:encode_varint(N))
                  end
-                 || {_EnumSym, Value} <- EnumDef],
+                 || {_EnumSym, Value, _} <- EnumDef],
     case lists:usort(EnumSizes) of
         [Size] -> {yes, Size};
         _      -> no

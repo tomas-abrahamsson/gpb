@@ -203,8 +203,8 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
        [repeat_clauses('EnumValue',
                        [[replace_term('EnumValue', EnumValue),
                          replace_term('EnumSym', EnumSym)]
-                        || {EnumSym, EnumValue} <- gpb_lib:unalias_enum(
-                                                     EnumDef)])])
+                        || {EnumSym, EnumValue, _} <- gpb_lib:unalias_enum(
+                                                        EnumDef)])])
      || {{enum, EnumName}, EnumDef} <- Defs,
         gpb_lib:smember({enum,EnumName}, UsedTypes)].
 

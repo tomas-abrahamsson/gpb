@@ -467,8 +467,9 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {N, Rest} = decode_type(int32, Bin, MsgDefs),
             {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
             case lists:keyfind(N, 2, EnumValues) of
-                {EnumName, N} -> {EnumName, Rest};
-                false         -> {N, Rest}
+                {EnumName, N, _} -> {EnumName, Rest}; % proto_defs_version 3
+                {EnumName, N}    -> {EnumName, Rest}; % proto_defs_version 2
+                false            -> {N, Rest}
             end;
         fixed64 ->
             <<N:64/little, Rest/binary>> = Bin,
@@ -928,8 +929,10 @@ encode_value(Value, Type, MsgDefs) ->
         {enum, _EnumName}=Key ->
             N = if is_atom(Value) ->
                         {Key, EnumValues} = lists:keyfind(Key, 1, MsgDefs),
-                        {Value, EN} = lists:keyfind(Value, 1, EnumValues),
-                        EN;
+                        case lists:keyfind(Value, 1, EnumValues) of
+                            {Value, EN, _} -> EN; % proto_defs_version 3
+                            {Value, EN}    -> EN  % proto_defs_version 2
+                        end;
                    is_integer(Value) ->
                         Value
                 end,
@@ -1602,8 +1605,16 @@ proto3_type_default(Type, MsgDefs) ->
         float    -> 0.0;
         {map,_KT,_VT} -> [];
         {enum, _EnumName}=Key ->
-            {Key,[{Sym0,_V0} | _]} = lists:keyfind(Key, 1, MsgDefs),
-            Sym0
+            {Key, EnumDef} = lists:keyfind(Key, 1, MsgDefs),
+            PDVsn = proplists:get_value(proto_defs_version, MsgDefs, 1),
+            if PDVsn >= 3 ->
+                    [{Sym0, _V0, _} | _] = EnumDef,
+                    Sym0;
+               PDVsn =< 2 ->
+                    %% Skip any {option, _, _} elems:
+                    [{Sym0, _V0} | _] = [Elem || {_Sym, _V}=Elem <- EnumDef],
+                    Sym0
+            end
     end.
 
 -ifndef(NO_HAVE_MAPS).

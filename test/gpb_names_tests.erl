@@ -140,7 +140,7 @@ nested_enums_test() ->
                  "}"]}],
               [use_packages]),
     [{package,'TopPkg.SubPkg'},
-     {{enum,'TopPkg.SubPkg.msg_name_1.EnumName'},[{a,0},{b,1}]},
+     {{enum,'TopPkg.SubPkg.msg_name_1.EnumName'},[{a,0,[]},{b,1,[]}]},
      {{enum_containment,"x"},['TopPkg.SubPkg.msg_name_1.EnumName']},
      {{msg,'TopPkg.SubPkg.msg_name_1'},
       [#?gpb_field{name = f1,fnum = 1,rnum = 2,
@@ -235,7 +235,7 @@ rename_msg_by_proto_with_legacy_opts_test() ->
                                 "extend m1 { optional uint32 fm2=2; }"]},
               {"proto3.proto", ["message m3 {map<string, m1> m=1;}"]}],
              []),
-    [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+    [{{enum,e1},  [{a,1,[]},{b,2,[]}]}, %% not prefixed
      {{enum_containment, _}, _},
      {{enum_containment, _}, _},
      {{enum_containment, _}, _},
@@ -273,7 +273,7 @@ prefix_record_names_with_legacy_opts_test() ->
                 "}",
                 "extend m1 { optional uint32 fm2=2; }"]}],
              []),
-    [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+    [{{enum,e1},  [{a,1,[]},{b,2,[]}]}, %% not prefixed
      {{enum_containment, _}, _},
      {{msg,p_m1}, [#?gpb_field{name=f1, type={enum,e1}},
                    #?gpb_field{name=fm2}]},
@@ -303,7 +303,7 @@ can_suffix_record_names_with_legacy_opts_test() ->
                 "}",
                 "extend m1 { optional uint32 fm2=2; }"]}],
              []),
-    [{{enum,e1},  [{a,1},{b,2}]}, %% not prefixed
+    [{{enum,e1},  [{a,1,[]},{b,2,[]}]}, %% not prefixed
      {{enum_containment, _}, _},
      {{msg,m1_s}, [#?gpb_field{name=f1, type={enum,e1}},
                    #?gpb_field{name=fm2}]},

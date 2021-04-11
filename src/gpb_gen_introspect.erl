@@ -31,8 +31,11 @@
 
 -import(gpb_lib, [replace_term/2, replace_tree/2, repeat_clauses/2]).
 
-format_exports(Defs, _AnRes, _Opts) ->
-    [?f("-export([get_msg_defs/0]).~n"),
+format_exports(Defs, _AnRes, Opts) ->
+    GetProtoDefs = proplists:get_bool(introspect_get_proto_defs, Opts),
+    [if GetProtoDefs     -> ?f("-export([get_proto_defs/0]).~n");
+        not GetProtoDefs -> ?f("-export([get_msg_defs/0]).~n")
+     end,
      ?f("-export([get_msg_names/0]).~n"),
      ?f("-export([get_group_names/0]).~n"),
      ?f("-export([get_msg_or_group_names/0]).~n"),
@@ -68,6 +71,8 @@ format_exports(Defs, _AnRes, _Opts) ->
      ?f("-export([get_protos_by_pkg_name_as_fqbin/1]).~n")].
 
 format_introspection(Defs, AnRes, Opts) ->
+    GetProtoDefs = proplists:get_bool(introspect_get_proto_defs, Opts),
+    ProtoDefsVsn = proplists:get_value(proto_defs_version, Defs, 1),
     Package = proplists:get_value(package, Defs, ''),
     MsgDefs  = [Item || {{msg, _}, _}=Item <- Defs],
     MsgInfos  = compute_msg_infos(MsgDefs, Package, AnRes, Opts),
@@ -77,10 +82,17 @@ format_introspection(Defs, AnRes, Opts) ->
     ServiceDefs = [Item || {{service, _}, _}=Item <- Defs],
     ServiceInfos = compute_service_renaming_infos(ServiceDefs, Package,
                                                   AnRes, Opts),
-    [gpb_codegen:format_fn(
-       get_msg_defs, fun() -> '<Defs>' end,
-       [replace_tree('<Defs>', msg_def_trees(EnumDefs, MsgDefs, GroupDefs,
-                                             Opts))]),
+    [if GetProtoDefs ->
+             gpb_codegen:format_fn(
+               get_proto_defs, fun() -> '<Defs>' end,
+               [replace_tree('<Defs>', proto_def_trees(Defs, Opts))]);
+        not GetProtoDefs ->
+             gpb_codegen:format_fn(
+               get_msg_defs, fun() -> '<Defs>' end,
+               [replace_tree('<Defs>',
+                             msg_def_trees(EnumDefs, MsgDefs, GroupDefs,
+                                           Opts))])
+     end,
      "\n",
      gpb_codegen:format_fn(
        get_msg_names, fun() -> '<Names>' end,
@@ -106,7 +118,7 @@ format_introspection(Defs, AnRes, Opts) ->
      ?f("~n"),
      format_find_enum_defs(EnumDefs),
      ?f("~n"),
-     format_enum_value_symbol_converters(EnumDefs),
+     format_enum_value_symbol_converters(EnumDefs, ProtoDefsVsn),
      ?f("~n"),
      format_get_service_names(ServiceDefs),
      ?f("~n"),
@@ -165,6 +177,16 @@ format_introspection(Defs, AnRes, Opts) ->
      ?f("~n"),
      format_get_protos_by_pkg_name_as_fqbin(Defs)].
 
+proto_def_trees(Defs, Opts) ->
+    Trees =
+        lists:map(
+          fun({{msg,_Name}, _}=Elem) -> msg_def_tree(Elem, Opts);
+             ({{group,_Name}, _}=Elem) -> group_def_tree(Elem, Opts);
+             ({{service,_Name}, _}=Elem) -> service_def_tree(Elem, Opts);
+             (Other) -> erl_parse:abstract(Other)
+          end,
+          Defs),
+    erl_syntax:list(Trees).
 
 msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
     EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
@@ -275,7 +297,9 @@ format_enum_value_symbol_converter_exports(Defs) ->
      end
      || {{enum, EnumName}, _EnumDef} <- Defs]].
 
-format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
+format_enum_value_symbol_converters(EnumDefs, DefsVsn) when EnumDefs /= [] ->
+    EnumDefs1 = [{{enum, Name}, sym_val_eopt(Elems, DefsVsn)}
+                 || {{enum, Name}, Elems} <- EnumDefs],
     %% A difference between this function and `d_enum_X' as generated
     %% by `format_enum_decoders' is that this function generates
     %% value/symbol converters for all enums, not only for the ones
@@ -287,7 +311,7 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
           '<EnumName>',
           [[replace_term('<EnumName>', EnumName),
             replace_term('cvt', gpb_lib:mk_fn(enum_symbol_by_value_, EnumName))]
-           || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
+           || {{enum, EnumName}, _EnumDef} <- EnumDefs1])]),
      "\n",
      gpb_codegen:format_fn(
        enum_value_by_symbol,
@@ -296,7 +320,7 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
           '<EnumName>',
           [[replace_term('<EnumName>', EnumName),
             replace_term('cvt', gpb_lib:mk_fn(enum_value_by_symbol_, EnumName))]
-           || {{enum, EnumName}, _EnumDef} <- EnumDefs])]),
+           || {{enum, EnumName}, _EnumDef} <- EnumDefs1])]),
      "\n",
      [[gpb_codegen:format_fn(
          gpb_lib:mk_fn(enum_symbol_by_value_, EnumName),
@@ -304,7 +328,7 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
          [repeat_clauses('<Value>',
                          [[replace_term('<Value>', EnumValue),
                            replace_term('<Sym>', EnumSym)]
-                          || {EnumSym, EnumValue} <- gpb_lib:unalias_enum(
+                          || {EnumSym, EnumValue, _} <- gpb_lib:unalias_enum(
                                                        EnumDef)])]),
        "\n",
        gpb_codegen:format_fn(
@@ -313,9 +337,9 @@ format_enum_value_symbol_converters(EnumDefs) when EnumDefs /= [] ->
          [repeat_clauses('<Sym>',
                          [[replace_term('<Value>', EnumValue),
                            replace_term('<Sym>', EnumSym)]
-                          || {EnumSym, EnumValue} <- EnumDef])])]
-      || {{enum, EnumName}, EnumDef} <- EnumDefs]];
-format_enum_value_symbol_converters([]=_EnumDefs) ->
+                          || {EnumSym, EnumValue, _} <- EnumDef])])]
+      || {{enum, EnumName}, EnumDef} <- EnumDefs1]];
+format_enum_value_symbol_converters([]=_EnumDefs, _DefsVsn) ->
     ["-spec enum_symbol_by_value(_, _) -> no_return().\n",
      gpb_codegen:format_fn(
        enum_symbol_by_value,
@@ -848,3 +872,12 @@ atom_to_binstr_stree(A) ->
     %% so construct a textual tree node to get the desired format
     S = list_to_binary(atom_to_list(A)),
     erl_syntax:text(?f("<<\"~s\">>", [S])).
+
+%% In introspects, the defs formats may have been converted to
+%% an ealier format.
+%% For enums handle both format 2 and 3.
+sym_val_eopt(Elems, DefsVsn) when DefsVsn >= 3 ->
+    Elems;
+sym_val_eopt(Elems, DefsVsn) when DefsVsn =< 2 ->
+    %% Filter away {option, NameComponents, Value} elems:
+    [{Sym, Num, []} || {Sym, Num} <- Elems].

@@ -686,7 +686,7 @@ format_enum_verifier(EnumName, EnumMembers, Opts) ->
                mk_type_error({invalid_enum, '<EnumName>'}, X, Path)
        end,
        [repeat_clauses('<sym>', [[replace_term('<sym>', EnumSym)]
-                                 || {EnumSym, _Value} <- EnumMembers]),
+                                 || {EnumSym, _Value, _} <- EnumMembers]),
         replace_term('<EnumName>', EnumName)])].
 
 format_type_verifiers(#anres{used_types=UsedTypes}, Opts) ->

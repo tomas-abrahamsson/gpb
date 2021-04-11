@@ -1862,7 +1862,7 @@ canonify_enum_jstrs(JStrsToSyms, _Opts) ->
 
 unalias_enum_syms(Enums) ->
     %% Enum can also have {option, allow_alias, true} elements.
-    Enums1 = [Enum || {_Sym,_Num}=Enum <- Enums],
+    Enums1 = [{Sym, Num} || {Sym, Num, _} <- Enums],
     %% In case of aliases: make a mapping:
     %%   If .proto is:           Then resulting mapping is:
     %%   enum E { E_0 = 0;       [{"E_0", 'E_0'},
@@ -1877,4 +1877,5 @@ ensure_sym_unaliased(Sym, Enums) ->
     Sym1.
 
 enum_ints_to_syms(Enums) ->
-    [{integer_to_list(Num), Sym} || {Sym,Num} <- gpb_lib:unalias_enum(Enums)].
+    [{integer_to_list(Num), Sym}
+     || {Sym, Num, _} <- gpb_lib:unalias_enum(Enums)].

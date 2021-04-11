@@ -269,14 +269,14 @@ p_enum_fields(Tokens, Acc) ->
     case Tokens of
         [?w("option") | _] ->
             {Option, Rest} = p_option(Tokens),
-            p_enum_fields(Rest, [Option | Acc]);
+            p_enum_fields(Rest, [{Option} | Acc]);
         [?w("reserved") | _] ->
             {Reserved, Rest} = p_reserved(Tokens),
             p_enum_fields(Rest, [Reserved | Acc]);
         [?w(Name/binary), ?t('=') | Rest] ->
             {Value, Rest2} = p_integer_const(Rest),
-            EnumField = {word_value(Name), Value},
-            {_EOpts, Rest3} = p_maybe_opt_list(Rest2),
+            {EOpts, Rest3} = p_maybe_opt_list(Rest2),
+            EnumField = {word_value(Name), Value, EOpts},
             Rest4 = skip_semicolon(Rest3),
             Acc1 = [EnumField | Acc],
             p_enum_fields(Rest4, Acc1);
@@ -368,7 +368,8 @@ p_msg_elem(Tokens) ->
         ?w("reserved") ->
             p_reserved(Tokens);
         ?w("option") ->
-            p_option(Tokens);
+            {Option, Rest} = p_option(Tokens),
+            {{Option}, Rest};
         ?w("map") ->
             p_map(Tokens);
         ?w("required") ->
@@ -516,8 +517,15 @@ p_map_key_type([?w("string") | Rest])   -> {string, Rest}.
 p_oneof([?w("oneof"), ?w(Name/binary), ?t('{') | Rest]) ->
     Rest2 = skip_semicolon(Rest),
     {Elems, [?t('}') | Rest3]} = p_oneof_elems(Rest2, []),
+    {Opts, OFields} = lists:partition(
+                        fun({{option, _OptName, _OptValue}}) -> true;
+                           (_Other) -> false
+                        end,
+                        Elems),
+    Opts1 = [{OptName,OptVal} || {{option, OptName, OptVal}} <- Opts],
     Field = #gpb_oneof{name = word_value(Name),
-                       fields = Elems},
+                       fields = OFields,
+                       opts = Opts1},
     Rest4 = skip_semicolon(Rest3),
     {Field, Rest4};
 p_oneof(Tokens) ->
@@ -526,9 +534,10 @@ p_oneof(Tokens) ->
 p_oneof_elems(Tokens, Acc) ->
     case Tokens of
         [?w("option") | _] ->
-            {_Opt, Rest} = p_option(Tokens),
+            {Opt, Rest} = p_option(Tokens),
             Rest2 = skip_semicolon(Rest),
-            p_oneof_elems(Rest2, Acc);
+            Acc1 = [{Opt} | Acc],
+            p_oneof_elems(Rest2, Acc1);
         _ ->
             {Field, Rest} = p_field_or_group(optional, Tokens),
             Rest2 = skip_semicolon(Rest),
@@ -734,8 +743,9 @@ p_rpc_defs(Tokens, Acc) ->
         [?t('}') | _] ->
             {lists:reverse(Acc), Tokens};
         [?w("option") | _] ->
-            {_Opt, Rest} = p_option(Tokens),
-            p_rpc_defs(Rest, Acc);
+            {Opt, Rest} = p_option(Tokens),
+            Acc1 = [{Opt} | Acc],
+            p_rpc_defs(Rest, Acc1);
         [?w("rpc") | _] ->
             {Rpc, Rest} = p_rpc_def(Tokens),
             Acc1 = [Rpc | Acc],
@@ -840,28 +850,28 @@ p_opt_nm2(Tokens, Acc) ->
 
 opt_name_acc_new(Name) when is_atom(Name) ->
     Name;
-opt_name_acc_new(DottedName) when is_list(DottedName) ->
-    lists:reverse(DottedName).
+opt_name_acc_new(Name) when is_tuple(Name) ->
+    [Name].
 
 opt_name_acc_add(Name, Acc) when is_atom(Name) ->
     Acc1 = ensure_atom_list(Acc),
     [Name | Acc1];
-opt_name_acc_add(DottedName, Acc) when is_list(DottedName) ->
+opt_name_acc_add(Name, Acc) when is_tuple(Name) ->
     Acc1 = ensure_atom_list(Acc),
-    lists:reverse(DottedName, Acc1).
+    [Name | Acc1].
 
-opt_name_acc_finalize(A) when is_atom(A) -> A;
-opt_name_acc_finalize(L) when is_list(L) -> lists:reverse(L).
+opt_name_acc_finalize(A) when is_atom(A)  -> A;
+opt_name_acc_finalize(L) when is_list(L)  -> lists:reverse(L).
 
-ensure_atom_list(A) when is_atom(A) -> [A];
-ensure_atom_list(L) when is_list(L) -> L.
+ensure_atom_list(A) when is_atom(A)  -> [A];
+ensure_atom_list(L) when is_list(L)  -> L.
 
 p_option_name_part(Tokens) ->
     case Tokens of
         [?t('(') | Rest] ->
             case p_dotted_name(Rest) of
                 {DottedName, [?t(')') | Rest2]} ->
-                    {DottedName, Rest2};
+                    {list_to_tuple(undot_but_first(DottedName)), Rest2};
                 _ ->
                     ?syntax_error(Rest, "expected option name")
             end;
@@ -870,6 +880,12 @@ p_option_name_part(Tokens) ->
         _ ->
             ?syntax_error(Tokens, "expected option name")
     end.
+
+undot_but_first(['.' | Rest]) -> ['.' | undot2(Rest)];
+undot_but_first(Components)   -> undot2(Components).
+
+undot2(Components) ->
+    lists:filter(fun(C) -> C /= '.' end, Components).
 
 %% opt_list -> opt ',' opt_list
 %% opt_list -> opt

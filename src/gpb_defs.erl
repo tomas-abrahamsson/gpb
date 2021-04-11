@@ -42,14 +42,20 @@
 
 -include("../include/gpb.hrl").
 
+-include_lib("eunit/include/eunit.hrl").
+
 -define(is_non_empty_string(Str), (is_list(Str) andalso is_integer(hd(Str)))).
 
 -type defs() :: [def()].
 -type def() :: {proto_defs_version, version()} |
                {{msg, Name::atom()}, [field()]} |
                {{group, Name::atom()}, [field()]} |
-               {{enum, Name::atom()}, [{Sym::atom(), Value::integer()} |
-                                       {option, Name::atom(), Val::term()}]} |
+               {{enum, Name::atom()},
+                %% Defs format 2:
+                [{Sym::atom(), Value::integer()} |
+                 {option, Name::atom(), Val::term()}] |
+                %% Defs format 3+:
+                [{Sym::atom(), Value::integer(), [Opt::ee_option()]}]} |
                {{service, Name::atom()}, [#?gpb_rpc{}]} |
                {package, Name::atom()} |
                {syntax, string()} | % "proto2" | "proto3"
@@ -60,6 +66,8 @@
                {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
                {import, ProtoFile::string()} |
                {{msg_options, MsgName::atom()}, [msg_option()]} |
+               {{enum_options, MsgName::atom()}, [enum_option()]} |
+               {{service_options, MsgName::atom()}, [service_option()]} |
                {{msg_containment, ProtoName::string()}, [MsgName::atom()]} |
                {{pkg_containment, ProtoName::string()}, PkgName::atom()} |
                {{service_containment, ProtoName::string()},
@@ -71,6 +79,10 @@
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
+-type enum_option() :: {atom() | [NameComponent::atom()], OptionValue::term()}.
+-type ee_option() :: {atom() | [NameComponent::atom()], OptionValue::term()}.
+-type service_option() :: {atom() | [NameComponent::atom()],
+                           OptionValue::term()}.
 -type version() :: integer().
 
 %% @doc Return a list of supported versions of the definition format.
@@ -88,7 +100,7 @@
 %% normal Erlang terms with for instance `=<'.
 -spec supported_defs_versions() -> [version()].
 supported_defs_versions() ->
-    [1, 2].
+    [1, 2, 3, 4].
 
 %% @doc Return the earliest supported proto defs version.
 earliest_supported_defs_version() ->
@@ -124,7 +136,9 @@ cvt_to_latest_aux(LatestVsn, LatestVsn, Defs) ->
     ensure_proto_defs_versionized(Defs, LatestVsn);
 cvt_to_latest_aux(Vsn, LatestVsn, Defs) when Vsn < LatestVsn ->
     CvtRes = case Vsn of
-                 1 -> cvt_defs_1_to_2(Defs)
+                 1 -> cvt_defs_1_to_2(Defs);
+                 2 -> cvt_defs_2_to_3(Defs);
+                 3 -> cvt_defs_3_to_4(Defs)
              end,
     case CvtRes of
         {ok, Defs1} -> cvt_to_latest_aux(Vsn + 1, LatestVsn, Defs1)
@@ -152,6 +166,8 @@ cvt_from_latest_aux(TargetVsn, TargetVsn, Defs) ->
     ensure_proto_defs_versionized(Defs, TargetVsn);
 cvt_from_latest_aux(Vsn, TargetVsn, Defs) when Vsn > TargetVsn ->
     CvtRes = case Vsn of
+                 4 -> cvt_defs_4_to_3(Defs);
+                 3 -> cvt_defs_3_to_2(Defs);
                  2 -> cvt_defs_2_to_1(Defs)
              end,
     case CvtRes of
@@ -189,7 +205,7 @@ post_process_one_file(FileName, Defs, Opts) ->
     case find_package_def(Defs, Opts) of
         {ok, Package} ->
             Defs1 = handle_proto_syntax_version_one_file(
-                      join_any_msg_options(
+                      join_any_elem_options(
                         convert_default_values(
                           flatten_qualify_defnames(Defs, Package)))),
             case tmp_fields_to_fields(Defs1) of
@@ -217,12 +233,8 @@ post_process_all_files(Defs, Opts) ->
                                   shorten_file_paths(
                                     reformat_names(
                                       extend_msgs(Defs2)))))),
-                    case versionize_defs(Defs3, Opts) of
-                        {ok, Defs4} ->
-                            {ok, Defs4};
-                        {error, Reasons} ->
-                            {error, Reasons}
-                    end;
+                    Defs4 = versionize_defs(Defs3),
+                    {ok, Defs4};
                 {error, Reasons} ->
                     {error, Reasons}
             end;
@@ -339,7 +351,8 @@ flatten_qualify_defnames(Defs, Root) ->
                     Acc;
            ({{service, Name}, RPCs}, Acc) ->
                 FullName = prepend_path(Root, Name),
-                [{{service,FullName}, RPCs} | Acc];
+                {RPCs2, Defs2} = flatten_service_elems(RPCs, FullName),
+                [{{service,FullName}, RPCs2} | Defs2] ++ Acc;
            (OtherElem, Acc) ->
                 [OtherElem | Acc]
         end,
@@ -370,7 +383,7 @@ flatten_fields(FieldsOrDefs, FullName) ->
              ({reserved_names, Ns}, {Fs,Ds}) ->
                   Def = {{reserved_names,FullName}, Ns},
                   {Fs, [Def | Ds]};
-             ({option,OptName,OptValue}, {Fs,Ds}) ->
+             ({{option,OptName,OptValue}}, {Fs,Ds}) ->
                   {Fs, [{{msg_option,FullName},{OptName,OptValue}} | Ds]};
              (Def, {Fs,Ds}) ->
                   QDefs = flatten_qualify_defnames([Def], FullName),
@@ -389,12 +402,27 @@ flatten_enum_elems(EnumElemsOrDefs, FullName) ->
              ({reserved_names, Ns}, {Es,Ds}) ->
                   Def = {{reserved_names,FullName}, Ns},
                   {Es, [Def | Ds]};
+             ({{option,OptName,OptValue}}, {Fs,Ds}) ->
+                  {Fs, [{{enum_option,FullName},{OptName,OptValue}} | Ds]};
              (Other, {Es,Ds}) ->
                   {[Other | Es], Ds}
           end,
           {[],[]},
           EnumElemsOrDefs),
     {lists:reverse(EnumElems2), Defs2}.
+
+flatten_service_elems(Elems, FullName) ->
+    {Elems2, Defs2} =
+        lists:foldl(
+          fun({{option, OptName, OptValue}}, {Es, Ds}) ->
+                  {Es, [{{service_option,FullName}, {OptName,OptValue}} | Ds]};
+             (Other, {Es, Ds}) ->
+                  {[Other | Es], Ds}
+          end,
+          {[],[]},
+          Elems),
+    {lists:reverse(Elems2), Defs2}.
+
 
 %% Resolve any refs
 resolve_refs(Defs) ->
@@ -467,7 +495,7 @@ resolve_rpc_refs(Rpcs, Defs, Root, FullName, Reasons) ->
                   {found, {msg, MArg}} ->
                       case resolve_ref(Defs, Return, Root, FullName) of
                           {found, {msg, MReturn}} ->
-                              NewOpts = [{reformat_name(Name), Value}
+                              NewOpts = [{Name, Value}
                                          || {option,Name,Value} <- Opts],
                               NewRpc = #?gpb_rpc{name=RpcName,
                                                  input=MArg,
@@ -609,19 +637,40 @@ convert_default_values_field(#gpb_oneof{fields=OFs}=Field) ->
     OFs2 = lists:map(fun convert_default_values_field/1, OFs),
     Field#gpb_oneof{fields=OFs2}.
 
-join_any_msg_options(Defs) ->
-    {NonMsgOptDefs, MsgOptsDict} =
+-record(elem_dicts, {msg=dict:new(),
+                     enum=dict:new(),
+                     service=dict:new()}).
+join_any_elem_options(Defs) ->
+    {NonOptDefs, Dicts} =
         lists:foldl(
-          fun({{msg_option,MsgName},Opt}, {Ds,MsgOptsDict}) ->
-                  {Ds, dict:append(MsgName, Opt, MsgOptsDict)};
-             (OtherDef, {Ds, MsgOptsDict}) ->
-                  {[OtherDef | Ds], MsgOptsDict}
+          fun({{msg_option,MsgName},Opt}, {Ds, #elem_dicts{msg=D0}=Dicts}) ->
+                  D1 = dict:append(MsgName, Opt, D0),
+                  Dicts1 = Dicts#elem_dicts{msg=D1},
+                  {Ds, Dicts1};
+             ({{enum_option,EName},Opt}, {Ds, #elem_dicts{enum=D0}=Dicts}) ->
+                  D1 = dict:append(EName, Opt, D0),
+                  Dicts1 = Dicts#elem_dicts{enum=D1},
+                  {Ds, Dicts1};
+             ({{service_option,SName},Opt},
+              {Ds, #elem_dicts{service=D0}=Dicts}) ->
+                  D1 = dict:append(SName, Opt, D0),
+                  Dicts1 = Dicts#elem_dicts{service=D1},
+                  {Ds, Dicts1};
+             (OtherDef, {Ds, Dicts}) ->
+                  {[OtherDef | Ds], Dicts}
           end,
-          {[], dict:new()},
+          {[], #elem_dicts{}},
           Defs),
-    MsgOpts = [{{msg_options, MsgName}, MsgOpts}
-               || {MsgName, MsgOpts} <- dict:to_list(MsgOptsDict)],
-    lists:reverse(NonMsgOptDefs, MsgOpts).
+    #elem_dicts{msg=MsgOptsDict,
+                enum=EnumOptsDict,
+                service=ServiceOptsDict} = Dicts,
+    MsgOpts = [{{msg_options, MsgName}, Opts}
+               || {MsgName, Opts} <- dict:to_list(MsgOptsDict)],
+    EnumOpts = [{{enum_options, EnumName}, Opts}
+               || {EnumName, Opts} <- dict:to_list(EnumOptsDict)],
+    ServiceOpts = [{{service_options, ServiceName}, Opts}
+                   || {ServiceName, Opts} <- dict:to_list(ServiceOptsDict)],
+    lists:reverse(NonOptDefs, EnumOpts++MsgOpts++ServiceOpts).
 
 handle_proto_syntax_version_one_file(Defs) ->
     case proplists:get_value(syntax, Defs) of
@@ -797,7 +846,7 @@ verify_scalar_default_if_present(MsgName, FieldName, Type, Default, AllDefs) ->
             case lists:keysearch({enum, Ref}, 1, AllDefs) of
                 {value, {{enum,Ref}, Enumerators}} ->
                     case lists:keysearch(Default, 1, Enumerators) of
-                        {value, {Default, _Value}} ->
+                        {value, {Default, _Value, _EeOpts}} ->
                             ok;
                         false ->
                             {error,
@@ -1078,9 +1127,6 @@ fmt_err({p3_unallowed_occurrence, MsgName, Field, Occurrence}) ->
 fmt_err({missing_occurrence, MsgName, Field}) ->
     ?f("in msg ~s, field ~s: missing 'optional' or 'required' or 'repeated'",
        [name_to_dstr(MsgName), Field]);
-fmt_err({request_of_unsupported_proto_defs_version, Requested, Supported}) ->
-    ?f("request of unsupported proto_defs_version ~w (supported: ~w)",
-       [Requested, Supported]);
 fmt_err({convert_from_unsupported_proto_defs_version, Found, Supported}) ->
     ?f("supplied proto_defs_version ~w is unsupported (supported: ~w)",
        [Found, Supported]);
@@ -1143,6 +1189,10 @@ reformat_names(Defs) ->
                       {{reserved_names,reformat_name(Name)}, FieldNames};
                  ({{msg_options,MsgName}, Opt}) ->
                       {{msg_options,reformat_name(MsgName)}, Opt};
+                 ({{enum_options,EnumName}, Opt}) ->
+                      {{enum_options,reformat_name(EnumName)}, Opt};
+                 ({{service_options,ServiceName}, Opt}) ->
+                      {{service_options,reformat_name(ServiceName)}, Opt};
                  (OtherElem) ->
                       OtherElem
               end,
@@ -1323,16 +1373,8 @@ shorten_meta_info(Mapping, Defs) ->
       end,
       Defs).
 
-versionize_defs(Defs, Opts) ->
-    LatestVsn = latest_defs_version(),
-    case proplists:get_value(proto_defs_version, Opts, LatestVsn) of
-        LatestVsn ->
-            {ok, [{proto_defs_version, LatestVsn} | Defs]};
-        X ->
-            Supported = supported_defs_versions(),
-            Reason = {request_of_unsupported_proto_defs_version, X, Supported},
-            {error, [Reason]}
-    end.
+versionize_defs(Defs) ->
+    [{proto_defs_version, latest_defs_version()} | Defs].
 
 possibly_hint_use_packages_opt(Reasons, Defs, Opts) ->
     UsePackagesOptPresent = case proplists:get_value(use_packages, Opts) of
@@ -1466,6 +1508,8 @@ ensure_proto_defs_versionized(Defs, Version) ->
             {ok, [{proto_defs_version, Version} | Defs1]}
     end.
 
+%% --upgrade--
+
 cvt_defs_1_to_2(Defs) ->
     %% Convert occurrence = optional -> defaulty for proto3 msg fields
     P3Msgs = proplists:get_value(proto3_msgs, Defs, []),
@@ -1489,6 +1533,194 @@ cvt_defs_1_to_2(Defs) ->
               Item
       end
       || Item <- Defs]}.
+
+
+cvt_defs_2_to_3(Defs) ->
+    {ok, cvt_defs_2_to_3_aux(Defs)}.
+
+cvt_defs_2_to_3_aux([{{enum,EName}, Elems} | Rest]) ->
+    %% Extend enumerators with an empty options
+    %% Lift any enumeration options to an {{enum_options, Name} Opts} entry.
+    {Enumerators, EOptions} =
+        lists:partition(
+          fun({_Sym, _Value}) -> true;
+             ({option,_OptName,_OptVal}) -> false
+          end,
+          Elems),
+    Elems2 = [{Sym, Value, []} || {Sym, Value} <- Enumerators],
+    EDef2 = {{enum, EName}, Elems2},
+    if EOptions == [] ->
+            [EDef2 | cvt_defs_2_to_3_aux(Rest)];
+       EOptions /= [] ->
+            EOptElems = [{OptName, OptValue}
+                         || {option, OptName, OptValue} <- EOptions],
+            EOptionsDef = {{enum_options, EName}, EOptElems},
+            [EDef2, EOptionsDef | cvt_defs_2_to_3_aux(Rest)]
+    end;
+cvt_defs_2_to_3_aux([OtherDef | Rest]) ->
+    [OtherDef | cvt_defs_2_to_3_aux(Rest)];
+cvt_defs_2_to_3_aux([]) ->
+    [].
+
+cvt_defs_3_to_4(Defs) ->
+    %% Should we attempt to consider packages to get more accurate
+    %% name components?
+    %% Eg if an option is [o,p,f,x] and there some other {package,'o,p'},
+    %% in Defs, then a more accurate upgrade translation is [{o,p,f},x]
+    %% Though, there are still cases we can't handle.
+    %% And for now, we don't use the options.
+    {ok, lists:map(
+           fun({{service, _ServiceName}=Key, Rpcs3}) ->
+                   Rpcs4 =
+                       lists:map(
+                         fun(#?gpb_rpc{opts=Opts}=R) ->
+                                 R#?gpb_rpc{opts=rpc_opts_3_to_4(Opts)}
+                         end,
+                         Rpcs3),
+                   {Key, Rpcs4};
+              (Other) ->
+                   Other
+           end,
+           Defs)}.
+
+rpc_opts_3_to_4(Opts) ->
+    lists:map(
+      fun({Name, Value}) -> {rpc_opt_name_3_to_4(Name), Value};
+         (Other)         -> Other % example: packed
+      end,
+      Opts).
+
+rpc_opt_name_3_to_4(Name) ->
+    case gpb_lib:string_lexemes(atom_to_list(Name), ".") of
+        [_NotDotted] -> Name;
+        Parts -> [list_to_atom(Part) || Part <- Parts]
+    end.
+
+%% --downgrade--
+
+cvt_defs_4_to_3(Defs) ->
+    {ok, lists:map(
+           fun({{msg,_MsgName}=Key, Fields}) ->
+                   {Key, field_opts_4_to_3(Fields)};
+              ({{msg_options, _MsgName}=Key, Opts}) ->
+                   {Key, opts_4_to_3(Opts)};
+              ({{enum,_EnumName}=Key, EnumElems4}) ->
+                   EnumElems3 =
+                       lists:map(
+                         fun({Sym, Val, Opts}) ->
+                                 {Sym, Val, opts_4_to_3(Opts)}
+                         end,
+                         EnumElems4),
+                   {Key, EnumElems3};
+              ({{enum_options, _EnumName}=Key, Opts}) ->
+                   {Key, opts_4_to_3(Opts)};
+              ({{service, _ServiceName}=Key, Rpcs4}) ->
+                   Rpcs3 =
+                       lists:map(
+                         fun(#?gpb_rpc{opts=Opts}=R) ->
+                                 R#?gpb_rpc{opts=rpc_opts_4_to_3(Opts)}
+                         end,
+                         Rpcs4),
+                   {Key, Rpcs3};
+              ({{service_options, _ServiceName}=Key, Opts}) ->
+                   {Key, opts_4_to_3(Opts)};
+              (Other) ->
+                   Other
+           end,
+           Defs)}.
+
+field_opts_4_to_3(Fields) ->
+    lists:map(
+      fun(#?gpb_field{opts=Opts}=F) ->
+              F#?gpb_field{opts = opts_4_to_3(Opts)};
+         (#gpb_oneof{fields=Fs, opts=Opts}=F) ->
+              F#gpb_oneof{fields = field_opts_4_to_3(Fs),
+                          opts   = opts_4_to_3(Opts)}
+      end,
+      Fields).
+
+opts_4_to_3(Opts) ->
+    lists:map(
+      fun({Name, Value}) when is_list(Name) -> {opt_name_4_to_3(Name), Value};
+         ({OtherName, Value})               -> {OtherName, Value};
+         (Other)                            -> Other % example: packed
+      end,
+      Opts).
+
+%% Example: [{pkg,custom_opt},f] -> [pkg,'.',custom_opt,f]
+opt_name_4_to_3([ExtComponents | Rest]) when is_tuple(ExtComponents) ->
+    Dotted = case tuple_to_list(ExtComponents) of
+                 ['.' | More] -> ['.' | gpb_lib:ljoin('.', More)];
+                 Comps        -> gpb_lib:ljoin('.', Comps)
+             end,
+    Dotted ++ opt_name_4_to_3(Rest);
+opt_name_4_to_3([NameComponent | Rest]) ->
+    [NameComponent | opt_name_4_to_3(Rest)];
+opt_name_4_to_3([]) ->
+    [].
+
+rpc_opts_4_to_3(Opts) ->
+    lists:map(
+      fun({Name, Value}) when is_list(Name) -> {rpc_opt_name_43(Name), Value};
+         ({OtherName, Value})               -> {OtherName, Value};
+         (Other)                            -> Other % example: packed
+      end,
+      Opts).
+
+%% Example:[{pkg,a,custom_option},subfield] -> 'pkg.a.custom_option.subfield'
+rpc_opt_name_43(OptName) ->
+    Components = opt_name_4_to_3(OptName),
+    list_to_atom(gpb_lib:dot_join([atom_to_list(P) || P <- Components])).
+
+opt_name_4_to_3_test() ->
+    [custom_opt] = opt_name_4_to_3([{custom_opt}]),         % (custom_opt)
+    [pkg,'.',opt] = opt_name_4_to_3([{pkg,opt}]),           % (pkg.opt)
+    [pkg,'.',opt,f] = opt_name_4_to_3([{pkg,opt},f]),       % (pkg.opt).f
+    [opt,f,g] = opt_name_4_to_3([{opt},f,g]),               % (opt).f.g
+    [p,f,g] = opt_name_4_to_3([{p},{f},g]),                 % (p).(f).g
+    ['.',p,'.',f,g] = opt_name_4_to_3([{'.',p},{'.',f},g]), % (.p).(.f).g
+    ok.
+
+rpc_opt_name_43_test() ->
+    custom_opt = rpc_opt_name_43([{custom_opt}]),       % (custom_opt)
+    'pkg...opt' = rpc_opt_name_43([{pkg,opt}]),         % (pkg.opt)
+    'pkg...opt.f' = rpc_opt_name_43([{pkg,opt},f]),     % (pkg.opt).f
+    'opt.f.g' = rpc_opt_name_43([{opt},f,g]),           % (opt).f.g
+    'p.f.g' = rpc_opt_name_43([{p},{f},g]),             % (p).(f).g
+    '..p...f.g' = rpc_opt_name_43([{'.',p},{'.',f},g]), % (.p).(.f).g
+    ok.
+
+cvt_defs_3_to_2(Defs) ->
+    %% For any {{enum_options, EName}, Opts}, insert the Opts
+    %% into the corresponding Elems in {{enum, EName}, Elems}
+    %%
+    %% Also: For each {Sym, Name, _Opts} in Elems, drop _Opts
+
+    {Defs2, EOptionsDefs} =
+        lists:partition(
+          fun({{enum_options, _EName}, _EOpts}) -> false;
+             (_OtherElem) -> true
+          end,
+          Defs),
+    {ok, cvt_defs_3_to_2_aux(Defs2, EOptionsDefs)}.
+
+cvt_defs_3_to_2_aux([{{enum, EName}, Elems} | Rest], EOptionsDefs) ->
+    Elems2 = [{Sym, Value} || {Sym, Value, _Opts} <- Elems],
+    case lists:keyfind({enum_options, EName}, 1, EOptionsDefs) of
+        {{enum_options, EName}, EOptions} ->
+            OptElems = [{option, OptName, OptValue}
+                        || {OptName, OptValue} <- EOptions],
+            Def2 = {{enum, EName}, OptElems ++ Elems2},
+            [Def2 | cvt_defs_3_to_2_aux(Rest, EOptionsDefs)];
+        false ->
+            Def2 = {{enum, EName}, Elems2},
+            [Def2 | cvt_defs_3_to_2_aux(Rest, EOptionsDefs)]
+    end;
+cvt_defs_3_to_2_aux([OtherDef | Rest], EOptionsDefs) ->
+    [OtherDef | cvt_defs_3_to_2_aux(Rest, EOptionsDefs)];
+cvt_defs_3_to_2_aux([], _) ->
+    [].
+
 
 cvt_defs_2_to_1(Defs) ->
     %% Convert occurrence = defaulty -> optional for proto3 msg fields

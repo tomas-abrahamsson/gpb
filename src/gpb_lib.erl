@@ -150,6 +150,8 @@
 -export([camel_case/1]).
 -export([lower_camel_case/1]).
 
+-export([ljoin/2]).
+
 -include("../include/gpb.hrl").
 
 
@@ -223,10 +225,8 @@ map_type_to_msg_name(KeyType, ValueType) ->
 %% The "option allow_alias = true;" inside an enum X { ... }
 %% says it is ok to have multiple symbols that map to the same numeric value.
 %% Appeared in protobuf 2.5.0.
-unalias_enum([{_Sym,Value}=Enum | Rest]) ->
-    [Enum | unalias_enum([E || {_,V}=E <- Rest, V /= Value])];
-unalias_enum([{option,_Name,_Value} | Rest]) ->
-    unalias_enum(Rest);
+unalias_enum([{_Sym, Value, _Opt}=Enum | Rest]) ->
+    [Enum | unalias_enum([E || {_,V,_}=E <- Rest, V /= Value])];
 unalias_enum([]) ->
     [].
 
@@ -1229,3 +1229,18 @@ camel_case([], _) ->
 
 capitalize_letter(C) ->
     C + ($A - $a).
+
+-ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
+%% Improve by making a separate test for lists:join (added in erl19)
+%% instead of piggybacking on the test for erl20 string functions.
+
+ljoin(Sep, List) ->
+    lists:join(Sep, List).
+
+-else. % NO_HAVE_ERL20_STR_FUNCTIONS
+
+ljoin(_Sep, []) -> [];
+ljoin(_Sep, [Elem]) -> [Elem];
+ljoin(Sep, [Hd | Rest]) -> [Hd, Sep | ljoin(Sep, Rest)].
+
+-endif. % NO_HAVE_ERL20_STR_FUNCTIONS
