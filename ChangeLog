@@ -1,5 +1,42 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.17.0
+2021-Apr-11
+
+        * Save all options as well as custom options, and introduce
+          versions 3 and 4 of the proto defs format. (#202)
+          See the doc/dev-guide/proto-defs-versions.md for more info.
+
+          The following definition elements were added and changed:
+            - Enum values have changed from 2-tuples to 3-tuples:
+                previously: {Symbol, Value}
+                now:        {Symbol, Value, EnumValueOptions}
+            - Added: {{enum_options,EnumName}, [<option>, ...]}
+            - Added: {{service_options,ServiceName}, [<option>, ...]}
+            - Rpc (custom) option names now look like any other
+              custom option names.
+            - Option name elements can now contain tuples
+              to indicate parenthesized path components, as indicated
+              in the doc/dev-guide/proto-defs-versions.md.
+
+          The above redesign also fixes a crash when there were
+          enum option. (#203)
+
+          The default version of the returned format and of the format
+          in the generated introspection functions is still 1, for
+          backwards compatibility. Use the {proto_defs_version,4} option
+          in order to use the added definition elements.
+
+        * Add an option, introspect_get_proto_defs (-introspect-get_proto_defs)
+          Normally a get_msg_defs/0 function is generated, but this
+          has historically only contained message and enum elements.
+          With the introspect_get_proto_defs option, a get_proto_defs/0
+          is instead generated, containing the same definitions as returned
+          when compiling with the to_proto_defs option.
+          NB that the format version of the definitions for get_proto_defs/0,
+          as well as those for get_msg_defs/0, is by default 1, but can 
+          be changed with the {proto_defs_version,N} option.
+
 Version 4.16.2
 2021-Feb-27
 
