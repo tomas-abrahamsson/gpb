@@ -326,7 +326,7 @@ Features of gpb
    - groups
    - JSON mapping is supported, see the json (-json) option(s)
 
-   gpb reads but ignores or throws away:
+   gpb reads but ignores:
    - options other than `packed` or `default`
    - custom options
 
