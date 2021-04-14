@@ -622,6 +622,84 @@ decode_packed_repeated_with_without_packed_test_aux() ->
      || {Type,Values} <- TypesWithValues],
     ok.
 
+decoding_should_mask_to_bitlength_test() ->
+    %% This is the result of decoding too large values
+    %% with protobuf's generated Python and C++ output.
+    %% gpb works like the C++ decoder.
+    %%
+    %%   Protobuf  Encoded   Python/C++
+    %%   Type      value     decoded
+    %%             on wire   value
+    %%   ----------------------------------------------------------------
+    %%   uint32    2^32      0
+    %%   uint32    2^33-1    4294967295
+    %%   uint32    2^33      0
+    %%   uint32    2^34-1    4294967295
+    %%   uint64    2^64      0
+    %%   uint64    2^65-1    18446744073709551615
+    %%   uint64    2^65      0
+    %%   uint64    2^66-1    18446744073709551615
+    %%
+    %%   int32     2^32      0
+    %%   int32     2^33-1    -1
+    %%   int32     2^33      0
+    %%   int32     2^34-1    -1
+    %%   int64     2^64      0
+    %%   int64     2^65-1    -1
+    %%   int64     2^65      0
+    %%   int64     2^66-1    -1
+    %%
+    %%   sint32    2^32      0
+    %%   sint32    2^33-1    -2147483648
+    %%   sint32    2^33      0
+    %%   sint32    2^34-1    -2147483648
+    %%   sint64    2^64      0
+    %%   sint64    2^65-1    -9223372036854775808
+    %%   sint64    2^65      0
+    %%   sint64    2^66-1    -9223372036854775808
+    %%
+    %% Here are the various versions involved:
+    %%   libprotoc 3.15.3
+    %%   Python 3.9.2
+    %%   gcc (Debian 10.2.1-6) 10.2.1 20210110
+    %%
+    [begin
+         FNum = 1,
+         Defs = [{{msg,m1}, [#?gpb_field{name = a, fnum = FNum, rnum = #m1.a,
+                                         type = Type, occurrence = required,
+                                         opts = []}]}],
+         WType = gpb:encode_wiretype(Type),
+         Encoded = iolist_to_binary(
+                     [gpb:encode_varint((FNum bsl 3) + WType),
+                      gpb:encode_varint(ValueToEncode)]),
+         Env = {Type, ValueToEncode, Encoded, Defs},
+         ?assertMatch({#m1{a=ExpectedDecoded}, _},
+                      {decode_msg(Encoded, m1, Defs), Env})
+     end
+     || {ExpectedDecoded, ValueToEncode, Type}
+            <- [%% uint32,uint64
+                {           0, pow2(32),   uint32},
+                {max_uint(32), pow2(33)-1, uint32},
+                {           0, pow2(64),   uint64},
+                {max_uint(64), pow2(65)-1, uint64},
+                %% int32,int64
+                {           0, pow2(32),   int32},
+                {          -1, pow2(33)-1, int32},
+                {           0, pow2(64),   int64},
+                {          -1, pow2(65)-1, int64},
+                %% sint32,sint64
+                {           0, pow2(32),   sint32},
+                {min_sint(32), pow2(33)-1, sint32},
+                {           0, pow2(64),   sint64},
+                {min_sint(64), pow2(65)-1, sint64}]],
+    ok.
+
+max_uint(NumBits) -> pow2(NumBits) - 1.
+
+min_sint(NumBits) -> -pow2(NumBits-1).
+
+pow2(NumBits) ->     (1 bsl NumBits).
+
 %% -------------------------------------------------------------
 
 encode_required_varint_field_test() ->
