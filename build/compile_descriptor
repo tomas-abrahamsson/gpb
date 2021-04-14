@@ -39,18 +39,27 @@ check_ok_or_halt(Res) ->
        true -> halt(1)
     end.
 
+deps_dir() ->
+    case os:getenv("REBAR_DEPS_DIR") of
+        false ->
+            os:getenv("REBAR_BARE_COMPILER_OUTPUT_DIR");
+        DepsDir ->
+            DepsDir
+    end.
+
 main(_) ->
-    REBAR_DEPS_DIR = os:getenv("REBAR_DEPS_DIR"),
+    REBAR_DEPS_DIR = deps_dir(),
     {EbinPath, TestPath} =
         case REBAR_DEPS_DIR =/= false
             andalso filelib:is_dir(filename:join(REBAR_DEPS_DIR, "gpb")) of
             true ->
-                Ebin = filename:join([REBAR_DEPS_DIR, "gpb", "ebin"]),
-                filelib:ensure_dir(filename:join(Ebin, ".dummy")),
-                {Ebin, filename:join([REBAR_DEPS_DIR, "gpb", "test"])};
+                {filename:join([REBAR_DEPS_DIR, "gpb", "ebin"]),
+                 filename:join([REBAR_DEPS_DIR, "gpb", "test"])};
             _ ->
                 {"./ebin", "./test"}
         end,
+
+    filelib:ensure_dir(filename:join(EbinPath, ".dummy")),
 
     CheckList =
         [{["descr_src/gpb_descriptor.erl",
