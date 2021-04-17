@@ -1,5 +1,19 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.17.1
+2021-Apr-17
+
+        * Fix compilation with Elixir 1.12.0, by respecting the
+          REBAR_BARE_COMPILER_OUTPUT_DIR env var during descriptor
+          compilation.  Thanks to Michael Davis. (#204, #205)
+
+        * On decoding, mask ints to 32 or 64 bits. (#206)
+
+        * Rename helpers/export-from-git to mk-versioned-archive
+          and make it able to export also from a non-git dir,
+          allowing the version to be set using options.
+          Keep a symlink from the old name for backwards compatibility.
+
 Version 4.17.0
 2021-Apr-11
 
