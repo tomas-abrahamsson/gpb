@@ -590,7 +590,7 @@ with the `--override-version=<x>` option to the `export-from-git` helper.
 
 Related projects
 ----------------
-* [rebar3_plugin_gpb](https://github.com/lrascao/rebar3_gpb_plugin) for
+* [rebar3_gpb_plugin](https://github.com/lrascao/rebar3_gpb_plugin) for
   using gpb with rebar3
 * [exprotobuf](https://github.com/bitwalker/exprotobuf) for using gpb from
   [Elixir](http://elixir-lang.org)
