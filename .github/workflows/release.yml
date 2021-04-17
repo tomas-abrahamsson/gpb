@@ -19,7 +19,7 @@ jobs:
           t=${{ github.event.ref }}
           vsn=${t##*/}
           echo "vsn=$vsn" >> $GITHUB_ENV
-          ./helpers/export-from-git --override-version=$vsn
+          ./helpers/mk-versioned-archive --override-version=$vsn
           ./helpers/extract-top-changelog-entry > release-descr.txt
       - name: Create Release
         id: create_release

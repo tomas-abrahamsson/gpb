@@ -555,11 +555,15 @@ src/gpb.app.src accordingly. See also the section below about
 [building outside of a git work tree](README.md#building-outside-of-a-git-work-tree) for info on
 exporting gpb from git.)
 
-The version number on the master branch of the gpb on github is
+The version number from the `git describe` command above will look like
+* `<x>.<y>.<z>` (on master on Github)
+* `<x>.<y>.<z>-<n>-g<sha>` (on branches or between commits)
+
+The version number on the master branch of the gpb on Github is
 intended to always be only integers with dots, in order to be
-compatible with reltool.  In other words, each push to github is
-considered a release, and the version number is bumped.  To ensure
-this, there is a `pre-push` git hook and two scripts,
+compatible with reltool.  In other words, each push to Github's master
+branch is considered a release, and the version number is bumped.
+To ensure  this, there is a `pre-push` git hook and two scripts,
 `install-git-hooks` and `tag-next-minor-vsn`, in the helpers
 subdirectory. The ChangeLog file will not necessarily reflect all
 minor version bumps, only important updates.
@@ -573,20 +577,28 @@ Places to update when making a new version:
 Building outside of a git work tree
 -----------------------------------
 
-The gpb build process requires a git work tree, with tags, to get the
-version numbering right, as described in the
-[Version numbering section](#version-numbering). To export gpb
-for building outside of a git work tree, run the
-`helpers/export-from-git` script from a git work tree. The export script
-will create a tar file with the version number already substituted.
+The gpb build process expects a (non-shallow) git work tree, with tags,
+to get the version numbering right, as described in the
+[Version numbering section](#version-numbering), but it is also possible
+to build outside of git. To do that, create a versioned archive, using
+the `helpers/mk-versioned-archive` script, then unpack the archive and build
+inside it.
 
-When downloading a version from github, make sure to grab the 
-*gpb-_<x.y.z>_.tar.gz* files, since these have been created
-using the export-from-git script.
+If you create the versioned archive in a git worktree, the version
+will be set automatically, otherwise you will need to specify it
+manually. Run `mk-versioned-archive --help` for info on what options
+to use.
 
-Avoid Github's automatic _Source code_ zip or tar.gz archives for gpb,
-as the version numbering is not correct in these, or re-export them
-with the `--override-version=<x>` option to the `export-from-git` helper.
+When downloading from Github, the *gpb-_<x.y.z>_.tar.gz* archives
+have been created using the mk-versioned-archive script, so it is
+possible to just unpack and build directly.
+
+If you use Github's automatic _Source code_ zip or tar.gz archives,
+you will need to re-create a versioned archive using the `mk-versioned-archive`
+script and the `--override-version=<x>` option (or possibly the
+or the `--override-version-from-cwd-path` option if the directory name
+contains a proper version.)
+
 
 Related projects
 ----------------

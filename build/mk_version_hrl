@@ -5,16 +5,20 @@
 
 -mode(compile).
 -define(NOT_IN_GIT_ERR_MSG,
-    "ERROR: Building outside a git work tree is not supported,
-           unless the source has first been exported.
-           This is for the version number to get correct.
-           To build outside a git work tree, first export it:
-           Start with a git clone, then run helpers/export-from-git.
+    "ERROR: To build outside a git work tree, you must first create
+           a versioned archive, and then unpack it and build that.
+           This is for the version number to get correctly set.
+           Use helpers/mk-versioned-archive to create such an archive.
+
+           The helpers/mk-versioned-archive can be used from a git worktree
+           or from eg Github's automatically generated tar/zip files
+           or similar. If you use it from a (non-shallow) git work tree
+           with tags intact, the version will get picked up automatically,
+           otherwise you must know the proper version and specify it manually,
+           see mk-versioned-archive --help for further assistance.
+
            For further info, see the README.md, the section section
-           named Building outside of a git work tree
-           Github automatically generates tar/zip files from tags,
-           but these will unfortunately not do, since the version
-           number does not get set correctly.").
+           named Building outside of a git work tree.").
 
 file_err(FunName, FileName, Reason) ->
     io:format(standard_error, "file:~p(~s) excute failed!, Reason :~s ~n",
