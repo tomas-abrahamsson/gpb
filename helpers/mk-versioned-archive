@@ -1,0 +1,179 @@
+#! /usr/bin/env bash
+
+usage () {
+    cat <<EOF
+Usage: $(basename "$0") [options]
+
+Create an archive and ensure the version is set,
+so that it can build outside of the gpb git repo.
+
+The version number is by default extracted from the git version,
+but can be overridden.
+
+The version number is used both in the archive name, and in the
+paths of the files in the archive, and also in the gpb_version.hrl
+file in the archive.
+
+Options:
+    --override-version=VERSION
+        Normally the version is automatically extracted from the git
+        history.  This option allows to override it to a specific value.
+        See also further info in the notes below.
+
+    --override-version-from-cwd-path
+        Attempt to deduce the version from the current working directory
+        path:  If a component of the path looks like gpb-<x> then
+        the <x> is taken as the version number. Example:
+        if this script is executed from /path/to/somewhere/gpb-1.0.0
+        then the version is assumed to be 1.0.0.
+        See also further info in the notes below.
+
+For both options --override-version=<x> --override-version-from-cwd-path,
+the following holds:
+* The version is used verbatim. No attempt is made to check that
+  it looks like a version gpb would normally find when from a git repo.
+* The current working directory is expected to be in the top
+  of the gpb, ie there should be a 'src' sub-directory in the current dir.
+EOF
+}
+
+vsn_source=from_git
+vsn=undefined
+opts_done=false
+get_opt_val () { echo "${1#*=}"; }
+while [ $opts_done = false ]
+do
+    case "$1" in
+        --override-version=*)
+            vsn_source=specified
+            vsn=$(get_opt_val "$1");
+            shift;;
+        --override-version-from-cwd-path)
+            vsn_source=from_cwd_path
+            shift;;
+        --help|-h) usage; exit 0;;
+        -*) echo "Unrecognized option '$1'" >&2; exit 1;;
+        *) opts_done=true;;
+    esac
+done
+
+fetch_vsn_from_pwd() {
+    d=$(pwd)
+    d_orig=$d
+    at_top=false
+    while [ $at_top = false ]
+    do
+        b=$(basename "$d")
+        case "$b" in
+            gpb-*)
+                echo ${b#*-}
+                return
+                ;;
+            *)
+                true
+        esac
+        d_up=$(dirname "$d")
+        [ "$d_up" = "$d" ] && at_top=true
+        d=$d_up
+    done
+    echo >&2 "Could not find the version from path, '$d_orig'"
+    exit 1
+}
+set -e
+
+case $vsn_source in
+    specified)
+        if ! [ -f ./src/gpb.erl ]
+        then
+            echo >&2 "Expected to be executed in the top of the gpb."
+            echo >&2 "but cannot find ./src/gpb.erl"
+            exit 1
+        fi
+        tmpdir=${TMPDIR:-/tmp}
+        dest_dir=$(mktemp -d "/$tmpdir/tmp-export-XXXXXXXX")
+        trap "ec=\$?; /bin/rm -rf '$dest_dir'; exit \$ec" 0 INT QUIT TERM
+        mkdir "$dest_dir/gpb-$vsn"
+        cp -p -r ./ "$dest_dir/gpb-$vsn/"
+        ;;
+    from_cwd_path)
+        if ! [ -f ./src/gpb.erl ]
+        then
+            echo >&2 "Expected to be executed in the top of the gpb."
+            echo >&2 "but cannot find ./src/gpb.erl"
+            exit 1
+        fi
+        vsn=$(fetch_vsn_from_pwd)
+        echo "Found version '$vsn' from current working directory path." 
+        tmpdir=${TMPDIR:-/tmp}
+        dest_dir=$(mktemp -d "/$tmpdir/tmp-export-XXXXXXXX")
+        trap "ec=\$?; /bin/rm -rf '$dest_dir'; exit \$ec" 0 INT QUIT TERM
+        mkdir "$dest_dir/gpb-$vsn"
+        cp -p -r ./ "$dest_dir/gpb-$vsn/"
+        ;;
+    from_git)
+        cdup=$(git rev-parse --show-toplevel) && \
+        cd "$cdup" || {
+            echo >&2 "Cannot chdir to $cdup, the toplevel of the working tree"
+            exit 1
+        }
+        vsn=$(git describe --always --tags --match '[0-9]*.[0-9]*')
+        dest_dir=$(mktemp -d "tmp-export-XXXXXXXX")
+        trap "ec=\$?; /bin/rm -rf '$dest_dir'; exit \$ec" 0 INT QUIT TERM
+        mkdir "$dest_dir/gpb-$vsn"
+        git archive --format=tar HEAD | (cd "$dest_dir/gpb-$vsn" && tar xfp -)
+        ;;
+esac
+
+echo "Exporting version $vsn -> gpb-$vsn.tar.gz"
+
+./build/mk_version_hrl \
+    include/gpb_version.hrl.in \
+    "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in"
+cp  "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in" \
+    "$dest_dir/gpb-$vsn/include/gpb_version.hrl"
+
+( echo "#! /usr/bin/env escript"
+  echo "%% -*- erlang -*-"
+  echo "%% This script was turned into a no-op"
+  echo "%% by $(basename "$0")"
+  echo
+  echo "main([FromFile, ToFile]) ->"
+  echo "    {ok, B} = file:read_file(FromFile),"
+  echo "    ok = file:write_file(ToFile, B)." ) \
+    > "$dest_dir/gpb-$vsn/build/mk_version_hrl"
+chmod +x "$dest_dir/gpb-$vsn/build/mk_version_hrl"
+
+
+# Fix version number in .gitignore (it is no longer an auto-generated file)
+if [ -f "$dest_dir/gpb-$vsn/.gitignore" ]
+then
+    sed -i -e 's,^.*gpb_version.hrl.*$,,g' "$dest_dir/gpb-$vsn/.gitignore"
+fi
+# Fix version number eunit test in in gpb_tests (and gpb_compile_tests)
+awk '{ if ($0 ~ /^version_test/) {
+    print "%%%% Outcommented since we have hard-wired the version";
+    print "%%%% instead of finding it from git which the original gpb does";
+    print "-compile({nowarn_unused_function, version_test_aux/0})."
+    print "-compile({nowarn_unused_function, vsn_format/0})."
+    do {
+      print "%% " $0;
+      success=getline;
+    } while (success && $0 !~ /^[a-z]/);
+    if (success) print $0;
+  } else {
+    print $0;
+  }
+}' \
+    < "$dest_dir/gpb-$vsn/test/gpb_tests.erl" \
+    > "$dest_dir/gpb-$vsn/test/gpb_tests.erl.new"
+mv "$dest_dir/gpb-$vsn/test/gpb_tests.erl.new" \
+   "$dest_dir/gpb-$vsn/test/gpb_tests.erl"
+
+# Remove some development auxiliaries
+/bin/rm -rf "$dest_dir/gpb-$vsn/helpers"
+
+(
+    cd "$dest_dir"
+    tar cfpz "gpb-$vsn.tar.gz" "gpb-$vsn"
+)
+mv "$dest_dir/gpb-$vsn.tar.gz" .

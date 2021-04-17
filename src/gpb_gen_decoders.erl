@@ -761,9 +761,9 @@ decode_int_value(ExtValueExpr, Rest, TrUserDataVar, FieldDef, Tr, Opts) ->
                       replace_term('Tr', Tr(decode))],
     case Type of
         sint32 ->
-            tuplify(decode_zigzag(ExtValueExpr, Tr, TrUserDataVar), Rest);
+            tuplify(decode_zigzag(ExtValueExpr, 32, Tr, TrUserDataVar), Rest);
         sint64 ->
-            tuplify(decode_zigzag(ExtValueExpr, Tr, TrUserDataVar), Rest);
+            tuplify(decode_zigzag(ExtValueExpr, 64, Tr, TrUserDataVar), Rest);
         int32 ->
             tuplify(decode_uint_to_int(ExtValueExpr, 32, Tr, TrUserDataVar),
                     Rest);
@@ -771,13 +771,15 @@ decode_int_value(ExtValueExpr, Rest, TrUserDataVar, FieldDef, Tr, Opts) ->
             tuplify(decode_uint_to_int(ExtValueExpr, 64, Tr, TrUserDataVar),
                     Rest);
         uint32 ->
-            tuplify(?expr('Tr'('ExtValueExpr', 'TrUserData'),
-                          [replace_tree('ExtValueExpr', ExtValueExpr)
+            tuplify(?expr('Tr'(('ExtValueExpr') band 'MaxUInt32', 'TrUserData'),
+                          [replace_tree('ExtValueExpr', ExtValueExpr),
+                           replace_term('MaxUInt32', (1 bsl 32) - 1)
                            | TrReplacements]),
                     Rest);
         uint64 ->
-            tuplify(?expr('Tr'('ExtValueExpr', 'TrUserData'),
-                          [replace_tree('ExtValueExpr', ExtValueExpr)
+            tuplify(?expr('Tr'(('ExtValueExpr') band 'MaxUInt64', 'TrUserData'),
+                          [replace_tree('ExtValueExpr', ExtValueExpr),
+                           replace_term('MaxUInt64', (1 bsl 64) - 1)
                            | TrReplacements]),
                     Rest);
         bool ->
@@ -1121,15 +1123,16 @@ format_floating_point_field_decoder(MsgName, XFieldDef, Type, AnRes) ->
         passes_msg = true,
         tree = T}.
 
-decode_zigzag(ExtValueExpr, Tr, TrUserDataVar) ->
+decode_zigzag(ExtValueExpr, NumBits, Tr, TrUserDataVar) ->
     ?expr(begin
-              ZValue = 'ExtValueExpr',
+              ZValue = ('ExtValueExpr') band 'MaxUInt',
               if ZValue band 1 =:= 0 -> 'Tr'(ZValue bsr 1, 'TrUserData');
                  true                -> 'Tr'(-((ZValue + 1) bsr 1),
                                              'TrUserData')
               end
           end,
           [replace_tree('ExtValueExpr', ExtValueExpr),
+           replace_term('MaxUInt', (1 bsl NumBits) - 1),
            replace_term('Tr', Tr(decode)),
            replace_tree('TrUserData', TrUserDataVar)]).
 
