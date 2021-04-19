@@ -1,5 +1,11 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.17.3
+2021-Apr-19
+
+        * Fix mk-versioned-archive to also substitute the
+          version in the gpb.app.src file.
+
 Version 4.17.2
 2021-Apr-19
 
