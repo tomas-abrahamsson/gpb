@@ -94,6 +94,7 @@ case $vsn_source in
         trap "ec=\$?; /bin/rm -rf '$dest_dir'; exit \$ec" 0 INT QUIT TERM
         mkdir "$dest_dir/gpb-$vsn"
         cp -p -r ./ "$dest_dir/gpb-$vsn/"
+        mk_version_hrl_opts=("--override-version=$vsn")
         ;;
     from_cwd_path)
         if ! [ -f ./src/gpb.erl ]
@@ -109,6 +110,7 @@ case $vsn_source in
         trap "ec=\$?; /bin/rm -rf '$dest_dir'; exit \$ec" 0 INT QUIT TERM
         mkdir "$dest_dir/gpb-$vsn"
         cp -p -r ./ "$dest_dir/gpb-$vsn/"
+        mk_version_hrl_opts=("--override-version=$vsn")
         ;;
     from_git)
         cdup=$(git rev-parse --show-toplevel) && \
@@ -121,12 +123,13 @@ case $vsn_source in
         trap "ec=\$?; /bin/rm -rf '$dest_dir'; exit \$ec" 0 INT QUIT TERM
         mkdir "$dest_dir/gpb-$vsn"
         git archive --format=tar HEAD | (cd "$dest_dir/gpb-$vsn" && tar xfp -)
+        mk_version_hrl_opts=("--override-version=$vsn")
         ;;
 esac
 
 echo "Exporting version $vsn -> gpb-$vsn.tar.gz"
 
-./build/mk_version_hrl \
+./build/mk_version_hrl "${mk_version_hrl_opts[@]}" \
     include/gpb_version.hrl.in \
     "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in"
 cp  "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in" \
@@ -137,6 +140,7 @@ cp  "$dest_dir/gpb-$vsn/include/gpb_version.hrl.in" \
   echo "%% This script was turned into a no-op"
   echo "%% by $(basename "$0")"
   echo
+  echo "main([\"--\"++_ | Rest]) -> main(Rest); % dont handle opts"
   echo "main([FromFile, ToFile]) ->"
   echo "    {ok, B} = file:read_file(FromFile),"
   echo "    ok = file:write_file(ToFile, B)." ) \
