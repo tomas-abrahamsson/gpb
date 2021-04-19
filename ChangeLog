@@ -1,5 +1,11 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.17.2
+2021-Apr-19
+
+        * Fix mk-versioned-archive to actually also work
+          from a non-git directory tree.
+
 Version 4.17.1
 2021-Apr-17
 
