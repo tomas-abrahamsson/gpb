@@ -28,6 +28,10 @@ Options:
         then the version is assumed to be 1.0.0.
         See also further info in the notes below.
 
+    --dest-dir=DIR
+        Create the resulting archive in DIR instead of in the
+        current dir.
+
 For both options --override-version=<x> --override-version-from-cwd-path,
 the following holds:
 * The version is used verbatim. No attempt is made to check that
@@ -39,6 +43,7 @@ EOF
 
 vsn_source=from_git
 vsn=undefined
+dest_archive_dir="."
 opts_done=false
 get_opt_val () { echo "${1#*=}"; }
 while [ $opts_done = false ]
@@ -50,6 +55,9 @@ do
             shift;;
         --override-version-from-cwd-path)
             vsn_source=from_cwd_path
+            shift;;
+        --dest-dir=*)
+            dest_archive_dir=$(get_opt_val "$1")
             shift;;
         --help|-h) usage; exit 0;;
         -*) echo "Unrecognized option '$1'" >&2; exit 1;;
@@ -187,4 +195,5 @@ mv "$dest_dir/gpb-$vsn/src/gpb.app.src.new" \
     cd "$dest_dir"
     tar cfpz "gpb-$vsn.tar.gz" "gpb-$vsn"
 )
-mv "$dest_dir/gpb-$vsn.tar.gz" .
+cp -p "$dest_dir/gpb-$vsn.tar.gz" "$dest_archive_dir"/
+/bin/rm "$dest_dir/gpb-$vsn.tar.gz"
