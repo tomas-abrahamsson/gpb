@@ -240,7 +240,8 @@ test:	all $(TEST_BEAMS) FORCE
 		_  -> halt(1) \
 	    end."
 
-doc:	| $(src)/gpb_parse_old.erl $(src)/gpb_scan_old.erl
+doc:	| $(incdir)/gpb_version.hrl \
+	$(src)/gpb_parse_old.erl $(src)/gpb_scan_old.erl
 	@echo Generating documentation...
 	$(silencer)$(ERL) $(ERL_BATCH_FLAGS) -pa $(ebin) -eval " \
 	    case edoc:application(gpb,\"$(EDOC_DEST_DIR)\",[$(EDOC_OPTS)]) of \
@@ -381,7 +382,7 @@ $(test)/gpb_tests.beam: $(incdir)/gpb.hrl
 # To compile gpb_codegen_tests, we first need the parse transform in gpb_codegen
 $(test)/gpb_codegen_tests.beam: $(ebin)/gpb_codegen.beam
 
-# To compile gpb.erl, we need gpb_include.hrl
+# To compile gpb.erl, we need gpb_version.hrl
 $(ebin)/gpb.beam: $(src)/gpb.erl $(incdir)/gpb_version.hrl
 
 # gpb_compile_tests.erl includes gpb_tests.erl (see the files for details
