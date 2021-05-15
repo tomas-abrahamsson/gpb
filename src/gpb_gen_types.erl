@@ -516,8 +516,7 @@ augment_type_sep(FieldInfos, TEnv) ->
 %% Step:
 %% Set whether the field needs to be out-commented.
 augment_out_commentation(FieldInfos, TEnv) ->
-    #t_env{can_do_map_presence = TypespecsCanIndicateMapItemPresence,
-           mapping_and_unset = MappingAndUnset,
+    #t_env{mapping_and_unset = MappingAndUnset,
            map_key_type = KeyType} = TEnv,
     case MappingAndUnset of
         records ->
@@ -535,10 +534,7 @@ augment_out_commentation(FieldInfos, TEnv) ->
             [FI#field_info{out_comment = false}
              || FI <- FieldInfos];
         #maps{unset_optional=omitted} ->
-            %% If Erlang 17 or 18, treat also required as optional,
-            %% since we cannot presence on decoding.
-            OutComment = not TypespecsCanIndicateMapItemPresence,
-            [FI#field_info{out_comment = OutComment}
+            [FI#field_info{out_comment = false}
              || FI <- FieldInfos]
     end.
 

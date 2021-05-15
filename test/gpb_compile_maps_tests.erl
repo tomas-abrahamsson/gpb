@@ -696,14 +696,10 @@ type_syntax_for_required_fields_test() ->
     %%     -type m() :: #{req => integer(),
     %%                    opt => string()}.
     %%
-    %% For Erlang/OTP 18 and earlier, only "=>" is available.
-    %% However, since we cannot guarantee presence on decode,
-    %% we can't actually use "=>" either, but must generate all
-    %% fields out-commented, like this:
-    %%
-    %%     -type m() :: #{%% req => integer()
-    %%                    %% opt => string()
-    %%                   }.
+    %% For Erlang/OTP 18 and earlier, only "=>" is available,
+    %% and it means the same as "=>" in Erlang 19.
+    %% The check for out_commented could still be useful, since
+    %% for binary keys, the types get out-commented.
     %%
     ReqProto = "message m { required uint32 f = 1; }",
     OptProto = "message m { optional uint32 f = 1; }",
@@ -719,9 +715,9 @@ type_syntax_for_required_fields_test() ->
     [true, false] = [gpb_lib:is_substr(X, RqT1) || X <- ["=>", ":="]],
     [true, false] = [gpb_lib:is_substr(X, OpT1) || X <- ["=>", ":="]],
     [true, false] = [gpb_lib:is_substr(X, RpT1) || X <- ["=>", ":="]],
-    ?assertMatch({true, _}, {type_is_out_commented(RqT1), RqT1}),
-    ?assertMatch({true, _}, {type_is_out_commented(OpT1), OpT1}),
-    ?assertMatch({true, _}, {type_is_out_commented(RpT1), RpT1}),
+    ?assertMatch({false, _}, {type_is_out_commented(RqT1), RqT1}),
+    ?assertMatch({false, _}, {type_is_out_commented(OpT1), OpT1}),
+    ?assertMatch({false, _}, {type_is_out_commented(RpT1), RpT1}),
 
     RqS2 = compile_to_string(ReqProto, [{target_erlang_version,19} | Common]),
     OpS2 = compile_to_string(OptProto, [{target_erlang_version,19} | Common]),
