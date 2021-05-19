@@ -1,5 +1,17 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.17.4
+2021-May-19
+
+        * Fix generation of map types when targeting Erlang 17 and 18 (#196)
+
+        * Rework building outside of a git-repo:
+          - Add the possibility to manually specify version
+            by adding a gpb.vsn file.
+          - Add the concept of a version source: git | file
+            include this info in the generated code
+          - Add a --dest-dir=DIR option to the mk-versioned-archive
+
 Version 4.17.3
 2021-Apr-19
 
