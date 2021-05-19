@@ -76,7 +76,7 @@ try_walk_root_wise(Dir, Base) ->
                 {ok, Vsn} ->
                     {ok, first_line_no_nl(binary_to_list(Vsn))};
                 {error, _} ->
-                    {error, no_root}
+                    {error, no_file}
             end;
         false ->
             case up_dir(Dir) of
@@ -123,9 +123,10 @@ up_dir(Dir) ->
 find_vsn_from_git() ->
     Cmd = "git describe --always --tags --match '[0-9]*.[0-9]*'",
     Output = os:cmd(Cmd),
-    case looks_like_vsn_output(Output) of
+    Line1 = first_line_no_nl(Output),
+    case looks_like_vsn_output(Line1) of
         true  ->
-            {ok, first_line_no_nl(Output)};
+            {ok, Line1};
         false ->
             {error, {Cmd, Output}}
     end.
