@@ -7,4 +7,6 @@
 
 -define(gpb_version, "@vsn@").
 
+-define(gpb_version_source, "@vsn-source@").
+
 -endif. %% gpb_version_hrl

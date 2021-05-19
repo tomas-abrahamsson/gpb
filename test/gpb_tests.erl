@@ -1855,9 +1855,14 @@ sort_elem2(Tuple) ->
 
 
 version_test() ->
-    case vsn_format() of
-        enforce_conforming -> version_test_aux();
-        any -> ok % not useful to do any tests here
+    case gpb:version_source() of
+        "file" ->
+            ok;
+        "git" ->
+            case vsn_format() of
+                enforce_conforming -> version_test_aux();
+                any -> ok % not useful to do any tests here
+            end
     end.
 
 version_test_aux() ->

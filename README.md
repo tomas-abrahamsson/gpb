@@ -580,9 +580,11 @@ Building outside of a git work tree
 The gpb build process expects a (non-shallow) git work tree, with tags,
 to get the version numbering right, as described in the
 [Version numbering section](#version-numbering), but it is also possible
-to build outside of git. To do that, create a versioned archive, using
-the `helpers/mk-versioned-archive` script, then unpack the archive and build
-inside it.
+to build outside of git. To do that, you have two options:
+* set the version manually by creating a file, `gpb.vsn`,
+  with the version on the first line
+* or create a versioned archive, using the `helpers/mk-versioned-archive` script,
+  then unpack the archive and build inside it.
 
 If you create the versioned archive in a git worktree, the version
 will be set automatically, otherwise you will need to specify it
@@ -594,7 +596,8 @@ have been created using the mk-versioned-archive script, so it is
 possible to just unpack and build directly.
 
 If you use Github's automatic _Source code_ zip or tar.gz archives,
-you will need to re-create a versioned archive using the `mk-versioned-archive`
+you will need to either create a `gpb.vsn` file as described aboce,
+or re-create a versioned archive using the `mk-versioned-archive`
 script and the `--override-version=<x>` option (or possibly the
 or the `--override-version-from-cwd-path` option if the directory name
 contains a proper version.)

@@ -7,12 +7,13 @@ main(Argv) ->
     [InFile, OutFile] = if length(Args) == 2 -> Args;
                            true -> usage(), halt(1)
                         end,
-    Vsn = case proplists:get_value(override_version, Opts) of
-              undefined ->
-                  get_version_from_git();
-              Version ->
-                  Version
-          end,
+    {Vsn, VsnSource} =
+        case proplists:get_value(override_version, Opts) of
+            undefined ->
+                find_vsn_and_source();
+            Version ->
+                {Version, overriding_option}
+        end,
     BaseStr = case file:read_file(InFile) of
                   {ok, S} ->
                       S;
@@ -22,6 +23,7 @@ main(Argv) ->
     SedList =
         [
             {<<"@vsn@">>, Vsn},
+            {<<"@vsn-source@">>, VsnSource},
             {<<"is expected to be">>, <<"was">>},
             {<<"%% The version below">>, [<<"%% DO NOT EDIT -- generated ">>,
                 <<"from gpb_version.hrl.in\n%% The version below">>]},
@@ -48,11 +50,14 @@ usage() ->
     io:format("mk_version_hrl [Opts] InFile OutFile~n"
               "Opts: --override-version=VSN~n").
 
--define(NOT_IN_GIT_ERR_MSG,
-    "ERROR: To build outside a git work tree, you must first create
-           a versioned archive, and then unpack it and build that.
-           This is for the version number to get correctly set.
-           Use helpers/mk-versioned-archive to create such an archive.
+-define(NO_VERSION_ERR_MSG,
+    "ERROR: To build outside a git work tree, you must explicitly
+           set the version, either by writing it to a file gpb.vsn,
+           or by creating a versioned archive, and then unpack and
+           build that.
+
+           If you want to create a versioned archive, then
+           use helpers/mk-versioned-archive.
 
            The helpers/mk-versioned-archive can be used from a git worktree
            or from eg Github's automatically generated tar/zip files
@@ -65,17 +70,23 @@ usage() ->
            named Building outside of a git work tree.").
 
 
-get_version_from_git() ->
-    InGit = os:cmd("git rev-parse --is-inside-work-tree  2>&1"),
-    case InGit of
+find_vsn_and_source() ->
+    case os:cmd("./build/find-vsn --have-vsn") of
         "true" ++ _ ->
-            next;
-        _ ->
-            io:format(standard_error, "~s~n", [?NOT_IN_GIT_ERR_MSG]),
+            Vsn = first_line_no_nl(
+                    os:cmd("./build/find-vsn --show-vsn")),
+            VsnSource = first_line_no_nl(
+                          os:cmd("./build/find-vsn --show-vsn-source")),
+            {Vsn, VsnSource};
+        "false" ++ _ ->
+            io:format(standard_error, "~s~n", [?NO_VERSION_ERR_MSG]),
             halt(1)
-    end,
-    Vsn0 = os:cmd("git describe --always --tags --match [0-9]*.[0-9]*"),
-    lists:sublist(Vsn0, length(Vsn0) - 1).
+    end.
+
+first_line_no_nl("\r" ++ _) -> "";
+first_line_no_nl("\n" ++ _) -> "";
+first_line_no_nl([C | Tl]) -> [C | first_line_no_nl(Tl)];
+first_line_no_nl("") -> "".
 
 file_err(FunName, FileName, Reason) ->
     io:format(standard_error, "file:~p(~s) excute failed!, Reason :~s ~n",

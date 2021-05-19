@@ -62,6 +62,7 @@
 -export([encode_wiretype/1, decode_wiretype/1]).
 -export([decode_packet/3]).
 -export([version_as_string/0, version_as_list/0]).
+-export([version_source/0]).
 -export([field_records_to_proplists/1, proplists_to_field_records/1]).
 -export([field_record_to_proplist/1,   proplist_to_field_record/1]).
 -export([defs_records_to_proplists/1,  proplists_to_defs_records/1]).
@@ -248,6 +249,12 @@ v2l2("-"++T, Acc)                   -> [v_acc_to_int(Acc), T].
 
 v_acc_to_int(Acc) ->
     list_to_integer(lists:reverse(Acc)).
+
+%% @doc Retrieve the source of the version.
+%% If it is extracted from git, it will be `"git"', else `"file"'.
+-spec version_source() -> string().
+version_source() ->
+    ?gpb_version_source.
 
 %% @doc Decode a binary to a message on record format.
 %%
