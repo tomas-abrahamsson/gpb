@@ -25,7 +25,5 @@ jobs:
         # TODO: test with protobuf (in the container)
         run: |
           set -xv
-          ./.github/helpers/write_commit_sha_to_gpb_version_hrl $GITHUB_SHA \
-          < include/gpb_version.hrl.in \
-          > include/gpb_version.hrl
+          echo $GITHUB_SHA > gpb.vsn
           make all test doc
