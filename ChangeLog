@@ -1,6 +1,6 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
-Version 4.17.5
+Version 4.17.6
 2021-May-19
 
         * Fix generation of map types when targeting Erlang 17 and 18 (#196)
