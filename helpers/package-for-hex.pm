@@ -60,21 +60,12 @@ then
     fi
 fi
 
-git archive --format=tar --prefix="$d"/ HEAD | tar xf -
 
 set -e
+./helpers/mk-versioned-archive --dest-dir="$d"
 cd "$d"
-
-## First some version fixup stuff.
-## gpb fetches the version from the git tag.
-## Include that version in the package, verbatim
-
-## Fixup the vsn tag in the src/gpb.app.src
-"$script_path"/xsillyed src/gpb.app.src key:vsn change-to:' {vsn,"'"$vsn"'"},'
-## Fixup vsn substitution in include/gpb_version.hrl
-"$script_path"/xsillyed rebar.config.script key:pre_hooks delete-paragraph
-build/mk_version_hrl include/gpb_version.hrl.in include/gpb_version.hrl
-/bin/rm include/gpb_version.hrl.in
+tar xfpz gpb-"$vsn".tar.gz
+cd gpb-"$vsn"
 
 cat >package.exs <<EOF
 # -*- coding: utf-8 -*-
