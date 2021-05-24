@@ -71,12 +71,13 @@ usage() ->
 
 
 find_vsn_and_source() ->
-    case os:cmd("./build/find-vsn --have-vsn") of
+    FindVsnCmd = "escript ./build/find-vsn",
+    case os:cmd(FindVsnCmd ++ " --have-vsn") of
         "true" ++ _ ->
             Vsn = first_line_no_nl(
-                    os:cmd("./build/find-vsn --show-vsn")),
+                    os:cmd(FindVsnCmd ++ " --show-vsn")),
             VsnSource = first_line_no_nl(
-                          os:cmd("./build/find-vsn --show-vsn-source")),
+                          os:cmd(FindVsnCmd ++ " --show-vsn-source")),
             {Vsn, VsnSource};
         "false" ++ _ ->
             io:format(standard_error, "~s~n", [?NO_VERSION_ERR_MSG]),

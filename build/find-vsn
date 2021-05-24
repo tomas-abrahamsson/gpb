@@ -121,7 +121,12 @@ up_dir(Dir) ->
     end.
 
 find_vsn_from_git() ->
-    Cmd = "git describe --always --tags --match '[0-9]*.[0-9]*'",
+    Cmd = case os:type() of
+              {win32,_} ->
+                  "git describe --always --tags --match [0-9]*.[0-9]*";
+              _ ->
+                  "git describe --always --tags --match '[0-9]*.[0-9]*'"
+          end,
     Output = os:cmd(Cmd),
     Line1 = first_line_no_nl(Output),
     case looks_like_vsn_output(Line1) of
