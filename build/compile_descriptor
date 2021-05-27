@@ -42,20 +42,38 @@ check_ok_or_halt(Res) ->
 deps_dir() ->
     case os:getenv("REBAR_DEPS_DIR") of
         false ->
+            %% Elixir 1.12+
             os:getenv("REBAR_BARE_COMPILER_OUTPUT_DIR");
         DepsDir ->
             DepsDir
     end.
 
+checkouts_out_dir() ->
+    os:getenv("REBAR_CHECKOUTS_OUT_DIR").
+
+gpb_exists_via_env(DirEnvValue) ->
+    if DirEnvValue == false  ->
+            false;
+       is_list(DirEnvValue) ->
+            filelib:is_dir(filename:join(DirEnvValue, "gpb"))
+    end.
+
 main(_) ->
+    REBAR_CHECKOUTS_OUT_DIR = checkouts_out_dir(),
     REBAR_DEPS_DIR = deps_dir(),
+    GpbExistsInCheckoutsOutDir = gpb_exists_via_env(REBAR_CHECKOUTS_OUT_DIR),
+    GpbExistsInDepsDir = gpb_exists_via_env(REBAR_DEPS_DIR),
+
     {EbinPath, TestPath} =
-        case REBAR_DEPS_DIR =/= false
-            andalso filelib:is_dir(filename:join(REBAR_DEPS_DIR, "gpb")) of
-            true ->
+        if GpbExistsInCheckoutsOutDir ->
+                %% With _checkouts and rebar3 3.14 or later
+                {filename:join([REBAR_CHECKOUTS_OUT_DIR, "gpb", "ebin"]),
+                 filename:join([REBAR_CHECKOUTS_OUT_DIR, "gpb", "test"])};
+           GpbExistsInDepsDir ->
                 {filename:join([REBAR_DEPS_DIR, "gpb", "ebin"]),
                  filename:join([REBAR_DEPS_DIR, "gpb", "test"])};
-            _ ->
+           true ->
+                %% rebar2 (or make)
                 {"./ebin", "./test"}
         end,
 
