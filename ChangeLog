@@ -1,5 +1,11 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.17.7
+2021-May-27
+
+        * Bugfix building on windows (#208)
+        * Bugfix building with rebar3 >= 3.14.0 with _checkouts (#209)
+
 Version 4.17.6
 2021-May-19
 
