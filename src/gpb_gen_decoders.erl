@@ -250,7 +250,7 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                                             TrUserDataVar, AnRes, Opts),
     Fns = lists:flatten(
             [format_msg_decoder_read_field(MsgName, MsgDef, InitExprs,
-                                           AnRes),
+                                           AnRes, Opts),
              format_field_decoders(MsgName, MsgDef, AnRes, Opts),
              case contains_field_for_unknowns(MsgDef) of
                  true ->
@@ -299,11 +299,11 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
           end,
     gpb_decoders_lib:run_morph_ops(Ops, Fns).
 
-format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes) ->
+format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes, Opts) ->
     Key = ?expr(Key),
     Rest = ?expr(Rest),
     {Param, FParam, FParamBinds} =
-        gpb_decoders_lib:decoder_read_field_param(MsgName, MsgDef),
+        gpb_decoders_lib:decoder_read_field_param(MsgName, MsgDef, Opts),
     Bindings = new_bindings([{'Param', Param},
                              {'FParam', FParam},
                              {'FFields', FParamBinds},
@@ -311,8 +311,8 @@ format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes) ->
                              {'Rest', Rest},
                              {'TrUserData', ?expr(TrUserData)}]),
     [format_msg_init_decoder(MsgName, InitExprs),
-     format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes),
-     format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes)].
+     format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts),
+     format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts)].
 
 format_msg_init_decoder(MsgName, InitExprs) ->
     T = gpb_codegen:mk_fn(
@@ -328,7 +328,7 @@ format_msg_init_decoder(MsgName, InitExprs) ->
         initializes_fields = true,
         tree = T}.
 
-format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
+format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The fast-path decoder directly matches the minimal varint form
     %% of the field-number combined with the wiretype.
     %% Unrecognized fields fall back to the more generic decoder-loop
@@ -340,6 +340,7 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
           fun('precomputed-binary-match', Z1, Z2, F, 'Param', TrUserData) ->
                   'calls-to-field-decoding';
              (<<>>, 0, 0, _, 'FParam', TrUserData) ->
+                  'maybe-check-required-present',
                   'finalize-result';
              (Other, Z1, Z2, F, 'Param', TrUserData) ->
                   'decode-general'(Other, Z1, Z2, F, 'Param', TrUserData)
@@ -351,6 +352,9 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
              [[replace_tree('precomputed-binary-match', BinMatch),
                replace_tree('calls-to-field-decoding', FnCall)]
               || {BinMatch, FnCall} <- decoder_fp(Bindings, MsgName, MsgDef)]),
+           splice_trees('maybe-check-required-present',
+                        gpb_decoders_lib:decoder_maybe_check_required_present(
+                          MsgName, FFields, Opts)),
            replace_tree('finalize-result',
                         gpb_decoders_lib:decoder_finalize_result(
                           Param, FFields,
@@ -363,7 +367,7 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes) ->
         passes_msg = true,
         tree = T}.
 
-format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
+format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The more general field selecting decoder
     %% Stuff that ends up here: non-minimal varint forms and field to skip
     Key = fetch_binding('Key', Bindings),
@@ -381,6 +385,7 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
                   'Key' = X bsl N + Acc,
                   'calls-to-field-decoding-or-skip';
              (<<>>, 0, 0, _, 'FParam', TrUserData) ->
+                  'maybe-check-required-present',
                   'finalize-result'
           end,
           [replace_tree('Key', Key),
@@ -389,6 +394,9 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes) ->
            replace_tree('FParam', FParam),
            replace_tree('calls-to-field-decoding-or-skip',
                         decoder_field_calls(Bindings, MsgName, MsgDef, AnRes)),
+           splice_trees('maybe-check-required-present',
+                        gpb_decoders_lib:decoder_maybe_check_required_present(
+                          MsgName, FFields, Opts)),
            replace_tree('finalize-result',
                         gpb_decoders_lib:decoder_finalize_result(
                           Param, FFields,

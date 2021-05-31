@@ -1112,6 +1112,64 @@ encode_decode_repeated_unknowns_test() ->
     unload_code(Mod1),
     unload_code(Mod2).
 
+%% --- verify required fields on decode ----------
+
+verify_required_fields_on_decode_test() ->
+    Proto = "message mm1 {
+               required string f1 = 1;
+               optional string f2 = 2;
+               repeated string f3 = 3;
+             }",
+    CO = [verify_decode_required_present],
+    Fpp = [{field_pass_method, pass_as_params}],
+    Fpr = [{field_pass_method, pass_as_record}],
+    Undef = [{maps_unset_optional, present_undefined}],
+    M1pp = compile_iolist(Proto, [maps] ++ Fpp ++ CO),
+    M1pr = compile_iolist(Proto, [maps] ++ Fpr ++ CO),
+    M2pp = compile_iolist(Proto, [maps] ++ Fpp),
+    M2pr = compile_iolist(Proto, [maps] ++ Fpr),
+    M3pp = compile_iolist(Proto, [maps] ++ Undef ++ Fpp ++ CO),
+    M3pr = compile_iolist(Proto, [maps] ++ Undef ++ Fpr ++ CO),
+    M4pp = compile_iolist(Proto, [maps] ++ Undef ++ Fpp),
+    M4pr = compile_iolist(Proto, [maps] ++ Undef ++ Fpr),
+    OnlyF1Set = M1pp:encode_msg(#{f1 => "abc"}, mm1),
+    AllMsg = #{f1 => "xyz",
+               f2 => "uvw",
+               f3 => ["ab", "cd"]},
+    AllSet = M1pp:encode_msg(AllMsg, mm1),
+
+    %% Decodes when required field is set:
+    #{f1 := "abc"} = M1pp:decode_msg(OnlyF1Set, mm1),
+    #{f1 := "abc"} = M1pr:decode_msg(OnlyF1Set, mm1),
+    #{f1 := "abc"} = M3pp:decode_msg(OnlyF1Set, mm1),
+    #{f1 := "abc"} = M3pr:decode_msg(OnlyF1Set, mm1),
+    AllMsg = M1pp:decode_msg(AllSet, mm1),
+    AllMsg = M1pr:decode_msg(AllSet, mm1),
+    AllMsg = M3pp:decode_msg(AllSet, mm1),
+    AllMsg = M3pr:decode_msg(AllSet, mm1),
+    %% Error if required field is not present:
+    ExpectedErr = {gpb_error,
+                   {decoding_failure,
+                    {missing_required_msg_field, mm1, f1}}},
+    ?assertError(ExpectedErr, M1pp:decode_msg(<<>>, mm1)),
+    ?assertError(ExpectedErr, M1pr:decode_msg(<<>>, mm1)),
+    ?assertError(ExpectedErr, M3pp:decode_msg(<<>>, mm1)),
+    ?assertError(ExpectedErr, M3pr:decode_msg(<<>>, mm1)),
+    %% No error on no option (bwd compat):
+    #{} = NE1pp = M2pp:decode_msg(<<>>, mm1),
+    #{} = NE2pr = M2pr:decode_msg(<<>>, mm1),
+    %% NE1pp is actually #{f1 => '$undef', f3 => []} while NE2pr is #{f3 => []}
+    [true,  false, _] = [maps:is_key(K, NE1pp) || K <- [f1, f2, f3]],
+    [false, false, _] = [maps:is_key(K, NE2pr) || K <- [f1, f2, f3]],
+    #{f1 := undefined} = M4pp:decode_msg(<<>>, mm1),
+    #{f1 := undefined} = M4pr:decode_msg(<<>>, mm1),
+
+    [unload_code(Mod) || Mod <- [M1pp, M1pr,
+                                 M2pp, M2pr,
+                                 M3pp, M3pr,
+                                 M4pp, M4pr]],
+    ok.
+
 %% nif ------------------------------------------------
 
 nif_test_() ->
