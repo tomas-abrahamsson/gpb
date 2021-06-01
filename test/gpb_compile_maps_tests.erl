@@ -696,6 +696,12 @@ type_syntax_for_required_fields_test() ->
     %%     -type m() :: #{req => integer(),
     %%                    opt => string()}.
     %%
+    %% However, with the `verify_decode_required_present' option,
+    %% we use ":=" for required fields.
+    %%
+    %%     -type m() :: #{req := integer(),
+    %%                    opt => string()}.
+    %%
     %% For Erlang/OTP 18 and earlier, only "=>" is available,
     %% and it means the same as "=>" in Erlang 19.
     %% The check for out_commented could still be useful, since
@@ -731,6 +737,22 @@ type_syntax_for_required_fields_test() ->
     ?assertMatch({false, _}, {type_is_out_commented(RqT2), RqT2}),
     ?assertMatch({false, _}, {type_is_out_commented(OpT2), OpT2}),
     ?assertMatch({false, _}, {type_is_out_commented(RpT2), RpT2}),
+
+    Common2 = [verify_decode_required_present | Common],
+    RqS3 = compile_to_string(ReqProto, [{target_erlang_version,19} | Common2]),
+    OpS3 = compile_to_string(OptProto, [{target_erlang_version,19} | Common2]),
+    RpS3 = compile_to_string(RepProto, [{target_erlang_version,19} | Common2]),
+    RqT3 = get_type(RqS3),
+    OpT3 = get_type(OpS3),
+    RpT3 = get_type(RpS3),
+    [false, true] = [gpb_lib:is_substr(X, RqT3) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, OpT3) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, RpT3) || X <- ["=>", ":="]],
+
+    RqS4 = compile_to_string(ReqProto, [{target_erlang_version,18} | Common2]),
+    RqT4 = get_type(RqS4),
+    [true, false] = [gpb_lib:is_substr(X, RqT4) || X <- ["=>", ":="]],
+
     ok.
 
 compile_to_string(Proto, Opts) ->
