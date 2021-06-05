@@ -115,14 +115,21 @@ format_decoders_top_function_msgs(Defs, AnRes, Opts) ->
     DecodeMsg1Catch_GetStackTraceAsPattern =
         ?f("decode_msg_1_catch(Bin, MsgName, TrUserData) ->~n"
            "    try decode_msg_2_doit(MsgName, Bin, TrUserData)~n"
-           "    catch Class:Reason:StackTrace -> ~s~n"
+           "    catch~n"
+           "        error:{gpb_error,_}=Reason:StackTrace ->~n"
+           "            erlang:raise(error, Reason, StackTrace);~n"
+           "        Class:Reason:StackTrace -> ~s~n"
            "    end.~n", [Error]),
     DecodeMsg1Catch_GetStackTraceAsCall =
         ?f("decode_msg_1_catch(Bin, MsgName, TrUserData) ->~n"
            "    try decode_msg_2_doit(MsgName, Bin, TrUserData)~n"
-           "    catch Class:Reason ->~n"
-           "        StackTrace = erlang:get_stacktrace(),~n"
-           "        ~s~n"
+           "    catch~n"
+           "        error:{gpb_error,_}=Reason ->~n"
+           "            erlang:raise(error, Reason,~n"
+           "                         erlang:get_stacktrace());~n"
+           "        Class:Reason ->~n"
+           "            StackTrace = erlang:get_stacktrace(),~n"
+           "            ~s~n"
            "    end.~n", [Error]),
     [gpb_codegen:format_fn(
        decode_msg,
