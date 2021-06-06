@@ -187,7 +187,7 @@
                boolean_opt(list_deps_missing_imports_are_generated) |
                boolean_opt(list_deps_makefile_phonies) |
                {list_deps_makefile_target, list_deps_makefile_target()} |
-               boolean_opt(list_deps_ang_generate) |
+               boolean_opt(list_deps_and_generate) |
                term().
 
 -type renaming() :: {pkg_name, name_change()} |
@@ -932,7 +932,7 @@ file(File) ->
 %%
 %% <a id="option-list_deps"/>
 %% <a id="option-list_deps_dest_file"/>
-%% <a id="option-list_deps_ang_generate"/>
+%% <a id="option-list_deps_and_generate"/>
 %% <a id="option-list_deps_missing_imports_are_generated"/>
 %% <a id="option-list_deps_makefile_phonies"/>
 %% <a id="option-list_deps_makefile_target"/>
@@ -2025,7 +2025,7 @@ c() ->
 %%       </ul>
 %%       See the `maps' option for the function {@link file/2}
 %%       for more info.</dd>
-%%   <dt><a id="cmdline-option-maps_unser_optional"/>
+%%   <dt><a id="cmdline-option-maps_unset_optional"/>
 %%       `-maps_unset_optional omitted | present_undefined'</dt>
 %%   <dd>Specifies the internal format for optional fields that are unset.</dd>
 %%   <dt><a id="cmdline-option-maps_oneof"/>

@@ -158,6 +158,7 @@ apply_msg_type_renaming(MsgName, Renamings) ->
     do_rename_type(MsgName, msg_types, Renamings).
 
 %% @doc Check whether an option is a renaming option or not.
+-spec is_renaming_opt(term()) -> boolean().
 is_renaming_opt(Opt) ->
     case Opt of
         {rename, _} -> true;
@@ -165,6 +166,7 @@ is_renaming_opt(Opt) ->
     end.
 
 %% @doc The opposite of {@link is_renaming_opt/1}
+-spec is_not_renaming_opt(term()) -> boolean().
 is_not_renaming_opt(Opt) ->
     not is_renaming_opt(Opt).
 
