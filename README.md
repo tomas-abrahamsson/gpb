@@ -155,11 +155,12 @@ Examples of Erlang format for protocol buffer messages
    #m2{i1 = 17}    % i2 is implicitly set to undefined
 
    %% With the maps option
+   #{i1 => 17}
+
+   %% With the maps option and the maps_unset_optional set to present_undefined:
    #{i1 => 17,
      i2 => undefined}
 
-   %% With the maps option and the maps_unset_optional set to omitted:
-   #{i1 => 17}
 ```
 
 #### Oneof fields
@@ -366,7 +367,8 @@ Features of gpb
 *  Introspection
 
    gpb generates some functions for examining messages, enums and services:
-   - `get_msg_defs()`, `get_msg_names()`, `get_enum_names()`
+   - `get_msg_defs()` (or `get_proto_defs()` if `introspect_get_proto_defs`
+      is set), `get_msg_names()`, `get_enum_names()`
    - `find_msg_def(MsgName)` and `fetch_msg_def(MsgName)`
    - `find_enum_def(MsgName)` and `fetch_enum_def(MsgName)`
    - `enum_symbol_by_value(EnumName, Value)`,
@@ -405,8 +407,10 @@ Features of gpb
 
    There are also some version information functions:
 
-   - `gpb:version_as_string()` and `gpb:version_as_list()`
-   - `GeneratedCode:version_as_string()` and `GeneratedCode:version_as_list()`
+   - `gpb:version_as_string()`, `gpb:version_as_list()`
+     and `gpb:version_source()`
+   - `GeneratedCode:version_as_string()`, `GeneratedCode:version_as_list()` and
+   - `GeneratedCode:version_source()`
    - `?gpb_version`  (in gpb_version.hrl)
    - `?'GeneratedCode_gpb_version'`  (in GeneratedCode.hrl)
 
@@ -445,6 +449,9 @@ Interaction with rebar
 
 For info on how to use gpb with rebar3, see
 https://rebar3.org/docs/configuration/plugins/#protocol-buffers
+
+Compatiblity with rebar2
+------------------------
 
 In rebar there is support for gpb since version 2.6.0. See the
 proto compiler section of rebar.sample.config file at
@@ -640,6 +647,10 @@ or git fetch requests.  Here are some guide lines:
 
 Version history
 ---------------
+
+See the
+[ChangeLog](https://github.com/tomas-abrahamsson/gpb/blob/master/ChangeLog)
+for defails.
 
 ##### Major change in version 4.0.0: #####
 
