@@ -696,6 +696,12 @@ type_syntax_for_required_fields_test() ->
     %%     -type m() :: #{req => integer(),
     %%                    opt => string()}.
     %%
+    %% However, with the `verify_decode_required_present' option,
+    %% we use ":=" for required fields.
+    %%
+    %%     -type m() :: #{req := integer(),
+    %%                    opt => string()}.
+    %%
     %% For Erlang/OTP 18 and earlier, only "=>" is available,
     %% and it means the same as "=>" in Erlang 19.
     %% The check for out_commented could still be useful, since
@@ -731,6 +737,22 @@ type_syntax_for_required_fields_test() ->
     ?assertMatch({false, _}, {type_is_out_commented(RqT2), RqT2}),
     ?assertMatch({false, _}, {type_is_out_commented(OpT2), OpT2}),
     ?assertMatch({false, _}, {type_is_out_commented(RpT2), RpT2}),
+
+    Common2 = [verify_decode_required_present | Common],
+    RqS3 = compile_to_string(ReqProto, [{target_erlang_version,19} | Common2]),
+    OpS3 = compile_to_string(OptProto, [{target_erlang_version,19} | Common2]),
+    RpS3 = compile_to_string(RepProto, [{target_erlang_version,19} | Common2]),
+    RqT3 = get_type(RqS3),
+    OpT3 = get_type(OpS3),
+    RpT3 = get_type(RpS3),
+    [false, true] = [gpb_lib:is_substr(X, RqT3) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, OpT3) || X <- ["=>", ":="]],
+    [true, false] = [gpb_lib:is_substr(X, RpT3) || X <- ["=>", ":="]],
+
+    RqS4 = compile_to_string(ReqProto, [{target_erlang_version,18} | Common2]),
+    RqT4 = get_type(RqS4),
+    [true, false] = [gpb_lib:is_substr(X, RqT4) || X <- ["=>", ":="]],
+
     ok.
 
 compile_to_string(Proto, Opts) ->
@@ -1111,6 +1133,64 @@ encode_decode_repeated_unknowns_test() ->
                  D2),
     unload_code(Mod1),
     unload_code(Mod2).
+
+%% --- verify required fields on decode ----------
+
+verify_required_fields_on_decode_test() ->
+    Proto = "message mm1 {
+               required string f1 = 1;
+               optional string f2 = 2;
+               repeated string f3 = 3;
+             }",
+    CO = [verify_decode_required_present],
+    Fpp = [{field_pass_method, pass_as_params}],
+    Fpr = [{field_pass_method, pass_as_record}],
+    Undef = [{maps_unset_optional, present_undefined}],
+    M1pp = compile_iolist(Proto, [maps] ++ Fpp ++ CO),
+    M1pr = compile_iolist(Proto, [maps] ++ Fpr ++ CO),
+    M2pp = compile_iolist(Proto, [maps] ++ Fpp),
+    M2pr = compile_iolist(Proto, [maps] ++ Fpr),
+    M3pp = compile_iolist(Proto, [maps] ++ Undef ++ Fpp ++ CO),
+    M3pr = compile_iolist(Proto, [maps] ++ Undef ++ Fpr ++ CO),
+    M4pp = compile_iolist(Proto, [maps] ++ Undef ++ Fpp),
+    M4pr = compile_iolist(Proto, [maps] ++ Undef ++ Fpr),
+    OnlyF1Set = M1pp:encode_msg(#{f1 => "abc"}, mm1),
+    AllMsg = #{f1 => "xyz",
+               f2 => "uvw",
+               f3 => ["ab", "cd"]},
+    AllSet = M1pp:encode_msg(AllMsg, mm1),
+
+    %% Decodes when required field is set:
+    #{f1 := "abc"} = M1pp:decode_msg(OnlyF1Set, mm1),
+    #{f1 := "abc"} = M1pr:decode_msg(OnlyF1Set, mm1),
+    #{f1 := "abc"} = M3pp:decode_msg(OnlyF1Set, mm1),
+    #{f1 := "abc"} = M3pr:decode_msg(OnlyF1Set, mm1),
+    AllMsg = M1pp:decode_msg(AllSet, mm1),
+    AllMsg = M1pr:decode_msg(AllSet, mm1),
+    AllMsg = M3pp:decode_msg(AllSet, mm1),
+    AllMsg = M3pr:decode_msg(AllSet, mm1),
+    %% Error if required field is not present:
+    ExpectedErr = {gpb_error,
+                   {decoding_failure,
+                    {missing_required_msg_field, mm1, f1}}},
+    ?assertError(ExpectedErr, M1pp:decode_msg(<<>>, mm1)),
+    ?assertError(ExpectedErr, M1pr:decode_msg(<<>>, mm1)),
+    ?assertError(ExpectedErr, M3pp:decode_msg(<<>>, mm1)),
+    ?assertError(ExpectedErr, M3pr:decode_msg(<<>>, mm1)),
+    %% No error on no option (bwd compat):
+    #{} = NE1pp = M2pp:decode_msg(<<>>, mm1),
+    #{} = NE2pr = M2pr:decode_msg(<<>>, mm1),
+    %% NE1pp is actually #{f1 => '$undef', f3 => []} while NE2pr is #{f3 => []}
+    [true,  false, _] = [maps:is_key(K, NE1pp) || K <- [f1, f2, f3]],
+    [false, false, _] = [maps:is_key(K, NE2pr) || K <- [f1, f2, f3]],
+    #{f1 := undefined} = M4pp:decode_msg(<<>>, mm1),
+    #{f1 := undefined} = M4pr:decode_msg(<<>>, mm1),
+
+    [unload_code(Mod) || Mod <- [M1pp, M1pr,
+                                 M2pp, M2pr,
+                                 M3pp, M3pr,
+                                 M4pp, M4pr]],
+    ok.
 
 %% nif ------------------------------------------------
 

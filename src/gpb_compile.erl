@@ -119,6 +119,7 @@
 -type opts() :: [opt()].
 -type opt() :: type_specs | {type_specs, boolean()} |
                {verify, optionally | always | never} |
+               boolean_opt(verify_decode_required_present) |
                {copy_bytes, true | false | auto | integer() | float()} |
                {strings_as_binaries, boolean()} | strings_as_binaries |
                boolean_opt(defs_as_proplists) |
@@ -350,6 +351,11 @@ file(File) ->
 %% Erlang value verification either succeeds or crashes with the `error'
 %% `{gpb_type_error,Reason}'. Regardless of the `verify' option,
 %% a function, `verify_msg/1' is always generated.
+%%
+%% <a id="option-verify_decode_required_present"/>
+%% The `verify_decode_required_present' option tells gpb to emit
+%% checks that on decoding, required fields are present in the binary
+%% to decode. If they are not present, decoding will fail with an error.
 %%
 %% <a id="option-copy_bytes"/>
 %% The `copy_bytes' option specifies whether when decoding data of
@@ -1822,6 +1828,10 @@ c() ->
 %%       `-v optionally | always | never'</dt>
 %%   <dd>Specify how the generated encoder should
 %%       verify the message to be encoded.</dd>
+%%   <dt><a id="cmdline-option-vdrp"/>
+%%       `-vdrp'</dt>
+%%   <dd>Specify if the generated decoder should
+%%       verify presence of required fields.</dd>
 %%   <dt><a id="cmdline-option-nif"/>
 %%       `-nif'</dt>
 %%   <dd>Generate nifs for linking with the protobuf C(++) library.</dd>
@@ -2363,6 +2373,8 @@ opt_specs() ->
      {"v", {optionally, always, never}, verify, " optionally | always | never\n"
       "       Specify how the generated encoder should\n"
       "       verify the message to be encoded.\n"},
+     {"vdrp", undefined, verify_decode_required_present, "\n"
+      "       Verify that on decoding, required fields are present."},
      {"c", {true, false, auto, 'number()'}, copy_bytes,
       " true | false | auto | number()\n"
       "       Specify how or when the generated decoder should\n"

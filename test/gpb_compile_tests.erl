@@ -1351,6 +1351,38 @@ copy_bytes_fraction_aux(MinSize) ->
     unload_code(M1),
     unload_code(M2).
 
+%% --- verify required fields on decode ----------
+
+verify_required_fields_on_decode_test() ->
+    Proto = ["message mm1 {"
+             "  required string f1 = 1;",
+             "  optional string f2 = 2;",
+             "  repeated string f3 = 3;",
+             "}"],
+    CO = [verify_decode_required_present],
+    M1pp = compile_iolist(Proto, [{field_pass_method, pass_as_params}] ++ CO),
+    M1pr = compile_iolist(Proto, [{field_pass_method, pass_as_record}] ++ CO),
+    M2pp = compile_iolist(Proto, [{field_pass_method, pass_as_params}]),
+    M2pr = compile_iolist(Proto, [{field_pass_method, pass_as_record}]),
+    OnlyF1Set = M1pp:encode_msg({mm1, "abc", undefined, []}),
+    AllSet = M1pp:encode_msg({mm1, "xyz", "uvw", ["ab", "cd"]}),
+
+    %% Decodes when required field is set:
+    {mm1, "abc", _, _} = M1pp:decode_msg(OnlyF1Set, mm1),
+    {mm1, "abc", _, _} = M1pr:decode_msg(OnlyF1Set, mm1),
+    {mm1, "xyz", "uvw", ["ab", "cd"]} = M1pp:decode_msg(AllSet, mm1),
+    {mm1, "xyz", "uvw", ["ab", "cd"]} = M1pr:decode_msg(AllSet, mm1),
+    %% Error if required field is not present:
+    ?assertError(_, M1pp:decode_msg(<<>>, mm1)),
+    ?assertError(_, M1pr:decode_msg(<<>>, mm1)),
+    %% No error on no option (bwd compat):
+    {mm1,undefined,_,_} = M2pp:decode_msg(<<>>, mm1),
+    {mm1,undefined,_,_} = M2pr:decode_msg(<<>>, mm1),
+
+    [unload_code(Mod) || Mod <- [M1pp, M1pr,
+                                 M2pp, M2pr]],
+    ok.
+
 %% --- strings ----------
 
 strings_as_binaries_option_produces_bins_test() ->
@@ -5293,6 +5325,13 @@ preserve_unknown_fields_cmdline_opts_test() ->
     {ok, {[preserve_unknown_fields], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-preserve-unknown-fields",
                                          "x.proto"]).
+
+verify_decode_required_present_cmdline_opts_test() ->
+    {ok, {[verify_decode_required_present],
+          ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-vdrp",
+           "x.proto"]).
 
 makedeps_cmdline_opts_test() ->
     {ok, {[{list_deps, makefile_rules},

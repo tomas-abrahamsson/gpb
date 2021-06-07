@@ -24,7 +24,8 @@
 
 -export([init_exprs/6]).
 -export([calc_field_infos/2]).
--export([decoder_read_field_param/2]).
+-export([decoder_read_field_param/3]).
+-export([decoder_maybe_check_required_present/3]).
 -export([decoder_finalize_result/5]).
 
 -export([run_morph_ops/2]).
@@ -53,6 +54,15 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
     UseDefaults = proplists:get_bool(defaults_for_omitted_optionals, Opts),
     UseTypeDefaults = proplists:get_bool(type_defaults_for_omitted_optionals,
                                          Opts),
+    DecVfy = proplists:get_bool(verify_decode_required_present, Opts),
+    MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
+    R = % Whether required fields are present in init-exprs
+        case MappingUnset of
+            records -> o;
+            #maps{} -> if DecVfy -> m;
+                          true   -> o
+                       end
+        end,
     ExprInfos1 =
         [case Field of
              #?gpb_field{name=FName, occurrence=Occurrence, type=Type,
@@ -82,7 +92,7 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
                      end,
                  case Occurrence of
                      repeated -> {FName, m, ?expr([]),        ?expr([])};
-                     required -> {FName, o, ?expr(undefined), ?expr('$undef')};
+                     required -> {FName, R, ?expr(undefined), ?expr('$undef')};
                      optional -> {FName, P, Undefined,        Undef};
                      defaulty -> {FName, o, Undefined,        Undef}
                  end;
@@ -110,7 +120,7 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
          || {FName, Presence, InitExpr, MOExpr} <- ExprInfos1],
     case gpb_lib:get_field_pass(MsgName, AnRes) of
         pass_as_params ->
-            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+            case MappingUnset of
                 records ->
                     [{FName, Expr} || {FName, _, Expr, _MOExpr} <- ExprInfos2];
                 #maps{unset_optional=present_undefined} ->
@@ -120,14 +130,14 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
                      || {FName, _, _Expr, MapsOmittedExpr} <- ExprInfos2]
             end;
         pass_as_record ->
-            case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+            case MappingUnset of
                 records ->
                     [{FName, Expr} || {FName, P, Expr, _} <- ExprInfos2,
                                       P == m orelse P == d];
                 #maps{unset_optional=present_undefined} ->
                     [{FName, Expr} || {FName, _, Expr, _} <- ExprInfos2];
                 #maps{unset_optional=omitted} ->
-                    [{FName, Expr} || {FName, m, Expr, _} <- ExprInfos2]
+                    [{FName, Expr} || {FName, m, _, Expr} <- ExprInfos2]
             end
     end.
 
@@ -137,21 +147,57 @@ is_msg_type(_)       -> false.
 %% @doc Generate an expression `#record{field_1 = R1, ... field_n=RN} = Msg',
 %% and return it and also its constituent parts:
 %% ```
-%%   {<the Msg var>, <that expr>, [{<name of field_1>, <the R_1 var>}, ...]}
+%%   {<the Msg var>,
+%%    <that expr>,
+%%    [{<name of field_1>, <the R_1 var>, repeated | required}, ...]}
 %% '''
-decoder_read_field_param(MsgName, MsgDef) ->
+decoder_read_field_param(MsgName, MsgDef, Opts) ->
     MappingVar = ?expr(Msg),
-    FFields = [{FName, gpb_lib:var_n("R", I)}
-               || {I,FName} <- gpb_lib:index_seq(
-                                 repeated_field_names(MsgDef))],
-    FMatch = gpb_lib:record_match(MsgName, FFields),
+    FFieldNamesOcc =
+        case proplists:get_bool(verify_decode_required_present, Opts) of
+            true  -> required_or_repeated_field_names(MsgDef);
+            false -> repeated_field_names(MsgDef)
+        end,
+    FFields = [{FName, gpb_lib:var_n("R", I), Occ}
+               || {I,{FName,Occ}} <- gpb_lib:index_seq(FFieldNamesOcc)],
+    FNameVars = [{FName, FVar} || {FName, FVar, _Occ} <- FFields],
+    FMatch = gpb_lib:record_match(MsgName, FNameVars),
     FParam = ?expr('#r{f1=R1..fn=RN}' = '<Msg>',
                    [replace_tree('#r{f1=R1..fn=RN}', FMatch),
                     replace_tree('<Msg>', MappingVar)]),
     {MappingVar, FParam, FFields}.
 
+required_or_repeated_field_names(MsgDef) ->
+    [{FName, Occ} || #?gpb_field{name=FName, occurrence=Occ} <- MsgDef,
+                     Occ == required orelse Occ == repeated].
+
 repeated_field_names(MsgDef) ->
-    [FName || #?gpb_field{name=FName, occurrence=repeated} <- MsgDef].
+    [{FName, Occ} || #?gpb_field{name=FName, occurrence=Occ} <- MsgDef,
+                     Occ == repeated].
+
+%% @doc Create expressions that check whether required fields
+%%      have been set, if the option indicates we should.
+decoder_maybe_check_required_present(MsgName, FFields, Opts) ->
+    case proplists:get_bool(verify_decode_required_present, Opts) of
+        true ->
+            decoder_check_required_present(MsgName, FFields);
+        false ->
+            []
+    end.
+
+decoder_check_required_present(MsgName, FFields) ->
+    [?expr(if 'FVar' == undefined ->
+                   error({gpb_error,
+                          {decoding_failure,
+                           {missing_required_msg_field,
+                            'MsgName', 'FName'}}});
+              true ->
+                   ok
+           end,
+           [replace_tree('FVar', FVar),
+            replace_term('MsgName', MsgName),
+            replace_term('FName', FName)])
+     || {FName, FVar, required} <- FFields].
 
 %% @doc Create a finalization expression by generating calls to
 %%      finalization translators. To give a notion what this is about,
@@ -173,7 +219,7 @@ decoder_finalize_result(MsgVar, FFields, MsgName, TrUserDataVar, AnRes) ->
                                             TrUserDataVar)]),
            {FName, FValueExpr}
        end
-       || {FName, FVar} <- FFields]).
+       || {FName, FVar, repeated} <- FFields]).
 
 %% @doc Compute optionality information for each field of a message.
 calc_field_infos(MsgDef, Opts) ->
