@@ -480,6 +480,21 @@ file(File) ->
 %% with the Google protobuf C++ library.  Read the file
 %% `README.nif-cc' for more info.
 %%
+%% <a id="option-load_nif"/>
+%% The option `{load_nif,FunctionDefinition}' allows to specify
+%% `FunctionDefinition' as the text that defines the function load_nif/0.
+%% This is called as the `-on_load.' hook for loading the NIF.
+%%
+%% The string can contain some special terms that will get replaced as follows:
+%% <dl>
+%%   <dt>`{{nifbase}}'</dt>
+%%   <dd>This will be replaced with the string `"Mod.nif"'.
+%%       where `Mod' is the name of the Erlang module.</dd>
+%%   <dt>`{{loadinfo}}'</dt>
+%%   <dd>This will be replaced with the version of gpb, as a list
+%%       of integers and strings, see {@link gpb:version_as_list/0}.</dd>
+%% </dl>
+%%
 %% <a id="option-binary"/>
 %% The `binary' option will cause the generated and compiled code to be
 %% returned as a binary. No files will be written. The return value
