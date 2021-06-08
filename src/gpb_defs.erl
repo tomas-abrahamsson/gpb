@@ -94,7 +94,7 @@
 %% Even when the version number has not changed, there may still
 %% be differences, but only backwards compatible changes.
 %%
-%% See file `doc/dev-guide/proto-defs-versions.md` for more info.
+%% See file `doc/dev-guide/proto-defs-versions.md' for more info.
 %%
 %% Format versions obey the Erlang term order and be compared like
 %% normal Erlang terms with for instance `=<'.
