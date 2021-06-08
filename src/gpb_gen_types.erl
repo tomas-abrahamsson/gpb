@@ -38,7 +38,8 @@
          map_key_type :: atom | binary,
          map_type_fields :: '2tuples' | maps,
          module :: module(),
-         nif :: boolean()}).
+         nif :: boolean(),
+         verify_decode_required_present :: boolean()}).
 
 -record(type_text,
         {text :: string(),
@@ -206,13 +207,15 @@ t_env(Opts) ->
                           Opts),
     Mod = proplists:get_value(module, Opts),
     Nif = proplists:get_bool(nif, Opts),
+    DecVfy = proplists:get_bool(verify_decode_required_present, Opts),
     #t_env{type_specs = TypeSpecs,
            can_do_map_presence = TypespecsCanIndicateMapItemPresence,
            mapping_and_unset = MappingAndUnset,
            map_key_type = KeyType,
            map_type_fields = MapTypeFieldsRepr,
            module = Mod,
-           nif = Nif}.
+           nif = Nif,
+           verify_decode_required_present = DecVfy}.
 
 calc_keytype_override([], _TEnv) ->
     no_override;
@@ -666,19 +669,28 @@ render_comment(CommentChunks, BaseTypeComment) ->
 %% --------------------------------------------------------------
 %% Helpers...
 
-calc_field_type_sep(#?gpb_field{},
-                    #t_env{mapping_and_unset=MappingAndUnset}=TEnv) ->
+calc_field_type_sep(#?gpb_field{occurrence=Occurrence},
+                    #t_env{mapping_and_unset=MappingAndUnset,
+                           verify_decode_required_present=DecVfy}=TEnv) ->
     case MappingAndUnset of
         records ->
             "::";
         #maps{unset_optional=present_undefined} ->
             mandatory_map_item_type_sep(TEnv);
         #maps{unset_optional=omitted} ->
-            %% Even for required (proto2) fields, we use "=>", since we
-            %% cannot guarantee that we will always decode to a map with
-            %% all required fields always set, since it depends on the
-            %% input binary.
-            "=>"
+            %% Even for required (proto2) fields, we generally use "=>",
+            %% since we cannot guarantee that we will always decode
+            %% to a map with all required fields always set,
+            %% since it depends on the input binary.
+            %%
+            %% However, with the `verify_decode_required_present'
+            %% option set, we can actually use ":=".
+            if Occurrence == required,
+               DecVfy ->
+                    mandatory_map_item_type_sep(TEnv);
+               true ->
+                    "=>"
+            end
     end;
 calc_field_type_sep(#gpb_oneof{}, #t_env{mapping_and_unset=MappingAndUnset}) ->
     case MappingAndUnset of

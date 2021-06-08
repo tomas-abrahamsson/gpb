@@ -137,6 +137,7 @@
         {maps_key_type, atom | binary} |
         %% Verification of input
         {verify, optionally | always | never} |
+        boolean_opt(verify_decode_required_present) |
         %% Renaming for the Erlang side
         {rename, renaming()} |
         {msg_name_prefix, string() | atom() | {by_proto, prefix_by_proto()}} |
@@ -368,7 +369,9 @@ file(File) ->
 %%   </dd>
 %%   <dt>Verification of input</dt>
 %%   <dd><tt>{<a href="#option-verify">verify</a>,
-%%            always|never|optionally}</tt>
+%%            always|never|optionally}</tt>,
+%%       <tt><a href="#option-verify_decode_required_present"
+%%                           >verify_decode_required_present</a></tt>
 %%   </dd>
 %%   <dt>Renaming for the Erlang side</dt>
 %%   <dd><tt>{<a href="#option-rename">rename</a>,
@@ -700,6 +703,16 @@ file(File) ->
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-v">-v</a>.
+%%
+%% <h4><a id="option-verify_decode_required_present"/>
+%%     `verify_decode_required_present'</h4>
+%%
+%% The `verify_decode_required_present' option tells gpb to emit
+%% checks that on decoding, required fields are present in the binary
+%% to decode. If they are not present, decoding will fail with an error.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-vdrp">-vdrp</a>.
 %%
 %% <!-- ======================================================== -->
 %% <h3><a id="optionsection-renaming"/>
@@ -2434,6 +2447,13 @@ c() ->
 %%       verify the message to be encoded.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-verify">verify</a></dd>
+%%   <dt><a id="cmdline-option-vdrp"/>
+%%       `-vdrp'</dt>
+%%     <dd>Specify if the generated decoder should
+%%       verify presence of required fields.<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-verify_decode_required_present"
+%%                       >verify_decode_required_present</a></dd>
 %% </dl>
 %%
 %% Renaming for the Erlang side
@@ -3114,6 +3134,8 @@ opt_specs() ->
      {"v", {optionally, always, never}, verify, " optionally | always | never\n"
       "       Specify how the generated encoder should\n"
       "       verify the message to be encoded.\n"},
+     {"vdrp", undefined, verify_decode_required_present, "\n"
+      "       Verify that on decoding, required fields are present."},
      {{section, "Renaming for the Erlang side"}},
      {"rename", fun opt_rename/2, rename, " What:How\n"
       "       What:\n"
