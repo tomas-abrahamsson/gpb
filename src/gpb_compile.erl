@@ -140,13 +140,13 @@
         boolean_opt(verify_decode_required_present) |
         %% Renaming for the Erlang side
         {rename, renaming()} |
-        {msg_name_prefix, string() | atom() | {by_proto, prefix_by_proto()}} |
-        {msg_name_suffix, string() | atom()} |
+        {msg_name_prefix, msg_name_prefix()} |
+        {msg_name_suffix, name_part()} |
         boolean_opt(msg_name_to_lower) |
         boolean_opt(msg_name_to_snake_case) |
-        {module_name_prefix, string() | atom()} |
-        {module_name_suffix, string() | atom()} |
-        {module_name, string() | atom()} |
+        {module_name_prefix, name_part()} |
+        {module_name_suffix, name_part()} |
+        {module_name, new_name()} |
         %% What to generate and how
         boolean_opt(use_packages) |
         boolean_opt(descriptor) |
@@ -156,12 +156,12 @@
         boolean_opt(type_specs) |
         boolean_opt(defaults_for_omitted_optionals) |
         boolean_opt(type_defaults_for_omitted_optionals) |
-        {target_erlang_version, integer() | current} |
+        {target_erlang_version, target_erlang_version()} |
         boolean_opt(preserve_unknown_fields) |
         {erlc_compile_options, string()} |
         %% Introspection of the proto definitions
-        {proto_defs_version, integer()} |
-        {introspect_proto_defs_version, integer() | preferably_1} |
+        {proto_defs_version, gpb_defs:version()} |
+        {introspect_proto_defs_version, gpb_defs:version() | preferably_1} |
         boolean_opt(introspect_get_proto_defs) |
         boolean_opt(defs_as_proplists) |
         boolean_opt(defs_as_maps) |
@@ -204,6 +204,10 @@
         %% Unknown options are allowed but ignored:
         term().
 
+-type msg_name_prefix() :: name_part() | {by_proto, prefix_by_proto()}.
+-type name_part() :: string() | atom().
+-type new_name() :: string() | atom().
+
 -type renaming() :: {pkg_name, name_change()} |
                     {msg_name, msg_name_change()} |
                     {msg_fqname, msg_name_change()} |
@@ -215,8 +219,8 @@
                     {msg_typename, name_change()} |
                     {enum_typename, name_change()}.
 
--type name_change() :: {prefix, string() | atom()} |
-                       {suffix, string() | atom()} |
+-type name_change() :: {prefix, name_part()} |
+                       {suffix, name_part()} |
                        lowercase |
                        snake_case |
                        dots_to_underscores |
@@ -225,7 +229,7 @@
 -type msg_name_change() :: name_change() |
                            {prefix, {by_proto, prefix_by_proto()}}.
 
--type prefix_by_proto() :: [{ProtoName::atom(), Prefix::string() | atom()}].
+-type prefix_by_proto() :: [{ProtoName::atom(), Prefix::name_part()}].
 
 
 -type field_path() :: [atom() | []].
@@ -242,6 +246,8 @@
 -type arg_template() :: [arg()].
 -type arg() :: term() | named_arg().
 -type named_arg() :: '$1' | '$2' | '$errorf' | '$user_data' | '$op'.
+
+-type target_erlang_version() :: integer() | current. %% eg: 23, 24, ...
 
 -type fetcher_ret() :: from_file | {ok, string()} | {error, term()}.
 -type import_fetcher_fun() :: fun((string()) -> fetcher_ret()).
@@ -377,18 +383,18 @@ file(File) ->
 %%   <dd><tt>{<a href="#option-rename">rename</a>,
 %%            {@link renaming()}}</tt>,
 %%       <tt>{<a href="#option-msg_name_prefix">msg_name_prefix</a>,
-%%            string()|atom()|{by_proto,{@link prefix_by_proto()}}}</tt>,
+%%            {@link msg_name_prefix()}</tt>,
 %%       <tt>{<a href="#option-msg_name_suffix">msg_name_suffix</a>,
-%%            string()|atom()}</tt>,
+%%            {@link name_part()}}</tt>,
 %%       <tt><a href="#option-msg_name_to_lower">msg_name_to_lower</a></tt>,
 %%       <tt><a href="#option-msg_name_to_snake_case">msg_name_to_snake_case</a
 %%           ></tt>,
 %%       <tt>{<a href="#option-module_name_prefix">module_name_prefix</a>,
-%%            string()|atom()}</tt>,
+%%            {@link name_part()}}</tt>,
 %%       <tt>{<a href="#option-module_name_suffix">module_name_suffix</a>,
-%%            string()|atom()}</tt>,
+%%            {@link name_part()}}</tt>,
 %%       <tt>{<a href="#option-module_name">module_name</a>
-%%            string()|atom()}</tt>,
+%%            {@link new_name()}}</tt>,
 %%   </dd>
 %%   <dt>What to generate and how</dt>
 %%   <dd><tt><a href="#option-use_packages">use_packages</a></tt>,
@@ -403,7 +409,7 @@ file(File) ->
 %%       <tt><a href="#option-type_defaults_for_omitted_optionals"
 %%                           >type_defaults_for_omitted_optionals</a></tt>,
 %%       <tt>{<a href="#option-target_erlang_version">target_erlang_version</a>,
-%%            integer()|current}</tt>,
+%%            {@link target_erlang_version()}}</tt>,
 %%       <tt><a href="#option-preserve_unknown_fields"
 %%                   >preserve_unknown_fields</a></tt>,
 %%       <tt>{<a href="#option-erlc_compile_options">erlc_compile_options</a>,
@@ -413,10 +419,10 @@ file(File) ->
 %%   </dd>
 %%   <dt>Introspection of the proto definitions</dt>
 %%   <dd><tt>{<a href="#option-proto_defs_version">proto_defs_version</a>,
-%%            integer()}</tt>,
+%%            {@link gpb_defs:version()}}</tt>,
 %%       <tt>{<a href="#option-introspect_proto_defs_version"
 %%                            >introspect_proto_defs_version</a>,
-%%            integer()|preferably_1}</tt>,
+%%            {@link gpb_defs:version()}|preferably_1}</tt>,
 %%       <tt><a href="#option-introspect_get_proto_defs"
 %%                           >introspect_get_proto_defs</a></tt>,
 %%       <tt><a href="#option-defs_as_proplists">defs_as_proplists</a></tt>,
@@ -744,9 +750,8 @@ file(File) ->
 %%
 %% <h4><a id="option-msg_name_prefix"/>
 %%     <a id="option-msg_name_suffix"/>
-%%     <tt>{msg_name_prefix, string()|atom()|{by_proto,{@link
-%%             prefix_by_proto()}}}</tt><br/>
-%%     `{msg_name_suffix, string()|atom()}'</h4>
+%%     <tt>{msg_name_prefix, {@link msg_name_prefix()}}</tt><br/>
+%%     <tt>{msg_name_suffix, {@link name_part()}}</tt></h4>
 %%
 %% The `{msg_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to each message. This might be useful for resolving colliding names,
@@ -778,8 +783,8 @@ file(File) ->
 %%
 %% <h4><a id="option-module_name_prefix"/>
 %%     <a id="option-module_name_suffix"/>
-%%     `{module_name_prefix, string()|atom()}'<br/>
-%%     `{module_name_suffix, string()|atom()}'</h4>
+%%     <tt>{module_name_prefix, {@link name_part()}}</tt><br/>
+%%     <tt>{module_name_suffix, {@link name_part()}}</tt></h4>
 %%
 %% The `{module_name_prefix,Prefix}' will add `Prefix' (a string or an atom)
 %% to the generated code and definition files. The `{module_name_suffix,Suffix}'
@@ -791,7 +796,8 @@ file(File) ->
 %% <a href="#cmdline-option-modprefix">-modprefix</a> and
 %% <a href="#cmdline-option-modsuffix">-modsuffix</a>.
 %%
-%% <h4><a id="option-module_name"/>`{module_name, string()|atom()}'</h4>
+%% <h4><a id="option-module_name"/>
+%%     <tt>{module_name, {@link new_name()}}</tt></h4>
 %%
 %% The `{module_name,Name}' can be used to specify the module name of the
 %% generated code freely, instead of basing it on the proto file name.
@@ -931,7 +937,7 @@ file(File) ->
 %%    >-type-defaults-for-omitted-optionals</a>.
 %%
 %% <h4><a id="option-target_erlang_version"/>
-%%     `{target_erlang_version, integer()|current}'</h4>
+%%     <tt>{target_erlang_version, {@link target_erlang_version()}}</tt></h4>
 %%
 %% The `target_erlang_version' can be used to specify another major
 %% version of Erlang/OTP to generate code for. The default, `current'
@@ -1000,8 +1006,9 @@ file(File) ->
 %%
 %% <h4><a id="option-proto_defs_version"/>
 %%     <a id="option-introspect_proto_defs_version"/>
-%%     `{proto_defs_version, integer()}'<br/>
-%%     `{introspect_proto_defs_version, integer()|preferably_1}'</h4>
+%%     <tt>{proto_defs_version, {@link gpb_defs:version()}}</tt><br/>
+%%     <tt>{introspect_proto_defs_version,
+%%          {@link gpb_defs:version()}|preferably_1}</tt></h4>
 %%
 %% The `proto_defs_version' can be used to specify version of definitions
 %% returned with the `to_proto_defs' option.  See the file
