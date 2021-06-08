@@ -606,7 +606,7 @@ file(File) ->
 %%        instead of a list of 2-tuples.</dd>
 %%    <dt>`defs_as_maps'</dt>
 %%    <dd>The introspection will generate message field descriptions
-%%        as maps, see the <a href="#defs_as_maps">`defs_as_maps'</a>.
+%%        as maps, see the <a href="#option-defs_as_maps">`defs_as_maps'</a>.
 %%        for further info.</dd>
 %% </dl>
 %%
@@ -1321,7 +1321,8 @@ file(File) ->
 %%   `verify', `decode_init_default', `decode_repeated_add_elem' or
 %%   `decode_repeated_finalize', depending on from which context it
 %%   is actually called. This can be useful because if the message is
-%%   to be verified on encoding (see the `verify' option), then the
+%%   to be verified on encoding (see the <a href="#option-verify"
+%%   >`verify'</a> option), then the
 %%   same options, and thus the same user-data, are used for both
 %%   `encode_msg' and for `verify_msg'. The `$op' marker makes it
 %%   possible to tell these two call sites apart, if needed.</dd>
@@ -2402,8 +2403,8 @@ c() ->
 %%         <li>`-mapfields-as-maps'</li>
 %%         <li>`-defs-as-maps'</li>
 %%       </ul>
-%%       See the `maps' option for the function {@link file/2}
-%%       for more info.<br/>
+%%       See the <a href="#option-maps">`maps'</a> option
+%%       for the function {@link file/2} for more info.<br/>
 %%       Corresponding Erlang-level options:
 %%       <a href="#option-maps">maps</a></dd>
 %%   <dt><a id="cmdline-option-msgs-as-maps"/>
@@ -2575,8 +2576,9 @@ c() ->
 %%   <dt><a id="cmdline-option-c"/>
 %%       `-c true | false | auto | integer() | float()'</dt>
 %%     <dd>Specify how or when the generated decoder should
-%%       copy fields of type `bytes'. See the `copy_bytes' option
-%%       for the function {@link file/2} for more info.<br/>
+%%       copy fields of type `bytes'. See the <a href="#option-copy_bytes"
+%%       >`copy_bytes'</a> option for the function {@link file/2}
+%%       for more info.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-copy_bytes">copy_bytes</a></dd>
 %%   <dt><a id="cmdline-option-type"/>
@@ -2801,7 +2803,8 @@ c() ->
 %%     <dd>Call functions in `MsFs' to pack, unpack, merge and verify
 %%       `google.protobuf.Any' messages. The `MsFs' is a string on the
 %%       following format: `e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
-%%       See the translate option for details on the string components.<br/>
+%%       See the <a href="#cmdline-option-translate_type">translate</a> option
+%%       for details on the string components.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-any_translate">any_translate</a></dd>
 %%   <dt><a id="cmdline-option-translate_field"/>
@@ -2811,8 +2814,9 @@ c() ->
 %%       a message field is specified instead of a type. The `FMsFs'
 %%       is a string on the following format:
 %%       `field=Path,e=...,d=...,m=...,V=...[,i=Mod:Fn][,a=Mod:Fn][,f=Mod:Fn]'
-%%       See the `-translate_type' option for info on `e=', `d=', `m=' and `V='
-%%       items. Additionally for this `-translate_field' option, these exist:
+%%       See the <a href="#cmdline-option-translate_type">`-translate_type'</a>
+%%       option for info on `e=', `d=', `m=' and `V=' items.
+%%       Additionally for this `-translate_field' option, these exist:
 %%       <dl>
 %%         <dt>`field=Path'</dt>
 %%         <dd>The `Path' indicates the element to translate as follows:
