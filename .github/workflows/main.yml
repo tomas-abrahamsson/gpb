@@ -26,4 +26,4 @@ jobs:
         run: |
           set -xv
           echo $GITHUB_SHA > gpb.vsn
-          make all test doc
+          make all test doc dialyze
