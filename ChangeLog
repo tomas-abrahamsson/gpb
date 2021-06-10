@@ -1,5 +1,12 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.18.0
+2021-Jun-10
+
+        * Add a new option, verify_decode_required_present (-vdrp) for
+          generating code that verifies that required fields are
+          present in message binaries during decoding. (#210)
+
 Version 4.17.7
 2021-May-27
 
