@@ -3843,9 +3843,9 @@ file_name_from_input({Mod,_S}) -> lists:concat([Mod, ".proto"]);
 file_name_from_input(FName)    -> FName.
 
 scan_and_parse_string(S, FName, Opts) ->
-    case scan(S, Opts) of
+    case gpb_scan:binary(unicode:characters_to_binary(S)) of
         {ok, Tokens, _} ->
-            case parse(Tokens, Opts) of
+            case gpb_parse:parse(Tokens) of
                 {ok, PTree} ->
                     case gpb_defs:post_process_one_file(FName, PTree, Opts) of
                         {ok, Result} ->
@@ -3853,36 +3853,11 @@ scan_and_parse_string(S, FName, Opts) ->
                         {error, Reason} ->
                             {error, {post_process, Reason}}
                     end;
-                {error, {_Line, _Module, _ErrInfo}=Reason} ->
-                    {error, {parse_error, FName, Reason}};
-                {error, Reasons} when is_list(Reasons) -> % scanner/parser 2
+                {error, Reasons} when is_list(Reasons) ->
                     {error, {parse_errors, FName, Reasons}}
             end;
         {error, {_Line0, _Module, _ErrInfo}=Reason, _Line1} ->
             {error, {scan_error, FName, Reason}}
-    end.
-
-scan(S, Opts) ->
-    case proplists:get_value(parser, Opts, default_scanner_parser()) of
-        new ->
-            gpb_scan:binary(unicode:characters_to_binary(S));
-        old ->
-            gpb_scan_old:string(S)
-    end.
-
-parse(Tokens, Opts) ->
-    case proplists:get_value(parser, Opts, default_scanner_parser()) of
-        new ->
-            gpb_parse:parse(Tokens);
-        old ->
-            gpb_parse_old:parse(Tokens++[{'$end', 999}])
-    end.
-
-default_scanner_parser() ->
-    case os:getenv("GPB_PARSER") of
-        false -> new; % default
-        "old" -> old;
-        _     -> new
     end.
 
 %% @doc Locate an import target.  This function might be potentially
