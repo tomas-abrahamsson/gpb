@@ -50,7 +50,7 @@
 %% a parsed .proto file.
 %%
 %% @hidden
--spec parse([gpb_scan2:token()]) -> {ok, gpb_defs:defs()} | {error, [error()]}.
+-spec parse([gpb_scan:token()]) -> {ok, gpb_defs:defs()} | {error, [error()]}.
 parse(Tokens) ->
     {ParseTree, Errors} = p_top(Tokens, [], []),
     if Errors == [] -> {ok, ParseTree};
