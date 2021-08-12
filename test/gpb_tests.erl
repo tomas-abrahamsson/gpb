@@ -141,6 +141,24 @@ field_proplist_conversion_test() ->
     [{{msg,m},[PL1]}, ED] = gpb:defs_records_to_proplists([{{msg,m},[F1]},ED]),
     [{{msg,m},[F1]},  ED] = gpb:proplists_to_defs_records([{{msg,m},[PL1]},ED]).
 
+gpb_error_on_decoding_test() ->
+    F1 = #?gpb_field{name=a,fnum=1,rnum=2, type=int32, occurrence=required,
+                     opts=[]},
+    Defs = [{{msg, m1}, [F1]}],
+    %% This is a group_end tag, with no preceding group_start tag
+    %% so decoding this should result in a crash. Check
+    %% that we get a {gpb_error, _} error and not a function clause or so.
+    BadBin = <<"D">>,
+    ?assertError({gpb_error, {decoding_failure, _}},
+                 gpb:decode_msg(BadBin, m1, Defs)),
+    %% Some bad type during encoding
+    ?assertError({gpb_error, {encoding_failure, _}},
+                 gpb:encode_msg({m1, make_ref()}, Defs)),
+    %% Some bad type during merging
+    ?assertError({gpb_error, {merging_failure, _}},
+                 gpb:merge_msgs({m1, make_ref()}, m1, Defs)),
+    ok.
+
 -endif.  %% gpb_compile_common_tests end of non-shared code ^^^^^^^^^^
 
 -record(m1,{a}).
