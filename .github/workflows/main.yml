@@ -26,4 +26,5 @@ jobs:
         run: |
           set -xv
           echo $GITHUB_SHA > gpb.vsn
-          make all test doc
+          erl +B -noinput -eval 'io:put_chars(erlang:system_info(system_version)),halt(0).'
+          make all test doc dialyze

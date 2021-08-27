@@ -73,6 +73,16 @@
 -export([msg_from_map/4]).
 -endif. % -ifndef(NO_HAVE_MAPS).
 
+-ifdef(OTP_RELEASE).
+%% Erlang 21 introduced new syntax for getting the stack trace.
+%% The OTP_RELEASE macro was also introduced in Erlang 21.
+-define(with_stacktrace(Class, Reason, Stack),
+        Class:Reason:Stack ->).
+-else. % -ifdef(OTP_RELEASE).
+-define(with_stacktrace(Class, Reason, Stack),
+        Class:Reason -> Stack = erlang:get_stacktrace(),).
+-endif. % -ifdef(OTP_RELEASE).
+
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 -include("../include/gpb_version.hrl").
@@ -263,6 +273,17 @@ version_source() ->
 %% See {@link merge_msgs/3} for more details.
 -spec decode_msg(binary(), atom(), gpb_defs:defs()) -> tuple().
 decode_msg(Bin, MsgName, MsgDefs) ->
+    try
+        decode_msg2(Bin, MsgName, MsgDefs)
+    catch
+        ?with_stacktrace(error, {gpb_error, _Reason}=Error, Stack)
+            erlang:raise(error, Error, Stack);
+        ?with_stacktrace(Class, Reason, Stack)
+            error({gpb_error, {decoding_failure,
+                               {Bin, MsgName, {Class, Reason, Stack}}}})
+    end.
+
+decode_msg2(Bin, MsgName, MsgDefs) ->
     MsgKey = {msg,MsgName},
     Msg    = new_initial_msg(MsgKey, MsgDefs),
     MsgDef = keyfetch(MsgKey, MsgDefs),
@@ -506,7 +527,7 @@ decode_type(FieldType, Bin, MsgDefs) ->
         {msg,MsgName} ->
             {Len, Rest} = decode_varint(Bin, 64),
             <<MsgBytes:Len/binary, Rest2/binary>> = Rest,
-            {decode_msg(MsgBytes, MsgName, MsgDefs), Rest2};
+            {decode_msg2(MsgBytes, MsgName, MsgDefs), Rest2};
         fixed32 ->
             <<N:32/little, Rest/binary>> = Bin,
             {N, Rest};
@@ -648,7 +669,7 @@ merge_field_msg(RNum, NewMsg, Record, MsgDefs) ->
         undefined ->
             setelement(RNum, Record, NewMsg);
         PrevMsg ->
-            MergedMsg = merge_msgs(PrevMsg, NewMsg, MsgDefs),
+            MergedMsg = merge_msgs2(PrevMsg, NewMsg, MsgDefs),
             setelement(RNum, Record, MergedMsg)
     end.
 
@@ -696,7 +717,18 @@ append_to_map(RNum, {Key, _Value}=NewItem, Record) ->
 %%       recursively.</dd>
 %% </dl>
 -spec merge_msgs(tuple(), tuple(), gpb_defs:defs()) -> tuple().
-merge_msgs(PrevMsg, NewMsg, MsgDefs)
+merge_msgs(PrevMsg, NewMsg, MsgDefs) ->
+    try
+        merge_msgs2(PrevMsg, NewMsg, MsgDefs)
+    catch
+        ?with_stacktrace(error, {gpb_error, _Reason}=Error, Stack)
+            erlang:raise(error, Error, Stack);
+        ?with_stacktrace(Class, Reason, Stack)
+            error({gpb_error, {merging_failure,
+                               {PrevMsg, NewMsg, {Class, Reason, Stack}}}})
+    end.
+
+merge_msgs2(PrevMsg, NewMsg, MsgDefs)
   when element(1,PrevMsg) == element(1,NewMsg) ->
     Key = {msg,element(1,PrevMsg)},
     merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs).
@@ -731,7 +763,8 @@ merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs) ->
                   {_PrevSubMsg, undefined} ->
                       AccRecord;
                   {PrevSubMsg, NewSubMsg} ->
-                      MergedSubMsg = merge_msgs(PrevSubMsg, NewSubMsg, MsgDefs),
+                      MergedSubMsg = merge_msgs2(PrevSubMsg, NewSubMsg,
+                                                 MsgDefs),
                       setelement(RNum, AccRecord, MergedSubMsg)
               end;
          (#?gpb_field{rnum=RNum, type={group,_FieldGroupName}}, AccRecord) ->
@@ -772,7 +805,8 @@ merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs) ->
                   {{OFName, PrevValue}, {OFName, NewValue}=NewElem} ->
                       case lists:keyfind(OFName, #?gpb_field.name, OFields) of
                           #?gpb_field{type={msg,_}} ->
-                              NewSub = merge_msgs(PrevValue, NewValue, MsgDefs),
+                              NewSub = merge_msgs2(PrevValue, NewValue,
+                                                   MsgDefs),
                               setelement(RNum, AccRecord, {OFName,NewSub});
                           #?gpb_field{} ->
                               setelement(RNum, AccRecord, NewElem)
@@ -789,6 +823,17 @@ merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs) ->
 %% @doc Encode a message on record format to a binary.
 -spec encode_msg(tuple(), gpb_defs:defs()) -> binary().
 encode_msg(Msg, MsgDefs) ->
+    try
+        encode_msg2(Msg, MsgDefs)
+    catch
+        ?with_stacktrace(error, {gpb_error, _Reason}=Error, Stack)
+            erlang:raise(error, Error, Stack);
+        ?with_stacktrace(Class, Reason, Stack)
+            error({gpb_error, {encoding_failure,
+                               {Msg, {Class, Reason, Stack}}}})
+    end.
+
+encode_msg2(Msg, MsgDefs) ->
     MsgName = element(1, Msg),
     MsgDef = keyfetch({msg, MsgName}, MsgDefs),
     encode_2(MsgDef, Msg, MsgDefs, <<>>).
@@ -966,7 +1011,7 @@ encode_value(Value, Type, MsgDefs) ->
                    <<(encode_varint(byte_size(ValueBin)))/binary, ValueBin/binary>>
             end;
         {msg,_MsgName} ->
-            SubMsg = encode_msg(Value, MsgDefs),
+            SubMsg = encode_msg2(Value, MsgDefs),
             <<(encode_varint(byte_size(SubMsg)))/binary, SubMsg/binary>>;
         {group,_MsgName} ->
             encode_group(Value, MsgDefs);

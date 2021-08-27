@@ -5086,6 +5086,7 @@ opt_test() ->
     {ok, {[strings_as_binaries,
            use_packages,
            include_as_lib,
+           {include_mod_hrl_prepend, "proto/"},
            type_specs,
            descriptor],
           ["x.proto"]}} =
@@ -5093,6 +5094,7 @@ opt_test() ->
           ["-strbin",
            "-pkgs",
            "-il",
+           "-include-mod-hrl-prepend", "proto/",
            "-type",
            "-descr",
            "x.proto"]),

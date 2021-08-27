@@ -74,7 +74,7 @@ binary(Bin) ->
 
 -spec binary(binary(), StartLine::pos_integer()) ->
           {ok, [token()], EndLine::pos_integer()} |
-          {error, error()}.
+          {error, error(), LineNumber::pos_integer()}.
 binary(Bin, Line) ->
     b(Bin, Line, []).
 

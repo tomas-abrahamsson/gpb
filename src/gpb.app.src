@@ -28,7 +28,7 @@
              gpb_gen_json_decoders, gpb_gen_json_encoders,
              gpb_gen_mergers, gpb_gen_nif, gpb_gen_translators,
              gpb_gen_types, gpb_gen_verifiers, gpb_scan, gpb_parse,
-             gpb_lib, gpb_names, gpb_scan_old, gpb_parse_old]},
+             gpb_lib, gpb_names]},
   {applications, [kernel, stdlib]},
   {registered, []},
   {env, []}]}.

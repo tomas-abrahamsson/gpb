@@ -151,6 +151,7 @@
         boolean_opt(use_packages) |
         boolean_opt(descriptor) |
         boolean_opt(include_as_lib) |
+        {include_mod_hrl_prepend, string()} |
         boolean_opt(bypass_wrappers) |
         {copy_bytes, true | false | auto | integer() | float()} |
         boolean_opt(type_specs) |
@@ -400,6 +401,8 @@ file(File) ->
 %%   <dd><tt><a href="#option-use_packages">use_packages</a></tt>,
 %%       <tt><a href="#option-descriptor">descriptor</a></tt>,
 %%       <tt><a href="#option-include_as_lib">include_as_lib</a></tt>,
+%%       <tt>{<a href="#option-include_mod_hrl_prepend"
+%%                            >include_mod_hrl_prepend</a>, string()}</tt>,
 %%       <tt><a href="#option-bypass_wrappers">bypass_wrappers</a></tt>,
 %%       <tt>{<a href="#option-copy_bytes">copy_bytes</a>,
 %%            false|true|auto|integer()|float()}</tt>,
@@ -842,6 +845,17 @@ file(File) ->
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-il">-il</a>.
+%%
+%% <h4><a id="option-include_mod_hrl_prepend"/>
+%%     `{include_mod_hrl_prepend, string()}'</h4>
+%%
+%% Generate code that prepends the specified string before `<output mod>.hrl'.
+%% Default is the empty string. No slashes are added. If you need to prepend
+%% a directory, you also need to include the slash in the string to prepend.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-include-mod-hrl-prepend"
+%%                        >-include-mod-hrl-prepend</a>.
 %%
 %% <h4><a id="option-bypass_wrappers"/>`bypass_wrappers'</h4>
 %%
@@ -2575,6 +2589,14 @@ c() ->
 %%       instead of `-include', which is the default.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-include_as_lib">include_as_lib</a></dd>
+%%   <dt><a id="cmdline-option-include-mod-hrl-prepend"/>
+%%       `-include-mod-hrl-prepend string()'</dt>
+%%     <dd>
+%%       Specify a string to prepend to the generated `-include("mod.hrl").'
+%%       (when generating for records).<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-include_mod_hrl_prepend"
+%%                       >include_mod_hrl_prepend</a></dd>
 %%   <dt><a id="cmdline-option-bypass-wrappers"/>
 %%       `-bypass-wrappers'</dt>
 %%     <dd>Bypass wrappers.<br/>
@@ -3201,6 +3223,9 @@ opt_specs() ->
      {"il", undefined, include_as_lib, "\n"
       "       Generate code that includes gpb.hrl using -include_lib\n"
       "       instead of -include, which is the default.\n"},
+     {"include-mod-hrl-prepend", 'string()', include_mod_hrl_prepend, "\n"
+      "       Specify a string to prepend to the generated\n"
+      "       -include(\"mod.hrl\"). (when generating for records).\n"},
      {"bypass-wrappers", undefined, bypass_wrappers, "\n"
       "       Bypass wrappers.\n"},
      {"c", {true, false, auto, 'number()'}, copy_bytes,
@@ -3843,9 +3868,9 @@ file_name_from_input({Mod,_S}) -> lists:concat([Mod, ".proto"]);
 file_name_from_input(FName)    -> FName.
 
 scan_and_parse_string(S, FName, Opts) ->
-    case scan(S, Opts) of
+    case gpb_scan:binary(unicode:characters_to_binary(S)) of
         {ok, Tokens, _} ->
-            case parse(Tokens, Opts) of
+            case gpb_parse:parse(Tokens) of
                 {ok, PTree} ->
                     case gpb_defs:post_process_one_file(FName, PTree, Opts) of
                         {ok, Result} ->
@@ -3853,36 +3878,11 @@ scan_and_parse_string(S, FName, Opts) ->
                         {error, Reason} ->
                             {error, {post_process, Reason}}
                     end;
-                {error, {_Line, _Module, _ErrInfo}=Reason} ->
-                    {error, {parse_error, FName, Reason}};
-                {error, Reasons} when is_list(Reasons) -> % scanner/parser 2
+                {error, Reasons} when is_list(Reasons) ->
                     {error, {parse_errors, FName, Reasons}}
             end;
         {error, {_Line0, _Module, _ErrInfo}=Reason, _Line1} ->
             {error, {scan_error, FName, Reason}}
-    end.
-
-scan(S, Opts) ->
-    case proplists:get_value(parser, Opts, default_scanner_parser()) of
-        new ->
-            gpb_scan:binary(unicode:characters_to_binary(S));
-        old ->
-            gpb_scan_old:string(S)
-    end.
-
-parse(Tokens, Opts) ->
-    case proplists:get_value(parser, Opts, default_scanner_parser()) of
-        new ->
-            gpb_parse:parse(Tokens);
-        old ->
-            gpb_parse_old:parse(Tokens++[{'$end', 999}])
-    end.
-
-default_scanner_parser() ->
-    case os:getenv("GPB_PARSER") of
-        false -> new; % default
-        "old" -> old;
-        _     -> new
     end.
 
 %% @doc Locate an import target.  This function might be potentially
@@ -4165,6 +4165,8 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                   dec_maps_as_msgs=DMapsAsMsgs}=AnRes,
            Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
+    IncludeModHrlPrepend = proplists:get_value(include_mod_hrl_prepend, Opts,
+                                               ""),
     AsLib = proplists:get_bool(include_as_lib, Opts),
     DoJson = gpb_lib:json_by_opts(Opts),
     DoMergers = gpb_lib:get_gen_mergers(Opts),
@@ -4200,8 +4202,10 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
          "\n"]
         || DoNif],
        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records -> ?f("-include(\"~s.hrl\").~n", [Mod]);
-           maps    -> ""
+           records ->
+               ?f("-include(\"~s~s.hrl\").~n", [IncludeModHrlPrepend, Mod]);
+           maps ->
+               ""
        end,
        case gpb_lib:get_defs_as_maps_or_records(Opts) of
            records ->
