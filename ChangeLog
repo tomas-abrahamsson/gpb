@@ -1,5 +1,20 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.0
+2021-Aug-28
+
+        * Wrap errors in the data-driven encoder/decoder: On invalid input,
+          catch for instance function clause errors and re-raise as
+          a {gpb_error, Info} error instead.  This has been the case
+          for the generated encoder/decoder since 3.28.1. #211.
+
+        * Add an option {include_mod_hrl_prepend, string()} which can
+          insert a string before the mod.hrl in the generated
+          -include("mod.hrl").  (related to erlang/rebar3#2610)
+
+        * Remove the old parser. There has been no reported problems
+          with the new parser for over a year.
+
 Version 4.18.0
 2021-Jun-10
 
