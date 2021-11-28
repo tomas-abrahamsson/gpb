@@ -1112,7 +1112,9 @@ no_underspecs_dialyzer_attr(FnName, Arity, Opts) ->
     %% option.
     case can_do_no_underspecs_dialyzer_attr(Opts) of
         true ->
-            ?f("-dialyzer({no_underspecs, ~p/~w}).~n", [FnName, Arity]);
+            [?f("-if(?OTP_RELEASE >= 24).~n"), % easy-support of slightly older
+             ?f("-dialyzer({no_underspecs, ~p/~w}).~n", [FnName, Arity]),
+             ?f("-endif.~n")];
         false ->
             ""
     end.
