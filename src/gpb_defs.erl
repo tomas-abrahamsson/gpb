@@ -1492,7 +1492,7 @@ to_fields_msg2(MsgName, MsgElems, OccHandler, Errors0) ->
 %%% -- Version and conversions ------------
 
 %% NB:
-%% Be quite explict here about the structure.  Don't rely so much on
+%% Be quite explicit here about the structure.  Don't rely so much on
 %% external helpers, such as gpb:is_msg_proto3/2, because helpers are
 %% for the latest defs version, while this may (in some future) be
 %% operating on a format that is not the latest any more.

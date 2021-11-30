@@ -296,9 +296,9 @@ parses_msg_with_custom_option_test() ->
     AllDefs = parse_sort_several_file_lines(
                 [{"descriptor.proto",
                   ["package google.protobuf;"
-                   "message MessageOptions {", % dummy for this test inly
+                   "message MessageOptions {", % dummy for this test only
                    "}",
-                   "message FieldOptions {", % dummy for this test inly
+                   "message FieldOptions {", % dummy for this test only
                    "}"]},
                  {"x.proto",
                   ["package x;",
@@ -1928,7 +1928,7 @@ proto_defs_versions_test() ->
     %% Requesting conversion to latest supported should always work (identity)
     {ok, AllDefs} = gpb_defs:convert_defs_to_latest_version(AllDefs),
 
-    %% Converting to every ealier (supported) version and back to latest,
+    %% Converting to every earlier (supported) version and back to latest,
     %% should always work:
     Latest = lists:max(gpb_defs:supported_defs_versions()),
     EarlierVersions = gpb_defs:supported_defs_versions() -- [Latest],

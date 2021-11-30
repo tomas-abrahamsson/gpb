@@ -1925,7 +1925,7 @@ version_format_test() ->
     ?assertError(_, assert_version_format("y")),
     ?assertError(_, assert_version_format("2.1-4z-gb996fbe")),
     ?assertError(_, assert_version_format("2.1-z-gb996fbe")),
-    %% malplaced dots
+    %% misplaced dots
     ?assertError(_, assert_version_format(".")),
     ?assertError(_, assert_version_format(".2")),
     ?assertError(_, assert_version_format("..2")),

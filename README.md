@@ -450,7 +450,7 @@ Interaction with rebar
 For info on how to use gpb with rebar3, see
 https://rebar3.org/docs/configuration/plugins/#protocol-buffers
 
-Compatiblity with rebar2
+Compatibility with rebar2
 ------------------------
 
 In rebar there is support for gpb since version 2.6.0. See the
@@ -603,7 +603,7 @@ have been created using the mk-versioned-archive script, so it is
 possible to just unpack and build directly.
 
 If you use Github's automatic _Source code_ zip or tar.gz archives,
-you will need to either create a `gpb.vsn` file as described aboce,
+you will need to either create a `gpb.vsn` file as described above,
 or re-create a versioned archive using the `mk-versioned-archive`
 script and the `--override-version=<x>` option (or possibly the
 or the `--override-version-from-cwd-path` option if the directory name

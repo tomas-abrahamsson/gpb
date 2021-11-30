@@ -173,7 +173,7 @@ Version 4.14.2
 Version 4.14.1
 2020-Sep-05
 
-        * Add a utility gpb:decode_packet/3 mimicing erlang:decode_packet/3,
+        * Add a utility gpb:decode_packet/3 mimicking erlang:decode_packet/3,
           but for varint length encoded framing of data.
         * Document the public API in gpb.erl.
         * Document gpb_defs:fetch_imports, it is part of the API.
@@ -515,7 +515,7 @@ Version 4.2.1
 2018-Jul-13
 
         * Fix proto3 bug in encoding of default values for enums when
-        given as 0 instead of as atom. Thansk to Jean-Alexandre Barszcz
+        given as 0 instead of as atom. Thanks to Jean-Alexandre Barszcz
         for reporting.
 
 Version 4.2.0
@@ -528,7 +528,7 @@ Version 4.2.0
         for asking the question that prompted this.
 
         * Add an option {maps_oneof,flat}. For maps, it changes the
-        Erlang representaiton of oneof fields from #{..., c => {x,Value}, ...}
+        Erlang representation of oneof fields from #{..., c => {x,Value}, ...}
         to #{..., x => Value}, ...}
 
         * Generate type specifications for records, and refer to them. This
@@ -564,7 +564,7 @@ Version 4.1.6
 2018-May-08
 
         * Make the Erlang 21 stacktrace syntax choice overridable.
-        In addition to the targetting version described in 4.1.5 below,
+        In addition to the targeting version described in 4.1.5 below,
         make it possible to override the stacktrace selection:
 
         When targeting Erlang 21 or later, generate code that uses the new
@@ -594,7 +594,7 @@ Version 4.1.3
         * Build changes: Provide better errors when building
         outside of a git repo, and provide a helper script,
         helers/export-from-git, to extract gpb from git in a way such
-        that it can be compiled outside fo git.
+        that it can be compiled outside of git.
 
 Version 4.1.2
 2018-Jan-26
@@ -670,7 +670,7 @@ Version 3.28.1
         allowed to be packed, such as string, bytes and sub
         messages. Such fields were not allowed to be be packed i the
         first place, but gpb never said anything so this could go
-        unnoticed. And gpb packed them in an invalid fasion, that was
+        unnoticed. And gpb packed them in an invalid fashion, that was
         probably incompaitble with other protobuf parsers/encoders.
 
         For such fields, this introduces a POTENTIAL INCOMPATIBILITY,
@@ -777,7 +777,7 @@ Version 3.27.0
 2017-May-28
 
         * Add support for groups. Thanks to David Weinstein for prompting
-        this to get implementated.
+        this to get implemented.
 
 Version 3.26.8
 2017-Mar-24
@@ -1457,7 +1457,7 @@ Version 3.3
         * Fix several errors in the gpb.app.src so that it works with
         Elixir and Relex, thanks to Paulo Almeida.
         * When decoding, reject messages with invalid varints.
-        Invaid varints are encoded with too many bits. Previously,
+        Invalid varints are encoded with too many bits. Previously,
         decoding a varint with very many bits (ie: with very many leading
         bytes > 128) would cause the Erlang VM to construct a very large
         number when decoding the varint. This would cause the Erlang VM to
@@ -1488,7 +1488,7 @@ Version 3.1
         * Add possibility to make the generated code compile-time
         independent of gpb by generating the introspection information to
         proplists instead of to #field{} records. The latter required
-        including gpb.hrl at compiletime. (There's no run-time dependency)
+        including gpb.hrl at compile time. (There's no run-time dependency)
         * Add possibility to prefix message/record and names and module
         names to avoid name collisions.
         * Add -type to the command line options, thanks to Louis-Philippe

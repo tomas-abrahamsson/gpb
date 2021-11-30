@@ -2425,7 +2425,7 @@ list_io_lists_non_found_imports_as_missing_test() ->
      {hrl_output, _},
      %% Non-missing files should still be in sources
      {sources, ["/main.proto", "/b.proto"]},
-     %% The missing one should be reported in verbatim as it appeares
+     %% The missing one should be reported in verbatim as it appears
      %% in the import declaration
      {missing, ["x/./../y/z/no-such-file.proto"]}] =
         do_list_io_defs(FileSystem, []),
@@ -4895,7 +4895,7 @@ is_32_bit_os() ->
 
 get_erlang_otp_major() ->
     case erlang:system_info(otp_release) of
-        "R"++Rest -> % R16 or ealier
+        "R"++Rest -> % R16 or earlier
             list_to_integer(lists:takewhile(fun is_digit/1, Rest));
         RelStr ->
             %% In Erlang 17 the leading "R" was dropped,

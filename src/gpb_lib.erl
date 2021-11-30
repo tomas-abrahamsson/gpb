@@ -714,7 +714,7 @@ is_current_major_version_at_least(VsnMin) ->
 
 current_otp_release() ->
     case erlang:system_info(otp_release) of
-        "R"++Rest -> % R16 or ealier
+        "R"++Rest -> % R16 or earlier
             FirstChunkOfDigits = lists:takewhile(fun is_digit/1, Rest),
             list_to_integer(FirstChunkOfDigits);
         RelStr ->

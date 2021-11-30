@@ -90,7 +90,7 @@ first_line_no_nl([C | Tl]) -> [C | first_line_no_nl(Tl)];
 first_line_no_nl("") -> "".
 
 file_err(FunName, FileName, Reason) ->
-    io:format(standard_error, "file:~p(~s) excute failed!, Reason :~s ~n",
+    io:format(standard_error, "file:~p(~s) execute failed!, Reason :~s ~n",
               [FunName, FileName, file:format_error(Reason)]),
     halt(1).
 

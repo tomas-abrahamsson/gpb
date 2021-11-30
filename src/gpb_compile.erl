@@ -978,7 +978,7 @@ file(File) ->
 %%     `{erlc_compile_options, string()}'</h4>
 %%
 %% If the the `{erlc_compile_options,string()}' option is set,
-%% then the genereted code will contain a directive `-compile([String]).'
+%% then the generated code will contain a directive `-compile([String]).'
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-erlc_compile_options">-erlc_compile_options</a>.
@@ -1322,7 +1322,7 @@ file(File) ->
 %%   <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%       If `Term' (`$1') is valid, the function is expected to just return
 %%       any value, which is ignored and discarded.
-%%       If `Term' is invalid, the function is exptected to not
+%%       If `Term' is invalid, the function is expected to not
 %%       return anything, but instead either crash, call
 %%       `erlang:error/1', or `throw/1' or `exit/1'.  with the
 %%       reason for error.
@@ -2669,7 +2669,7 @@ c() ->
 %%       <a href="#option-defs_as_proplists">defs_as_proplists</a></dd>
 %%   <dt><a id="cmdline-option-defs-as-maps"/>
 %%       `-defs-as-maps'</dt>
-%%     <dd>Specifies that proto defintions from the generated code
+%%     <dd>Specifies that proto definitions from the generated code
 %%       are to be returned as maps. Otherwise, they will be lists
 %%       of tuples and records (or proplists if the `-pldefs' option
 %%       is specified)<br/>
@@ -2785,13 +2785,13 @@ c() ->
 %%   <dt><a id="cmdline-option-translate_type"/>
 %%       `-translate_type TMsFs'</dt>
 %%     <dd>Call functions in `TMsFs' to pack, unpack, merge and verify
-%%       for the specifed type. The `TMsFs' is a string on the
+%%       for the specified type. The `TMsFs' is a string on the
 %%       following format: `type=Type,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
 %%       The Type and specified modules and functions are called and used
 %%       as follows:
 %%       <dl>
 %%         <dt>`type=Type'</dt>
-%%         <dd>Specfies that the translations apply to fields of type.
+%%         <dd>Specifies that the translations apply to fields of type.
 %%             The `Type' may be either of:
 %%             `msg:MsgName' (after any renaming operations),
 %%             `enum:EnumName', `int32', `int64', `uint32', `uint64',
@@ -2813,7 +2813,7 @@ c() ->
 %%         <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%             If `Term' is valid, the function is expected to just return
 %%             any value, which is ignored and discarded.
-%%             If `Term' is invalid, the function is exptected to not
+%%             If `Term' is invalid, the function is expected to not
 %%             return anything, but instead either crash, call
 %%             `erlang:error/1', or `throw/1' or `exit/1' with the
 %%             reason for error.
@@ -3260,7 +3260,7 @@ opt_specs() ->
       "       instead of #field{} records, to make the generated code\n"
       "       completely free of even compile-time dependencies to gpb.\n"},
      {"defs-as-maps", undefined, defs_as_maps, "\n"
-      "        Specifies that proto defintions from the generated code\n"
+      "        Specifies that proto definitions from the generated code\n"
       "        are to be returned as maps. Otherwise, they will be lists\n"
       "        of tuples and records (or proplists if the -pldefs option\n"
       "        is specified)\n"},
@@ -3364,7 +3364,7 @@ opt_specs() ->
       "       Erlang protobuffs library:\n"
       "       * encode/1 and encode_MsgName/1\n"
       "       * decode/2 and decode_MsgName/1\n"},
-     {{section, "Quering dependencies"}},
+     {{section, "Querying dependencies"}},
      {"M", {'opt_value()', makefile_rules}, list_deps, "\n"
       "       Generate Makefile rule(s) for dependencies.\n"
       "       No code is generated unless -MMD.\n"},

@@ -1238,7 +1238,7 @@ field_pass_as_record_test() ->
     %% Analysis may decide decoding should pass fields in a record
     %% instead of as params for performance reasons,
     %% but this could make json decoding get into trouble
-    %% due to the joint depencency on gpb_decoders_lib.
+    %% due to the joint dependency on gpb_decoders_lib.
     Proto = "
        message Msg {
           optional uint32 f1 = 1;
