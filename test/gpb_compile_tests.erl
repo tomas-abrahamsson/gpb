@@ -77,6 +77,9 @@
 %% Translators for top-level message tests
 -export([e_value_to_msg/2, d_msg_to_value/2, v_value/2]).
 
+%% Translators for bytes <--> octet-lists
+-export([e_l2b/1, d_b2l/1, v_l/1]).
+
 
 -ifdef(OTP_RELEASE).
 -define(STACKTRACE(C,R,St), C:R:St ->).
@@ -1232,6 +1235,15 @@ assert_contains_regexp(IoData, Re) ->
             erlang:error({"Re ", Re, "not found in", IoData})
     end.
 
+assert_not_contains_regexp(IoData, Re) ->
+    case re:run(IoData, Re) of
+        {match, _} ->
+            ?debugFmt("~nERROR: Regexp ~s found in:~n~s~n", [Re, IoData]),
+            erlang:error({"Re ", Re, "not found in", IoData});
+        nomatch ->
+            ok
+    end.
+
 %% --- bytes ----------
 
 list_as_bytes_indata_test() ->
@@ -1765,6 +1777,35 @@ verify_callback_with_and_without_errorf_test() ->
                  Mod2:verify_msg(#m1{a=123})),
     unload_code(Mod2).
 
+dialzer_nowarn_when_scalar_only_for_translated_fields_test_() ->
+    case gpb_lib:nowarn_dialyzer_attr(a, 0, []) of
+        "" -> %
+            {"dialzer_nowarn_when_scalar_only_for_translated_fields_test_"
+             " skipped on older Erlang", []};
+        _ ->
+            {"dialzer_nowarn_when_scalar_only_for_translated_fields",
+             [fun dialzer_nowarn_when_scalar_only_for_translated_fields_aux/0]}
+    end.
+
+dialzer_nowarn_when_scalar_only_for_translated_fields_aux() ->
+    Proto1 = ["message M {\n"
+              "  required bytes f1=1;\n" % translated
+              "};\n"],
+    Proto2 = ["message M {\n"
+              "  required bytes f1=1;\n" % translated
+              "  required bytes f2=2;\n" % not translated
+              "};\n"],
+    TranslOpt = {translate_field,
+                 {['M', f1], [{encode,{?MODULE,e_l2b,['$1']}},
+                              {decode,{?MODULE,d_b2l,['$1']}},
+                              {verify,{?MODULE,v_l,['$1']}}]}},
+    S1 = compile_to_string(Proto1, [TranslOpt]),
+    S2 = compile_to_string(Proto2, [TranslOpt]),
+    assert_contains_regexp(S1, "-dialyzer.*nowarn_function.*e_type_bytes"),
+    assert_not_contains_regexp(S2, "-dialyzer.*nowarn_function.*e_type_bytes"),
+    ok.
+
+
 %% Translators/callbacks:
 any_e_atom(A) ->
     {'google.protobuf.Any', "x.com/atom", list_to_binary(atom_to_list(A))}.
@@ -2211,6 +2252,12 @@ d_msg_to_value({MsgName, Value}, MsgName) -> Value.
 v_value(Value, integer) when is_integer(Value) -> ok;
 v_value(Value, string) when is_list(Value) -> ok;
 v_value(X, Expected) -> error({bad_value, Expected, X}).
+
+e_l2b(L) -> list_to_binary(L).
+
+d_b2l(B) -> binary_to_list(B).
+
+v_l(L) when is_list(L) -> ok.
 
 verify_is_optional_for_translate_toplevel_messages_test() ->
     M = compile_iolist(
