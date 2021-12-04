@@ -43,8 +43,9 @@ analyze_defs(Defs, Sources, Renamings, Opts) ->
     Translations = compute_translations(Defs, Opts),
     KnownMsgSize = find_msgsizes_known_at_compile_time(MapsAsMsgs ++ Defs),
     UnknownsInfo = gpb_lib:defs_contains_fields_for_unknows(Defs),
+    UsedTypes = find_used_types(Defs),
     #anres{source_filenames    = Sources,
-           used_types          = find_used_types(Defs),
+           used_types          = UsedTypes,
            known_msg_size      = KnownMsgSize,
            fixlen_types        = find_fixlen_types(MapsAsMsgs ++ Defs),
            num_packed_fields   = find_num_packed_fields(MapsAsMsgs ++ Defs),
@@ -54,6 +55,8 @@ analyze_defs(Defs, Sources, Renamings, Opts) ->
            maps_as_msgs        = ProtoDefsVsnElem ++ MapsAsMsgs ++ MapMsgEnums,
            dec_maps_as_msgs    = ProtoDefsVsnElem ++ DMapsAsMsgs ++ MapMsgEnums,
            translations        = Translations,
+           types_only_via_translations = find_types_used_only_via_translations(
+                                           UsedTypes, Defs, Translations),
            map_types           = MapTypes,
            map_value_types     = compute_map_value_types(MapTypes),
            group_occurrences   = find_group_occurrences(Defs),
@@ -749,6 +752,60 @@ fetch_op_translation(Op, Translations, Default, Ctxt) ->
 
 is_repeated_elem_path([_MsgName,_FName,[]]) -> true;
 is_repeated_elem_path(_) -> false.
+
+find_types_used_only_via_translations(UsedTypes, Defs, Translations) ->
+    %% For types used only via a translation, include a
+    %% -dialyzer({nowarn_function, <encoder_function>/<arity>}).
+    %%
+    %% This is since when used only from translations,
+    %% dialyzer may find that some general-purpose execution paths
+    %% in such encoder functions will never succeed, and if so will warn.
+    %%
+    %% But there is nothing the user can do. So emit that dialyzer attr.
+
+    %% Defs may be big, but UsedTypes and Translations are usually smaller
+    %% or much smaller
+    gpb_lib:fold_msg_or_group_fields_o(
+      fun(_MsgOrGroup,
+          MsgName,
+          #?gpb_field{type=Type, name=FName, occurrence=Occurrence},
+          Oneof,
+          Acc) ->
+              case is_scalar_type(Type) andalso sets:is_element(Type, Acc) of
+                  true ->
+                      FieldPath =
+                          case {Oneof, Occurrence} of
+                              {false, repeated}  -> [MsgName, FName, []];
+                              {false, _}         -> [MsgName, FName];
+                              {{true,CFName}, _} -> [MsgName, CFName, FName]
+                          end,
+                      case has_enc_dec_translation(FieldPath, Translations) of
+                          true -> Acc;
+                          false -> sets:del_element(Type, Acc)
+                      end;
+                  false ->
+                      Acc
+              end
+      end,
+      UsedTypes,
+      Defs).
+
+has_enc_dec_translation(FieldPath, Translations) ->
+    case dict:find(FieldPath, Translations) of
+        {ok, FieldTranslations}  ->
+            lists:any(fun({encode, _}) -> true;
+                         ({decode, _}) -> true;
+                         ({decode_init_default, _}) -> true;
+                         ({decode_repeated_add_elem, _}) -> true;
+                         ({decode_repeated_finalize, _}) -> true;
+                         ({merge, _}) -> false;
+                         ({verify, _}) -> false;
+                         ({type_spec, _}) -> false
+                      end,
+                      FieldTranslations);
+        error ->
+            false
+    end.
 
 find_group_occurrences(Defs) ->
     gpb_lib:fold_msg_or_group_fields_o(
