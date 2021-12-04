@@ -4505,6 +4505,8 @@ nepp2_nl(<<"-ifdef", Rest/binary>>, NState, N, Acc) ->
     nepp2_ifdef(Rest, ifdef, NState, N, Acc);
 nepp2_nl(<<"-ifndef", Rest/binary>>, NState, N, Acc) ->
     nepp2_ifdef(Rest, ifndef, NState, N, Acc);
+nepp2_nl(<<"-if", Rest/binary>>, NState, N, Acc) ->
+    nepp2_if(Rest, NState, N, Acc);
 nepp2_nl(<<"-else.\n", Rest/binary>>, #nepp{depth=1}=NState, N, Acc) ->
     nepp2_skip(Rest, NState, N+1, Acc);
 nepp2_nl(<<"-endif.\n", Rest/binary>>, #nepp{depth=1}=NState, N, Acc) ->
@@ -4547,12 +4549,22 @@ nepp2_ifdef(Rest, SkipCond, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
     {Sym, Rest2} = read_until(Rest1, ")", ""),
     {_,   Rest3} = read_until(Rest2, "\n", ""),
     {Txt, Rest4, NState2, N2} =
-    case {dict:is_key(parse_term(Sym), Ds), SkipCond} of
-        {true,  ifdef}  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
-        {false, ifndef} -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
-        _ -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
+        case {dict:is_key(parse_term(Sym), Ds), SkipCond} of
+            {true,  ifdef}  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
+            {false, ifndef} -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
+            _ -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
+        end,
+    nepp2_nl(Rest4, NState2#nepp{depth=Depth}, N2, lists:reverse(Txt, Acc)).
 
-    end,
+nepp2_if(Rest, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
+    {_,    Rest1} = read_until(Rest,  "(", ""),
+    {Cond, Rest2} = read_until(Rest1, ")", ""),
+    {_,    Rest3} = read_until(Rest2, "\n", ""),
+    {Txt,  Rest4, NState2, N2} =
+        case nepp2_eval_cond(Cond, Ds) of
+            true  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
+            false -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
+        end,
     nepp2_nl(Rest4, NState2#nepp{depth=Depth}, N2, lists:reverse(Txt, Acc)).
 
 nepp2_skip(<<"-else.\n", Rest/binary>>, #nepp{depth=Depth}=NState, N, Acc) ->
@@ -4573,6 +4585,28 @@ nepp2_skip(<<$\n, Rest/binary>>, NState, N, Acc) ->
     nepp2_skip(Rest, NState, N+1, Acc);
 nepp2_skip(<<_, Rest/binary>>, NState, N, Acc) ->
     nepp2_skip(Rest, NState, N, Acc).
+
+nepp2_eval_cond(Str, Ds) ->
+    {ok, Tokens, End} = erl_scan:string(Str),
+    Tokens2 = nepp2_simple_expand(Tokens, Ds),
+    {ok, Exprs} = erl_parse:parse_exprs(Tokens2 ++ [{dot, End}]),
+    InitBinds = erl_eval:new_bindings(),
+    {value, Result, _Binds} = erl_eval:exprs(Exprs, InitBinds),
+    Result.
+
+nepp2_simple_expand([{'?', _}, {var, _, Sym} | Rest], Ds) ->
+    nepp2_assert_not_parameterized(Sym, Rest),
+    Val = dict:fetch(Sym, Ds),
+    [erl_parse:abstract(Val) | nepp2_simple_expand(Rest, Ds)];
+nepp2_simple_expand([Tok | Rest], Ds) ->
+    [Tok | nepp2_simple_expand(Rest, Ds)];
+nepp2_simple_expand([], _Ds) ->
+    [].
+
+nepp2_assert_not_parameterized(Sym, [{'(', _} | _]) ->
+    error({not_implemeted, nepp2, parameterized_macros, Sym});
+nepp2_assert_not_parameterized(_Sym, _) ->
+    ok.
 
 read_until(<<C, Rest/binary>>, Delims, Acc) ->
     case lists:member(C, Delims) of
