@@ -1059,7 +1059,7 @@ format_p3wellknown_value_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     TypeNull = {enum, 'google.protobuf.NullValue'},
     TypeStruct = {msg, 'google.protobuf.Struct'},
     TypeList = {msg, 'google.protobuf.ListValue'},
-    %% Be quite explcit in the matching below, so we won'd accidentally
+    %% Be quite explicit in the matching below, so we won't accidentally
     %% mis-decode a field at run-time, if the wellknown would change
     %% in some future import or update.
     [#gpb_oneof{name=kind=FName, rnum=RNum, fields=OFields}] = MsgDef,

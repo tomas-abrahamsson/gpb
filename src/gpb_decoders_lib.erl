@@ -236,7 +236,7 @@ field_infos(MsgDef, FlattenOnoef) ->
              {FName, optional};
          #?gpb_field{name=FName, occurrence=defaulty} ->
              %% On finalization, treat proto3 (scalar) fields as
-             %% requried, to avoid redundant if F == '$undef' -> ...
+             %% required, to avoid redundant if F == '$undef' -> ...
              %% checks;  it can never be '$undef' since it has a
              %% type-default. (except for sub messages and onoef)
              {FName, required};
@@ -266,7 +266,7 @@ run_morph_ops([], Fns) ->
 %% underscore.
 %%
 %% The intention is that code generation can issue match patterns for
-%% all fields of a message, or all auxilliary working parameters and not
+%% all fields of a message, or all auxiliary working parameters and not
 %% have to worry about underscoring unused ones to avoid warning messages
 %% about unused variables.
 underscore_unused_vars() ->

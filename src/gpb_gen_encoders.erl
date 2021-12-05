@@ -189,9 +189,9 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
         || {{msg,MsgName}, _Fields}=MsgDef <- Defs]]
       || gpb_lib:get_epb_functions_by_opts(Opts)]].
 
-format_aux_encoders(Defs, AnRes, _Opts) ->
+format_aux_encoders(Defs, AnRes, Opts) ->
     [format_enum_encoders(Defs, AnRes),
-     format_type_encoders()
+     format_type_encoders(AnRes, Opts)
     ].
 
 format_aux_common_encoders(_Defs, AnRes, _Opts) ->
@@ -919,27 +919,27 @@ format_unknownsize_packed_field_encoder2(MsgName,
        [replace_term('<encode-elem>', ElemEncoderFn),
         replace_term('Tr', Transl)])].
 
-format_type_encoders() ->
-    [format_varlength_field_encoders(),
-     format_fixlength_field_encoders(),
+format_type_encoders(AnRes, Opts) ->
+    [format_varlength_field_encoders(AnRes, Opts),
+     format_fixlength_field_encoders(AnRes, Opts),
      format_unknown_encoder(),
      format_varint_encoder()].
 
-format_varlength_field_encoders() ->
+format_varlength_field_encoders(AnRes, Opts) ->
     [format_sint_encoder(),
-     format_int_encoder(int32, 32),
-     format_int_encoder(int64, 64),
-     format_bool_encoder(),
-     format_string_encoder(),
-     format_bytes_encoder()].
+     format_int_encoder(int32, 32, AnRes, Opts),
+     format_int_encoder(int64, 64, AnRes, Opts),
+     format_bool_encoder(AnRes, Opts),
+     format_string_encoder(AnRes, Opts),
+     format_bytes_encoder(AnRes, Opts)].
 
-format_fixlength_field_encoders() ->
-    [format_fixed_encoder(fixed32,  32, [little]),
-     format_fixed_encoder(sfixed32, 32, [little,signed]),
-     format_fixed_encoder(fixed64,  64, [little]),
-     format_fixed_encoder(sfixed64, 64, [little,signed]),
-     format_float_encoder(float),
-     format_double_encoder(double)].
+format_fixlength_field_encoders(AnRes, Opts) ->
+    [format_fixed_encoder(fixed32,  32, [little], AnRes, Opts),
+     format_fixed_encoder(sfixed32, 32, [little,signed], AnRes, Opts),
+     format_fixed_encoder(fixed64,  64, [little], AnRes, Opts),
+     format_fixed_encoder(sfixed64, 64, [little,signed], AnRes, Opts),
+     format_float_encoder(float, AnRes, Opts),
+     format_double_encoder(double, AnRes, Opts)].
 
 format_sint_encoder() ->
     [gpb_lib:nowarn_unused_function(e_type_sint,3),
@@ -951,9 +951,10 @@ format_sint_encoder() ->
                e_varint(Value * -2 - 1, Bin)
        end)].
 
-format_int_encoder(Type, _BitLen) ->
+format_int_encoder(Type, _BitLen, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(e_type_, Type),
     [gpb_lib:nowarn_unused_function(FnName, 3),
+     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes, Opts),
      gpb_codegen:format_fn(
        FnName,
        fun(Value, Bin, _TrUserData) when 0 =< Value, Value =< 127 ->
@@ -966,19 +967,22 @@ format_int_encoder(Type, _BitLen) ->
                e_varint(N, Bin)
        end)].
 
-format_bool_encoder() ->
-    [gpb_lib:nowarn_unused_function(e_type_bool, 3),
+format_bool_encoder(AnRes, Opts) ->
+    FnName = e_type_bool,
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     maybe_no_dialyzer_warn_funcion(bool, FnName, 3, AnRes, Opts),
      gpb_codegen:format_fn(
-       e_type_bool,
+       FnName,
        fun(true, Bin, _TrUserData)  -> <<Bin/binary, 1>>;
           (false, Bin, _TrUserData) -> <<Bin/binary, 0>>;
           (1, Bin, _TrUserData) -> <<Bin/binary, 1>>;
           (0, Bin, _TrUserData) -> <<Bin/binary, 0>>
        end)].
 
-format_fixed_encoder(Type, BitLen, BitType) ->
+format_fixed_encoder(Type, BitLen, BitType, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(e_type_, Type),
     [gpb_lib:nowarn_unused_function(FnName, 3),
+     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes, Opts),
      gpb_codegen:format_fn(
        FnName,
        fun(Value, Bin, _TrUserData) ->
@@ -1027,9 +1031,10 @@ format_packed_double_encoder(FnName, TranslFn) ->
       end,
       [replace_term('Tr', TranslFn)]).
 
-format_float_encoder(Type) ->
+format_float_encoder(Type, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(e_type_, Type),
     [gpb_lib:nowarn_unused_function(FnName, 3),
+     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes, Opts),
      gpb_codegen:format_fn(
        FnName,
        fun(V, Bin, _) when is_number(V) -> <<Bin/binary, V:32/little-float>>;
@@ -1038,9 +1043,10 @@ format_float_encoder(Type) ->
           (nan, Bin, _)                 -> <<Bin/binary, 0:16,192,127>>
        end)].
 
-format_double_encoder(Type) ->
+format_double_encoder(Type, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(e_type_, Type),
     [gpb_lib:nowarn_unused_function(FnName, 3),
+     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes, Opts),
      gpb_codegen:format_fn(
        FnName,
        fun(V, Bin, _) when is_number(V) -> <<Bin/binary, V:64/little-float>>;
@@ -1049,20 +1055,24 @@ format_double_encoder(Type) ->
           (nan, Bin, _)                 -> <<Bin/binary, 0:48,248,127>>
        end)].
 
-format_string_encoder() ->
-    [gpb_lib:nowarn_unused_function(e_type_string, 3),
+format_string_encoder(AnRes, Opts) ->
+    FnName = e_type_string,
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     maybe_no_dialyzer_warn_funcion(string, FnName, 3, AnRes, Opts),
      gpb_codegen:format_fn(
-       e_type_string,
+       FnName,
        fun(S, Bin, _TrUserData) ->
                Utf8 = unicode:characters_to_binary(S),
                Bin2 = e_varint(byte_size(Utf8), Bin),
                <<Bin2/binary, Utf8/binary>>
        end)].
 
-format_bytes_encoder() ->
-    [gpb_lib:nowarn_unused_function(e_type_bytes, 3),
+format_bytes_encoder(AnRes, Opts) ->
+    FnName = e_type_bytes,
+    [gpb_lib:nowarn_unused_function(FnName, 3),
+     maybe_no_dialyzer_warn_funcion(bytes, FnName, 3, AnRes, Opts),
      gpb_codegen:format_fn(
-       e_type_bytes,
+       FnName,
        fun(Bytes, Bin, _TrUserData) when is_binary(Bytes) ->
                Bin2 = e_varint(byte_size(Bytes), Bin),
                <<Bin2/binary, Bytes/binary>>;
@@ -1125,6 +1135,16 @@ format_is_empty_string(#anres{has_p3_opt_strings=true}) ->
           (<<>>) -> false;
           ([]) -> false
        end)].
+
+maybe_no_dialyzer_warn_funcion(Type, FnName, Arity,
+                               #anres{types_only_via_translations=TrTypes},
+                               Opts) ->
+    case sets:is_element(Type, TrTypes) of
+        true ->
+            gpb_lib:nowarn_dialyzer_attr(FnName, Arity, Opts);
+        false ->
+            []
+    end.
 
 ret_type_all_msgs(Defs) ->
     case at_least_one_msg_is_nonempty(Defs) of

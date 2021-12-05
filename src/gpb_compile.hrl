@@ -15,6 +15,7 @@
           maps_as_msgs,       % :: list() % same format as `Defs'
           dec_maps_as_msgs,   % :: list() % ditto, for decoding
           translations,       % :: dict:dict(), %% FieldPath -> TranslationOps
+          types_only_via_translations,% :: sets:set(gpb_field_type()),
           map_types,          % :: sets:set({map,_,_})
           map_value_types,    % :: {boolean(), boolean()} % submsgs?/nonsubmsgs?
           group_occurrences,  % :: dict:dict() %% GroupName -> repeated | ...

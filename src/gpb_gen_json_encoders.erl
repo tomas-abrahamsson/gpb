@@ -282,7 +282,7 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                           {enum,'google.protobuf.NullValue'} -> true;
                           _ -> false
                       end,
-    %% Shoult EmitTypeDefaults be a run-time option?
+    %% Should EmitTypeDefaults be a run-time option?
     %% or alternatively a run-time option?
     EmitTypeDefaults =
         proplists:get_bool(json_always_print_primitive_fields, Opts)
@@ -808,7 +808,7 @@ format_to_json_p3wellknown_value(MsgName, MsgDef, Defs, AnRes, Opts) ->
     TypeNull = {enum, 'google.protobuf.NullValue'},
     TypeStruct = {msg, 'google.protobuf.Struct'},
     TypeList = {msg, 'google.protobuf.ListValue'},
-    %% Be quite explcit in the matching below, so we won'd accidentally
+    %% Be quite explicit in the matching below, so we won't accidentally
     %% mis-encode a field at run-time, if the wellknown would change
     %% in some future import or update.
     [#gpb_oneof{name=kind=FName, rnum=RNum, fields=OFields}] = MsgDef,

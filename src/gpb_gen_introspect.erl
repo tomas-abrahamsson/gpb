@@ -874,7 +874,7 @@ atom_to_binstr_stree(A) ->
     erl_syntax:text(?f("<<\"~s\">>", [S])).
 
 %% In introspects, the defs formats may have been converted to
-%% an ealier format.
+%% an earlier format.
 %% For enums handle both format 2 and 3.
 sym_val_eopt(Elems, DefsVsn) when DefsVsn >= 3 ->
     Elems;

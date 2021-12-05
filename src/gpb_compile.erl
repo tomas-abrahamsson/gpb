@@ -978,7 +978,7 @@ file(File) ->
 %%     `{erlc_compile_options, string()}'</h4>
 %%
 %% If the the `{erlc_compile_options,string()}' option is set,
-%% then the genereted code will contain a directive `-compile([String]).'
+%% then the generated code will contain a directive `-compile([String]).'
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-erlc_compile_options">-erlc_compile_options</a>.
@@ -1322,7 +1322,7 @@ file(File) ->
 %%   <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%       If `Term' (`$1') is valid, the function is expected to just return
 %%       any value, which is ignored and discarded.
-%%       If `Term' is invalid, the function is exptected to not
+%%       If `Term' is invalid, the function is expected to not
 %%       return anything, but instead either crash, call
 %%       `erlang:error/1', or `throw/1' or `exit/1'.  with the
 %%       reason for error.
@@ -2669,7 +2669,7 @@ c() ->
 %%       <a href="#option-defs_as_proplists">defs_as_proplists</a></dd>
 %%   <dt><a id="cmdline-option-defs-as-maps"/>
 %%       `-defs-as-maps'</dt>
-%%     <dd>Specifies that proto defintions from the generated code
+%%     <dd>Specifies that proto definitions from the generated code
 %%       are to be returned as maps. Otherwise, they will be lists
 %%       of tuples and records (or proplists if the `-pldefs' option
 %%       is specified)<br/>
@@ -2785,13 +2785,13 @@ c() ->
 %%   <dt><a id="cmdline-option-translate_type"/>
 %%       `-translate_type TMsFs'</dt>
 %%     <dd>Call functions in `TMsFs' to pack, unpack, merge and verify
-%%       for the specifed type. The `TMsFs' is a string on the
+%%       for the specified type. The `TMsFs' is a string on the
 %%       following format: `type=Type,e=Mod:Fn,d=Mod:Fn[,m=Mod:Fn][,V=Mod:Fn]'.
 %%       The Type and specified modules and functions are called and used
 %%       as follows:
 %%       <dl>
 %%         <dt>`type=Type'</dt>
-%%         <dd>Specfies that the translations apply to fields of type.
+%%         <dd>Specifies that the translations apply to fields of type.
 %%             The `Type' may be either of:
 %%             `msg:MsgName' (after any renaming operations),
 %%             `enum:EnumName', `int32', `int64', `uint32', `uint64',
@@ -2813,7 +2813,7 @@ c() ->
 %%         <dd>Call `Mod:Fn(Term) -> _' to verify an unpacked `Term'.
 %%             If `Term' is valid, the function is expected to just return
 %%             any value, which is ignored and discarded.
-%%             If `Term' is invalid, the function is exptected to not
+%%             If `Term' is invalid, the function is expected to not
 %%             return anything, but instead either crash, call
 %%             `erlang:error/1', or `throw/1' or `exit/1' with the
 %%             reason for error.
@@ -3260,7 +3260,7 @@ opt_specs() ->
       "       instead of #field{} records, to make the generated code\n"
       "       completely free of even compile-time dependencies to gpb.\n"},
      {"defs-as-maps", undefined, defs_as_maps, "\n"
-      "        Specifies that proto defintions from the generated code\n"
+      "        Specifies that proto definitions from the generated code\n"
       "        are to be returned as maps. Otherwise, they will be lists\n"
       "        of tuples and records (or proplists if the -pldefs option\n"
       "        is specified)\n"},
@@ -3364,7 +3364,7 @@ opt_specs() ->
       "       Erlang protobuffs library:\n"
       "       * encode/1 and encode_MsgName/1\n"
       "       * decode/2 and decode_MsgName/1\n"},
-     {{section, "Quering dependencies"}},
+     {{section, "Querying dependencies"}},
      {"M", {'opt_value()', makefile_rules}, list_deps, "\n"
       "       Generate Makefile rule(s) for dependencies.\n"
       "       No code is generated unless -MMD.\n"},
@@ -4505,6 +4505,8 @@ nepp2_nl(<<"-ifdef", Rest/binary>>, NState, N, Acc) ->
     nepp2_ifdef(Rest, ifdef, NState, N, Acc);
 nepp2_nl(<<"-ifndef", Rest/binary>>, NState, N, Acc) ->
     nepp2_ifdef(Rest, ifndef, NState, N, Acc);
+nepp2_nl(<<"-if", Rest/binary>>, NState, N, Acc) ->
+    nepp2_if(Rest, NState, N, Acc);
 nepp2_nl(<<"-else.\n", Rest/binary>>, #nepp{depth=1}=NState, N, Acc) ->
     nepp2_skip(Rest, NState, N+1, Acc);
 nepp2_nl(<<"-endif.\n", Rest/binary>>, #nepp{depth=1}=NState, N, Acc) ->
@@ -4547,12 +4549,22 @@ nepp2_ifdef(Rest, SkipCond, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
     {Sym, Rest2} = read_until(Rest1, ")", ""),
     {_,   Rest3} = read_until(Rest2, "\n", ""),
     {Txt, Rest4, NState2, N2} =
-    case {dict:is_key(parse_term(Sym), Ds), SkipCond} of
-        {true,  ifdef}  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
-        {false, ifndef} -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
-        _ -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
+        case {dict:is_key(parse_term(Sym), Ds), SkipCond} of
+            {true,  ifdef}  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
+            {false, ifndef} -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
+            _ -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
+        end,
+    nepp2_nl(Rest4, NState2#nepp{depth=Depth}, N2, lists:reverse(Txt, Acc)).
 
-    end,
+nepp2_if(Rest, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
+    {_,    Rest1} = read_until(Rest,  "(", ""),
+    {Cond, Rest2} = read_until(Rest1, ")", ""),
+    {_,    Rest3} = read_until(Rest2, "\n", ""),
+    {Txt,  Rest4, NState2, N2} =
+        case nepp2_eval_cond(Cond, Ds) of
+            true  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
+            false -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
+        end,
     nepp2_nl(Rest4, NState2#nepp{depth=Depth}, N2, lists:reverse(Txt, Acc)).
 
 nepp2_skip(<<"-else.\n", Rest/binary>>, #nepp{depth=Depth}=NState, N, Acc) ->
@@ -4573,6 +4585,28 @@ nepp2_skip(<<$\n, Rest/binary>>, NState, N, Acc) ->
     nepp2_skip(Rest, NState, N+1, Acc);
 nepp2_skip(<<_, Rest/binary>>, NState, N, Acc) ->
     nepp2_skip(Rest, NState, N, Acc).
+
+nepp2_eval_cond(Str, Ds) ->
+    {ok, Tokens, End} = erl_scan:string(Str),
+    Tokens2 = nepp2_simple_expand(Tokens, Ds),
+    {ok, Exprs} = erl_parse:parse_exprs(Tokens2 ++ [{dot, End}]),
+    InitBinds = erl_eval:new_bindings(),
+    {value, Result, _Binds} = erl_eval:exprs(Exprs, InitBinds),
+    Result.
+
+nepp2_simple_expand([{'?', _}, {var, _, Sym} | Rest], Ds) ->
+    nepp2_assert_not_parameterized(Sym, Rest),
+    Val = dict:fetch(Sym, Ds),
+    [erl_parse:abstract(Val) | nepp2_simple_expand(Rest, Ds)];
+nepp2_simple_expand([Tok | Rest], Ds) ->
+    [Tok | nepp2_simple_expand(Rest, Ds)];
+nepp2_simple_expand([], _Ds) ->
+    [].
+
+nepp2_assert_not_parameterized(Sym, [{'(', _} | _]) ->
+    error({not_implemeted, nepp2, parameterized_macros, Sym});
+nepp2_assert_not_parameterized(_Sym, _) ->
+    ok.
 
 read_until(<<C, Rest/binary>>, Delims, Acc) ->
     case lists:member(C, Delims) of
