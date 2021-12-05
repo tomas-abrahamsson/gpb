@@ -1,5 +1,15 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.2
+2021-Dec-05
+
+        * Wrap no_underspecs in a preprocessor check. (#212)
+
+        * Fix typos.  Thanks to Ang Kian Meng Ang. (#213)
+
+        * Fix potential dialyzer issue for type encoders when all fields
+          are translated.
+
 Version 4.19.1
 2021-Aug-28
 
