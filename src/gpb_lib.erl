@@ -96,6 +96,7 @@
 -export([target_may_fail_compilation_for_flat_oneof_for_maps/1]).
 -export([target_has_stacktrace_syntax/1]).
 -export([target_has_map_iterators/1]).
+-export([target_has_nifs_directive/1]).
 -export([current_otp_release/0]).
 -export([proto2_type_default/3]).
 -export([proto3_type_default/3]).
@@ -790,6 +791,12 @@ target_has_stacktrace_syntax(Opts) ->
 %% usage is guaranteed to be bounded no matter the size of the map."
 target_has_map_iterators(Opts) ->
     is_target_major_version_at_least(21, Opts).
+
+%% In Erlang 25, declaring functions overridden as NIFs
+%% in -nifs([fn1/1, fn2/1, ...]). allows for the compiler and loader
+%% to do better.
+target_has_nifs_directive(Opts) ->
+    is_target_major_version_at_least(25, Opts).
 
 proto2_type_default(Type, Defs, Opts) ->
     type_default(Type, Defs, Opts, fun gpb:proto2_type_default/2).

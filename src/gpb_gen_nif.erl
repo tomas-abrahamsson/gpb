@@ -28,6 +28,10 @@
 -module(gpb_gen_nif).
 
 -export([format_load_nif/2]).
+-export([format_encoder_nifs_fns/3]).
+-export([format_decoder_nifs_fns/3]).
+-export([format_to_json_nifs_fns/3]).
+-export([format_from_json_nifs_fns/3]).
 -export([format_nif_encoder_error_wrappers/3]).
 -export([format_nif_decoder_error_wrappers/3]).
 -export([format_nif_to_json_error_wrappers/3]).
@@ -79,7 +83,13 @@ replace_tilde_s(<<C, Rest/binary>>, ModBin, VsnBin) ->
 replace_tilde_s(<<>>, _ModBin, _VsnBin) ->
     <<>>.
 
-%% error wrappers for encoders
+%%% Encoders
+%%%
+format_encoder_nifs_fns(Defs, _AnRes, _Opts) ->
+    [?f("~p/1", [gpb_lib:mk_fn(encode_msg_, MsgName)])
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+%% error wrappers
 format_nif_encoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_encode_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
@@ -92,7 +102,13 @@ format_msg_nif_encode_error_wrapper(MsgName) ->
       end,
       [replace_term('<msg-name>', MsgName)]).
 
-%% error wrappers for decoders
+%%% Decoders
+%%%
+format_decoder_nifs_fns(Defs, _AnRes, _Opts) ->
+    [?f("~p/1", [gpb_lib:mk_fn(decode_msg_, MsgName)])
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+%% error wrappers
 format_nif_decoder_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_decode_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
@@ -105,7 +121,13 @@ format_msg_nif_decode_error_wrapper(MsgName) ->
       end,
       [replace_term('<msg-name>', MsgName)]).
 
-%% error wrappers for to_json
+%%% TO_JSON
+%%%
+format_to_json_nifs_fns(Defs, _AnRes, _Opts) ->
+    [?f("~p/1", [gpb_lib:mk_fn(to_json_msg_, MsgName)])
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+%% error wrappers
 format_nif_to_json_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_to_json_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].
@@ -118,7 +140,13 @@ format_msg_nif_to_json_error_wrapper(MsgName) ->
       end,
       [replace_term('<msg-name>', MsgName)]).
 
-%% error wrappers for from_json
+%%% FROM_JSON
+%%%
+format_from_json_nifs_fns(Defs, _AnRes, _Opts) ->
+    [?f("~p/1", [gpb_lib:mk_fn(from_json_msg_, MsgName)])
+     || {{msg, MsgName}, _MsgDef} <- Defs].
+
+%% error wrappers
 format_nif_from_json_error_wrappers(Defs, _AnRes, _Opts) ->
     [format_msg_nif_from_json_error_wrapper(MsgName)
      || {{msg, MsgName}, _MsgDef} <- Defs].

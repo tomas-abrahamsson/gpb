@@ -495,6 +495,20 @@ no_dialyzer_attributes_for_erlang_version_pre_18_test() ->
     S2 = compile_to_string(Proto, [{target_erlang_version,18}]),
     true = gpb_lib:is_substr("-dialyzer(", S2).
 
+nifs_attribute_for_erlang_version_25_or_later_test() ->
+    %% -nifs([...]). for Erlang >= 25 helps the compiler and loader to do better
+    Proto = "message m { repeated uint32 f1 = 1; }",
+    %% No nif option: no -nifs(...) regardless of version
+    S1 = compile_to_string(Proto, [{target_erlang_version, 24}]),
+    false = gpb_lib:is_substr("-nifs(", S1),
+    S2 = compile_to_string(Proto, [{target_erlang_version, 25}]),
+    false = gpb_lib:is_substr("-nifs(", S2),
+    %% WITH the nif option:
+    S3 = compile_to_string(Proto, [{target_erlang_version, 24}, nif]),
+    false = gpb_lib:is_substr("-nifs(", S3),
+    S4 = compile_to_string(Proto, [{target_erlang_version, 25}, nif]),
+    true = gpb_lib:is_substr("-nifs(", S4).
+
 empty_group_test() ->
     M = compile_iolist("syntax = \"proto2\";
                         message Quz {optional group E = 11 {}}",

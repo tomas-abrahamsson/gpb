@@ -4165,6 +4165,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                   dec_maps_as_msgs=DMapsAsMsgs}=AnRes,
            Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
+    DoNifsDirective = gpb_lib:target_has_nifs_directive(Opts),
     IncludeModHrlPrepend = proplists:get_value(include_mod_hrl_prepend, Opts,
                                                ""),
     AsLib = proplists:get_bool(include_as_lib, Opts),
@@ -4197,7 +4198,17 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
        ?f("-export([gpb_version_as_string/0, gpb_version_as_list/0]).~n"),
        ?f("-export([gpb_version_source/0]).~n"),
        "\n",
-       [["-on_load(load_nif/0).\n",
+       [[[?f("-nifs([~s]).~n",
+             [gpb_lib:comma_join(
+                lists:append(
+                  [gpb_gen_nif:format_encoder_nifs_fns(Defs, AnRes, Opts),
+                   gpb_gen_nif:format_decoder_nifs_fns(Defs, AnRes, Opts)] ++
+                  [gpb_gen_nif:format_to_json_nifs_fns(Defs, AnRes, Opts)
+                   || DoJson] ++
+                  [gpb_gen_nif:format_from_json_nifs_fns(Defs, AnRes, Opts)
+                  || DoJson]))])
+          || DoNifsDirective],
+         "-on_load(load_nif/0).\n",
          "-export([load_nif/0]). %% for debugging of nif loading\n",
          "\n"]
         || DoNif],
