@@ -1,5 +1,10 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.3
+2022-Mar-05
+
+        * Emit a -nifs() attribute on Erlang 25 when generating nifs.
+
 Version 4.19.2
 2021-Dec-05
 
