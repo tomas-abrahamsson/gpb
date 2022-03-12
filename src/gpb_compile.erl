@@ -579,6 +579,9 @@ file(File) ->
 %% directory of the `gpb' application. This can be used either when this
 %% directory is not available or to provide a custom set of well known types.
 %%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-ignore-priv-dir">-ignore-priv-dir</a>.
+%%
 %% <!-- ======================================================== -->
 %% <h3><a id="optionsection-formats"/>
 %%     Format of the Erlang representation
@@ -2406,6 +2409,13 @@ c() ->
 %%       <a href="#option-o_erl">o_erl</a>,
 %%       <a href="#option-o_hrl">o_hrl</a> and
 %%       <a href="#option-o_nif_cc">o_nif_cc</a>.</dd>
+%%    <dt><a id="cmdline-option-ignore-priv-dir"/>
+%%        `-ignore-priv-dir'</dt>
+%%     <dd>Will stop gpb from looking for a well known types directory
+%%       by trying to locate the `priv' directory of the gpb app.<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-ignore_wellknown_types_directory"
+%%                       >ignore_wellknown_types_directory</a></dd>
 %% </dl>
 %%
 %% Format of the Erlang representation
@@ -3136,6 +3146,9 @@ opt_specs() ->
      {"o-nif-cc", 'string()', o_nif_cc, "Dir\n"
       "       Specify output directory for where to generate\n"
       "       the NIF C++ file, if the -nif option is specified\n"},
+     {"ignore-priv-dir", undefined, ignore_wellknown_types_directory, "\n"
+      "       Will stop gpb from looking for a well known types directory\n"
+      "       by trying to locate the priv directory of the gpb app.\n"},
      {{section, "Format of the Erlang representation"}},
      {"strbin", undefined, strings_as_binaries, "\n"
       "       Specify that decoded strings should be returned as binaries,\n"

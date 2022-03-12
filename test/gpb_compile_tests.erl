@@ -5116,6 +5116,11 @@ opt_test() ->
            "-o-erl", "o-erl-dir",
            "-o-hrl", "o-hrl-dir",
            "x.proto", "y.proto"]),
+    {ok, {[ignore_wellknown_types_directory],
+          ["x.proto", "y.proto"]}} =
+        gpb_compile:parse_opts_and_args(
+          ["-ignore-priv-dir",
+           "x.proto", "y.proto"]),
     %% nif related
     {ok, {[{o_nif_cc, "o-nif-cc-dir"},
            nif,
