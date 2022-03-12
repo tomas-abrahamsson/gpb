@@ -20,8 +20,8 @@
 %% @doc This module contains a data-driven encoder/decoder plus some auxiliary
 %% helper functions.
 %%
-%% For information on how to generate code for a set or `.proto' files,
-%% see {@link gpb_compile}.
+%% For information on how to generate code for a set of `.proto' files,
+%% see the {@link gpb_compile} module.
 %%
 %% The reason for keeping this (slower) data-driven encoder/decoder is
 %% mostly to be able to cross-check with the generated encoder/decoder.
