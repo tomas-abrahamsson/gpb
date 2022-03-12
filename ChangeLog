@@ -1,5 +1,11 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.4
+2022-Mar-12
+
+        * Add a command line option -ignore-priv-dir for
+          the ignore_wellknown_types_directory option.
+
 Version 4.19.3
 2022-Mar-05
 
