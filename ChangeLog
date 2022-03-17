@@ -1,5 +1,12 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.5
+2022-Mar-17
+
+        * Fix a bug with the import_fetcher option and multiple imports.
+          An error {multiply_defined_file_or_files,["from_fetched.proto"]}
+          could occur and the defs would refer to the wrong proto file.
+
 Version 4.19.4
 2022-Mar-12
 
