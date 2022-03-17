@@ -3841,8 +3841,8 @@ locate_read_input_once(Input, CheckSeen, ImEnv) ->
             {error, {locate, Reason}}
     end.
 
-parse_one_input(#path{orig=In}, Content, #import_env{opts=Opts}) ->
-    FName = file_name_from_input(In),
+parse_one_input(Path, Content, #import_env{opts=Opts}) ->
+    FName = path_to_filename(Path, orig),
     case scan_and_parse_string(Content, FName, Opts) of
         {ok, Defs} ->
             Imports = gpb_defs:fetch_imports(Defs),
@@ -3876,9 +3876,6 @@ add_curr_dir_as_include_if_needed(Opts) ->
         true  -> Opts;
         false -> Opts ++ [{i,"."}]
     end.
-
-file_name_from_input({Mod,_S}) -> lists:concat([Mod, ".proto"]);
-file_name_from_input(FName)    -> FName.
 
 scan_and_parse_string(S, FName, Opts) ->
     case gpb_scan:binary(unicode:characters_to_binary(S)) of

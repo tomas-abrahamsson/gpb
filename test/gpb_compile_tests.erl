@@ -199,6 +199,26 @@ flush_msgs() ->
             []
     end.
 
+several_imports_with_fetcher_test() ->
+    A = <<"import 'b.proto';
+           import 'c.proto';
+           message A { optional uint32 a = 1; }">>,
+    B = <<"message B { optional uint32 b = 2; }">>,
+    C = <<"message C { optional uint32 c = 3; }">>,
+    Fetcher = fun("b.proto") -> {ok, binary_to_list(B)};
+                 ("c.proto") -> {ok, binary_to_list(C)}
+              end,
+    Vsn = gpb_defs:latest_defs_version(),
+    {ok, [{proto_defs_version, Vsn} | Defs], _Warns=[]} =
+        gpb_compile:string(a, binary_to_list(A),
+                           [to_proto_defs,
+                            return_errors, return_warnings,
+                            {import_fetcher, Fetcher},
+                            {proto_defs_version, Vsn}]),
+    ["a.proto", "b.proto", "c.proto"] =
+        [Full || {file, {_BaseSansExt, Full}} <- Defs],
+    ok.
+
 parses_file_to_binary_test() ->
     Contents = <<"message Msg { required uint32 field1 = 1; }\n">>,
     {ok, 'X', Code, []} =
