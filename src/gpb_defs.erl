@@ -40,6 +40,8 @@
 -export_type([field/0]).
 -export_type([version/0]).
 
+-export([rootward_names/2]).
+
 -include("../include/gpb.hrl").
 
 -include_lib("eunit/include/eunit.hrl").

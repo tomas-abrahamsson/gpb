@@ -65,6 +65,10 @@
 -export([fold_msg_or_group_fields_o/3]).
 -export([fold_msgdef_fields/3]).
 -export([fold_msgdef_fields_o/3]).
+-export([mapfold_msg_or_group_fields_o/3]).
+-export([mapfold_msgdef_fields_o/3]).
+-export([map_msg_fields_o/2]).
+-export([map_msgdef_fields_o/2]).
 
 -export([mapping_match/3]).
 -export([mapping_create/3]).
@@ -435,8 +439,6 @@ fold_msg_or_group_fields_o(Fun, InitAcc, Defs) ->
       InitAcc,
       Defs).
 
-
-
 %% The fun takes 3 args: Fun(#?gpb_field{}, IsOneof, Acc) -> Acc1
 fold_msgdef_fields_o(Fun, InitAcc, Fields) ->
     lists:foldl(
@@ -449,6 +451,69 @@ fold_msgdef_fields_o(Fun, InitAcc, Fields) ->
                           OFields)
       end,
       InitAcc,
+      Fields).
+
+%% MFFun takes 5 args:
+%% MFFun(msg | group, MsgName, Field, IsOneof, Acc) -> {Field1, Acc1}
+mapfold_msg_or_group_fields_o(MFFun, Acc0, Defs) ->
+    lists:mapfoldl(
+      fun({{Type, Name}, Fields}, Acc) when Type =:= msg;
+                                            Type =:= group ->
+              MFFun1 = fun(Field, IsOneof, FAcc) ->
+                               MFFun(Type, Name, Field, IsOneof, FAcc)
+                       end,
+              {Fields1, AccOut} = mapfold_msgdef_fields_o(MFFun1, Acc, Fields),
+              MsgOrGroup1 = {{Type, Name}, Fields1},
+              {MsgOrGroup1, AccOut};
+         (Other, Acc) ->
+              {Other, Acc}
+      end,
+      Acc0,
+      Defs).
+
+%% MFFun takes 4 args:
+%% MFFun(Field, IsOneof, Acc) -> {Field1, Acc1}
+mapfold_msgdef_fields_o(MFFun, Acc0, Fields) ->
+    lists:mapfoldl(
+      fun(#?gpb_field{}=Field, Acc) ->
+              MFFun(Field, false, Acc);
+         (#gpb_oneof{name=CFName, fields=OFields}=Field, Acc)->
+              {OFields1, AccOut} =
+                  lists:mapfoldl(
+                    fun(OField, Acc2) -> MFFun(OField, {true, CFName}, Acc2)
+                    end,
+                    Acc,
+                    OFields),
+              {Field#gpb_oneof{fields = OFields1}, AccOut}
+      end,
+      Acc0,
+      Fields).
+
+%% The fun takes 4 args: Fun(Msgname, #?gpb_field{}=F1, IsOneof) -> F2
+map_msg_fields_o(Fun, Defs) ->
+    lists:map(
+      fun({{msg, MsgName}, Fields}) ->
+              FFun = fun(Field, IsOneOf) ->
+                             Fun(MsgName, Field, IsOneOf)
+                     end,
+              Fields1 = map_msgdef_fields_o(FFun, Fields),
+              {{msg, MsgName}, Fields1};
+         (OtherElem) ->
+              OtherElem
+      end,
+      Defs).
+
+map_msgdef_fields_o(FFun, Fields) ->
+    lists:map(
+      fun(#?gpb_field{}=Field) ->
+              FFun(Field, false);
+         (#gpb_oneof{name=CFName, fields=OFields}=Field)->
+              OFields1 = lists:map(
+                           fun(OField) -> FFun(OField, {true, CFName})
+                           end,
+                           OFields),
+              Field#gpb_oneof{fields = OFields1}
+      end,
       Fields).
 
 %% Record or map expr helpers --------

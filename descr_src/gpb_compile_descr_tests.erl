@@ -19,6 +19,9 @@
 
 -module(gpb_compile_descr_tests).
 
+-export([compile_descriptors/2]). % for use from gpb_parse_descr_tests.erl
+-export([compile_files_as_iolists/2]). % for use from gpb_parse_descr_tests.erl
+
 -include_lib("kernel/include/file.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("gpb_descriptor.hrl").
@@ -210,6 +213,27 @@ service_rpc_streams_test() ->
                                      client_streaming=ArgStream,
                                      server_streaming=RetStream} <- Methods],
     ok.
+
+package_and_use_packges_opt_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax=\"proto2\";",
+           "package a.b.c;",
+           "message M {",
+           "  optional .a.b.c.Sub f = 1;",
+           "  optional Sub        g = 2;",
+           "}",
+           "message Sub { }"]}],
+    {_,
+     [{"main",
+       #'FileDescriptorProto'{
+          message_type = [#'DescriptorProto'{name="M", field=Fields},
+                          #'DescriptorProto'{name="Sub"}]}}]} =
+        compile_descriptors(ProtosAsTxts, [use_packages]),
+    %% type_names should have full package path regardless of how they
+    %% were specified in the .proto:
+    [#'FieldDescriptorProto'{type_name=".a.b.c.Sub"},
+     #'FieldDescriptorProto'{type_name=".a.b.c.Sub"}] = Fields.
 
 nested_definitions_test() ->
     ProtosAsTxts =

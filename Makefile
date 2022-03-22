@@ -190,11 +190,12 @@ DESCR_PROTO_HRL := $(descr_src)/gpb_descriptor.hrl
 
 DESCR_MODULES := \
 	gpb_compile_descr \
+	gpb_parse_descr \
 	$(patsubst $(priv)/proto3/google/protobuf/%.proto,gpb_%,$(DESCR_PROTO))
 
 TEST_MODULES := \
 	$(patsubst $(test)/%.erl,%,$(wildcard $(test)/*.erl)) \
-	gpb_compile_descr_tests
+	gpb_compile_descr_tests gpb_parse_descr_tests
 
 # Run eunit on these modules:
 # - If module M and M_tests exist, only include M (M_tests is then implicit)
@@ -358,6 +359,7 @@ $(ebin)/gpb_lib.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_names.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_parse.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_compile_descr.beam: $(incdir)/gpb.hrl 
+$(ebin)/gpb_parse_descr.beam: $(incdir)/gpb.hrl 
 $(test)/gpb_compile_tests.beam: $(incdir)/gpb.hrl
 $(test)/gpb_compile_maps_tests.beam: $(incdir)/gpb.hrl
 $(test)/gpb_names_tests.beam: $(incdir)/gpb.hrl
@@ -378,10 +380,16 @@ $(test)/gpb_compile_tests.beam: $(test)/gpb_compile_tests.erl \
 
 # To compile the description generator (and its unit tests), we
 # must first have compiled the proto file for the gpb_description.proto
-$(ebin)/gpb_compile_descr.beam: $(descr_src)/gpb_compile_descr.erl \
+$(ebin)/gpb_compile_descr.beam: $(descr_src)/gpb_compile_descr.erl	\
 				$(DESCR_PROTO_ERL)
 
 $(test)/gpb_compile_descr_tests.beam: $(descr_src)/gpb_compile_descr_tests.erl \
+				$(DESCR_PROTO_ERL)
+
+$(ebin)/gpb_parse_descr.beam: $(descr_src)/gpb_parse_descr.erl \
+				$(DESCR_PROTO_ERL)
+
+$(test)/gpb_parse_descr_tests.beam: $(descr_src)/gpb_parse_descr_tests.erl \
 				$(DESCR_PROTO_ERL)
 
 

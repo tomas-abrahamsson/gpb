@@ -109,7 +109,12 @@ main(_) ->
          {filename:join(EbinPath, "gpb_compile_descr.beam"),
           ["descr_src/gpb_compile_descr.erl",
            "descr_src/gpb_descriptor.hrl"],
-          compile_file_cmd("descr_src/gpb_compile_descr.erl", ErlcOpts)}],
+          compile_file_cmd("descr_src/gpb_compile_descr.erl", ErlcOpts)},
+
+         {filename:join(EbinPath, "gpb_parse_descr.beam"),
+          ["descr_src/gpb_parse_descr.erl",
+           "descr_src/gpb_descriptor.hrl"],
+          compile_file_cmd("descr_src/gpb_parse_descr.erl", ErlcOpts)}],
 
     make(MakeScript),
     case filelib:is_dir(TestPath) of
@@ -128,6 +133,13 @@ main(_) ->
                    "descr_src/gpb_compile_descr.erl",
                    "descr_src/gpb_descriptor.hrl"],
                   compile_file_cmd("descr_src/gpb_compile_descr_tests.erl",
+                                   ErlcTestOpts)},
+
+                 {filename:join(TestPath, "gpb_parse_descr_tests.beam"),
+                  ["descr_src/gpb_parse_descr_tests.erl",
+                   "descr_src/gpb_parse_descr.erl",
+                   "descr_src/gpb_descriptor.hrl"],
+                  compile_file_cmd("descr_src/gpb_parse_descr_tests.erl",
                                    ErlcTestOpts)}],
             make(TestMakeScript);
         _ ->
