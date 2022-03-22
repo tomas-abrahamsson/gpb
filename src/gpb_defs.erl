@@ -62,7 +62,7 @@
                {{extensions, MsgName::atom()}, [field_number_extension()]} |
                {{extend, MsgName::atom()}, MoreFields::[field()]} |
                {proto3_msgs, [MsgName::atom()]} |
-               {{reserved_numbers, MsgName::atom()}, [integer()]} |
+               {{reserved_numbers, MsgName::atom()}, [reserved_num()]} |
                {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
                {import, ProtoFile::string()} |
                {{msg_options, MsgName::atom()}, [msg_option()]} |
@@ -78,6 +78,7 @@
                {file, {BaseSansExt::string(), Base::string()}}.
 -type field() :: #?gpb_field{} | #gpb_oneof{}.
 -type field_number_extension() :: {Lower::integer(), Upper::integer() | max}.
+-type reserved_num() :: integer() | {Lower::integer(), Upprt::integer() | max}.
 -type msg_option() :: {[NameComponent::atom()], OptionValue::term()}.
 -type enum_option() :: {atom() | [NameComponent::atom()], OptionValue::term()}.
 -type ee_option() :: {atom() | [NameComponent::atom()], OptionValue::term()}.
