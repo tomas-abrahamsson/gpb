@@ -137,7 +137,7 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
     #'FileDescriptorProto'{
        name             = Name1,     %% string() | undefined
        package          = Pkg,
-       dependency       = [],        %% [string()]
+       dependency       = [Dep || {import, Dep} <- Defs], %% [string()]
        message_type     = Msg ++ MapMsgs,
        enum_type        = Enums,
        service          = defs_to_service(Defs1),
