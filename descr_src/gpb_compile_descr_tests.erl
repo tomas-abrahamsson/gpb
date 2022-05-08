@@ -209,8 +209,16 @@ nested_definitions_test() ->
                       [#'DescriptorProto'{
                           name="S",
                           field=[#'FieldDescriptorProto'{type_name=".M.S.EE"}],
-                          enum_type=[#'EnumDescriptorProto'{name="EE"}]}],
-                  enum_type = [#'EnumDescriptorProto'{name="E"}]}]}}]} =
+                          enum_type=[#'EnumDescriptorProto'{
+                                        name="EE",
+                                        value=[#'EnumValueDescriptorProto'{
+                                                  name="aa",
+                                                  number=0}]}]}],
+                  enum_type = [#'EnumDescriptorProto'{
+                                  name="E",
+                                  value=[#'EnumValueDescriptorProto'{
+                                            name="a",
+                                            number=0}]}]}]}}]} =
         compile_descriptors(ProtosAsTxts, []).
 
 proto3_optional_test() ->

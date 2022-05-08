@@ -322,7 +322,7 @@ defs_to_types([{{_Path, {{enum, EnumName}, Enumerators}}, []} | Rest],
               value = [#'EnumValueDescriptorProto'{
                           name   = atom_to_ustring(EName),
                           number = EValue}
-                       || {EName, EValue} <- Enumerators]},
+                       || {EName, EValue, _EOpts} <- Enumerators]},
     defs_to_types(Rest, MapTypesToPseudoMsgNames, [Item | Acc]);
 defs_to_types([], _MapTypesToPseudoMsgNames, Acc) ->
     lists:partition(fun(#'DescriptorProto'{}) -> true;
