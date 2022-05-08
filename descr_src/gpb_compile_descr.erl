@@ -33,11 +33,14 @@ encode_defs_to_descriptors(Defs, Opts) ->
     encode_defs_to_descriptors(undefined, Defs, Opts).
 
 encode_defs_to_descriptors(DefaultName, Defs, Opts) ->
-    Defs1 = synthesize_proto3_optional_oneofs(Defs),
+    %% In case this function is called directly (ie not from gpb_compile)
+    %% with some defs:
+    {ok, Defs1} = gpb_defs:convert_defs_to_latest_version(Defs),
+    Defs2 = synthesize_proto3_optional_oneofs(Defs1),
     %% Encode the list of files as a #'FileDescriptorSet'{}.
     %% Encode also for each constituent proto, ie the top level and each
     %% imported proto separately, as #'FileDescriptorProto'{}.
-    PDefses = partition_protos(Defs1, DefaultName, [], []),
+    PDefses = partition_protos(Defs2, DefaultName, [], []),
     {FdSet, Infos} = partitioned_defs_to_file_descr_set(PDefses, Opts),
     Bin = gpb_descriptor:encode_msg(FdSet, [verify]),
     PBins = [{FileNameSansExt, gpb_descriptor:encode_msg(FdProto, [verify])}
