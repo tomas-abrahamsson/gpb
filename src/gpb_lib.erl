@@ -109,6 +109,7 @@
 -export([json_null/1]).
 -export([get_gen_mergers/1]).
 -export([get_gen_introspect/1]).
+-export([possibly_adjust_proto_defs_version_opt/1]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
@@ -875,6 +876,15 @@ get_gen_mergers(Opts) ->
 
 get_gen_introspect(Opts) ->
     proplists:get_value(gen_introspect, Opts, true).
+
+possibly_adjust_proto_defs_version_opt(Opts) ->
+    case proplists:get_value(proto_defs_version, Opts) of
+        undefined ->
+            %% Default version is 1 for now
+            [{proto_defs_version, 1} | Opts];
+        _Vsn ->
+            Opts
+    end.
 
 %% Syntax tree stuff ----
 
