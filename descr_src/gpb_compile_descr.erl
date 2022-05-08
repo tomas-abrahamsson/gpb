@@ -28,6 +28,9 @@
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
 
+-record(to_defs_env, {pseudo_msg_names,
+                      msg_options,
+                      enum_options}).
 
 encode_defs_to_descriptors(Defs, Opts) ->
     encode_defs_to_descriptors(undefined, Defs, Opts).
@@ -135,8 +138,13 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
     Defs1 = process_refs(Defs, Adjuster),
     {TypesToPseudoMsgNames, PseudoMsgs} =
         compute_map_field_pseudo_msgs(Defs1, Opts, Adjuster),
-    {Msg, Enums} = nest_defs_to_types(Defs1, TypesToPseudoMsgNames),
-    MapMsgs = maptype_defs_to_msgtype(PseudoMsgs, TypesToPseudoMsgNames),
+    MsgOptions = collect_msg_options(Defs),
+    EnumOptions = collect_enum_options(Defs),
+    ToDefsEnv = #to_defs_env{pseudo_msg_names = TypesToPseudoMsgNames,
+                             msg_options = MsgOptions,
+                             enum_options = EnumOptions},
+    {Msg, Enums} = nest_defs_to_types(Defs1, ToDefsEnv),
+    MapMsgs = maptype_defs_to_msgtype(PseudoMsgs, ToDefsEnv),
     #'FileDescriptorProto'{
        name             = Name1,     %% string() | undefined
        package          = Pkg,
@@ -219,11 +227,6 @@ process_refs(Defs, RefOp) ->
          ({{reserved_names, MsgName}, FieldNames}) ->
               MsgName1 = do_name_ref(MsgName, RefOp),
               {{reserved_names, MsgName1}, FieldNames};
-         ({{msg_options, MsgName}, MsgOpts}) ->
-              MsgName1 = do_name_ref(MsgName, RefOp),
-              MsgOpts1 = [{process_refs_path(NameComponents, RefOp), OptVal}
-                          || {NameComponents, OptVal} <- MsgOpts],
-              {{msg_options, MsgName1}, MsgOpts1};
          ({{service,ServiceName}, Rpcs}) ->
               Rpcs1 = do_rpc_refs(Rpcs, RefOp),
               {{service,ServiceName}, Rpcs1};
@@ -265,14 +268,6 @@ do_rpc_refs(Rpcs, RefOp) ->
 name_to_components(Name) ->
     gpb_lib:string_lexemes(atom_to_list(Name), ".").
 
-components_to_name(["." | Rest]) ->
-    list_to_atom("." ++ gpb_lib:dot_join(Rest));
-components_to_name(Components) ->
-    list_to_atom(gpb_lib:dot_join(Components)).
-
-process_refs_path(NameComponents, RefOp) ->
-    name_to_components(do_name_ref(components_to_name(NameComponents), RefOp)).
-
 do_name_ref(Name, RefOp) when is_atom(Name) ->
     RefOp(Name).
 
@@ -282,7 +277,7 @@ prepend_pkg(Name, PkgComponents) ->
 root_ref(Name) ->
     list_to_atom("." ++ atom_to_list(Name)).
 
-nest_defs_to_types(Defs, MapTypesToPseudoMsgNames) ->
+nest_defs_to_types(Defs, ToDefsEnv) ->
     NCs = lists:sort(
             lists:foldl(
               fun({{msg,Name}, _}=Def, Acc) ->
@@ -296,38 +291,39 @@ nest_defs_to_types(Defs, MapTypesToPseudoMsgNames) ->
               [],
               Defs)),
     Nestings = mk_prefix_tree(NCs, []),
-    defs_to_types(Nestings, MapTypesToPseudoMsgNames, []).
+    defs_to_types(Nestings, ToDefsEnv, []).
 
 defs_to_types([{{_Path, {{_msg_or_group, MsgName}, Fields}}, ChildItems}
                | Rest],
-              MapTypesToPseudoMsgNames,
+              #to_defs_env{msg_options=MsgOptionsByName}=ToDefsEnv,
               Acc) when _msg_or_group == msg;
                         _msg_or_group == group ->
     OneofNames = oneof_names_synthetic_last(Fields),
-    {SubMsgs, SubEnums} = defs_to_types(ChildItems, MapTypesToPseudoMsgNames,
-                                        []),
+    {SubMsgs, SubEnums} = defs_to_types(ChildItems, ToDefsEnv, []),
     Item = #'DescriptorProto'{
               name            = atom_to_ustring_base(MsgName),
               field           = field_defs_to_mgstype_fields(
-                                  Fields, OneofNames, MapTypesToPseudoMsgNames),
+                                  Fields, OneofNames, ToDefsEnv),
               extension       = [],
               nested_type     = SubMsgs,
               enum_type       = SubEnums,
               extension_range = [],
-              options         = undefined,
+              options         = msg_options(MsgName, MsgOptionsByName),
               oneof_decl      = oneof_decl(OneofNames)},
-    defs_to_types(Rest, MapTypesToPseudoMsgNames, [Item | Acc]);
+    defs_to_types(Rest, ToDefsEnv, [Item | Acc]);
 defs_to_types([{{_Path, {{enum, EnumName}, Enumerators}}, []} | Rest],
-              MapTypesToPseudoMsgNames,
+              #to_defs_env{enum_options=EnumOptionsByName}=ToDefsEnv,
               Acc) ->
     Item = #'EnumDescriptorProto'{
               name  = atom_to_ustring_base(EnumName),
               value = [#'EnumValueDescriptorProto'{
                           name   = atom_to_ustring(EName),
-                          number = EValue}
-                       || {EName, EValue, _EOpts} <- Enumerators]},
-    defs_to_types(Rest, MapTypesToPseudoMsgNames, [Item | Acc]);
-defs_to_types([], _MapTypesToPseudoMsgNames, Acc) ->
+                          number = EValue,
+                          options = enum_value_options(EOpts)}
+                       || {EName, EValue, EOpts} <- Enumerators],
+              options = enum_options(EnumName, EnumOptionsByName)},
+    defs_to_types(Rest, ToDefsEnv, [Item | Acc]);
+defs_to_types([], _ToDefsEnv, Acc) ->
     lists:partition(fun(#'DescriptorProto'{}) -> true;
                        (#'EnumDescriptorProto'{}) -> false
                     end,
@@ -351,11 +347,11 @@ is_synthetic_oneof(Field) ->
             false
     end.
 
-maptype_defs_to_msgtype(MapPseudoMsgs, MapTypesToPseudoMsgNames) ->
+maptype_defs_to_msgtype(MapPseudoMsgs, ToDefsEnv) ->
     [#'DescriptorProto'{
         name            = atom_to_ustring_base(MsgName),
         field           = field_defs_to_mgstype_fields(
-                            Fields, [], MapTypesToPseudoMsgNames),
+                            Fields, [], ToDefsEnv),
         extension       = [],
         nested_type     = [],
         enum_type       = [],
@@ -365,10 +361,9 @@ maptype_defs_to_msgtype(MapPseudoMsgs, MapTypesToPseudoMsgNames) ->
        }
      || {{msg,MsgName}, Fields} <- MapPseudoMsgs].
 
-field_defs_to_mgstype_fields(Fields, AllOneofs, MapTypesToPseudoMsgNames) ->
+field_defs_to_mgstype_fields(Fields, AllOneofs, ToDefsEnv) ->
     lists:append([field_def_to_msgtype_field(Field, AllOneofs,
-                                             MapTypesToPseudoMsgNames,
-                                             undefined)
+                                             ToDefsEnv, undefined)
                   || Field <- Fields]).
 
 field_def_to_msgtype_field(#?gpb_field{name=FName,
@@ -377,7 +372,8 @@ field_def_to_msgtype_field(#?gpb_field{name=FName,
                                        occurrence=Occurrence,
                                        opts=Opts}=Field,
                            _AllOneofs,
-                           MapTypesToPseudoMsgNames,
+                           #to_defs_env{
+                              pseudo_msg_names=MapTypesToPseudoMsgNames},
                            Proto3Optional) ->
     [#'FieldDescriptorProto'{
         name          = atom_to_ustring_base(FName),
@@ -465,19 +461,36 @@ field_default_value(#?gpb_field{type=Type, opts=Opts}) ->
     end.
 
 field_options(Opts) ->
-    Packed = case lists:member(packed, Opts) of
-                 true  -> true;
-                 false -> undefined
-             end,
-    Deprecated = case lists:member(deprecated, Opts) of
-                     true  -> true;
-                     false -> undefined
-                 end,
-    if Packed == undefined, Deprecated == undefined ->
-            undefined;
-       true ->
+    Packed = get_bool_opt(packed, Opts),
+    Deprecated = get_bool_opt(deprecated, Opts),
+    if Packed == true;
+       Deprecated == true ->
             #'FieldOptions'{packed     = Packed,
-                            deprecated = Deprecated}
+                            deprecated = Deprecated};
+       true ->
+            undefined
+    end.
+
+msg_options(MsgName, D) ->
+    case dict:find(MsgName, D) of
+        error ->
+            undefined;
+        {ok, []} ->
+            undefined;
+        {ok, Opts} ->
+            FNames = record_info(fields, 'MessageOptions'),
+            set_options(Opts, FNames, #'MessageOptions'{})
+    end.
+
+enum_options(EnumName, D) ->
+    case dict:find(EnumName, D) of
+        error ->
+            undefined;
+        {ok, []} ->
+            undefined;
+        {ok, Opts} ->
+            FNames = record_info(fields, 'EnumOptions'),
+            set_options(Opts, FNames, #'EnumOptions'{})
     end.
 
 defs_to_service(Defs) ->
@@ -546,6 +559,57 @@ invent_unused_msg_names_aux(Base, I, N, AllMsgNames) ->
         false -> invent_unused_msg_names_aux(Base, I+1, N, AllMsgNames)
     end.
 
+collect_msg_options(Defs) ->
+    lists:foldl(
+      fun({{msg_options, MsgName}, Opts}, D) ->
+              dict:append_list(MsgName, Opts, D);
+         (_Other, D) ->
+              D
+      end,
+      dict:new(),
+      Defs).
+
+collect_enum_options(Defs) ->
+    lists:foldl(
+      fun({{enum_options, EnumName}, Opts}, D) ->
+              dict:append_list(EnumName, Opts, D);
+         (_Other, D) ->
+              D
+      end,
+      dict:new(),
+      Defs).
+
+enum_value_options(Opts) ->
+    FNames = record_info(fields, 'EnumValueOptions'),
+    set_options(Opts, FNames, #'EnumValueOptions'{}).
+
+set_options(Opts, FNames, Initial) ->
+    Defaults = tl(tuple_to_list(Initial)),
+    Positions = lists:seq(2, length(FNames) + 1),
+    FDPs = lists:zip3(FNames, Defaults, Positions),
+    set_opts2(Opts, FDPs, Initial, false).
+
+set_opts2([Opt | Rest], FDPs, OptMsg, HasChanged) ->
+    %% Normalize opts first for safety
+    {K, V} = if is_tuple(Opt), tuple_size(Opt) == 2 -> Opt;
+                is_atom(Opt) -> {Opt, true}
+             end,
+    case lists:keyfind(K, 1, FDPs) of
+        {K, Default, Pos} ->
+            if V == Default ->
+                    set_opts2(Rest, FDPs, OptMsg, HasChanged);
+               V /= Default ->
+                    OptMsg1 = setelement(Pos, OptMsg, V),
+                    set_opts2(Rest, FDPs, OptMsg1, true)
+            end;
+        false ->
+            set_opts2(Rest, FDPs, OptMsg, HasChanged)
+    end;
+set_opts2([], _FNamesDefaults, OptMsg, HasChanged) ->
+    if HasChanged     -> OptMsg;
+       not HasChanged -> undefined
+    end.
+
 atom_to_ustring(A) ->
     Utf8Str = atom_to_list(A),
     unicode:characters_to_list(list_to_binary(Utf8Str), utf8).
@@ -563,6 +627,14 @@ escape_bytes(<<>>) ->
     "".
 
 escape_char(C) -> ?ff("\\~.8b", [C]).
+
+-spec get_bool_opt(atom(), proplists:proplist()) -> undefined | boolean().
+get_bool_opt(OptKey, Opts) ->
+    case proplists:get_value(OptKey, Opts) of
+        undefined -> undefined;
+        true      -> true;
+        false     -> false
+    end.
 
 mk_prefix_tree([{Path,_Def}=PathDef | Rest], Acc) -> % iterates over sorted list
     {Children, Rest2} =

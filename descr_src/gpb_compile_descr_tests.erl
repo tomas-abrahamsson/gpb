@@ -244,6 +244,48 @@ proto3_optional_test() ->
                               #'OneofDescriptorProto'{}]}]}}]} =
         compile_descriptors(ProtosAsTxts, []).
 
+msg_options_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax='proto3';
+            message Mm {
+              option deprecated=true;
+              uint32 f = 1;
+            };
+           "]}],
+    {_FileDescriptorSet,
+     [{"main",
+       #'FileDescriptorProto'{
+          message_type= [#'DescriptorProto'{
+                            options=MsgOptions}]}}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    #'MessageOptions'{deprecated=true} = MsgOptions,
+    ok.
+
+enum_options_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax='proto3';
+            message Mm { Ee f = 1; };
+            enum Ee {
+              option deprecated=true;
+              option allow_alias=true;
+              A = 0 [deprecated=true];
+            }
+           "]}],
+    {_FileDescriptorSet,
+     [{"main",
+       #'FileDescriptorProto'{
+          message_type= [#'DescriptorProto'{}],
+          enum_type=[#'EnumDescriptorProto'{
+                        value=[#'EnumValueDescriptorProto'{
+                                  options=EnumValueOptions}],
+                        options=EnumOptions}]}}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    #'EnumOptions'{allow_alias=true, deprecated=true} = EnumOptions,
+    #'EnumValueOptions'{deprecated=true} = EnumValueOptions,
+    ok.
+
 %% --helpers----------
 
 compile_descriptors(IoLists, GpbCompileOpts) ->
