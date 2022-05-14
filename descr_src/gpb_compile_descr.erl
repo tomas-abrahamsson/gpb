@@ -382,6 +382,7 @@ field_def_to_msgtype_field(#?gpb_field{name=FName,
         type          = type_to_descr_type(Type),
         type_name     = type_to_descr_type_name(Type, MapTypesToPseudoMsgNames),
         default_value = field_default_value(Field),
+        json_name     = proplists:get_value(json_name, Opts),
         options       = field_options(Opts),
         proto3_optional = Proto3Optional}];
 field_def_to_msgtype_field(#gpb_oneof{name=FName,
@@ -461,15 +462,8 @@ field_default_value(#?gpb_field{type=Type, opts=Opts}) ->
     end.
 
 field_options(Opts) ->
-    Packed = get_bool_opt(packed, Opts),
-    Deprecated = get_bool_opt(deprecated, Opts),
-    if Packed == true;
-       Deprecated == true ->
-            #'FieldOptions'{packed     = Packed,
-                            deprecated = Deprecated};
-       true ->
-            undefined
-    end.
+    FNames = record_info(fields, 'FieldOptions'),
+    set_options(Opts, FNames, #'FieldOptions'{}).
 
 msg_options(MsgName, D) ->
     case dict:find(MsgName, D) of
@@ -627,14 +621,6 @@ escape_bytes(<<>>) ->
     "".
 
 escape_char(C) -> ?ff("\\~.8b", [C]).
-
--spec get_bool_opt(atom(), proplists:proplist()) -> undefined | boolean().
-get_bool_opt(OptKey, Opts) ->
-    case proplists:get_value(OptKey, Opts) of
-        undefined -> undefined;
-        true      -> true;
-        false     -> false
-    end.
 
 mk_prefix_tree([{Path,_Def}=PathDef | Rest], Acc) -> % iterates over sorted list
     {Children, Rest2} =

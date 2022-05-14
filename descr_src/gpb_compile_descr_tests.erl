@@ -262,6 +262,36 @@ msg_options_test() ->
     #'MessageOptions'{deprecated=true} = MsgOptions,
     ok.
 
+msg_field_options_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax='proto3';
+            message Mm {
+              repeated uint64 f_x = 1 [packed, deprecated=true,
+                                       jstype=JS_STRING, json_name='f_x'];
+              Mm g = 2 [lazy=true];
+
+            };
+           "]}],
+    {_FileDescriptorSet,
+     [{"main",
+       #'FileDescriptorProto'{
+          message_type=
+              [#'DescriptorProto'{
+                  field=[#'FieldDescriptorProto'{name="f_x",
+                                                 options=FOptions1,
+                                                 json_name=JsonName},
+                         #'FieldDescriptorProto'{name="g",
+                                                 options=FOptions2}]}]}}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    "f_x" = JsonName,
+    #'FieldOptions'{deprecated=true,
+                    packed=true,
+                    jstype='JS_STRING'} = FOptions1,
+    #'FieldOptions'{lazy=true} = FOptions2,
+    ok.
+
+
 enum_options_test() ->
     ProtosAsTxts =
         [{"main.proto",
