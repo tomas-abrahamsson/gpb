@@ -154,7 +154,7 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
        enum_type        = Enums,
        service          = defs_to_service(Defs1, ServiceOptions),
        extension        = [],        %% [#'FieldDescriptorProto'{}]
-       options          = undefined, %% #'FileOptions'{} | undefined
+       options          = file_options(Defs), %% #'FileOptions'{} | undefined
        source_code_info = undefined, %% #'SourceCodeInfo'{} | undefined
        syntax           = proplists:get_value(syntax, Defs1, "proto2")
       }.
@@ -605,6 +605,11 @@ service_options(ServiceName, D) ->
 method_options(Opts) ->
     FNames = record_info(fields, 'MethodOptions'),
     set_options(Opts, FNames, #'MethodOptions'{}).
+
+file_options(Defs) ->
+    Opts = [{K, V} || {option, K, V} <- Defs],
+    FNames = record_info(fields, 'FileOptions'),
+    set_options(Opts, FNames, #'FileOptions'{}).
 
 set_options(Opts, FNames, Initial) ->
     Defaults = tl(tuple_to_list(Initial)),

@@ -364,6 +364,59 @@ service_and_rpc_options_test() ->
                      idempotency_level='NO_SIDE_EFFECTS'} = MethodOptions,
     ok.
 
+file_options_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax='proto3';
+            option java_package='j.pkg';
+            option java_outer_classname='OuterClassName';
+            option java_multiple_files=true;
+            option java_generate_equals_and_hash=false;
+            option java_string_check_utf8=true;
+            option optimize_for=CODE_SIZE;
+            option go_package='g.pkg';
+            option cc_generic_services=true;
+            option java_generic_services=true;
+            option py_generic_services=true;
+            option php_generic_services=true;
+            option deprecated=true;
+            option cc_enable_arenas=false;
+            option objc_class_prefix='prefix';
+            option csharp_namespace='ns';
+            option swift_prefix='prefix';
+            option php_class_prefix='prefix';
+            option php_namespace='ns';
+            option php_metadata_namespace='mns';
+            option ruby_package='r.pkg';
+           "]}],
+    {_FileDescriptorSet,
+     [{"main",
+       #'FileDescriptorProto'{
+          options=FileOptions}}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    #'FileOptions'{
+       java_package="j.pkg",
+       java_outer_classname="OuterClassName",
+       java_multiple_files=true,
+       java_generate_equals_and_hash=false,
+       java_string_check_utf8=true,
+       optimize_for='CODE_SIZE',
+       go_package="g.pkg",
+       cc_generic_services=true,
+       java_generic_services=true,
+       py_generic_services=true,
+       php_generic_services=true,
+       deprecated=true,
+       cc_enable_arenas=false,
+       objc_class_prefix="prefix",
+       csharp_namespace="ns",
+       swift_prefix="prefix",
+       php_class_prefix="prefix",
+       php_namespace="ns",
+       php_metadata_namespace="mns",
+       ruby_package="r.pkg"} = FileOptions,
+    ok.
+
 %% --helpers----------
 
 compile_descriptors(IoLists, GpbCompileOpts) ->
