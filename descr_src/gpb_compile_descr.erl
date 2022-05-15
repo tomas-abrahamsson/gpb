@@ -140,6 +140,7 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
         compute_map_field_pseudo_msgs(Defs1, Opts, Adjuster),
     MsgOptions = collect_msg_options(Defs),
     EnumOptions = collect_enum_options(Defs),
+    ServiceOptions = collect_service_options(Defs),
     ToDefsEnv = #to_defs_env{pseudo_msg_names = TypesToPseudoMsgNames,
                              msg_options = MsgOptions,
                              enum_options = EnumOptions},
@@ -151,7 +152,7 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
        dependency       = [Dep || {import, Dep} <- Defs], %% [string()]
        message_type     = Msg ++ MapMsgs,
        enum_type        = Enums,
-       service          = defs_to_service(Defs1),
+       service          = defs_to_service(Defs1, ServiceOptions),
        extension        = [],        %% [#'FieldDescriptorProto'{}]
        options          = undefined, %% #'FileOptions'{} | undefined
        source_code_info = undefined, %% #'SourceCodeInfo'{} | undefined
@@ -487,16 +488,19 @@ enum_options(EnumName, D) ->
             set_options(Opts, FNames, #'EnumOptions'{})
     end.
 
-defs_to_service(Defs) ->
+defs_to_service(Defs, ServiceOptionsByName) ->
     [#'ServiceDescriptorProto'{
         name   = atom_to_ustring_base(ServiceName),
         method = [#'MethodDescriptorProto'{
                      name        = atom_to_ustring(RpcName),
                      input_type  = atom_to_ustring(Input),
-                     output_type = atom_to_ustring(Output)}
+                     output_type = atom_to_ustring(Output),
+                     options     = method_options(RpcOpts)}
                   || #?gpb_rpc{name=RpcName,
                                input=Input,
-                               output=Output} <- Rpcs]}
+                               output=Output,
+                               opts=RpcOpts} <- Rpcs],
+        options = service_options(ServiceName, ServiceOptionsByName)}
      || {{service, ServiceName}, Rpcs} <- Defs].
 
 oneof_decl(AllOneofs) ->
@@ -576,6 +580,31 @@ collect_enum_options(Defs) ->
 enum_value_options(Opts) ->
     FNames = record_info(fields, 'EnumValueOptions'),
     set_options(Opts, FNames, #'EnumValueOptions'{}).
+
+collect_service_options(Defs) ->
+    lists:foldl(
+      fun({{service_options, ServiceName}, Opts}, D) ->
+              dict:append_list(ServiceName, Opts, D);
+         (_Other, D) ->
+              D
+      end,
+      dict:new(),
+      Defs).
+
+service_options(ServiceName, D) ->
+    case dict:find(ServiceName, D) of
+        error ->
+            undefined;
+        {ok, []} ->
+            undefined;
+        {ok, Opts} ->
+            FNames = record_info(fields, 'ServiceOptions'),
+            set_options(Opts, FNames, #'ServiceOptions'{})
+    end.
+
+method_options(Opts) ->
+    FNames = record_info(fields, 'MethodOptions'),
+    set_options(Opts, FNames, #'MethodOptions'{}).
 
 set_options(Opts, FNames, Initial) ->
     Defaults = tl(tuple_to_list(Initial)),

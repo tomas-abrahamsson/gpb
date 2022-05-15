@@ -337,6 +337,33 @@ enum_options_test() ->
     #'EnumValueOptions'{deprecated=true} = EnumValueOptions,
     ok.
 
+service_and_rpc_options_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax='proto3';
+            message M { };
+            service S {
+              option deprecated=true;
+              rpc Req(M) returns(M) {
+                option deprecated=true;
+                option idempotency_level=NO_SIDE_EFFECTS;
+              }
+            }
+           "]}],
+    {_FileDescriptorSet,
+     [{"main",
+       #'FileDescriptorProto'{
+          message_type= [#'DescriptorProto'{}],
+          service=[#'ServiceDescriptorProto'{
+                      method=[#'MethodDescriptorProto'{
+                                 options=MethodOptions}],
+                      options=ServiceOptions}]}}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    #'ServiceOptions'{deprecated=true} = ServiceOptions,
+    #'MethodOptions'{deprecated=true,
+                     idempotency_level='NO_SIDE_EFFECTS'} = MethodOptions,
+    ok.
+
 %% --helpers----------
 
 compile_descriptors(IoLists, GpbCompileOpts) ->
