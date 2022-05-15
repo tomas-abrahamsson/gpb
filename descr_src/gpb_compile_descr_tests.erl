@@ -291,6 +291,27 @@ msg_field_options_test() ->
     #'FieldOptions'{lazy=true} = FOptions2,
     ok.
 
+default_value_test() ->
+    "1"         = fmt_proto_get_default("uint32", "1"),
+    "-1"        = fmt_proto_get_default("sint32", "-1"),
+    "1.125"++_  = fmt_proto_get_default("double", "1.125"),
+    "-1.125"++_ = fmt_proto_get_default("double", "-1.125"),
+    "inf"       = fmt_proto_get_default("double", "inf"),
+    "-inf"      = fmt_proto_get_default("double", "-inf"),
+    "nan"       = fmt_proto_get_default("double", "nan"),
+    ok.
+
+fmt_proto_get_default(Type, ProtoDefault) ->
+    P = [{"main.proto",
+          ["syntax='proto3';
+            message M { "++Type++" f = 1 [default="++ProtoDefault++"]; }"]}],
+    {_FileDescriptorSet,
+     [{_, #'FileDescriptorProto'{
+             message_type=[#'DescriptorProto'{
+                              field=[#'FieldDescriptorProto'{
+                                        default_value=DescrDefault}]}]}}]} =
+        compile_descriptors(P, []),
+    DescrDefault.
 
 enum_options_test() ->
     ProtosAsTxts =

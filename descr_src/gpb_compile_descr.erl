@@ -453,12 +453,12 @@ field_default_value(#?gpb_field{type=Type, opts=Opts}) ->
         {{enum,_EnumName}, E} -> atom_to_ustring(E);
         {fixed64, I}       -> integer_to_list(I);
         {sfixed64, I}      -> integer_to_list(I);
-        {double, F}        -> float_to_list(F);
+        {double, F}        -> format_float(F);
         {string, S}        -> S;
         {bytes, B}         -> escape_bytes(B);
         {fixed32, I}       -> integer_to_list(I);
         {sfixed32, I}      -> integer_to_list(I);
-        {float, F}         -> float_to_list(F)
+        {float, F}         -> format_float(F)
     end.
 
 field_options(Opts) ->
@@ -611,6 +611,11 @@ atom_to_ustring(A) ->
 atom_to_ustring_base(A) ->
     Utf8Str = lists:last(gpb_lib:string_lexemes(atom_to_list(A), ".")),
     unicode:characters_to_list(list_to_binary(Utf8Str), utf8).
+
+format_float(F) when is_float(F) -> float_to_list(F);
+format_float(infinity)           -> "inf";
+format_float('-infinity')        -> "-inf";
+format_float('nan')              -> "nan".
 
 escape_bytes(<<B, Rest/binary>>) ->
     if B >= 127 -> escape_char(B) ++ escape_bytes(Rest);
