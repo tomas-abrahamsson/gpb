@@ -180,6 +180,29 @@ refs_have_pkg_name_test() -> % only refs have package, names do not
     Descriptors2 = compile_descriptors(ProtosAsTxts2, [use_packages]),
     ok.
 
+service_rpc_streams_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax='proto2';
+            message M { };
+            service S {
+               rpc R1(stream M) returns (M);
+               rpc R2(M) returns (stream M);
+            };"]}],
+    {_,
+     [{_,
+       #'FileDescriptorProto'{
+          message_type = [_],
+          service = [#'ServiceDescriptorProto'{method = Methods}]}}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    [{"R1", true, false},
+     {"R2", false, true}] =
+        [{Name, ArgStream, RetStream}
+         || #'MethodDescriptorProto'{name=Name,
+                                     client_streaming=ArgStream,
+                                     server_streaming=RetStream} <- Methods],
+    ok.
+
 nested_definitions_test() ->
     ProtosAsTxts =
         [{"main.proto",

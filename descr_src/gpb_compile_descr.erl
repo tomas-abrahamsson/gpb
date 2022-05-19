@@ -495,10 +495,12 @@ defs_to_service(Defs, ServiceOptionsByName) ->
                      name        = atom_to_ustring(RpcName),
                      input_type  = atom_to_ustring(Input),
                      output_type = atom_to_ustring(Output),
+                     client_streaming = InputStream,
+                     server_streaming = OutputStream,
                      options     = method_options(RpcOpts)}
                   || #?gpb_rpc{name=RpcName,
-                               input=Input,
-                               output=Output,
+                               input=Input,   input_stream=InputStream,
+                               output=Output, output_stream=OutputStream,
                                opts=RpcOpts} <- Rpcs],
         options = service_options(ServiceName, ServiceOptionsByName)}
      || {{service, ServiceName}, Rpcs} <- Defs].
