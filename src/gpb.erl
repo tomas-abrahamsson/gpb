@@ -1898,12 +1898,19 @@ fetch_field_by_name(Name, Fields) ->
 
 -endif. % -ifndef(NO_HAVE_MAPS).
 
-keyfetch(Key, KVPairs) ->
+keyfetch(Key, MsgDefs) ->
+    case keyfetch_2(Key, MsgDefs) of
+        undefined -> erlang:error({error, {no_such_key, Key, MsgDefs}});
+        Value -> Value
+    end.
+
+keyfetch_2(Key, MsgDefs) when is_map(MsgDefs) ->
+    maps:get(Key, MsgDefs, undefined);
+
+keyfetch_2(Key, KVPairs) when is_list(KVPairs) ->
     case lists:keysearch(Key, 1, KVPairs) of
-        {value, {Key, Value}} ->
-            Value;
-        false ->
-            erlang:error({error, {no_such_key, Key, KVPairs}})
+        {value, {Key, Value}} -> Value;
+        false -> undefined
     end.
 
 is_field_for_unknowns(#?gpb_field{type=unknown, occurrence=repeated}) ->
