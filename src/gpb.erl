@@ -885,16 +885,11 @@ encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
         []    ->
             <<>>;
         Elems ->
-            PackedFields = encode_packed_2(Elems, Type, MsgDefs),
+            PackedFields = [encode_value(Elem, Type, MsgDefs) || Elem <- Elems],
             [encode_fnum_type(FNum, bytes),
               en_vi(iolist_size(PackedFields)),
               PackedFields]
     end.
-
-encode_packed_2([Elem | Rest], Type, MsgDefs) ->
-    [encode_value(Elem, Type, MsgDefs) | encode_packed_2(Rest, Type, MsgDefs)];
-encode_packed_2([], _Type, _MsgDefs) ->
-    [].
 
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
              Msg, MsgDefs) ->
@@ -923,12 +918,7 @@ encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=defaulty},
     end;
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=repeated},
              Msg, MsgDefs) ->
-    encode_repeated(element(RNum, Msg), FNum, Type, MsgDefs).
-
-encode_repeated([Elem | Rest], FNum, Type, MsgDefs) ->
-    EncodedValue = encode_field_value(Elem, FNum, Type, MsgDefs),
-    [EncodedValue, encode_repeated(Rest, FNum, Type, MsgDefs)];
-encode_repeated([], _FNum, _Type, _MsgDefs) -> [].
+    [encode_field_value(Elem, FNum, Type, MsgDefs) || Elem <- element(RNum, Msg)].
 
 encode_field_value(Value, FNum, {group,_}=Type, MsgDefs) ->
     [encode_fnum_type(FNum, group_start),
