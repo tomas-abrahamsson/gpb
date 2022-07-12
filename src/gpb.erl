@@ -493,7 +493,7 @@ decode_type(FieldType, Bin, MsgDefs) ->
             {N =/= 0, Rest};
         {enum, _EnumName}=Key ->
             {N, Rest} = decode_type(int32, Bin, MsgDefs),
-            {value, {Key, EnumValues}} = lists:keysearch(Key, 1, MsgDefs),
+            EnumValues = keyfetch(Key, MsgDefs),
             case lists:keyfind(N, 2, EnumValues) of
                 {EnumName, N, _} -> {EnumName, Rest}; % proto_defs_version 3
                 {EnumName, N}    -> {EnumName, Rest}; % proto_defs_version 2
@@ -1221,11 +1221,11 @@ encode_zigzag(N) when N <  0 -> N * -2 - 1.
 -spec verify_msg(tuple() | term(), gpb_defs:defs()) -> ok.
 verify_msg(Msg, MsgDefs) when is_tuple(Msg), tuple_size(Msg) >= 1 ->
     MsgName = element(1, Msg),
-    case lists:keysearch({msg,MsgName}, 1, MsgDefs) of
-        {value, _} ->
-            verify_msg2(Msg, MsgName, MsgDefs, [top_level]);
-        false ->
-            mk_type_error(not_a_known_message, MsgName, [top_level])
+    case keyfetch_2({msg,MsgName}, MsgDefs) of
+        undefined ->
+            mk_type_error(not_a_known_message, MsgName, [top_level]);
+        _ ->
+            verify_msg2(Msg, MsgName, MsgDefs, [top_level])
     end;
 verify_msg(Msg, _MsgDefs) ->
     mk_type_error(expected_a_message, Msg, []).
@@ -1234,7 +1234,7 @@ verify_msg(Msg, _MsgDefs) ->
 verify_msg2(Msg, MsgName, MsgDefs, Path) when is_tuple(Msg),
                                               element(1, Msg) == MsgName ->
     MsgKey = {msg, MsgName},
-    {value, {MsgKey, Fields}} = lists:keysearch(MsgKey, 1, MsgDefs),
+    Fields = keyfetch_2(MsgKey, MsgDefs),
     if tuple_size(Msg) == length(Fields) + 1 ->
             Path2 = if Path == [top_level] -> [MsgName];
                        true                -> Path
@@ -1249,7 +1249,7 @@ verify_msg2(V, MsgName, _MsgDefs, Path) ->
 verify_group(Msg, GName, MsgDefs, Path) when is_tuple(Msg),
                                              element(1, Msg) == GName ->
     Key = {group, GName},
-    {value, {Key, Fields}} = lists:keysearch(Key, 1, MsgDefs),
+    Fields = keyfetch_2(Key, MsgDefs),
     if tuple_size(Msg) == length(Fields) + 1 ->
             Path2 = if Path == [top_level] -> [GName];
                        true                -> Path
