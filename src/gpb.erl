@@ -824,7 +824,7 @@ merge_m_g_aux(PrevMsg, NewMsg, Key, MsgDefs) ->
 -spec encode_msg(tuple(), gpb_defs:defs()) -> binary().
 encode_msg(Msg, MsgDefs) ->
     try
-        encode_msg2(Msg, MsgDefs)
+        iolist_to_binary(encode_msg2(Msg, MsgDefs))
     catch
         ?with_stacktrace(error, {gpb_error, _Reason}=Error, Stack)
             erlang:raise(error, Error, Stack);
@@ -836,14 +836,14 @@ encode_msg(Msg, MsgDefs) ->
 encode_msg2(Msg, MsgDefs) ->
     MsgName = element(1, Msg),
     MsgDef = keyfetch({msg, MsgName}, MsgDefs),
-    encode_2(MsgDef, Msg, MsgDefs, <<>>).
+    encode_2(MsgDef, Msg, MsgDefs).
 
 encode_group(Msg, MsgDefs) ->
     GroupName = element(1, Msg),
     MsgDef = keyfetch({group, GroupName}, MsgDefs),
-    encode_2(MsgDef, Msg, MsgDefs, <<>>).
+    encode_2(MsgDef, Msg, MsgDefs).
 
-encode_2([#?gpb_field{}=Field | Rest], Msg, MsgDefs, Acc) ->
+encode_2([#?gpb_field{}=Field | Rest], Msg, MsgDefs) ->
     EncodedField =
         case classify_field_for_encoding(Field) of
             repeated_packed ->
@@ -853,20 +853,19 @@ encode_2([#?gpb_field{}=Field | Rest], Msg, MsgDefs, Acc) ->
             unknowns ->
                 encode_unknowns(Field, Msg, MsgDefs)
         end,
-    encode_2(Rest, Msg, MsgDefs, <<Acc/binary, EncodedField/binary>>);
-encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs, Acc) ->
+    [EncodedField | encode_2(Rest, Msg, MsgDefs)];
+encode_2([#gpb_oneof{fields=Fields, rnum=RNum} | Rest], Msg, MsgDefs) ->
     case element(RNum, Msg) of
         {Name, Value} ->
             Field = lists:keyfind(Name, #?gpb_field.name, Fields),
-            NewAcc = encode_2([Field#?gpb_field{occurrence=required}],
-                              setelement(RNum, Msg, Value), MsgDefs,
-                              Acc),
-            encode_2(Rest, Msg, MsgDefs, NewAcc);
+            EncodedField = encode_2([Field#?gpb_field{occurrence=required}],
+                              setelement(RNum, Msg, Value), MsgDefs),
+            [EncodedField | encode_2(Rest, Msg, MsgDefs)];
         undefined ->
-            encode_2(Rest, Msg, MsgDefs, Acc)
+            encode_2(Rest, Msg, MsgDefs)
     end;
-encode_2([], _Msg, _MsgDefs, Acc) ->
-    Acc.
+encode_2([], _Msg, _MsgDefs) ->
+    [].
 
 classify_field_for_encoding(#?gpb_field{occurrence=Occurrence}=Field) ->
     case is_field_for_unknowns(Field) of
@@ -886,17 +885,11 @@ encode_packed(#?gpb_field{rnum=RNum, fnum=FNum, type=Type}, Msg, MsgDefs) ->
         []    ->
             <<>>;
         Elems ->
-            PackedFields = encode_packed_2(Elems, Type, MsgDefs, <<>>),
-            <<(encode_fnum_type(FNum, bytes))/binary,
-              (encode_varint(byte_size(PackedFields)))/binary,
-              PackedFields/binary>>
+            PackedFields = [encode_value(Elem, Type, MsgDefs) || Elem <- Elems],
+            [encode_fnum_type(FNum, bytes),
+              en_vi(iolist_size(PackedFields)),
+              PackedFields]
     end.
-
-encode_packed_2([Elem | Rest], Type, MsgDefs, Acc) ->
-    NewAcc = <<Acc/binary, (encode_value(Elem, Type, MsgDefs))/binary>>,
-    encode_packed_2(Rest, Type, MsgDefs, NewAcc);
-encode_packed_2([], _Type, _MsgDefs, Acc) ->
-    Acc.
 
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=required},
              Msg, MsgDefs) ->
@@ -925,58 +918,50 @@ encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=defaulty},
     end;
 encode_field(#?gpb_field{rnum=RNum, fnum=FNum, type=Type, occurrence=repeated},
              Msg, MsgDefs) ->
-    encode_repeated(element(RNum, Msg), FNum, Type, MsgDefs, <<>>).
-
-encode_repeated([Elem | Rest], FNum, Type, MsgDefs, Acc) ->
-    EncodedValue = encode_field_value(Elem, FNum, Type, MsgDefs),
-    NewAcc = <<Acc/binary, EncodedValue/binary>>,
-    encode_repeated(Rest, FNum, Type, MsgDefs, NewAcc);
-encode_repeated([], _FNum, _Type, _MsgDefs, Acc) ->
-    Acc.
+    [encode_field_value(Elem, FNum, Type, MsgDefs) || Elem <- element(RNum, Msg)].
 
 encode_field_value(Value, FNum, {group,_}=Type, MsgDefs) ->
-    <<(encode_fnum_type(FNum, group_start))/binary,
-      (encode_value(Value, Type, MsgDefs))/binary,
-      (encode_fnum_type(FNum, group_end))/binary>>;
+    [encode_fnum_type(FNum, group_start),
+      encode_value(Value, Type, MsgDefs),
+      encode_fnum_type(FNum, group_end)];
 encode_field_value(Value, FNum, Type, MsgDefs) ->
-    <<(encode_fnum_type(FNum, Type))/binary,
-      (encode_value(Value, Type, MsgDefs))/binary>>.
+    [encode_fnum_type(FNum, Type), encode_value(Value, Type, MsgDefs)].
 
 encode_fnum_type(FNum, Type) ->
-    encode_varint((FNum bsl 3) bor encode_wiretype(Type)).
+    en_vi((FNum bsl 3) bor encode_wiretype(Type)).
 
 encode_value(Value, Type, MsgDefs) ->
     case Type of
         sint32 ->
-            encode_varint(encode_zigzag(Value));
+            en_vi(encode_zigzag(Value));
         sint64 ->
-            encode_varint(encode_zigzag(Value));
+            en_vi(encode_zigzag(Value));
         int32 ->
             if Value >= 0 ->
-                    encode_varint(Value);
+                    en_vi(Value);
                true ->
                     %% Encode as a 64 bit value, for interop compatibility.
                     %% Some implementations don't decode 32 bits properly,
                     %% and Google's protobuf (C++) encodes as 64 bits
                     <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
-                    encode_varint(N)
+                    en_vi(N)
             end;
         int64 ->
             if Value >= 0 ->
-                    encode_varint(Value);
+                    en_vi(Value);
                true ->
                     <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
-                    encode_varint(N)
+                    en_vi(N)
             end;
         uint32 ->
-            encode_varint(Value);
+            en_vi(Value);
         uint64 ->
-            encode_varint(Value);
+            en_vi(Value);
         bool ->
-            if Value       -> encode_varint(1);
-               not Value   -> encode_varint(0);
-               Value =:= 1 -> encode_varint(1);
-               Value =:= 0 -> encode_varint(0)
+            if Value       -> en_vi(1);
+               not Value   -> en_vi(0);
+               Value =:= 1 -> en_vi(1);
+               Value =:= 0 -> en_vi(0)
             end;
         {enum, _EnumName}=Key ->
             N = if is_atom(Value) ->
@@ -1002,17 +987,15 @@ encode_value(Value, Type, MsgDefs) ->
             end;
         string ->
             Utf8 = unicode:characters_to_binary(Value),
-            <<(encode_varint(byte_size(Utf8)))/binary, Utf8/binary>>;
+            [en_vi(byte_size(Utf8)), Utf8];
         bytes ->
-            if is_binary(Value) ->
-                   <<(encode_varint(byte_size(Value)))/binary, Value/binary>>;
-               is_list(Value) ->
-                   ValueBin = iolist_to_binary(Value),
-                   <<(encode_varint(byte_size(ValueBin)))/binary, ValueBin/binary>>
+            if is_binary(Value) -> [en_vi(byte_size(Value)), Value];
+               is_list(Value) -> [en_vi(iolist_size(Value)), Value]
             end;
         {msg,_MsgName} ->
             SubMsg = encode_msg2(Value, MsgDefs),
-            <<(encode_varint(byte_size(SubMsg)))/binary, SubMsg/binary>>;
+            SubMsgSize = en_vi(iolist_size(SubMsg)),
+            [SubMsgSize, SubMsg];
         {group,_MsgName} ->
             encode_group(Value, MsgDefs);
         fixed32 ->
@@ -1042,14 +1025,14 @@ encode_unknown_fields(Fields) ->
               case Unknown of
                   {varint, FieldNum, N} ->
                       Key = encode_fnum_type(FieldNum, int32),
-                      NBin = encode_varint(N),
+                      NBin = en_vi(N),
                       <<Acc/binary, Key/binary, NBin/binary>>;
                   {fixed64, FieldNum, N} ->
                       Key = encode_fnum_type(FieldNum, fixed64),
                       <<Acc/binary, Key/binary, N:64/little>>;
                   {length_delimited, FieldNum, Data} ->
                       Key = encode_fnum_type(FieldNum, string),
-                      Len = encode_varint(byte_size(Data)),
+                      Len = en_vi(byte_size(Data)),
                       <<Acc/binary, Key/binary, Len/binary, Data/binary>>;
                   {group, FieldNum, GroupFields} ->
                       GS = encode_fnum_type(FieldNum, group_start),
@@ -1205,10 +1188,10 @@ de_pkt(<<>>, _N, _Acc, _Consumed, _Bits, _Opts) ->
 
 %% @doc Encode an unsigned varint to a binary.
 -spec encode_varint(integer()) -> binary().
-encode_varint(N) -> en_vi(N).
+encode_varint(N) -> iolist_to_binary(en_vi(N)).
 
 en_vi(N) when N =< 127 -> <<N>>;
-en_vi(N) when N >= 128 -> <<1:1, (N band 127):7, (en_vi(N bsr 7))/binary>>.
+en_vi(N) when N >= 128 -> [<<1:1, (N band 127):7>>, en_vi(N bsr 7)].
 
 
 decode_zigzag(N) when N band 1 =:= 0 -> N bsr 1;        %% N is even
@@ -1982,8 +1965,8 @@ skips_nested_groups_test() ->
     <<99,88,77>> = test_run_skip_field(
                      <<(mk_group_start(1))/binary,
                        (mk_group_start(2))/binary,
-                       (encode_field(Int32F, {x,4711}, []))/binary,
-                       (encode_field(Bytes, {x,<<1,2,3>>}, []))/binary,
+                       (iolist_to_binary(encode_field(Int32F, {x,4711}, [])))/binary,
+                       (iolist_to_binary(encode_field(Bytes, {x,<<1,2,3>>}, [])))/binary,
                        (mk_group_end(2))/binary,
                        (mk_group_end(1))/binary,
                        99,88,77>>).
