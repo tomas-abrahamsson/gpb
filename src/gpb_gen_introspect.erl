@@ -664,7 +664,7 @@ compute_msg_infos(Msgs, Package, #anres{renamings = Renamings}, Opts) ->
      || {{msg,MsgName}, _Fields} <- Msgs].
 
 format_fqbin_to_msg_name(MsgInfos) ->
-    [["-spec msg_name_to_fqbin(_) -> no_return().\n" || MsgInfos == []],
+    [["-spec fqbin_to_msg_name(_) -> no_return().\n" || MsgInfos == []],
      gpb_codegen:format_fn(
        fqbin_to_msg_name,
        fun('<<"maybe.package.MsgName">>') -> 'MsgName';
@@ -678,7 +678,7 @@ format_fqbin_to_msg_name(MsgInfos) ->
            || {FqMsgName, MsgName} <- MsgInfos])])].
 
 format_msg_name_to_fqbin(MsgInfos) ->
-    [["-spec fqbin_to_msg_name(_) -> no_return().\n" || MsgInfos == []],
+    [["-spec msg_name_to_fqbin(_) -> no_return().\n" || MsgInfos == []],
      gpb_codegen:format_fn(
        msg_name_to_fqbin,
        fun('MsgName') -> '<<"maybe.package.MsgName">>';
