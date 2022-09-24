@@ -1,5 +1,14 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.6
+2022-Sep-24
+
+        * Bugfix spec order for msg_name_to_fqbin and fqbin_to_msg_name
+          when there are no messages. (#221)
+
+        * Use iolists in the data-driven encoder in gpb.erl to improve
+          performance. Thanks to Saša Jurić. (#218)
+
 Version 4.19.5
 2022-Mar-17
 
