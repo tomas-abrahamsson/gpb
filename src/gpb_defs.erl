@@ -61,6 +61,7 @@
                {syntax, string()} | % "proto2" | "proto3"
                {{extensions, MsgName::atom()}, [field_number_extension()]} |
                {{extend, MsgName::atom()}, MoreFields::[field()]} |
+               {{ext_origin,MsgName::atom()}, {atom(), MoreFields::[field()]}} |
                {proto3_msgs, [MsgName::atom()]} |
                {{reserved_numbers, MsgName::atom()}, [reserved_num()]} |
                {{reserved_names, MsgName::atom()}, [FieldName::atom()]} |
@@ -348,7 +349,9 @@ flatten_qualify_defnames(Defs, Root) ->
                     rootward_names(empty_pkg_root(), Name),
                 {Fields2, Defs2} = flatten_fields(FieldsOrDefs, Root),
                 ERef2 = {eref2,Root,Name,FullNameCandidates},
-                [{{extend,ERef2},Fields2} | Defs2] ++
+                [{{extend,ERef2},Fields2},
+                 {{ext_origin,ERef2}, {Root, Fields2}} % for descriptor
+                 | Defs2] ++
                     Acc;
            ({{service, Name}, RPCs}, Acc) ->
                 FullName = prepend_path(Root, Name),
@@ -447,6 +450,11 @@ resolve_refs(Defs) ->
                       resolve_extend_refs(ExtendeeCandidates, Fields, Defs,
                                           Root, Acc),
                   {{{extend,Extendee}, NewFields}, Acc2};
+             ({{ext_origin,ExtendeeCandidates}, {ERoot, Fields}}, Acc) ->
+                  {Extendee, NewFields, Acc2} =
+                      resolve_extend_refs(ExtendeeCandidates, Fields, Defs,
+                                          Root, Acc),
+                  {{{ext_origin,Extendee}, {ERoot, NewFields}}, Acc2};
              (OtherElem, Acc) ->
                   {OtherElem, Acc}
           end,
@@ -1169,6 +1177,10 @@ reformat_names(Defs) ->
                       {{extensions,reformat_name(Name)}, Exts};
                  ({{extend,Name}, Fields}) ->
                       {{extend,reformat_name(Name)}, reformat_fields(Fields)};
+                 ({{ext_origin,Name}, {Root, Fields}}) ->
+                      Root2 = reformat_name_or_dot(Root),
+                      Fields2 = reformat_fields(Fields),
+                      {{ext_origin,reformat_name(Name)}, {Root2, Fields2}};
                  ({{service,Name}, RPCs}) ->
                       {{service,reformat_name(Name)}, reformat_rpcs(RPCs)};
                  ({{service_containment, ProtoName}, ServiceNames}) ->
@@ -1225,6 +1237,9 @@ reformat_enum_opt_names(Def) ->
 reformat_name(Name) when is_atom(Name) -> Name;
 reformat_name(Name) when is_list(Name) -> % dotted name components:
     list_to_atom(gpb_lib:dot_join([atom_to_list(P) || P <- Name, P /= '.'])).
+
+reformat_name_or_dot(['.']) -> '.';
+reformat_name_or_dot(Name) -> reformat_name(Name).
 
 reformat_rpcs(RPCs) ->
     lists:map(fun(#?gpb_rpc{name=RpcName, input=Arg, output=Return}=R) ->
