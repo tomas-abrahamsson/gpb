@@ -30,7 +30,11 @@
 
 -record(to_defs_env, {pseudo_msg_names,
                       msg_options,
-                      enum_options}).
+                      enum_options,
+                      ext_origins, % extended location -> extensions
+                      ext_msgs, % extended msg -> fields
+                      ext_ranges, % extended msg -> ranges
+                      name_adjuster}).
 
 encode_defs_to_descriptors(Defs, Opts) ->
     encode_defs_to_descriptors(undefined, Defs, Opts).
@@ -134,26 +138,34 @@ partitioned_defs_to_file_descr_set(Defses, Opts) ->
 
 defs_to_file_descr_proto(Name, Defs, Opts) ->
     Name1 = compute_filename_from_package(Name, Defs),
-    {Pkg, Adjuster} = compute_adjustment_from_package(Defs, Opts),
+    {Pkg, Root, Adjuster} = compute_adjustment_from_package(Defs, Opts),
     Defs1 = process_refs(Defs, Adjuster),
     {TypesToPseudoMsgNames, PseudoMsgs} =
         compute_map_field_pseudo_msgs(Defs1, Opts, Adjuster),
     MsgOptions = collect_msg_options(Defs),
     EnumOptions = collect_enum_options(Defs),
     ServiceOptions = collect_service_options(Defs),
+    {ExtOrigins, ExtMsgs} = collect_ext_origins(Defs),
+    ExtRanges = collect_extension_ranges(Defs),
     ToDefsEnv = #to_defs_env{pseudo_msg_names = TypesToPseudoMsgNames,
                              msg_options = MsgOptions,
-                             enum_options = EnumOptions},
-    {Msg, Enums} = nest_defs_to_types(Defs1, ToDefsEnv),
+                             enum_options = EnumOptions,
+                             ext_origins = ExtOrigins,
+                             ext_msgs = ExtMsgs,
+                             ext_ranges = ExtRanges,
+                             name_adjuster = Adjuster},
+    {Msgs, Enums} = nest_defs_to_types(Defs1, ToDefsEnv),
+    RootPath = gpb_lib:string_lexemes(Root, "."),
+    RootExts = extensions_to_types(RootPath, ToDefsEnv),
     MapMsgs = maptype_defs_to_msgtype(PseudoMsgs, ToDefsEnv),
     #'FileDescriptorProto'{
        name             = Name1,     %% string() | undefined
        package          = Pkg,
        dependency       = [Dep || {import, Dep} <- Defs], %% [string()]
-       message_type     = Msg ++ MapMsgs,
+       message_type     = Msgs ++ MapMsgs,
        enum_type        = Enums,
        service          = defs_to_service(Defs1, ServiceOptions),
-       extension        = [],        %% [#'FieldDescriptorProto'{}]
+       extension        = RootExts,
        options          = file_options(Defs), %% #'FileOptions'{} | undefined
        source_code_info = undefined, %% #'SourceCodeInfo'{} | undefined
        syntax           = proplists:get_value(syntax, Defs1, "proto2")
@@ -182,14 +194,14 @@ compute_adjustment_from_package(Defs, Opts) ->
             DescriptorPkg = atom_to_ustring(Pkg),
             case proplists:get_bool(use_packages, Opts) of
                 true ->
-                    {DescriptorPkg, fun root_ref/1};
+                    {DescriptorPkg, DescriptorPkg, fun root_ref/1};
                 false ->
                     PkgCs = name_to_components(Pkg),
                     RefOp = fun(Ref) -> root_ref(prepend_pkg(Ref, PkgCs)) end,
-                    {DescriptorPkg, RefOp}
+                    {DescriptorPkg, ".", RefOp}
             end;
         false ->
-            {undefined, fun root_ref/1}
+            {undefined, ".", fun root_ref/1}
     end.
 
 process_refs(Defs, RefOp) ->
@@ -294,21 +306,27 @@ nest_defs_to_types(Defs, ToDefsEnv) ->
     Nestings = mk_prefix_tree(NCs, []),
     defs_to_types(Nestings, ToDefsEnv, []).
 
-defs_to_types([{{_Path, {{_msg_or_group, MsgName}, Fields}}, ChildItems}
+defs_to_types([{{Path, {{_msg_or_group, MsgName}, Fields0}}, ChildItems}
                | Rest],
-              #to_defs_env{msg_options=MsgOptionsByName}=ToDefsEnv,
+              #to_defs_env{ext_msgs=ExtMsgs,
+                           msg_options=MsgOptionsByName,
+                           ext_ranges=ExtRangesByMsg}=ToDefsEnv,
               Acc) when _msg_or_group == msg;
                         _msg_or_group == group ->
-    OneofNames = oneof_names_synthetic_last(Fields),
+    Extendsings = extensions_to_types(Path, ToDefsEnv),
+    ExtFields = dict_fetch_list(Path, ExtMsgs),
+    ExtRanges = extension_ranges(Path, ExtRangesByMsg),
+    Fields1 = remove_extended_fields(Fields0, ExtFields),
+    OneofNames = oneof_names_synthetic_last(Fields1),
     {SubMsgs, SubEnums} = defs_to_types(ChildItems, ToDefsEnv, []),
     Item = #'DescriptorProto'{
               name            = atom_to_ustring_base(MsgName),
-              field           = field_defs_to_mgstype_fields(
-                                  Fields, OneofNames, ToDefsEnv),
-              extension       = [],
+              field           = field_defs_to_msgtype_fields(
+                                  Fields1, OneofNames, ToDefsEnv),
+              extension       = Extendsings,
               nested_type     = SubMsgs,
               enum_type       = SubEnums,
-              extension_range = [],
+              extension_range = ExtRanges,
               options         = msg_options(MsgName, MsgOptionsByName),
               oneof_decl      = oneof_decl(OneofNames)},
     defs_to_types(Rest, ToDefsEnv, [Item | Acc]);
@@ -330,6 +348,20 @@ defs_to_types([], _ToDefsEnv, Acc) ->
                     end,
                     lists:reverse(Acc)).
 
+remove_extended_fields(Fields, []) ->
+    %% Short-circuit the common case:
+    Fields;
+remove_extended_fields(Fields, ExtFields) ->
+    ExtFNums = [FNum || #?gpb_field{fnum=FNum} <- ExtFields],
+    lists:filter(
+      fun(#?gpb_field{fnum=FNum}) ->
+              not lists:member(FNum, ExtFNums);
+         (#gpb_oneof{}) ->
+              %% A oneof cannot contain 'extend'ed fields; keep it.
+              true
+      end,
+      Fields).
+
 oneof_names_synthetic_last(Fields) ->
     %% Synthetic oneof fields must come after all non-syntetic ones
     Oneofs = [Field || #gpb_oneof{}=Field <- Fields],
@@ -348,10 +380,19 @@ is_synthetic_oneof(Field) ->
             false
     end.
 
+extension_ranges(Path, ExtRangesByMsg) ->
+    ExtRanges = dict_fetch_list(Path, ExtRangesByMsg),
+    [#'DescriptorProto.ExtensionRange'{start = Start, % inclusive
+                                       'end' = range_end(End)} % exclusive
+     || {Start, End} <- ExtRanges].
+
+range_end(max) -> 16#20000000; % 536870912
+range_end(Max) when is_integer(Max) -> Max + 1. % inclusive -> exclusive
+
 maptype_defs_to_msgtype(MapPseudoMsgs, ToDefsEnv) ->
     [#'DescriptorProto'{
         name            = atom_to_ustring_base(MsgName),
-        field           = field_defs_to_mgstype_fields(
+        field           = field_defs_to_msgtype_fields(
                             Fields, [], ToDefsEnv),
         extension       = [],
         nested_type     = [],
@@ -362,7 +403,23 @@ maptype_defs_to_msgtype(MapPseudoMsgs, ToDefsEnv) ->
        }
      || {{msg,MsgName}, Fields} <- MapPseudoMsgs].
 
-field_defs_to_mgstype_fields(Fields, AllOneofs, ToDefsEnv) ->
+extensions_to_types(Path, #to_defs_env{ext_origins=ExtOrigins,
+                                       name_adjuster=NameAdjuster}=ToDefsEnv) ->
+    Exts = dict_fetch_list(Path, ExtOrigins),
+    %% FIXME: is it possible to extend with oneofs alternatives?
+    %% Is it possible to extend with new oneofs fields?
+    AllOneofs = [],
+
+    lists:append(
+      [set_extendee(NameAdjuster(Extendee),
+                    field_defs_to_msgtype_fields(Fields, AllOneofs, ToDefsEnv))
+       || {Extendee, Fields} <- Exts]).
+
+set_extendee(Extendee, FieldDescrs) when is_list(FieldDescrs) ->
+    [FieldDescr#'FieldDescriptorProto'{extendee = atom_to_list(Extendee)}
+     || FieldDescr <- FieldDescrs].
+
+field_defs_to_msgtype_fields(Fields, AllOneofs, ToDefsEnv) ->
     lists:append([field_def_to_msgtype_field(Field, AllOneofs,
                                              ToDefsEnv, undefined)
                   || Field <- Fields]).
@@ -640,6 +697,30 @@ set_opts2([], _FNamesDefaults, OptMsg, HasChanged) ->
        not HasChanged -> undefined
     end.
 
+collect_ext_origins(Defs) ->
+    lists:foldl(
+      fun({{ext_origin, Extendee}, {Location, Fields}}, {ByLoc, ByMsg}) ->
+              LPath = name_to_components(Location),
+              MPath = name_to_components(Extendee),
+              ByLoc1 = dict:append(LPath, {Extendee, Fields}, ByLoc),
+              ByMsg1 = dict:append_list(MPath, Fields, ByMsg),
+              {ByLoc1, ByMsg1};
+         (_Other, {ByLoc, ByMsg}) ->
+              {ByLoc, ByMsg}
+      end,
+      {dict:new(), dict:new()},
+      Defs).
+
+collect_extension_ranges(Defs) ->
+    lists:foldl(
+      fun({{extensions, Msg}, Ranges}, D) ->
+              dict:store(name_to_components(Msg), Ranges, D);
+         (_Other, Acc) ->
+              Acc
+      end,
+      dict:new(),
+      Defs).
+
 atom_to_ustring(A) ->
     Utf8Str = atom_to_list(A),
     unicode:characters_to_list(list_to_binary(Utf8Str), utf8).
@@ -662,6 +743,12 @@ escape_bytes(<<>>) ->
     "".
 
 escape_char(C) -> ?ff("\\~.8b", [C]).
+
+dict_fetch_list(Key, D) ->
+    case dict:find(Key, D) of
+        {ok, Elems} when is_list(Elems) -> Elems;
+        error -> []
+    end.
 
 mk_prefix_tree([{Path,_Def}=PathDef | Rest], Acc) -> % iterates over sorted list
     {Children, Rest2} =

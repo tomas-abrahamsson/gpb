@@ -23,6 +23,11 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("gpb_descriptor.hrl").
 
+-define(extension_range(StartIncl, EndExcl),
+        #'DescriptorProto.ExtensionRange'{start = StartIncl,
+                                          'end' = EndExcl}).
+-define(range_max, 536870912).
+
 %% ------------------------------------------------------------------
 
 individual_descriptor_test() ->
@@ -438,6 +443,70 @@ file_options_test() ->
        php_namespace="ns",
        php_metadata_namespace="mns",
        ruby_package="r.pkg"} = FileOptions,
+    ok.
+
+extend_proto() ->
+    "message M1 {
+       extensions 200 to 299;
+       message M2 {
+         extensions 201 to max;
+       }
+       extend M2 {optional uint32 e2 = 222;}
+     };
+     extend M1 {optional uint32 e11 = 211;}
+     extend M1.M2 {optional uint32 e12 = 212;}".
+
+extend_with_package_test() ->
+    ProtosAsTxts = [{"main.proto", ["syntax='proto2';
+                                     package p;
+                                    " ++ extend_proto()]}],
+    {FileDescriptorSet, [{_main1, MainProto}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    #'FileDescriptorProto'{
+       message_type =
+           [#'DescriptorProto'{
+               name="M1",
+               field=[],
+               extension=[#'FieldDescriptorProto'{extendee=".p.M1.M2",
+                                                  name="e2"}],
+               extension_range=[?extension_range(200, 300)],
+               nested_type=
+                   [#'DescriptorProto'{
+                       name="M2",
+                       field=[],
+                       extension_range=[?extension_range(201, ?range_max)],
+                       extension=[]}]}],
+       extension=[#'FieldDescriptorProto'{extendee=".p.M1",
+                                          name="e11"},
+                  #'FieldDescriptorProto'{extendee=".p.M1.M2",
+                                          name="e12"}]} = MainProto,
+
+    %% Again, but with the use_packages option.
+    %% The resulting descriptors should be the same.
+    {FileDescriptorSet, [{_main2, MainProto}]} =
+        compile_descriptors(ProtosAsTxts, [use_packages]),
+    ok.
+
+extend_no_package_test() ->
+    ProtosAsTxts = [{"main.proto", ["syntax='proto2';\n" ++ extend_proto()]}],
+    {FileDescriptorSet, [{_main1, MainProto}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    #'FileDescriptorProto'{
+       message_type =
+           [#'DescriptorProto'{
+               name="M1",
+               field=[],
+               extension=[#'FieldDescriptorProto'{extendee=".M1.M2"}],
+               nested_type= [#'DescriptorProto'{name="M2",
+                                                field=[]}]}],
+       extension=[#'FieldDescriptorProto'{extendee=".M1"},
+                  #'FieldDescriptorProto'{extendee=".M1.M2"}]} =
+        MainProto,
+
+    %% Again, but with the use_packags option.
+    %% The resulting descriptors should be the same.
+    {FileDescriptorSet, [{_main2, MainProto}]} =
+        compile_descriptors(ProtosAsTxts, [use_packages]),
     ok.
 
 %% --helpers----------
