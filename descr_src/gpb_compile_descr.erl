@@ -34,6 +34,8 @@
                       ext_origins, % extended location -> extensions
                       ext_msgs, % extended msg -> fields
                       ext_ranges, % extended msg -> ranges
+                      reserved_nums,
+                      reserved_names,
                       name_adjuster}).
 
 encode_defs_to_descriptors(Defs, Opts) ->
@@ -146,6 +148,7 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
     EnumOptions = collect_enum_options(Defs),
     ServiceOptions = collect_service_options(Defs),
     {ExtOrigins, ExtMsgs} = collect_ext_origins(Defs),
+    {ReservedNums, ReservedNames} = collect_reserved_nums_names(Defs),
     ExtRanges = collect_extension_ranges(Defs),
     ToDefsEnv = #to_defs_env{pseudo_msg_names = TypesToPseudoMsgNames,
                              msg_options = MsgOptions,
@@ -153,6 +156,8 @@ defs_to_file_descr_proto(Name, Defs, Opts) ->
                              ext_origins = ExtOrigins,
                              ext_msgs = ExtMsgs,
                              ext_ranges = ExtRanges,
+                             reserved_nums = ReservedNums,
+                             reserved_names = ReservedNames,
                              name_adjuster = Adjuster},
     {Msgs, Enums} = nest_defs_to_types(Defs1, ToDefsEnv),
     RootPath = gpb_lib:string_lexemes(Root, "."),
@@ -310,7 +315,9 @@ defs_to_types([{{Path, {{_msg_or_group, MsgName}, Fields0}}, ChildItems}
                | Rest],
               #to_defs_env{ext_msgs=ExtMsgs,
                            msg_options=MsgOptionsByName,
-                           ext_ranges=ExtRangesByMsg}=ToDefsEnv,
+                           ext_ranges=ExtRangesByMsg,
+                           reserved_nums=ReservedNumsByMsg,
+                          reserved_names=ReservedNamesByMsg}=ToDefsEnv,
               Acc) when _msg_or_group == msg;
                         _msg_or_group == group ->
     Extendsings = extensions_to_types(Path, ToDefsEnv),
@@ -318,6 +325,8 @@ defs_to_types([{{Path, {{_msg_or_group, MsgName}, Fields0}}, ChildItems}
     ExtRanges = extension_ranges(Path, ExtRangesByMsg),
     Fields1 = remove_extended_fields(Fields0, ExtFields),
     OneofNames = oneof_names_synthetic_last(Fields1),
+    ReservedRanges = reserved_ranges(Path, ReservedNumsByMsg),
+    ReservedNames = dict_fetch_list(Path, ReservedNamesByMsg),
     {SubMsgs, SubEnums} = defs_to_types(ChildItems, ToDefsEnv, []),
     Item = #'DescriptorProto'{
               name            = atom_to_ustring_base(MsgName),
@@ -327,6 +336,8 @@ defs_to_types([{{Path, {{_msg_or_group, MsgName}, Fields0}}, ChildItems}
               nested_type     = SubMsgs,
               enum_type       = SubEnums,
               extension_range = ExtRanges,
+              reserved_range  = ReservedRanges,
+              reserved_name   = ReservedNames,
               options         = msg_options(MsgName, MsgOptionsByName),
               oneof_decl      = oneof_decl(OneofNames)},
     defs_to_types(Rest, ToDefsEnv, [Item | Acc]);
@@ -385,6 +396,16 @@ extension_ranges(Path, ExtRangesByMsg) ->
     [#'DescriptorProto.ExtensionRange'{start = Start, % inclusive
                                        'end' = range_end(End)} % exclusive
      || {Start, End} <- ExtRanges].
+
+reserved_ranges(Path, NumsByMsg) ->
+    [begin
+         {Start, End} = if is_integer(Num) -> {Num, Num};
+                           is_tuple(Num) -> Num
+                        end,
+         #'DescriptorProto.ReservedRange'{start = Start, % inclusive
+                                          'end' = range_end(End)} % exclusive
+     end
+     || Num <- dict_fetch_list(Path, NumsByMsg)].
 
 range_end(max) -> 16#20000000; % 536870912
 range_end(Max) when is_integer(Max) -> Max + 1. % inclusive -> exclusive
@@ -719,6 +740,22 @@ collect_extension_ranges(Defs) ->
               Acc
       end,
       dict:new(),
+      Defs).
+
+collect_reserved_nums_names(Defs) ->
+    lists:foldl(
+      fun({{reserved_numbers, Msg}, Reserved}, {Nums, Names}) ->
+              Path = name_to_components(Msg),
+              Nums1 = dict:append_list(Path, Reserved, Nums),
+              {Nums1, Names};
+         ({{reserved_names, Msg}, Reserved}, {Nums, Names}) ->
+              Path = name_to_components(Msg),
+              Names1 = dict:append_list(Path, Reserved, Names),
+              {Nums, Names1};
+         (_Other, {Nums, Names}) ->
+              {Nums, Names}
+      end,
+      {dict:new(), dict:new()},
       Defs).
 
 atom_to_ustring(A) ->

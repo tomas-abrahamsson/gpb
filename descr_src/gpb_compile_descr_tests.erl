@@ -26,6 +26,9 @@
 -define(extension_range(StartIncl, EndExcl),
         #'DescriptorProto.ExtensionRange'{start = StartIncl,
                                           'end' = EndExcl}).
+-define(reserved_range(StartIncl, EndExcl),
+        #'DescriptorProto.ReservedRange'{start = StartIncl,
+                                         'end' = EndExcl}).
 -define(range_max, 536870912).
 
 %% ------------------------------------------------------------------
@@ -507,6 +510,31 @@ extend_no_package_test() ->
     %% The resulting descriptors should be the same.
     {FileDescriptorSet, [{_main2, MainProto}]} =
         compile_descriptors(ProtosAsTxts, [use_packages]),
+    ok.
+
+reserved_test() ->
+    ProtosAsTxts =
+        [{"main.proto",
+          ["syntax='proto2';
+            message M {
+              reserved 2, 11 to 13, 9, 15 to max;
+              reserved 8;
+              reserved 'foo', 'bar';
+              reserved 'zzz';
+            }"]}],
+    {_FileDescriptorSet, [{_main1, MainDescr}]} =
+        compile_descriptors(ProtosAsTxts, []),
+    io:format("~nD:~p~n", [MainDescr]),
+    #'FileDescriptorProto'{
+       message_type =
+           [#'DescriptorProto'{
+               name="M",
+               reserved_range=[?reserved_range( 2,  3),
+                               ?reserved_range(11, 14),
+                               ?reserved_range( 9, 10),
+                               ?reserved_range(15, ?range_max),
+                               ?reserved_range( 8,  9)],
+               reserved_name=["foo", "bar", "zzz"]}]} = MainDescr,
     ok.
 
 %% --helpers----------
