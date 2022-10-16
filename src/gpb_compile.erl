@@ -4229,7 +4229,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                ""
        end,
        case gpb_lib:get_defs_as_maps_or_records(Opts) of
-           records ->
+           records when DoIntrospect ->
                [case gpb_lib:get_field_format_by_opts(Opts) of
                     fields_as_records ->
                         if AsLib ->
@@ -4242,6 +4242,8 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                     fields_as_maps ->
                         ""
                 end];
+           records when not DoIntrospect ->
+               "";
            maps ->
                ""
        end,

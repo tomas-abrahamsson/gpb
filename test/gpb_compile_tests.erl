@@ -1071,6 +1071,12 @@ get_containments_test() ->
     unload_code(M1),
     unload_code(M2).
 
+no_include_gpb_hrl_on_no_gen_introspect_test() ->
+    Proto = "syntax='proto2';
+             message M { }",
+    S = compile_to_string(Proto, [{gen_introspect, false}]),
+    assert_not_contains_regexp(S, "-include.*gpb.hrl").
+
 %% --- decoder tests ---------------
 
 decodes_overly_long_varints_test() ->
