@@ -1169,7 +1169,7 @@ file(File) ->
 %%
 %% The `{json_object_format,Format}' option specifies the format
 %% of json object, as indicated below. (Note that the format of the keys
-%% is specified by the `json_object_key' option, see further below.)
+%% is specified by the `json_key_format' option, see further below.)
 %% <dl>
 %%   <dt>`eep18'</dt>
 %%   <dd>The empty json object is represented as `[{}]'.<br/>
