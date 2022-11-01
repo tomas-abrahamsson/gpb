@@ -2400,6 +2400,77 @@ gen_verifiers_test() ->
     unload_code(M),
     ok.
 
+%% --- pre-encoded submsgs during encoding ------------
+
+preencoded_msg_with_verify_test() ->
+    M = compile_iolist(["message Top { optional Sub s = 1; }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top = M:encode_msg({'Top', {'Sub', 17}}),
+    Sub = M:encode_msg({'Sub', 17}),
+    ok  = M:verify_msg({'Top', Sub}),
+    Top = M:encode_msg({'Top', Sub}, [{verify, true}]),
+    unload_code(M).
+
+preencoded_msg_with_no_fields_test() ->
+    M = compile_iolist(["message Top { optional Sub s = 1; }
+                         message Sub { }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top = M:encode_msg({'Top', {'Sub'}}),
+    Sub = M:encode_msg({'Sub'}),
+    ok  = M:verify_msg({'Top', Sub}),
+    Top = M:encode_msg({'Top', Sub}, [{verify, true}]),
+    unload_code(M).
+
+preencoded_msg_in_oneof_test() ->
+    M = compile_iolist(["message Top { oneof c { Sub s = 1; } }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top = M:encode_msg({'Top', {s, {'Sub', 17}}}),
+    Sub = M:encode_msg({'Sub', 17}),
+    ok  = M:verify_msg({'Top', {s, Sub}}),
+    Top = M:encode_msg({'Top', {s, Sub}}),
+    unload_code(M).
+
+preencoded_msg_in_maptype_field_test() ->
+    M = compile_iolist(["message Top { map<uint32, Sub> m = 1; }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top = M:encode_msg({'Top', [{42, {'Sub', 17}}]}),
+    Sub = M:encode_msg({'Sub', 17}),
+    ok  = M:verify_msg({'Top', [{42, Sub}]}),
+    Top = M:encode_msg({'Top', [{42, Sub}]}),
+    unload_code(M).
+
+preencoded_msg_with_repeated_test() ->
+    M = compile_iolist(["message Top { repeated Sub r = 1; }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top   = M:encode_msg({'Top', [{'Sub', 17}, {'Sub', 18}]}),
+    Sub17 = M:encode_msg({'Sub', 17}),
+    Sub18 = M:encode_msg({'Sub', 18}),
+    ok    = M:verify_msg({'Top', [Sub17, Sub18]}),
+    Top   = M:encode_msg({'Top', [Sub17, Sub18]}),
+    unload_code(M).
+
+-ifndef(NO_HAVE_MAPS).
+preencoded_msg_with_maps_test() ->
+    M = compile_iolist(["message Top { optional Sub s = 1; }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs, maps]),
+    Top = M:encode_msg(#{s => #{a => 17}}, 'Top'),
+    Sub = M:encode_msg(#{a => 17}, 'Sub'),
+    ok  = M:verify_msg(#{s => Sub}, 'Top'),
+    Top = M:encode_msg(#{s => Sub}, 'Top', [{verify, true}]),
+    unload_code(M).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
 %% --- locate_import and read_import ----------
 
 read_import_test() ->
@@ -5429,6 +5500,11 @@ no_gen_verifiers_test() ->
 no_gen_mergers_test() ->
     {ok, {[nif, {gen_mergers, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-nif", "-no-gen-mergers",
+                                         "x.proto"]).
+
+allow_preencoded_submsgs_options_test() ->
+    {ok, {[allow_preencoded_submsgs], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-allow-preencoded-submsgs",
                                          "x.proto"]).
 
 no_gen_intospections_test() ->

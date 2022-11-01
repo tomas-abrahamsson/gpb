@@ -299,6 +299,7 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
                                replace_tree('M', MsgVar)])
                 end
         end,
+    AllowPreencodedSubmsgs = proplists:get_bool(allow_preencoded_submsgs, Opts),
     [[[[[gpb_codegen:format_fn(
            gpb_lib:mk_fn(encode_msg_, MsgName),
            fun(Msg) ->
@@ -317,10 +318,19 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
        "\n"] || IncludeStarter],
      gpb_codegen:format_fn(
        FnName,
-       fun('<msg-matching>', Bin, TrUserData) ->
+       fun('Preencoded', _Bin, _TrUserData) when is_binary('Preencoded') ->
+               'Preencoded';
+          ('<msg-matching>', Bin, TrUserData) ->
                '<encode-param-exprs>'
        end,
-       [replace_tree('<msg-matching>', FieldMatching),
+       [repeat_clauses(
+          'Preencoded',
+          if AllowPreencodedSubmsgs ->
+                  [[replace_tree('Preencoded', gpb_lib:var("Preencoded", []))]];
+             not AllowPreencodedSubmsgs ->
+                  [] % don't include this clause at all
+          end),
+        replace_tree('<msg-matching>', FieldMatching),
         splice_trees('<encode-param-exprs>', EncodeExprs)])].
 
 field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,

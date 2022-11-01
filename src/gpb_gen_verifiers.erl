@@ -140,8 +140,41 @@ format_verifiers(Defs, AnRes, Opts) ->
     ].
 
 format_msg_verifiers(Defs, AnRes, Opts) ->
-    [format_msg_verifier(MsgName, MsgDef, AnRes, Opts)
-     || {_Type, MsgName, MsgDef} <- gpb_lib:msgs_or_groups(Defs)].
+    [[case Type == msg andalso can_occur_as_submsg(MsgName, AnRes) of
+          true  -> format_submsg_verifier_wrapper(MsgName, Opts);
+          false -> []
+      end,
+      format_msg_verifier(MsgName, MsgDef, AnRes, Opts)]
+     || {Type, MsgName, MsgDef} <- gpb_lib:msgs_or_groups(Defs)].
+
+can_occur_as_submsg(MsgName, #anres{used_types=UsedTypes}) ->
+    gpb_lib:smember({msg, MsgName}, UsedTypes).
+
+format_submsg_verifier_wrapper(MsgName, Opts) ->
+    FnNameSub = gpb_lib:mk_fn(v_submsg_, MsgName),
+    FnName    = gpb_lib:mk_fn(v_msg_, MsgName),
+    case proplists:get_bool(allow_preencoded_submsgs, Opts) of
+        true ->
+            [gpb_lib:nowarn_unused_function(FnNameSub, 3),
+             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3,Opts),
+             gpb_codegen:format_fn(
+               FnNameSub,
+               fun(Preencoded, _Path, _TrUserData) when is_binary(Preencoded) ->
+                       ok;
+                  (Msg, Path, TrUserData) ->
+                       'FnName'(Msg, Path, TrUserData)
+               end,
+               [replace_term('FnName', FnName)])];
+        false ->
+            [gpb_lib:nowarn_unused_function(FnNameSub, 3),
+             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3,Opts),
+             gpb_codegen:format_fn(
+               FnNameSub,
+               fun(Msg, Path, TrUserData) ->
+                       'FnName'(Msg, Path, TrUserData)
+               end,
+               [replace_term('FnName', FnName)])]
+    end.
 
 format_msg_verifier(MsgName, MsgDef0, AnRes, Opts) ->
     MsgDef1 = drop_field_for_unknown_if_present(MsgDef0),
@@ -254,7 +287,7 @@ field_verifier(MsgName,
                FVar, MsgVar, TrUserDataVar, AnRes, Opts) ->
     FVerifierFn =
         case Type of
-            {msg,FMsgName}  -> gpb_lib:mk_fn(v_msg_, FMsgName);
+            {msg,FMsgName}  -> gpb_lib:mk_fn(v_submsg_, FMsgName);
             {group,GName}   -> gpb_lib:mk_fn(v_msg_, GName);
             {enum,EnumName} -> gpb_lib:mk_fn(v_enum_, EnumName);
             {map,KT,VT}     -> gpb_lib:mk_fn(v_, gpb_lib:map_type_to_msg_name(
@@ -524,7 +557,7 @@ field_oneof_present_undefined_verifier(MsgName, FName, OFields,
                FVerifierFn =
                    case Type of
                        {msg,FMsgName} ->
-                           gpb_lib:mk_fn(v_msg_, FMsgName);
+                           gpb_lib:mk_fn(v_submsg_, FMsgName);
                        {enum,EnumName} ->
                            gpb_lib:mk_fn(v_enum_, EnumName);
                        Type ->
@@ -581,7 +614,7 @@ field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
           [begin
                FVerifierFn =
                    case Type of
-                       {msg,FMsgName} -> gpb_lib:mk_fn(v_msg_, FMsgName);
+                       {msg,FMsgName} -> gpb_lib:mk_fn(v_submsg_, FMsgName);
                        {enum,EnumName} -> gpb_lib:mk_fn(v_enum_, EnumName);
                        Type -> gpb_lib:mk_fn(v_type_, Type)
                    end,
@@ -645,7 +678,7 @@ field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
           [begin
                FVerifierFn =
                    case Type of
-                       {msg,FMsgName} -> gpb_lib:mk_fn(v_msg_, FMsgName);
+                       {msg,FMsgName} -> gpb_lib:mk_fn(v_submsg_, FMsgName);
                        {enum,EnumName} -> gpb_lib:mk_fn(v_enum_, EnumName);
                        Type -> gpb_lib:mk_fn(v_type_, Type)
                    end,
@@ -817,7 +850,7 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(v_, MsgName),
     KeyVerifierFn = gpb_lib:mk_fn(v_type_, KeyType),
     ValueVerifierFn1 = case ValueType of
-                           {msg,FMsgName}  -> gpb_lib:mk_fn(v_msg_, FMsgName);
+                           {msg,FMsgName}  -> gpb_lib:mk_fn(v_submsg_,FMsgName);
                            {enum,EnumName} -> gpb_lib:mk_fn(v_enum_, EnumName);
                            Type            -> gpb_lib:mk_fn(v_type_, Type)
                        end,

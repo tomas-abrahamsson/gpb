@@ -135,6 +135,7 @@
         {maps_unset_optional, omitted | present_undefined} |
         {maps_oneof, tuples | flat} |
         {maps_key_type, atom | binary} |
+        boolean_opt(allow_preencoded_submsgs) |
         %% Verification of input
         {verify, optionally | always | never} |
         boolean_opt(verify_decode_required_present) |
@@ -371,7 +372,9 @@ file(File) ->
 %%       <tt>{<a href="#option-maps_oneof">maps_oneof</a>,
 %%            tuples|flat}</tt>,
 %%       <tt>{<a href="#option-maps_key_type">maps_key_type</a>,
-%%            atom|binary}</tt>
+%%            atom|binary}</tt>,
+%%       <tt><a href="#option-allow_preencoded_submsgs"
+%%                           >allow_preencoded_submsgs</a></tt>
 %%       <br/>
 %%       See also <tt><a href="#option-use_packages">use_packages</a></tt>.
 %%   </dd>
@@ -398,7 +401,7 @@ file(File) ->
 %%       <tt>{<a href="#option-module_name_suffix">module_name_suffix</a>,
 %%            {@link name_part()}}</tt>,
 %%       <tt>{<a href="#option-module_name">module_name</a>
-%%            {@link new_name()}}</tt>,
+%%            {@link new_name()}}</tt>
 %%   </dd>
 %%   <dt>What to generate and how</dt>
 %%   <dd><tt><a href="#option-use_packages">use_packages</a></tt>,
@@ -684,6 +687,16 @@ file(File) ->
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-maps_key_type">-maps_key_type</a>.
+%%
+%% <h4><a id="option-allow_preencoded_submsgs"/>`allow_preencoded_submsgs'</h4>
+%%
+%% Allow pre-encoded submsgs to save cpu during encoding. A sub-message
+%% can then be specified as a binary. It is not possible to combine this
+%% option neither with the option `nif' nor with encoding to json.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-allow-preencoded-submsgs"
+%%                        >-allow-preencoded-submsgs</a>.
 %%
 %% <h4>Related options</h4>
 %% <ul>
@@ -1865,7 +1878,8 @@ verify_opts(Defs, Opts) ->
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
               fun() -> verify_opts_flat_oneof(Opts) end,
               fun() -> verify_opts_no_gen_mergers(Opts) end,
-              fun() -> verify_opts_no_gen_verifiers(Opts) end]).
+              fun() -> verify_opts_no_gen_verifiers(Opts) end,
+              fun() -> verify_opts_allow_preencoded_submsgs(Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -1966,6 +1980,15 @@ verify_opts_no_gen_verifiers(Opts) ->
         {never, false} -> ok;
         {_, false} -> {error, {invalid_options,
                                {verify,Verify}, {gen_verifiers,false}}}
+    end.
+
+verify_opts_allow_preencoded_submsgs(Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    AllowPreencodedSubmsgs = proplists:get_bool(allow_preencoded_submsgs, Opts),
+    case {DoNif, AllowPreencodedSubmsgs} of
+        {true, true} -> {error, {invalid_options,
+                                 nif, allow_preencoded_submsgs}};
+        _ -> ok
     end.
 
 %% @equiv msg_defs(Mod, Defs, [])
@@ -2362,6 +2385,8 @@ fmt_err({invalid_options, nif, {gen_mergers, false}}) ->
 fmt_err({invalid_options, {verify,Verify}, {gen_verifiers,false}}) ->
     ?f("Option error: It is not possible to omit verifiers when verify = ~p",
        [Verify]);
+fmt_err({invalid_options, nif, allow_preencoded_submsgs}) ->
+    "Option error: Not supported: both allow_preencoded_submsgs and nif";
 fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
@@ -2512,6 +2537,12 @@ c() ->
 %%     <dd>Specifies the key type for maps.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-maps_key_type">maps_key_type</a></dd>
+%%   <dt><a id="cmdline-option-allow-preencoded-submsgs"/>
+%%       `-allow-preencoded-submsgs'</dt>
+%%     <dd>Allow pre-encoded submsgs to save cpu during encoding<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-allow_preencoded_submsgs"
+%%                       >allow_preencoded_submsgs</a></dd>
 %% </dl>
 %%
 %% Verification of input
@@ -3224,6 +3255,8 @@ opt_specs() ->
      {"maps_key_type", {atom, binary}, maps_key_type,
       "atom | binary\n"
       "       Specifies the key type for maps.\n"},
+     {"allow-preencoded-submsgs", undefined, allow_preencoded_submsgs, "\n"
+      "       Allow pre-encoded submsgs to save cpu during encoding.\n"},
      {{section, "Verification of inputs"}},
      {"v", {optionally, always, never}, verify, " optionally | always | never\n"
       "       Specify how the generated encoder should\n"
