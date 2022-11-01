@@ -246,7 +246,8 @@ doc:	| $(incdir)/gpb_version.hrl
 doc-check: doc
 	$(silencer)tidy -config .tidyrc -q -e doc/gpb_*.html 2>&1 | \
 	    egrep -v '(trimming empty|inserting implicit) <p>' | \
-	    egrep -v '<table> lacks "summary" attribute' || :
+	    egrep -v '<table> lacks "summary" attribute' | \
+	    egrep -v 'Warning.*proprietary attribute.*docgen-(rel|href)' || :
 
 xref: all
 	@echo Checking for calls to undefined functions...
