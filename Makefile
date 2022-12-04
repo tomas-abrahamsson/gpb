@@ -414,9 +414,8 @@ $(ebin)/gpb.app: $(src)/gpb.app.src | $(ebin)
 		         io_lib:format(\"~p.~n\", [AppTerm]))), \
 		halt(0) \
 	    catch Class:Reason -> \
-		ST = erlang:get_stacktrace(), \
-		io:format(\"ERROR: {~p,~p~n\" \
-			  \"        ~p}~n\", [Class,Reason,ST]), \
+		io:format(\"ERROR: {~p,~p}~n\", \
+			  [Class,Reason]), \
 		halt(1) \
 	    end."
 
