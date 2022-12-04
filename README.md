@@ -46,7 +46,7 @@ Eshell V8.0.3  (abort with ^G)
 In the Erlang shell, the `rr("x.hrl")` reads record definitions, and
 the `v(-1)` references a value one step earlier in the history.
 
-Mapping of protocol buffer datatypes to erlang
+Mapping of protocol buffer datatypes to Erlang
 ----------------------------------------------
 
 <table>
@@ -505,7 +505,7 @@ exporting gpb from git.)
 
 The version number from the `git describe` command above will look like
 * `<x>.<y>.<z>` (on master on Github)
-* `<x>.<y>.<z>-<n>-g<sha>` (on branches or between commits)
+* `<x>.<y>.<z>-<n>-g<sha>` (on branches or between releases)
 
 The version number on the master branch of the gpb on Github is
 intended to always be only integers with dots, in order to be
@@ -519,7 +519,7 @@ minor version bumps, only important updates.
 Places to update when making a new version:
 * Write about the changes in the ChangeLog file,
   if it is a non-minor version bump.
-* tag it in git
+* Tag it in git
 
 
 Building outside of a git work tree
@@ -534,7 +534,7 @@ to build outside of git. To do that, you have two options:
 * or create a versioned archive, using the `helpers/mk-versioned-archive` script,
   then unpack the archive and build inside it.
 
-If you create the versioned archive in a git worktree, the version
+If you create the versioned archive in a git work tree, the version
 will be set automatically, otherwise you will need to specify it
 manually. Run `mk-versioned-archive --help` for info on what options
 to use.
@@ -591,7 +591,7 @@ Version history
 
 See the
 [ChangeLog](https://github.com/tomas-abrahamsson/gpb/blob/master/ChangeLog)
-for defails.
+for details.
 
 ##### Major change in version 4.0.0: #####
 
