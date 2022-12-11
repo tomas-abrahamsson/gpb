@@ -904,11 +904,20 @@ format_nif_cc_utf8_conversion_code(Opts) ->
               "    return n;\n",
               "}\n",
               "\n",
+              "#if GOOGLE_PROTOBUF_VERSION >= 3000000\n"
+              "#define DEST_TYPE std::string &\n"
+              "#define ADD_OCTET(dest, oct_expr) \\\n"
+              "            (dest) += static_cast<char>((oct_expr))\n"
+              "#else\n"
+              "#define DEST_TYPE char *\n"
+              "#define ADD_OCTET(dest, oct_expr) \\\n"
+              "            *(dest)++ = static_cast<char>((oct_expr))\n"
+              "#endif\n"
+              "\n"
               "static int\n",
-              "utf8_to_octets(ErlNifEnv *env, ERL_NIF_TERM str, char *dest)\n",
+              "utf8_to_octets(ErlNifEnv *env, ERL_NIF_TERM str,\n"
+              "               DEST_TYPE dest)\n",
               "{\n",
-              "    unsigned char *s = (unsigned char *)dest;\n",
-              "\n",
               "    while (!enif_is_empty_list(env, str))\n",
               "    {\n",
               "        ERL_NIF_TERM head, tail;\n",
@@ -920,41 +929,41 @@ format_nif_cc_utf8_conversion_code(Opts) ->
               "            return -1;\n",
               "\n",
               "        if (c <= 0x7f)\n",
-              "            *s++ = c;\n",
+              "            ADD_OCTET(dest, c);\n",
               "        else if (c <= 0x7ff)\n",
               "        {\n",
-              "            *s++ = 0xc0 | (c >> 6);\n",
-              "            *s++ = 0x80 | (c & 0x3f);\n",
+              "            ADD_OCTET(dest, 0xc0 | (c >> 6));\n",
+              "            ADD_OCTET(dest, 0x80 | (c & 0x3f));\n",
               "        }\n",
               "        else if (c <= 0xffff)\n",
               "        {\n",
-              "            *s++ = 0xe0 | (c >> 12);\n",
-              "            *s++ = 0x80 | ((c >> 6) & 0x3f);\n",
-              "            *s++ = 0x80 | (c        & 0x3f);\n",
+              "            ADD_OCTET(dest, 0xe0 | (c >> 12));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >> 6) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | (c        & 0x3f));\n",
               "        }\n",
               "        else if (c <= 0x1Fffff)\n",
               "        {\n",
-              "            *s++ = 0xf0 | (c >> 18);\n",
-              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n",
-              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n",
-              "            *s++ = 0x80 | (c         & 0x3f);\n",
+              "            ADD_OCTET(dest, 0xf0 | (c >> 18));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >> 12) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >>  6) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | (c         & 0x3f));\n",
               "        }\n",
               "        else if (c <= 0x3FFffff)\n",
               "        {\n",
-              "            *s++ = 0xf0 | (c >> 24);\n",
-              "            *s++ = 0x80 | ((c >> 18) & 0x3f);\n",
-              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n",
-              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n",
-              "            *s++ = 0x80 | (c         & 0x3f);\n",
+              "            ADD_OCTET(dest, 0xf0 | (c >> 24));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >> 18) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >> 12) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >>  6) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | (c         & 0x3f));\n",
               "        }\n",
               "        else if (c <= 0x7FFFffff)\n",
               "        {\n",
-              "            *s++ = 0xf0 | (c >> 30);\n",
-              "            *s++ = 0x80 | ((c >> 24) & 0x3f);\n",
-              "            *s++ = 0x80 | ((c >> 18) & 0x3f);\n",
-              "            *s++ = 0x80 | ((c >> 12) & 0x3f);\n",
-              "            *s++ = 0x80 | ((c >>  6) & 0x3f);\n",
-              "            *s++ = 0x80 | (c         & 0x3f);\n",
+              "            ADD_OCTET(dest, 0xf0 | (c >> 30));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >> 24) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >> 18) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >> 12) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | ((c >>  6) & 0x3f));\n",
+              "            ADD_OCTET(dest, 0x80 | (c         & 0x3f));\n",
               "        }\n",
               "        else\n",
               "            return 0;\n",
@@ -1606,12 +1615,21 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, CCMapping,
                        "        return 0;\n"
                        "    else\n"
                        "    {\n"
+                       "#if GOOGLE_PROTOBUF_VERSION >= 3000000\n"
+                       "         std::string s;\n"
+                       "         s.reserve(num_octs);\n"
+                       "         utf8_to_octets(env, ~s, s);\n"
+                       "         ~s\n"
+                       "#else\n"
                        "         char s[num_octs];\n"
                        "         utf8_to_octets(env, ~s, s);\n"
                        "         ~s\n"
+                       "#endif\n"
                        "    }\n"
                        "}\n",
-                       [SrcVar, SrcVar, SetFn(["s", "num_octs"])])
+                       [SrcVar,
+                        SrcVar, SetFn(["s"]), % PROTOBUF >= 3.16.0
+                        SrcVar, SetFn(["s", "num_octs"])])
             end;
         bytes ->
             ?f("{\n"
@@ -2214,8 +2232,9 @@ format_nif_cc_to_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
      "        return enif_make_badarg(env);\n"
      "    }\n\n"
      ""
-     "    if (::google::protobuf::util::MessageToJsonString(*m, &j, jopts)\n"
-     "        == ::google::protobuf::util::Status::OK)\n"
+     "    ::google::protobuf::util::Status st;\n"
+     "    st = ::google::protobuf::util::MessageToJsonString(*m, &j, jopts);\n"
+     "    if (st.ok())\n"
      "    {\n"
      "        unsigned char *data;\n"
      "        const char    *jData = j.data();\n"
@@ -2282,8 +2301,9 @@ format_nif_cc_from_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
      "\n",
      %% try/catch bad_alloc and return enomem?
      "    j.assign(reinterpret_cast<char *>(data.data), data.size);\n"
-     "    if (::google::protobuf::util::JsonStringToMessage(j, m, jopts)\n"
-     "        != ::google::protobuf::util::Status::OK)"
+     "    ::google::protobuf::util::Status st;\n"
+     "    st = ::google::protobuf::util::JsonStringToMessage(j, m, jopts);\n"
+     "    if (!st.ok())\n"
      "    {\n"
      "        delete m;\n"
      "        return enif_make_badarg(env);\n"
