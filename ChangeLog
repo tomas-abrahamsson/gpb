@@ -1,5 +1,14 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.7
+2023-Feb-04
+
+        * Support Google protobuf 3.16 and later with nifs.
+        * Add an option {gen_verifiers, false} (no-gen-verifiers).
+          This implies {verify, never} (-v never)
+        * Don't emit -include("gpb.hrl") when not generating introspection
+          functions. It is not needed.
+
 Version 4.19.6
 2022-Sep-24
 
