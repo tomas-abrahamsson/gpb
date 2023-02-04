@@ -109,6 +109,7 @@
 -export([json_null/1]).
 -export([get_gen_mergers/1]).
 -export([get_gen_introspect/1]).
+-export([get_gen_verifiers/1]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
@@ -875,6 +876,9 @@ get_gen_mergers(Opts) ->
 
 get_gen_introspect(Opts) ->
     proplists:get_value(gen_introspect, Opts, true).
+
+get_gen_verifiers(Opts) ->
+    proplists:get_value(gen_verifiers, Opts, true).
 
 %% Syntax tree stuff ----
 

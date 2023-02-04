@@ -138,6 +138,7 @@
         %% Verification of input
         {verify, optionally | always | never} |
         boolean_opt(verify_decode_required_present) |
+        boolean_opt(gen_verifiers) |
         %% Renaming for the Erlang side
         {rename, renaming()} |
         {msg_name_prefix, msg_name_prefix()} |
@@ -378,7 +379,9 @@ file(File) ->
 %%   <dd><tt>{<a href="#option-verify">verify</a>,
 %%            always|never|optionally}</tt>,
 %%       <tt><a href="#option-verify_decode_required_present"
-%%                           >verify_decode_required_present</a></tt>
+%%                           >verify_decode_required_present</a></tt>,
+%%       <tt><a href="#option-gen_verifiers"
+%%                           >gen_verifiers</a></tt>
 %%   </dd>
 %%   <dt>Renaming for the Erlang side</dt>
 %%   <dd><tt>{<a href="#option-rename">rename</a>,
@@ -418,7 +421,8 @@ file(File) ->
 %%       <tt>{<a href="#option-erlc_compile_options">erlc_compile_options</a>,
 %%            string()}</tt>
 %%       <br/>
-%%       See also <tt><a href="#option-gen_introspect">gen_introspect</a></tt>.
+%%       See also <tt><a href="#option-gen_introspect">gen_introspect</a></tt>
+%%       and <tt><a href="#option-gen_verifiers">gen_verifiers</a></tt>
 %%   </dd>
 %%   <dt>Introspection of the proto definitions</dt>
 %%   <dd><tt>{<a href="#option-proto_defs_version">proto_defs_version</a>,
@@ -713,6 +717,11 @@ file(File) ->
 %% `{gpb_type_error,Reason}'. Regardless of the `verify' option,
 %% a function, `verify_msg/1' is always generated.
 %%
+%% Note that the `verify_msg' functions are still generated, even with
+%% `{verify,never}'. If needed, user code might want to call them explicitly.
+%% See the <tt><a href="#option-gen_verifiers">{gen_verifiers, false}</a></tt>
+%% option for a way to control this.
+%%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-v">-v</a>.
 %%
@@ -725,6 +734,17 @@ file(File) ->
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-vdrp">-vdrp</a>.
+%%
+%% <h4><a id="option-gen_verifiers"/>`gen_verifiers'</h4>
+%%
+%% The `{gen_verifiers,false}' option tells gpb to not emit code that
+%% can verify type and range of the Erlang values before encoding.
+%% The main purpose is as a means to reduce the size of the generated
+%% code. Setting this option to `false' also implicitly sets the
+%% <tt><a href="#option-verify">{verify, never}</a></tt> option.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-no-gen-verifiers">-no-gen-verifiers</a>.
 %%
 %% <!-- ======================================================== -->
 %% <h3><a id="optionsection-renaming"/>
@@ -989,6 +1009,7 @@ file(File) ->
 %% <h4>Related options</h4>
 %% <ul>
 %%   <li><a href="#option-gen_introspect">`gen_introspect'</a></li>
+%%   <li><a href="#option-gen_verifiers">`gen_verifiers'</a></li>
 %% </ul>
 %%
 %% <!-- ======================================================== -->
@@ -1169,7 +1190,7 @@ file(File) ->
 %%
 %% The `{json_object_format,Format}' option specifies the format
 %% of json object, as indicated below. (Note that the format of the keys
-%% is specified by the `json_object_key' option, see further below.)
+%% is specified by the `json_key_format' option, see further below.)
 %% <dl>
 %%   <dt>`eep18'</dt>
 %%   <dd>The empty json object is represented as `[{}]'.<br/>
@@ -1637,7 +1658,8 @@ normalize_alias_opts(Opts) ->
                  fun norm_opt_epb_compat_opt/1,
                  fun norm_opt_map_opts/1,
                  fun norm_opt_any_translate/1,
-                 fun norm_opt_json_format/1]).
+                 fun norm_opt_json_format/1,
+                 fun norm_opt_gen_verifiers/1]).
 
 norm_opt_alias_to_msg_proto_defs(Opts) ->
     lists:map(fun(to_msg_defs)         -> to_proto_defs;
@@ -1697,6 +1719,12 @@ norm_opt_json_format(Opts) ->
                                     {json_array_format, list},
                                     {json_string_format, binary},
                                     {json_null, null}]}],
+      Opts).
+
+norm_opt_gen_verifiers(Opts) ->
+    proplists:expand(
+      [{{gen_verifiers, false}, [{verify, never},
+                                 {gen_verifiers, false}]}],
       Opts).
 
 normalize_return_report_opts(Opts1) ->
@@ -1836,7 +1864,8 @@ verify_opts(Defs, Opts) ->
               fun() -> verify_opts_preserve_unknown_fields_and_json(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
               fun() -> verify_opts_flat_oneof(Opts) end,
-              fun() -> verify_opts_no_gen_mergers(Opts) end]).
+              fun() -> verify_opts_no_gen_mergers(Opts) end,
+              fun() -> verify_opts_no_gen_verifiers(Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -1926,6 +1955,17 @@ verify_opts_no_gen_mergers(Opts) ->
         {_,     true} -> ok;
         {true,  false} -> ok;
         {false, false} -> {error, {invalid_options, nif, {gen_mergers,false}}}
+    end.
+
+verify_opts_no_gen_verifiers(Opts) ->
+    Verify = proplists:get_value(verify, Opts),
+    GenVerifiers = proplists:get_value(gen_verifiers, Opts),
+    case {Verify, GenVerifiers} of
+        {_,     undefined} -> ok; % default for gen_mergers is true
+        {_,     true} -> ok;
+        {never, false} -> ok;
+        {_, false} -> {error, {invalid_options,
+                               {verify,Verify}, {gen_verifiers,false}}}
     end.
 
 %% @equiv msg_defs(Mod, Defs, [])
@@ -2319,6 +2359,9 @@ fmt_err({invalid_options, epb_functions, maps}) ->
         "and maps";
 fmt_err({invalid_options, nif, {gen_mergers, false}}) ->
     "Option error: It is only possible to omit mergers with nif";
+fmt_err({invalid_options, {verify,Verify}, {gen_verifiers,false}}) ->
+    ?f("Option error: It is not possible to omit verifiers when verify = ~p",
+       [Verify]);
 fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
@@ -2486,6 +2529,11 @@ c() ->
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-verify_decode_required_present"
 %%                       >verify_decode_required_present</a></dd>
+%%   <dt><a id="cmdline-option-no-gen-verifiers"/>
+%%       `-no-gen-verifiers'</dt>
+%%     <dd>Do not generate `verify_msg' functions. Implies `-v never'.<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-gen_verifiers">gen_verifiers</a></dd>
 %% </dl>
 %%
 %% Renaming for the Erlang side
@@ -3182,6 +3230,9 @@ opt_specs() ->
       "       verify the message to be encoded.\n"},
      {"vdrp", undefined, verify_decode_required_present, "\n"
       "       Verify that on decoding, required fields are present."},
+     {"no-gen-verifiers", {'opt_value()', false}, gen_verifiers, "\n"
+      "       Do not generate verify_msg functions.\n"
+      "       Implies `-v never'.\n"},
      {{section, "Renaming for the Erlang side"}},
      {"rename", fun opt_rename/2, rename, " What:How\n"
       "       What:\n"
@@ -4181,6 +4232,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
     AsLib = proplists:get_bool(include_as_lib, Opts),
     DoJson = gpb_lib:json_by_opts(Opts),
     DoMergers = gpb_lib:get_gen_mergers(Opts),
+    DoVerifiers = gpb_lib:get_gen_verifiers(Opts),
     DoIntrospect = gpb_lib:get_gen_introspect(Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
@@ -4198,7 +4250,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
        gpb_gen_encoders:format_exports(Defs, Opts),
        gpb_gen_decoders:format_exports(Defs, Opts),
        [gpb_gen_mergers:format_exports(Defs, Opts) || DoMergers],
-       gpb_gen_verifiers:format_exports(Defs, Opts),
+       [gpb_gen_verifiers:format_exports(Defs, Opts) || DoVerifiers],
        [[gpb_gen_json_encoders:format_exports(Defs, Opts),
          gpb_gen_json_decoders:format_exports(Defs, Opts)]
         || DoJson],
@@ -4229,7 +4281,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                ""
        end,
        case gpb_lib:get_defs_as_maps_or_records(Opts) of
-           records ->
+           records when DoIntrospect ->
                [case gpb_lib:get_field_format_by_opts(Opts) of
                     fields_as_records ->
                         if AsLib ->
@@ -4242,6 +4294,8 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                     fields_as_maps ->
                         ""
                 end];
+           records when not DoIntrospect ->
+               "";
            maps ->
                ""
        end,
@@ -4296,9 +4350,10 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
        [gpb_gen_mergers:format_msg_merge_code(Defs, AnRes, Opts)
         || DoMergers],
        "\n",
-       gpb_gen_verifiers:format_verifiers_top_function(Defs, AnRes, Opts),
-       "\n",
-       gpb_gen_verifiers:format_verifiers(Defs, AnRes, Opts),
+       [[gpb_gen_verifiers:format_verifiers_top_function(Defs, AnRes, Opts),
+         "\n",
+         gpb_gen_verifiers:format_verifiers(Defs, AnRes, Opts)]
+        || DoVerifiers],
        "\n",
        if not DoNif ->
                [gpb_gen_translators:format_aux_transl_helpers(),

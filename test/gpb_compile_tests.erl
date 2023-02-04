@@ -1071,6 +1071,12 @@ get_containments_test() ->
     unload_code(M1),
     unload_code(M2).
 
+no_include_gpb_hrl_on_no_gen_introspect_test() ->
+    Proto = "syntax='proto2';
+             message M { }",
+    S = compile_to_string(Proto, [{gen_introspect, false}]),
+    assert_not_contains_regexp(S, "-include.*gpb.hrl").
+
 %% --- decoder tests ---------------
 
 decodes_overly_long_varints_test() ->
@@ -2375,6 +2381,24 @@ ignores_packed_for_nonpackable_repeated_on_encoding_test() ->
     %% expect no length-delimited wrapping around the field
     %% just the elements one after the other.
     <<10,3,"abc",10,3,"def">> = M:encode_msg({m1, ["abc", "def"]}).
+
+gen_verifiers_test() ->
+    Proto = "syntax='proto2';
+             message m1 { optional uint32 f = 1;}",
+    compile_and_assert_that_format_error_produces_iolist(
+      Proto,
+      [],
+      [{verify, always}, {gen_verifiers, false}],
+      ["Option error", "verify", "verifiers"]),
+    S = compile_to_string(Proto, [{gen_verifiers,false}]),
+    assert_not_contains_regexp(S, "verify_msg"),
+    M = compile_iolist(Proto, [{gen_verifiers,false}]),
+    %% This should encode (to something odd) even though it is out of range
+    %% for an uint32. It would be an out-of-range error with verification,
+    %% but we have the {gen_verifiers, false} option set.
+    ?assert(is_binary(M:encode_msg({m1, (1 bsl 33)}, m1, [{verify, true}]))),
+    unload_code(M),
+    ok.
 
 %% --- locate_import and read_import ----------
 
@@ -5396,6 +5420,11 @@ field_translation_options_test() ->
 no_type_specs_test() ->
     {ok, {[{type_specs, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-no_type", "x.proto"]).
+
+no_gen_verifiers_test() ->
+    {ok, {[{gen_verifiers, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-no-gen-verifiers",
+                                         "x.proto"]).
 
 no_gen_mergers_test() ->
     {ok, {[nif, {gen_mergers, false}], ["x.proto"]}} =
