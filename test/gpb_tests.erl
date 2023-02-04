@@ -381,7 +381,7 @@ decode_msg_with_optional_nonpresent_sub_msg_field_test() ->
 decoding_zero_instances_of_packed_varints_test() ->
     %%    "A packed repeated field containing zero elements does not
     %%     appear in the encoded message."
-    %%    -- http://code.google.com/apis/protocolbuffers/docs/encoding.html
+    %%    -- https://protobuf.dev/programming-guides/encoding
     #m1{a = []} =
         decode_msg(<<>>,
                    m1,
@@ -407,7 +407,7 @@ decoding_two_packed_chunks_of_varints_test() ->
     %%     must be prepared to accept multiple key-value pairs. In this
     %%     case, the payloads should be concatenated. Each pair must
     %%     contain a whole number of elements."
-    %%    -- http://code.google.com/apis/protocolbuffers/docs/encoding.html
+    %%    -- https://protobuf.dev/programming-guides/encoding
     #m1{a = [3, 270, 86942, 4, 271, 86943]} =
         decode_msg(<<16#22, 16#06, 16#03, 16#8E, 16#02, 16#9E, 16#a7, 16#05,
                      16#22, 16#06, 16#04, 16#8F, 16#02, 16#9F, 16#a7, 16#05>>,
@@ -617,7 +617,7 @@ decode_packed_repeated_with_without_packed_test_aux() ->
     %% "Protocol buffer parsers must be able to parse repeated fields
     %% that were compiled as packed as if they were not packed, and vice
     %% versa. [...]"
-    %% -- https://developers.google.com/protocol-buffers/docs/encoding#packed
+    %% -- https://protobuf.dev/programming-guides/encoding/#packed
     %%
     %% Also: "Only repeated fields of primitive numeric types (types
     %% which use the varint, 32-bit, or 64-bit wire types) can be
@@ -1091,7 +1091,7 @@ encode_proto3_various_empty_sequence_of_bytes_test() ->
 proto3_type_default_values_never_serialized_test() ->
     %% "... if a scalar message field is set to its default, the value
     %% will not be serialized on the wire."
-    %% -- https://developers.google.com/protocol-buffers/docs/proto3#default
+    %% -- https://protobuf.dev/programming-guides/proto3/#default
     %%
     %% Assuming for oneof it means default = undefined (but I couldn't
     %% find any mention of this in the official protobuf docs)

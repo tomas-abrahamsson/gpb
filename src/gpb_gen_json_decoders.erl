@@ -315,7 +315,7 @@ calc_decodings(MsgName, MsgDef, JValueExpr, EMsgVar, TrUserDataVar,
     %% Additionally, in Json, "[p]arsers accept both the lowerCamelCase name
     %% (or the one specified by the json_name option) and the original proto
     %% field name."
-    %% (src: https://developers.google.com/protocol-buffers/docs/proto3#json)
+    %% (src: https://protobuf.dev/programming-guides/proto3/#json)
     %%
     %% So build a mapping from Json field name (binary, atom or string)
     %% to decoding-and-update expressions:

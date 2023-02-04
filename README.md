@@ -1,5 +1,5 @@
 The gpb is a compiler for
-[Google protocol buffer](https://developers.google.com/protocol-buffers/)
+[Google protocol buffer](https://protobuf.dev/)
 definitions files for Erlang.
 
 Shortcuts: [API documentation](https://hexdocs.pm/gpb/) ~ [gpb on hex.pm](https://hex.pm/packages/gpb/)
@@ -267,7 +267,7 @@ then the call `decode_msg(Input, o1)` results in:
 The last of the alternatives is perhaps not very useful, but still
 possible, and implemented for completeness.
 
-[Google's Reference](https://developers.google.com/protocol-buffers/docs/proto#optional)
+[Google's Reference](https://protobuf.dev/programming-guides/proto/#optional)
 
 #### For proto3 syntax
 

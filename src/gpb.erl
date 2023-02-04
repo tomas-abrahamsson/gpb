@@ -627,7 +627,7 @@ add_field(Value, FieldDef, false=_IsOneof, MsgDefs, Record) ->
     %% FIXME: what about bytes?? "For numeric types and strings, if
     %% the same value appears multiple times, the parser accepts the
     %% last value it sees." But what about bytes?
-    %% http://code.google.com/apis/protocolbuffers/docs/encoding.html
+    %% https://protobuf.dev/programming-guides/encoding
     %% For now, we assume it works like strings.
     case FieldDef of
         #?gpb_field{rnum = RNum, occurrence = required, type = {msg,_Name}}->

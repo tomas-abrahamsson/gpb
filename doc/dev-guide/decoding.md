@@ -2,7 +2,7 @@ Short guide to the design of decoding
 -------------------------------------
 
 The generated code centers much around decoding of
-[varints](https://developers.google.com/protocol-buffers/docs/encoding#varints)
+[varints](https://protobuf.dev/programming-guides/encoding/#varints)
 ie variable length integers. The basic loop construct looks like:
 
 ```
