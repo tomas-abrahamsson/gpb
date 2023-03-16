@@ -478,9 +478,10 @@ augment_default_values(FieldInfos, Opts, Defs, TEnv) ->
     case MappingAndUnset of
         records ->
             [case Field of
-                 #?gpb_field{}=Field ->
+                 #?gpb_field{occurrence = Occurrence}=Field ->
                      Default = record_field_default(Field, Opts, Defs, TEnv),
-                     FI#field_info{default = Default};
+                     OrUndefined = Default == ["undefined"] andalso Occurrence == defaulty,
+                     FI#field_info{default = Default, or_undefined = OrUndefined};
                  #gpb_oneof{} ->
                      FI
              end
