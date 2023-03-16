@@ -481,13 +481,14 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 end,
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                 records ->
-                    ?expr(
-                       if '<F>' == undefined ->
-                               '<Bin>';
-                          true ->
-                               '<encodeit>'
-                       end,
-                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                    ?expr('<encodeit>', [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                    %% ?expr(
+                    %%    if '<F>' == undefined ->
+                    %%            '<Bin>';
+                    %%       true ->
+                    %%            '<encodeit>'
+                    %%    end,
+                    %%    [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(
                        if '<F>' == undefined ->

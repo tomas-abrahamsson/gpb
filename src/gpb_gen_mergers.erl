@@ -189,15 +189,30 @@ format_msg_merger(MsgName, MsgDef, AnRes, Opts) ->
                          false -> ?expr(_)
                      end)])].
 
+required_pfvar(#?gpb_field{occurrence=Occurrence}=Field) ->
+    case gpb_lib:classify_field_merge_action(Field) of
+        overwrite when Occurrence == required ->
+            none;
+        overwrite when Occurrence == defaulty ->
+            gpb_lib:var("_PF~s", [gpb_lib:get_field_name(Field)]);
+        _ ->
+            gpb_lib:var("PF~s", [gpb_lib:get_field_name(Field)])
+    end;
+required_pfvar(#gpb_oneof{fields=OFields}=Field) ->
+    case [ x || #?gpb_field{type={msg,_}} <- OFields] of
+        [] ->
+            gpb_lib:var("_PF~s", [gpb_lib:get_field_name(Field)]);
+        _ ->
+            gpb_lib:var("PF~s", [gpb_lib:get_field_name(Field)])
+    end;
+required_pfvar(Field) ->
+    gpb_lib:var("PF~s", [gpb_lib:get_field_name(Field)]).
+
 format_msg_merger_fnclause_match(_MsgName, [], _Opts) ->
     {?expr(PF), ?expr(_), no_fields};
 format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
     FNames  = [gpb_lib:get_field_name(Field) || Field <- MsgDef],
-    PFVars  = [case is_required_overwrite_merge(Field) of
-                   true  -> none;
-                   false -> gpb_lib:var("PF~s", [gpb_lib:get_field_name(Field)])
-               end
-               || Field <- MsgDef],
+    PFVars  = [required_pfvar(Field) || Field <- MsgDef],
     NFVars  = [gpb_lib:var("NF~s", [FName]) || FName <- FNames],
     PFields = lists:zip(FNames, PFVars),
     NFields = lists:zip(FNames, NFVars),
@@ -237,10 +252,6 @@ format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
             end
     end.
 
-is_required_overwrite_merge(#?gpb_field{occurrence=required}=Field) ->
-    gpb_lib:classify_field_merge_action(Field) == overwrite;
-is_required_overwrite_merge(_Field) ->
-    false.
 
 compute_msg_field_mergers({pr, XInfo}, MsgName, AnRes, Opts) ->
     Merges =
@@ -261,6 +272,8 @@ format_field_merge_expr(#?gpb_field{name=FName, occurrence=Occur}=Field,
     case gpb_lib:classify_field_merge_action(Field) of
         overwrite when Occur == required ->
             {required, {PF, NF}};
+        overwrite when Occur == defaulty ->
+            {overwrite, {none, NF}};
         overwrite ->
             {overwrite, {PF, NF}};
         seqadd ->
@@ -268,7 +281,11 @@ format_field_merge_expr(#?gpb_field{name=FName, occurrence=Occur}=Field,
             Append = gpb_gen_translators:find_translation(
                        ElemPath, merge, AnRes, 'erlang_++'),
             Tr = fun (_,_) -> Append end,
-            {cond_merge, {{PF, NF}, Tr, 'erlang_++'}};
+            if Occur == repeated ->
+                {uncond_merge, {{PF, NF}, Tr, 'erlang_++'}};
+               true ->
+                {cond_merge, {{PF, NF}, Tr, 'erllang_++'}}
+            end;
         msgmerge when Occur == required ->
             Tr = gpb_gen_translators:mk_find_tr_fn_elem_or_default(
                    MsgName, Field, false, AnRes),
@@ -334,8 +351,10 @@ render_field_mergers(MsgName, Mergings, TrUserDataVar, Opts) ->
 
 render_field_merger({required, {none, NF}}, _TrUserDataVar) ->
     NF;
+render_field_merger({overwrite, {none, NF}}, _TrUserDataVar) ->
+    NF;
 render_field_merger({overwrite, {PF, NF}}, _TrUserDataVar) ->
-    ?expr(if 'NF' =:= undefined -> 'PF';
+    ?expr(if 'NF' == undefined -> 'PF';
              true               -> 'NF'
           end,
           [replace_tree('PF', PF),
