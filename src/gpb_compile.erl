@@ -161,6 +161,8 @@
         {target_erlang_version, target_erlang_version()} |
         boolean_opt(preserve_unknown_fields) |
         {erlc_compile_options, string()} |
+        boolean_opt(gen_encoders) |
+        boolean_opt(gen_decoders) |
         %% Introspection of the proto definitions
         {proto_defs_version, gpb_defs:version()} |
         {introspect_proto_defs_version, gpb_defs:version() | preferably_1} |
@@ -419,7 +421,9 @@ file(File) ->
 %%       <tt><a href="#option-preserve_unknown_fields"
 %%                   >preserve_unknown_fields</a></tt>,
 %%       <tt>{<a href="#option-erlc_compile_options">erlc_compile_options</a>,
-%%            string()}</tt>
+%%            string()}</tt>,
+%%       <tt>{<a href="#option-gen_encoders">gen_encoders</a>,boolean()}</tt>
+%%       <tt>{<a href="#option-gen_decoders">gen_decoders</a>,boolean()}</tt>
 %%       <br/>
 %%       See also <tt><a href="#option-gen_introspect">gen_introspect</a></tt>
 %%       and <tt><a href="#option-gen_verifiers">gen_verifiers</a></tt>
@@ -1006,6 +1010,32 @@ file(File) ->
 %% Corresponding command line option:
 %% <a href="#cmdline-option-erlc_compile_options">-erlc_compile_options</a>.
 %%
+%% <h4><a id="option-gen_encoders"/>`gen_encoders'</h4>
+%%
+%% The `{gen_encoders,false}' option tells gpb to not emit code
+%% for encoding messages. This may be useful to reduce the size of the
+%% generated code in cases when no encoding is needed.
+%% The default is to generate encoders.
+%% Setting this option to `false' also implicitly sets the
+%% <tt><a href="#option-gen_verifiers">{gen_verifiers,false}</a></tt>
+%% option.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-no-gen-encoders">-no-gen-encoders</a>.
+%%
+%% <h4><a id="option-gen_decoders"/>`gen_decoders'</h4>
+%%
+%% The `{gen_decoders,false}' option tells gpb to not emit code
+%% for decoding messages. This may be useful to reduce the size of the
+%% generated code in cases when no decoding is needed.
+%% The default is to generate decoders.
+%% Setting this option to `false' also implicitly sets the
+%% <tt><a href="#option-gen_mergers">{gen_mergers,false}</a></tt>
+%% option.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-no-gen-decoders">-no-gen-decoders</a>.
+%%
 %% <h4>Related options</h4>
 %% <ul>
 %%   <li><a href="#option-gen_introspect">`gen_introspect'</a></li>
@@ -1293,8 +1323,11 @@ file(File) ->
 %% <h4><a id="option-gen_mergers"/>`gen_mergers'</h4>
 %%
 %% The `{gen_mergers,false}' option will cause gpb to not generate code for
-%% merging of messages. This is only useful with the option `nif'. One
-%% rationale for this is option is to reduce the size of the generated code.
+%% merging of messages. This is only useful with the
+%% option <a href="#option-nif">`nif'</a> or with the
+%% option <tt>{<a href="#option-gen_decoders">gen_decoders</a>,false}</tt>.
+%% One rationale for this is option is to reduce the size of the generated
+%% code.
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-no-gen-mergers">-no-gen-mergers</a>.
@@ -1659,6 +1692,8 @@ normalize_alias_opts(Opts) ->
                  fun norm_opt_map_opts/1,
                  fun norm_opt_any_translate/1,
                  fun norm_opt_json_format/1,
+                 fun norm_opt_gen_encoders/1,
+                 fun norm_opt_gen_decoders/1,
                  fun norm_opt_gen_verifiers/1]).
 
 norm_opt_alias_to_msg_proto_defs(Opts) ->
@@ -1720,6 +1755,19 @@ norm_opt_json_format(Opts) ->
                                     {json_string_format, binary},
                                     {json_null, null}]}],
       Opts).
+
+norm_opt_gen_encoders(Opts) ->
+    proplists:expand(
+      [{{gen_encoders, false}, [{gen_verifiers, false},
+                                {gen_encoders, false}]}],
+      Opts).
+
+norm_opt_gen_decoders(Opts) ->
+    proplists:expand(
+      [{{gen_decoders, false}, [{gen_mergers, false},
+                                {gen_decoders, false}]}],
+      Opts).
+
 
 norm_opt_gen_verifiers(Opts) ->
     proplists:expand(
@@ -1864,7 +1912,7 @@ verify_opts(Defs, Opts) ->
               fun() -> verify_opts_preserve_unknown_fields_and_json(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
               fun() -> verify_opts_flat_oneof(Opts) end,
-              fun() -> verify_opts_no_gen_mergers(Opts) end,
+              fun() -> verify_opts_no_gen_decoders_mergers_nif(Opts) end,
               fun() -> verify_opts_no_gen_verifiers(Opts) end]).
 
 while_ok(Funs) ->
@@ -1947,14 +1995,21 @@ check_maps_flat_oneof_may_fail_on_compilation(Opts) ->
             []
     end.
 
-verify_opts_no_gen_mergers(Opts) ->
+verify_opts_no_gen_decoders_mergers_nif(Opts) ->
+    %% Default for gen_decoders and gen_mergers is true.
+    DoMergers = gpb_lib:get_gen_mergers(Opts),
+    DoDecoders = gpb_lib:get_gen_decoders(Opts),
     DoNif = proplists:get_bool(nif, Opts),
-    GenMergers = proplists:get_value(gen_mergers, Opts),
-    case {DoNif, GenMergers} of
-        {_,     undefined} -> ok; % default for gen_mergers is true
-        {_,     true} -> ok;
-        {true,  false} -> ok;
-        {false, false} -> {error, {invalid_options, nif, {gen_mergers,false}}}
+    %% Decoders but no mergers is ok only if the nif option is set.
+    case {DoMergers, DoDecoders, DoNif} of
+        {true,  _,     _}     -> ok;
+        {false, false, false} -> ok;
+        {false, false, true}  -> ok;
+        {false, true,  false} -> {error, {invalid_options,
+                                          {gen_decoders, true},
+                                          {gen_mergers, false},
+                                          {nif,false}}};
+        {false, true,  true}  -> ok
     end.
 
 verify_opts_no_gen_verifiers(Opts) ->
@@ -2357,11 +2412,13 @@ fmt_err({unsupported_translation, _Type, non_msg_type}) ->
 fmt_err({invalid_options, epb_functions, maps}) ->
     "Option error: Not supported: both epb_compatibility (or epb_functions) "
         "and maps";
-fmt_err({invalid_options, nif, {gen_mergers, false}}) ->
-    "Option error: It is only possible to omit mergers with nif";
 fmt_err({invalid_options, {verify,Verify}, {gen_verifiers,false}}) ->
     ?f("Option error: It is not possible to omit verifiers when verify = ~p",
        [Verify]);
+fmt_err({invalid_options, {gen_decoders, true}, {gen_mergers,false},
+         {nif, false}}) ->
+    ?f("Option error: Decoders byt no mergers is only ok if the nif option "
+       "is set");
 fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
@@ -2707,6 +2764,20 @@ c() ->
 %%       along to the `-compile(...)' directive on the generated code.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-erlc_compile_options">erlc_compile_options</a></dd>
+%%   <dt><a id="cmdline-option-no-gen-encoders"/>
+%%       `-no-gen-encoders'</dt>
+%%     <dd>Do not generate `encode_msg' functions. Implies
+%%       <a href="#cmdline-option-no-gen-verifiers">`-no-gen-verifiers'</a>.
+%%       <br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-gen_encoders">gen_encoders</a></dd>
+%%   <dt><a id="cmdline-option-no-gen-decoders"/>
+%%       `-no-gen-decoders'</dt>
+%%     <dd>Do not generate `decode_msg' functions. Implies
+%%       <a href="#cmdline-option-no-gen-mergers">`-no-gen-mergers'</a>.
+%%       <br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-gen_decoders">gen_decoders</a></dd>
 %% </dl>
 %%
 %% Introspection of the proto definitions
@@ -3315,6 +3386,10 @@ opt_specs() ->
      {"erlc_compile_options", 'string()', erlc_compile_options, "String\n"
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
+     {"no-gen-encoders", {'opt_value()', false}, gen_encoders, "\n"
+      "       Do not generate encoder functions.\n"},
+     {"no-gen-decoders", {'opt_value()', false}, gen_decoders, "\n"
+      "       Do not generate decoder functions.\n"},
      {{section, "Introspection of the proto definitions"}},
      {"introspect-get_proto_defs", undefined, introspect_get_proto_defs, "\n"
       "       For introspection, generate a get_proto_defs/0 function\n"
@@ -4234,6 +4309,8 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
     DoMergers = gpb_lib:get_gen_mergers(Opts),
     DoVerifiers = gpb_lib:get_gen_verifiers(Opts),
     DoIntrospect = gpb_lib:get_gen_introspect(Opts),
+    DoEncoders = gpb_lib:get_gen_encoders(Opts),
+    DoDecoders = gpb_lib:get_gen_decoders(Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
       [?f("%% @private~n"
@@ -4247,8 +4324,8 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
            [_|_] -> ?f("-compile([~ts]).~n", [CompileOptsStr])
        end,
        "\n",
-       gpb_gen_encoders:format_exports(Defs, Opts),
-       gpb_gen_decoders:format_exports(Defs, Opts),
+       [gpb_gen_encoders:format_exports(Defs, Opts) || DoEncoders],
+       [gpb_gen_decoders:format_exports(Defs, Opts) || DoDecoders],
        [gpb_gen_mergers:format_exports(Defs, Opts) || DoMergers],
        [gpb_gen_verifiers:format_exports(Defs, Opts) || DoVerifiers],
        [[gpb_gen_json_encoders:format_exports(Defs, Opts),
@@ -4322,30 +4399,34 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
        %% to about 10000 msgs/s for a set of mixed message samples.
        %% f("-compile(inline).~n"),
        %%
-       gpb_gen_encoders:format_encoders_top_function(Defs, AnRes, Opts),
+       [[gpb_gen_encoders:format_encoders_top_function(Defs, AnRes, Opts),
+         "\n",
+         if DoNif ->
+                 ?f("~s~n", [gpb_gen_nif:format_nif_encoder_error_wrappers(
+                               Defs, AnRes, Opts)]);
+            not DoNif ->
+                 [gpb_gen_encoders:format_msg_encoders(Defs, AnRes, Opts,
+                                                       true),
+                  gpb_gen_encoders:format_map_encoders(MapsAsMsgs, AnRes, Opts,
+                                                       false),
+                  gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts),
+                  gpb_gen_encoders:format_aux_common_encoders(Defs, AnRes,
+                                                              Opts)]
+         end]
+        || DoEncoders],
        "\n",
-       if DoNif ->
-               ?f("~s~n", [gpb_gen_nif:format_nif_encoder_error_wrappers(
-                             Defs, AnRes, Opts)]);
-          not DoNif ->
-               [gpb_gen_encoders:format_msg_encoders(Defs, AnRes, Opts,
-                                                     true),
-                gpb_gen_encoders:format_map_encoders(MapsAsMsgs, AnRes, Opts,
-                                                     false),
-                gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts),
-                gpb_gen_encoders:format_aux_common_encoders(Defs, AnRes, Opts)]
-       end,
-       "\n",
-       gpb_gen_decoders:format_decoders_top_function(Defs, AnRes, Opts),
-       "\n\n",
-       if DoNif ->
-               [gpb_gen_nif:format_nif_decoder_error_wrappers(Defs,
-                                                              AnRes, Opts)];
-          not DoNif ->
-               [gpb_gen_decoders:format_msg_decoders(Defs, AnRes, Opts),
-                gpb_gen_decoders:format_map_decoders(DMapsAsMsgs, AnRes, Opts),
-                gpb_gen_decoders:format_aux_decoders(Defs, AnRes, Opts)]
-       end,
+       [[gpb_gen_decoders:format_decoders_top_function(Defs, AnRes, Opts),
+         "\n\n",
+         if DoNif ->
+                 [gpb_gen_nif:format_nif_decoder_error_wrappers(Defs,
+                                                                AnRes, Opts)];
+            not DoNif ->
+                 [gpb_gen_decoders:format_msg_decoders(Defs, AnRes, Opts),
+                  gpb_gen_decoders:format_map_decoders(DMapsAsMsgs, AnRes,
+                                                       Opts),
+                  gpb_gen_decoders:format_aux_decoders(Defs, AnRes, Opts)]
+         end]
+        || DoDecoders],
        "\n",
        [gpb_gen_mergers:format_msg_merge_code(Defs, AnRes, Opts)
         || DoMergers],

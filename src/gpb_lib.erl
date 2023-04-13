@@ -110,6 +110,8 @@
 -export([get_gen_mergers/1]).
 -export([get_gen_introspect/1]).
 -export([get_gen_verifiers/1]).
+-export([get_gen_encoders/1]).
+-export([get_gen_decoders/1]).
 
 -export([var_f_n/1]).
 -export([var_b_n/1]).
@@ -879,6 +881,12 @@ get_gen_introspect(Opts) ->
 
 get_gen_verifiers(Opts) ->
     proplists:get_value(gen_verifiers, Opts, true).
+
+get_gen_encoders(Opts) ->
+    proplists:get_value(gen_encoders, Opts, true).
+
+get_gen_decoders(Opts) ->
+    proplists:get_value(gen_decoders, Opts, true).
 
 %% Syntax tree stuff ----
 

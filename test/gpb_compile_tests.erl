@@ -2400,6 +2400,37 @@ gen_verifiers_test() ->
     unload_code(M),
     ok.
 
+gen_encoders_test() ->
+    Proto = "syntax='proto2';
+             message m1 { optional uint32 f = 1;}",
+    S = compile_to_string(Proto, [{gen_encoders,false}]),
+    assert_not_contains_regexp(S, "encode_msg"),
+    assert_not_contains_regexp(S, "verify_msg"),
+    M = compile_iolist(Proto, [{gen_encoders,false}]),
+    ?assertError(undef, M:encode_msg({m1, 4711})),
+    ?assertError(undef, M:verify_msg({m1, 4711})),
+    {m1, 4711} = M:decode_msg(<<8, 231, 36>>, m1),
+    unload_code(M),
+    ok.
+
+gen_decoders_test() ->
+    Proto = "syntax='proto2';
+             message m1 { optional uint32 f = 1;}",
+    compile_and_assert_that_format_error_produces_iolist(
+      Proto,
+      [],
+      [{gen_decoders, true}, {gen_mergers, false}],
+      ["Option error", "Decoders", "mergers"]),
+    S = compile_to_string(Proto, [{gen_decoders,false}]),
+    assert_not_contains_regexp(S, "decode_msg"),
+    assert_not_contains_regexp(S, "merge_msgs"),
+    M = compile_iolist(Proto, [{gen_decoders,false}]),
+    ?assertError(undef, M:decode_msg(<<8, 231, 36>>, m1)),
+    ?assertError(undef, M:merge_msgs({m1, 4711}, {m1, 4712})),
+    ?assert(is_binary(M:encode_msg({m1, 4711}, m1, []))),
+    unload_code(M),
+    ok.
+
 %% --- locate_import and read_import ----------
 
 read_import_test() ->
@@ -5430,6 +5461,13 @@ no_gen_mergers_test() ->
     {ok, {[nif, {gen_mergers, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-nif", "-no-gen-mergers",
                                          "x.proto"]).
+
+no_gen_encoders_decoders_cmdline_opts_test() ->
+    {ok, {[{gen_encoders, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-no-gen-encoders", "x.proto"]),
+    {ok, {[{gen_decoders, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-no-gen-decoders", "x.proto"]),
+    ok.
 
 no_gen_intospections_test() ->
     {ok, {[{gen_introspect, false}], ["x.proto"]}} =
