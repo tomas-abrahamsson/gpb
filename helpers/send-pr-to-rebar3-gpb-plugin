@@ -160,7 +160,7 @@ git clone -q git@github.com:"$github_user"/"$repo_name"
     git add "$f"
     unset ERL_LIBS
     rebar3 unlock gpb
-    rebar3 upgrade
+    rebar3 upgrade --all
     git add rebar.lock
     git commit -q -m "Bump gpb to $vsn"
     echo "This is the change:-----------------------------------"
