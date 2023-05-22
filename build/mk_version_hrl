@@ -31,15 +31,23 @@ main(Argv) ->
             {<<"%% NB: The build.mk_version_hrl depends.*">>, <<"">>}
         ],
     Content =
-        lists:foldl(
-          fun({Patten, Replacement}, Acc) ->
-                  re:replace(Acc, Patten, Replacement, [{return, binary}])
-          end, BaseStr, SedList),
-    case file:write_file(OutFile, Content) of
-        ok ->
+        iolist_to_binary(
+          lists:foldl(
+            fun({Patten, Replacement}, Acc) ->
+                    re:replace(Acc, Patten, Replacement, [{return, binary}])
+            end, BaseStr, SedList)),
+    case file:read_file(OutFile) of
+        {ok, Content} ->
+            %% Don't overwrite the file with identical data.
+            %% This can cause build systems to rebuild unnecessarily.
             ok;
-        {error, Reason2} ->
-            file_err(write_file, OutFile, Reason2)
+        _ ->
+            case file:write_file(OutFile, Content) of
+                ok ->
+                    ok;
+                {error, Reason2} ->
+                    file_err(write_file, OutFile, Reason2)
+            end
     end.
 
 parse_opts(["--override-version="++Vsn | Rest], Opts, Args) ->
