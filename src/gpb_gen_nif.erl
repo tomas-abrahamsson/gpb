@@ -449,7 +449,12 @@ format_nif_cc_json_api_check_if_needed(Opts) ->
 format_nif_cc_json_includes_if_needed(Opts) ->
     case gpb_lib:json_by_opts(Opts) of
         true ->
-            ["#include <google/protobuf/util/json_util.h>\n"];
+            ["#include <google/protobuf/util/json_util.h>\n"
+             "#if GOOGLE_PROTOBUF_VERSION < 4022000\n"
+             "#define STATUS_TYPE ::google::protobuf::util::Status\n"
+             "#else\n"
+             "#define STATUS_TYPE ::absl::Status\n"
+             "#endif\n"];
         false ->
             ""
     end.
@@ -2232,7 +2237,7 @@ format_nif_cc_to_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
      "        return enif_make_badarg(env);\n"
      "    }\n\n"
      ""
-     "    ::google::protobuf::util::Status st;\n"
+     "    STATUS_TYPE st;\n"
      "    st = ::google::protobuf::util::MessageToJsonString(*m, &j, jopts);\n"
      "    if (st.ok())\n"
      "    {\n"
@@ -2301,7 +2306,7 @@ format_nif_cc_from_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
      "\n",
      %% try/catch bad_alloc and return enomem?
      "    j.assign(reinterpret_cast<char *>(data.data), data.size);\n"
-     "    ::google::protobuf::util::Status st;\n"
+     "    STATUS_TYPE st;\n"
      "    st = ::google::protobuf::util::JsonStringToMessage(j, m, jopts);\n"
      "    if (!st.ok())\n"
      "    {\n"
