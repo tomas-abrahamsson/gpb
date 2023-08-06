@@ -1035,9 +1035,9 @@ format_json_helpers(_Defs, #anres{map_types=MapTypes}=AnRes, Opts) ->
          {Atom, list} ->
              format_tagged_list_array_helpers(Atom)
      end,
-     [[case gpb_lib:get_records_or_maps_by_opts(Opts) of
-           records ->
-               format_mapfield_record_helpers();
+     [[case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
+           '2tuples' ->
+               format_mapfield_2tuples_helpers();
            maps ->
                format_mapfield_map_helpers(Opts)
        end,
@@ -1143,7 +1143,7 @@ format_map_object_helpers(Opts) ->
 
 %% -- mapfield helpers, ie for map<_,_> --
 
-format_mapfield_record_helpers() ->
+format_mapfield_2tuples_helpers() ->
     [gpb_lib:nowarn_unused_function(tj_mapfield_fold, 3),
      gpb_codegen:format_fn(
        tj_mapfield_fold,
