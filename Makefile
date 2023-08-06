@@ -268,7 +268,7 @@ clean_plt:
 
 $(plt):
 	dialyzer -q --build_plt --output_plt $@ \
-		--apps erts kernel stdlib syntax_tools
+		--apps erts kernel stdlib syntax_tools compiler crypto eunit
 
 
 FORCE:
