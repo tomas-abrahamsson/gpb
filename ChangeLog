@@ -1,9 +1,18 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.8
+2023-Aug-06
+
+        * Fix code generation for options mapfields_as_maps and json (#227)
+        * Support Google protobuf 22.0 and later with NIFs and JSON.
+        * Include enough Erlang/OTP apps in the plt so that there are no
+          dialyzer issues with Erlang 26.
+        * Don't generate gpb_version.hrl unnecessarily.
+
 Version 4.19.7
 2023-Feb-04
 
-        * Support Google protobuf 3.16 and later with nifs.
+        * Support Google protobuf 3.16 and later with NIFs.
         * Add an option {gen_verifiers, false} (no-gen-verifiers).
           This implies {verify, never} (-v never)
         * Don't emit -include("gpb.hrl") when not generating introspection
