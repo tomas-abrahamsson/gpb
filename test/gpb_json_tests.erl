@@ -680,6 +680,21 @@ mapfield_map_test() ->
                                              <<"y">> => #{<<"s">> => 20}}},
                               'StrToSub')),
     unload_code(M1).
+
+mapfields_as_maps_test() ->
+    M1 = compile_iolist(small_mapfields_proto(),
+                        [json, mapfields_as_maps]),
+
+    %% -- internal -> json
+    ?assertEqual([{<<"name">>, <<"nn">>},
+                  {<<"map">>, [{<<"a">>, <<"b">>}]}],
+                 M1:to_json({'Msg', "nn", #{"a" => "b"}})),
+    %% -- json -> internal
+    ?assertEqual({'Msg', "nn", #{"a" => "b"}},
+                 M1:from_json([{<<"name">>, <<"nn">>},
+                               {<<"map">>, [{<<"a">>, <<"b">>}]}],
+                              'Msg')),
+    unload_code(M1).
 -endif. % -ifndef(NO_HAVE_MAPS).
 
 p3wellknown_duration_test() ->
@@ -1464,7 +1479,8 @@ nif_maps_test_() ->
       [?nif_if_supported(nif_misc_types_maps),
        ?nif_if_supported(nif_oneof_maps),
        ?nif_if_supported(nif_oneof_flat_maps),
-       ?nif_if_supported(nif_mapfields_maps)]).
+       ?nif_if_supported(nif_mapfields_maps),
+       ?nif_if_supported(nif_mapfields_as_maps_rec)]).
 -endif. % -ifndef(NO_HAVE_MAPS).
 
 nif_misc_types_proto() ->
@@ -1658,6 +1674,14 @@ mapfields_proto() ->
     message Sub       { optional uint32    i = 1; };
     ".
 
+small_mapfields_proto() ->
+    "syntax='proto3';
+     message Msg {
+       string name = 1;
+       map<string,string> map = 2;
+     };
+    ".
+
 nif_mapfields_rec(features) -> [json | guess_features(mapfields_proto())];
 nif_mapfields_rec(title) -> "map<_,_> fields (records)".
 nif_mapfields_rec() ->
@@ -1700,6 +1724,19 @@ nif_mapfields_maps() ->
               ok
       end,
       [json, maps]).
+
+nif_mapfields_as_maps_rec(features) -> [json | guess_features(
+                                                 small_mapfields_proto())];
+nif_mapfields_as_maps_rec(title) -> "map<_,_> as maps (rec)".
+nif_mapfields_as_maps_rec() ->
+    nif_to_from_json_aux(
+      dont_save,
+      small_mapfields_proto(),
+      fun(NifM, ErlM) ->
+              j_roundtrip({'Msg', "nn", #{"a" => "b"}}, NifM, ErlM),
+              ok
+      end,
+      [json, mapfields_as_maps]).
 -endif. % -ifndef(NO_HAVE_MAPS).
 
 nif_bypass_wrappers(features) -> [json |
