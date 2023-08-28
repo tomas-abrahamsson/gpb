@@ -1,5 +1,10 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.19.9
+2023-Aug-06
+
+        * Fix verifiers to catch floats for int fields. (#228)
+
 Version 4.19.8
 2023-Aug-06
 
