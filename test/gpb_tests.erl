@@ -1453,13 +1453,13 @@ verify_valid_integer_succeeds_test() ->
      || IType <- [int32, int64, uint32, uint64, sint32, sint64,
                   fixed32, fixed64, sfixed32, sfixed64]].
 
-verify_integer_range_fails_test_() ->
+verify_integer_type_and_range_fails_test_() ->
     %% Without increased timeout, this test sometimes times
     %% out on my slow machine (1.6 GHz Atom N270)
     %% when run from gpb_compile_tests.
-    {timeout,59,fun verify_integer_range_fails_test_aux/0}.
+    {timeout,59,fun verify_integer_type_and_range_fails_test_aux/0}.
 
-verify_integer_range_fails_test_aux() ->
+verify_integer_type_and_range_fails_test_aux() ->
     [begin
          ok = verify_msg(#m1{a=int_min(IType)},
                          [{{msg,m1},[#?gpb_field{name=a,fnum=1,rnum=#m1.a,
@@ -1476,6 +1476,12 @@ verify_integer_range_fails_test_aux() ->
                                                occurrence=required}]}])),
          ?verify_gpb_err(
             verify_msg(#m1{a=int_max(IType)+1},
+                       [{{msg,m1},[#?gpb_field{name=a,fnum=1,rnum=#m1.a,
+                                               type=IType,
+                                               occurrence=required}]}])),
+         %% Floats (that are in range)
+         ?verify_gpb_err(
+            verify_msg(#m1{a=125.0},
                        [{{msg,m1},[#?gpb_field{name=a,fnum=1,rnum=#m1.a,
                                                type=IType,
                                                occurrence=required}]}]))

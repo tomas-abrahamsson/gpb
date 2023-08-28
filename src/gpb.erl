@@ -1316,20 +1316,20 @@ verify_value_2(V, {msg,M}, Path, MsgDefs)   -> verify_msg2(V, M, MsgDefs, Path);
 verify_value_2(V, {group,G}, Path, MsgDefs) -> verify_group(V, G, MsgDefs,Path);
 verify_value_2(V, {map,_,_}=M, Path, MsgDefs) -> verify_map(V, M, MsgDefs,Path).
 
-verify_int(V, {i,32}, _) when -(1 bsl 31) =< V, V =< (1 bsl 31 - 1) -> ok;
-verify_int(V, {i,64}, _) when -(1 bsl 63) =< V, V =< (1 bsl 63 - 1) -> ok;
-verify_int(V, {u,32}, _) when 0 =< V, V =< (1 bsl 32 - 1)           -> ok;
-verify_int(V, {u,64}, _) when 0 =< V, V =< (1 bsl 64 - 1)           -> ok;
-verify_int(V, {S,Bits}, Path) ->
-    Signedness = case S of
-                     i -> signed;
-                     u -> unsigned
-                 end,
-    if is_integer(V) ->
-            mk_type_error({value_out_of_range, Signedness, Bits}, V, Path);
-       true ->
-            mk_type_error({bad_integer_value, Signedness, Bits}, V, Path)
-    end.
+verify_int(V, RangeInfo, Path) when is_integer(V) ->
+    verify_range(V, RangeInfo, Path);
+verify_int(V, {S, Bits}, Path) ->
+    mk_type_error({bad_integer_value, signedness(S), Bits}, V, Path).
+
+verify_range(V, {i,32}, _) when -(1 bsl 31) =< V, V =< (1 bsl 31 - 1) -> ok;
+verify_range(V, {i,64}, _) when -(1 bsl 63) =< V, V =< (1 bsl 63 - 1) -> ok;
+verify_range(V, {u,32}, _) when 0 =< V, V =< (1 bsl 32 - 1)           -> ok;
+verify_range(V, {u,64}, _) when 0 =< V, V =< (1 bsl 64 - 1)           -> ok;
+verify_range(V, {S,Bits}, Path) ->
+    mk_type_error({value_out_of_range, signedness(S), Bits}, V, Path).
+
+signedness(i) -> signed;
+signedness(u) -> unsigned.
 
 verify_bool(true,  _) -> ok;
 verify_bool(false, _) -> ok;

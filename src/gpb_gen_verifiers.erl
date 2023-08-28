@@ -727,7 +727,8 @@ format_int_verifier(IntType, Signedness, NumBits, Opts) ->
      gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
      gpb_codegen:format_fn(
        FnName,
-       fun(N, _Path, _TrUserData) when '<Min>' =< N, N =< '<Max>' ->
+       fun(N, _Path, _TrUserData) when is_integer(N),
+                                       '<Min>' =< N, N =< '<Max>' ->
                ok;
           (N, Path, _TrUserData) when is_integer(N) ->
                mk_type_error({value_out_of_range, '<details>'}, N, Path);
