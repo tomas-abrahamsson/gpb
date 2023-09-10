@@ -2643,6 +2643,15 @@ list_io_with_nif_options_includes_nif_cc_output_test() ->
         do_list_io_defs(FileSystem, [nif]),
     ok.
 
+list_io_with_gen_enum_macros_and_maps_test() ->
+    FileSystem = [{"/main.proto", ["message M { optional uint32 f = 1; }"]}],
+    [{erl_output, "/main.erl"},
+     {hrl_output, "/main.hrl"},
+     {sources, ["/main.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, [maps, gen_enum_macros]),
+    ok.
+
 generates_makefile_deps_to_stdout_test() ->
     MainProto = lf_lines(["import 'a.proto';",
                           "message M { required uint32 f = 1; }\n"]),
@@ -3406,6 +3415,50 @@ defaults_for_proto3_fields_test() ->
     P2M = MkMod(proto2, []),
     {m, undefined, undefined, undefined, [], undefined, []} = P2M:new_m_msg(),
     unload_code(P2M).
+
+enum_macros_test() ->
+    Proto1 = ["package foo.bar;
+               enum A { NO = 0; YES = 1; }
+               enum B { option allow_alias=true;
+                        FALSE = 0; TRUE = 1; YES = 1; }
+               message M { optional A f1 = 1; optional B f2 = 2; }
+              "],
+    %% Basic contains
+    Hrl1 = compile_to_string_get_hrl(Proto1, [gen_enum_macros]),
+    assert_contains_regexp(Hrl1, "-define.'A.NO', *'NO'"),
+    assert_contains_regexp(Hrl1, "-define.'A.YES', *'YES'"),
+    assert_contains_regexp(Hrl1, "-define.'B.FALSE', *'FALSE'"),
+    assert_contains_regexp(Hrl1, "-define.'B.TRUE', *'TRUE'"),
+    assert_contains_regexp(Hrl1, "-define.'B.YES', *'YES'"),
+    %%
+    %% Use packages
+    Hrl2 = compile_to_string_get_hrl(Proto1, [gen_enum_macros, use_packages]),
+    assert_contains_regexp(Hrl2, "-define.'foo.bar.A.NO', *'NO'"),
+    %% Prefix and suffix (string)
+    Hrl3 = compile_to_string_get_hrl(
+             Proto1,
+             [gen_enum_macros,
+              {rename, {enum_macro, {prefix, "abc/"}}},
+              {rename, {enum_macro, {suffix, "/xyz"}}}]),
+    assert_contains_regexp(Hrl3, "-define.'abc/A.NO/xyz', *'NO'"),
+    %% Prefix and suffix (atom)
+    Hrl4 = compile_to_string_get_hrl(
+             Proto1,
+             [use_packages, gen_enum_macros,
+              {rename, {enum_macro, uppercase}}]),
+    assert_contains_regexp(Hrl4, "-define.'FOO.BAR.A.NO', *'NO'"),
+    ok.
+
+
+-ifndef(NO_HAVE_MAPS).
+enum_macros_means_hrl_even_with_maps_test() ->
+    Proto = ["enum A { NO = 0; YES = 1; }
+              message M { optional A f1 = 1; }
+              "],
+    Hrl = compile_to_string_get_hrl(Proto, [maps, gen_enum_macros]),
+    assert_contains_regexp(Hrl, "-define.'A.YES', *'YES'"),
+    ok.
+-endif. % NO_HAVE_MAPS
 
 %% --- nif generation tests -----------------
 
@@ -5319,7 +5372,8 @@ renaming_options_test() ->
            {rename,{service_fqname,{prefix,"serice_prefix_"}}},
            {rename,{rpc_name,{prefix,"rpc_prefix_"}}},
            {rename,{msg_typename,{prefix,"msgtype_"}}},
-           {rename,{enum_typename,{prefix,"enumtype_"}}}] = WhatOpts,
+           {rename,{enum_typename,{prefix,"enumtype_"}}},
+           {rename,{enum_macro,uppercase}}] = WhatOpts,
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-rename", "pkg_name:prefix=pkg_prefix_",
@@ -5332,6 +5386,7 @@ renaming_options_test() ->
            "-rename", "rpc_name:prefix=rpc_prefix_",
            "-rename", "msg_typename:prefix=msgtype_",
            "-rename", "enum_typename:prefix=enumtype_",
+           "-rename", "enum_macro:uppercase",
            "x.proto"]),
     [] = lists:filter(fun gpb_names:is_not_renaming_opt/1, WhatOpts),
 
@@ -5443,6 +5498,11 @@ no_gen_intospections_test() ->
 preserve_unknown_fields_cmdline_opts_test() ->
     {ok, {[preserve_unknown_fields], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-preserve-unknown-fields",
+                                         "x.proto"]).
+
+gen_enum_macros_cmdline_opts_test() ->
+    {ok, {[gen_enum_macros], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-gen-enum-macros",
                                          "x.proto"]).
 
 verify_decode_required_present_cmdline_opts_test() ->

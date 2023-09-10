@@ -160,6 +160,7 @@
         boolean_opt(type_defaults_for_omitted_optionals) |
         {target_erlang_version, target_erlang_version()} |
         boolean_opt(preserve_unknown_fields) |
+        boolean_opt(gen_enum_macros) |
         {erlc_compile_options, string()} |
         %% Introspection of the proto definitions
         {proto_defs_version, gpb_defs:version()} |
@@ -219,7 +220,8 @@
                     {service_fqname, name_change()} |
                     {rpc_name, name_change()} |
                     {msg_typename, name_change()} |
-                    {enum_typename, name_change()}.
+                    {enum_typename, name_change()} |
+                    {enum_macro, name_change()}.
 
 -type name_change() :: {prefix, name_part()} |
                        {suffix, name_part()} |
@@ -399,7 +401,7 @@ file(File) ->
 %%       <tt>{<a href="#option-module_name_suffix">module_name_suffix</a>,
 %%            {@link name_part()}}</tt>,
 %%       <tt>{<a href="#option-module_name">module_name</a>
-%%            {@link new_name()}}</tt>,
+%%            {@link new_name()}}</tt>
 %%   </dd>
 %%   <dt>What to generate and how</dt>
 %%   <dd><tt><a href="#option-use_packages">use_packages</a></tt>,
@@ -419,6 +421,7 @@ file(File) ->
 %%            {@link target_erlang_version()}}</tt>,
 %%       <tt><a href="#option-preserve_unknown_fields"
 %%                   >preserve_unknown_fields</a></tt>,
+%%       <tt><a href="#option-gen_enum_macros">gen_enum_macros</a></tt>,
 %%       <tt>{<a href="#option-erlc_compile_options">erlc_compile_options</a>,
 %%            string()}</tt>
 %%       <br/>
@@ -766,7 +769,9 @@ file(File) ->
 %% `Package.MsgName', while the `msg_name' refers to just the message
 %% name without package. The `service_fqname' and `service_name' specifiers
 %% work analogously. The `enum_typename' and `msg_typename' operate on
-%% any enum or msg renamings already applied.
+%% any enum or msg renamings already applied. The `enum_macro' operates on
+%% enum macros (see <a href="#option-gen_enum_macros"
+%% >`gen_enum_macros'</a>).
 %%
 %% It is possible to stack `rename' options, and they will be applied in
 %% the order they are specified. So it is for example possible to
@@ -997,6 +1002,30 @@ file(File) ->
 %% Corresponding command line option:
 %% <a href="#cmdline-option-preserve-unknown-fields"
 %%    >-preserve-unknown-fields</a>.
+%%
+%% <h4><a id="option-gen_enum_macros"/>`gen_enum_macros'</h4>
+%%
+%% The `gen_enum_macros' option causes macros to be emitted on the form
+%% indicated by the following example:
+%% ```
+%%    x.proto:
+%%      syntax="proto3";
+%%      message Msg {
+%%        enum Status { NOT_SET = 0; FAILURE = 1; SUCCESS = 2; }
+%%        Status f = 1;
+%%      }
+%%    x.hrl:
+%%      -define('Msg.Status.NOT_SET', 'NOT_SET').
+%%      -define('Msg.Status.FAILURE', 'FAILURE').
+%%      -define('Msg.Status.SUCCESS', 'SUCCESS').
+%% '''
+%% The intention is to make it possible to catch errors already at compile-time
+%% if any enum symbol would get renamed in a future version of the proto file.
+%% Note that this option will cause `.hrl' files to be generated, even with
+%% the <a href="#option-maps">`maps'</a> option.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-gen-enum-macros">-gen-enum-macros</a>.
 %%
 %% <h4><a id="option-erlc_compile_options"/>
 %%     `{erlc_compile_options, string()}'</h4>
@@ -2150,10 +2179,10 @@ get_output_files(Mod, Opts) ->
     NifCcOutDir = get_nif_cc_outdir(Opts),
     Erl = filename:join(ErlOutDir, atom_to_list(Mod) ++ ".erl"),
     Hrl =
-        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-            records ->
+        case get_gen_hrl_file(Opts) of
+            true ->
                 filename:join(HrlOutDir, atom_to_list(Mod) ++ ".hrl");
-            maps ->
+            false ->
                 '$not_generated'
         end,
     NifCc =
@@ -2164,6 +2193,11 @@ get_output_files(Mod, Opts) ->
                 '$not_generated'
         end,
     {Erl, Hrl, NifCc}.
+
+get_gen_hrl_file(Opts) ->
+    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    DoEnumMacros = gpb_lib:get_enum_macros_by_opts(Opts),
+    Mapping == records orelse DoEnumMacros.
 
 get_erl_outdir(Opts) ->
     proplists:get_value(o_erl, Opts, get_outdir(Opts)).
@@ -2564,6 +2598,8 @@ c() ->
 %%         <dd>Erlang type names for messages and groups.</dd>
 %%         <dt>`enum_typename'</dt>
 %%         <dd>Erlang type names for enums.</dd>
+%%         <dt>`enum_macro'</dt>
+%%         <dd>Enum macros.</dd>
 %%       </dl>
 %%       The following `How' values are available:
 %%       <dl>
@@ -2704,6 +2740,12 @@ c() ->
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-preserve_unknown_fields"
 %%                       >preserve_unknown_fields</a></dd>
+%%   <dt><a id="cmdline-option-gen-enum-macros"/>
+%%       `-gen-enum-macros'</dt>
+%%     <dd>Generate macro definitions for enum symbols. Note that this causes
+%%       a `.hrl' file to be generated even with the `-maps' option.<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-gen_enum_macros">gen_enum_macros</a></dd>
 %%   <dt><a id="cmdline-option-erlc_compile_options"/>
 %%       `-erlc_compile_options Options'</dt>
 %%     <dd>Specifies compilation options, in a comma separated string, to pass
@@ -3252,6 +3294,7 @@ opt_specs() ->
       "         rpc_name       The RPC name.\n"
       "         msg_typename   Erlang type names for messages and groups.\n"
       "         enum_typename  Erlang type names for enums.\n"
+      "         enum_macro     Enum macros, see also -gen-enum-macros.\n"
       "       How:\n"
       "          prefix=Prefix        Prepend the Prefix.\n"
       "          suffix=Suffix        Append the Suffix.\n"
@@ -3316,6 +3359,9 @@ opt_specs() ->
       "       Generate code for Erlang/OTP version N instead of current.\n"},
      {"preserve-unknown-fields", undefined, preserve_unknown_fields, "\n"
       "       Preserve unknown fields.\n"},
+     {"gen-enum-macros", undefined, gen_enum_macros, "\n"
+      "       Generate macro definitions for enum symbols. Note that this\n"
+      "       causes a .hrl file to be generated even with the -maps option.\n"},
      {"erlc_compile_options", 'string()', erlc_compile_options, "String\n"
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
@@ -3518,6 +3564,7 @@ opt_rename_what(S) ->
         "rpc_name:"++S2       -> {rpc_name, S2};
         "msg_typename:"++S2   -> {msg_typename, S2};
         "enum_typename:"++S2  -> {enum_typename, S2};
+        "enum_macro:"++S2     -> {enum_macro, S2};
         _ -> throw({badopt, "Invalid thing to rename: "++S})
     end.
 
@@ -4471,13 +4518,15 @@ possibly_format_descriptor(Defs, Opts) ->
 %% -- hrl -----------------------------------------------------
 
 possibly_format_hrl(Mod, Defs, AnRes, Opts) ->
-    case gpb_lib:get_records_or_maps_by_opts(Opts) of
-        records -> format_hrl(Mod, Defs, AnRes, Opts);
-        maps    -> '$not_generated'
+    case get_gen_hrl_file(Opts) of
+        true  -> format_hrl(Mod, Defs, AnRes, Opts);
+        false -> '$not_generated'
     end.
 
-format_hrl(Mod, Defs, AnRes, Opts1) ->
-    Opts = [{module, Mod}|Opts1],
+format_hrl(Mod, Defs, AnRes, Opts0) ->
+    Opts = [{module, Mod} | Opts0],
+    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    DoEnumMacros = gpb_lib:get_enum_macros_by_opts(Opts),
     ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
       [?f("%% Automatically generated, do not edit~n"
@@ -4489,9 +4538,20 @@ format_hrl(Mod, Defs, AnRes, Opts1) ->
        "\n",
        ?f("-define(~p, \"~s\").~n", [ModVsn, gpb:version_as_string()]),
        "\n",
-       gpb_lib:nl_join(
-         [gpb_gen_types:format_msg_record(Msg, Fields, AnRes, Opts, Defs)
-          || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)]),
+       [gpb_lib:nl_join(
+          [[?f("-define(~p, ~p).~n",
+               [gpb_names:rename_enum_macro(
+                  list_to_atom(lists:concat([EnumName, '.', Sym])),
+                  Opts),
+                Sym])
+            || {Sym, _EValue, _EOpts} <- EnumDef]
+           || {{enum, EnumName}, EnumDef} <- Defs])
+        || DoEnumMacros],
+       "\n",
+       [gpb_lib:nl_join(
+          [gpb_gen_types:format_msg_record(Msg, Fields, AnRes, Opts, Defs)
+           || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)])
+        || Mapping == records],
        "\n",
        ?f("-endif.~n")],
       Opts).

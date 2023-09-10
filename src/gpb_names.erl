@@ -24,6 +24,7 @@
 
 -export([file_name_to_module_name/2]).
 -export([rename_module/2]).
+-export([rename_enum_macro/2]).
 -export([rename_defs/2]).
 -export([compute_renamings/2]).
 -export([apply_renamings/2]).
@@ -101,6 +102,13 @@ possibly_suffix_mod(BaseNameNoExt, Opts) ->
         Suffix ->
             lists:concat([BaseNameNoExt, Suffix])
     end.
+
+%% @doc Given an enum macro name, rename it according to opts, for example
+%% by prefixing it.
+-spec rename_enum_macro(atom(), gpb_compile:opts()) -> atom().
+rename_enum_macro(EnumMacro, Opts) when is_atom(EnumMacro) ->
+    RenameOps = [How || {rename, {enum_macro, How}} <- Opts],
+    lists:foldl(fun do_prim_op/2, EnumMacro, RenameOps).
 
 %% @doc Rename definitions according to options, for example
 %% lowercasing message names.
@@ -273,7 +281,11 @@ l_msg_and_service_and_rpc_opts(Value) ->
 %% -- Renaming opts -> renaming functions ------------------
 
 mk_rename_operations(Opts) ->
-    [{What, mk_rename_op(What, How)} || {rename, {What, How}} <- Opts].
+    [{What, mk_rename_op(What, How)} || {rename, {What, How}} <- Opts,
+                                        is_def_related_rename(What)].
+
+is_def_related_rename(enum_macro) -> false;
+is_def_related_rename(_)          -> true.
 
 mk_rename_op(pkg_name, How) -> mk_pkg_rename_op(How);
 mk_rename_op(msg_fqname, How) -> mk_msg_rename_op(How);
