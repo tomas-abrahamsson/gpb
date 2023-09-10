@@ -183,7 +183,7 @@
         boolean_opt(nif) |
         {load_nif, string()} |
         boolean_opt(gen_mergers) |
-        %% Transslations
+        %% Translations
         {translate_type, {gpb_field_type(), [translation()]}} |
         {any_translate, [translation()]} |
         {translate_field, {field_path(), [translation()]}} |
