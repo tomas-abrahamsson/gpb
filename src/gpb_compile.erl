@@ -2570,7 +2570,7 @@ c() ->
 %%         <dd>Prepend the Prefix to the beginning of the name.</dd>
 %%         <dt>`suffix=Suffix'</dt>
 %%         <dd>Append the Suffix to the end of the name.</dd>
-%%         <dt>`lower_case'</dt>
+%%         <dt>`lowercase'</dt>
 %%         <dd>Example: from `MsgName' to `msgname'</dd>
 %%         <dt>`snake_case'</dt>
 %%         <dd>Example: from `MsgName' to `msg_name'</dd>
@@ -3252,7 +3252,7 @@ opt_specs() ->
       "       How:\n"
       "          prefix=Prefix        Prepend the Prefix.\n"
       "          suffix=Suffix        Append the Suffix.\n"
-      "          lower_case           Example: from MsgName to msgname\n"
+      "          lowercase            Example: from MsgName to msgname\n"
       "          snake_case           Example: from MsgName to msg_name\n"
       "          dots_to_underscores  Example: from Msg.Sub to Msg_Sub\n"
       "          base_name            Example: from Domain.Pkg.Msg to Msg\n"
@@ -3521,7 +3521,7 @@ opt_rename_how(What, S) ->
     case S of
         "prefix="++Prefix -> {prefix, Prefix};
         "suffix="++Suffix -> {suffix, Suffix};
-        "lower_case" -> lower_case;
+        "lowercase" -> lowercase;
         "snake_case" -> snake_case;
         "dots_to_underscores" -> dots_to_underscores;
         "base_name" -> base_name;
