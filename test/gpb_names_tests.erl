@@ -533,6 +533,21 @@ enum_type_names_test() ->
     msg_x_msg1 = gpb_names:apply_msg_type_renaming(msg1, Renamings2),
     ok.
 
+uppercase_test() ->
+    Defs = parse_sort_several_file_lines(
+             [{"xyz.proto",
+               ["message msg1 {",
+                "};"]}],
+             []),
+    [{{enum_containment,"xyz"}, _},
+     {{msg,'MSG1'}, []},
+     {{msg_containment,"xyz"}, ['MSG1']}] =
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs,
+                 [{rename, {msg_name, uppercase}}])))).
+
 no_error_for_same_rpc_name_in_different_services_test() ->
     Defs = parse_sort_several_file_lines(
              [{"a.proto",

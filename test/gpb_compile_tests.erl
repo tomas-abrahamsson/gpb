@@ -5338,6 +5338,7 @@ renaming_options_test() ->
     %% Misc `How' renaming option values
     {ok, {[{rename,{msg_fqname,{suffix,"_msg_suffix"}}},
            {rename,{msg_fqname,lowercase}},
+           {rename,{msg_fqname,uppercase}},
            {rename,{msg_fqname,snake_case}},
            {rename,{msg_fqname,dots_to_underscores}},
            {rename,{msg_fqname,base_name}},
@@ -5350,6 +5351,7 @@ renaming_options_test() ->
         gpb_compile:parse_opts_and_args(
           ["-rename", "msg_fqname:suffix=_msg_suffix",
            "-rename", "msg_fqname:lowercase",
+           "-rename", "msg_fqname:uppercase",
            "-rename", "msg_fqname:snake_case",
            "-rename", "msg_fqname:dots_to_underscores",
            "-rename", "msg_fqname:base_name",

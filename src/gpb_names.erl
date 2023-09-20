@@ -319,6 +319,8 @@ do_prim_op({suffix, Suffix}, Name) ->
     list_to_atom(lists:concat([Name, Suffix]));
 do_prim_op(lowercase, Name) ->
     list_to_atom(gpb_lib:lowercase(atom_to_list(Name)));
+do_prim_op(uppercase, Name) ->
+    list_to_atom(gpb_lib:uppercase(atom_to_list(Name)));
 do_prim_op(snake_case, Name) ->
     list_to_atom(gpb_lib:snake_case(atom_to_list(Name)));
 do_prim_op(dots_to_underscores, Name) ->

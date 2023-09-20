@@ -224,6 +224,7 @@
 -type name_change() :: {prefix, name_part()} |
                        {suffix, name_part()} |
                        lowercase |
+                       uppercase |
                        snake_case |
                        dots_to_underscores |
                        base_name.
@@ -2572,6 +2573,8 @@ c() ->
 %%         <dd>Append the Suffix to the end of the name.</dd>
 %%         <dt>`lowercase'</dt>
 %%         <dd>Example: from `MsgName' to `msgname'</dd>
+%%         <dt>`uppercase'</dt>
+%%         <dd>Example: from `MsgName' to `MSGNAME'</dd>
 %%         <dt>`snake_case'</dt>
 %%         <dd>Example: from `MsgName' to `msg_name'</dd>
 %%         <dt>`dots_to_underscores'</dt>
@@ -3253,6 +3256,7 @@ opt_specs() ->
       "          prefix=Prefix        Prepend the Prefix.\n"
       "          suffix=Suffix        Append the Suffix.\n"
       "          lowercase            Example: from MsgName to msgname\n"
+      "          uppercase            Example: from MsgName to MSGNAME\n"
       "          snake_case           Example: from MsgName to msg_name\n"
       "          dots_to_underscores  Example: from Msg.Sub to Msg_Sub\n"
       "          base_name            Example: from Domain.Pkg.Msg to Msg\n"
@@ -3522,6 +3526,7 @@ opt_rename_how(What, S) ->
         "prefix="++Prefix -> {prefix, Prefix};
         "suffix="++Suffix -> {suffix, Suffix};
         "lowercase" -> lowercase;
+        "uppercase" -> uppercase;
         "snake_case" -> snake_case;
         "dots_to_underscores" -> dots_to_underscores;
         "base_name" -> base_name;
