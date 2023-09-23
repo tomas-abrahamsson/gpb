@@ -23,26 +23,14 @@ jobs:
           ./helpers/extract-top-changelog-entry > release-descr.txt
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ env.vsn }}
-          release_name: Release ${{ env.vsn }}
+          name: Release ${{ env.vsn }}
           draft: false
           prerelease: false
           body_path: release-descr.txt
-      - name: Upload Release Asset
-        id: upload-release-asset 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # This pulls from the CREATE RELEASE step above, referencing it's ID
-          # to get its outputs object, which include a `upload_url`. See this
-          # blog post for more info:
-          # https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./gpb-${{ env.vsn }}.tar.gz
-          asset_name: gpb-${{ env.vsn }}.tar.gz
-          asset_content_type: application/gzip
+          files: gpb-${{ env.vsn }}.tar.gz
+          fail_on_unmatched_files: true
