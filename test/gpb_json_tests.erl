@@ -471,14 +471,14 @@ type_defaults_test() ->
     [{}]                 = M1:to_json({'Int64Msg', 0}),
     [{<<"f">>, <<"0">>}] = M2:to_json({'Int64Msg', 0}),
     [{}]                 = M1:to_json({'FloatMsg', 0.0}),
-    [{<<"f">>, 0.0}]     = M2:to_json({'FloatMsg', 0.0}),
+    [{<<"f">>, +0.0}]    = M2:to_json({'FloatMsg', 0.0}),
     {'EnumMsg', 'A'}     = M1:from_json([{}], 'EnumMsg'),
     {'BoolMsg', false}   = M1:from_json([{}], 'BoolMsg'),
     {'StringMsg', ""}    = M1:from_json([{}], 'StringMsg'),
     {'BytesMsg', <<>>}   = M1:from_json([{}], 'BytesMsg'),
     {'Int32Msg', 0}      = M1:from_json([{}], 'Int32Msg'),
     {'Int64Msg', 0}      = M1:from_json([{}], 'Int64Msg'),
-    {'FloatMsg', 0.0}    = M1:from_json([{}], 'FloatMsg'),
+    {'FloatMsg', +0.0}   = M1:from_json([{}], 'FloatMsg'),
     unload_code(M1),
     unload_code(M2).
 
@@ -500,14 +500,14 @@ type_defaults_maps_test() ->
     ?assertEqual(#{},                   M1:to_json(#{f => 0}, 'Int64Msg')),
     ?assertEqual(#{<<"f">> => <<"0">>}, M2:to_json(#{f => 0}, 'Int64Msg')),
     ?assertEqual(#{},                   M1:to_json(#{f => 0.0}, 'FloatMsg')),
-    ?assertEqual(#{<<"f">> => 0.0},     M2:to_json(#{f => 0.0}, 'FloatMsg')),
+    ?assertEqual(#{<<"f">> => +0.0},    M2:to_json(#{f => 0.0}, 'FloatMsg')),
     ?assertEqual(#{f => 'A'},           M1:from_json(#{}, 'EnumMsg')),
     ?assertEqual(#{f => false},         M1:from_json(#{}, 'BoolMsg')),
     ?assertEqual(#{f => ""},            M1:from_json(#{}, 'StringMsg')),
     ?assertEqual(#{f => <<>>},          M1:from_json(#{}, 'BytesMsg')),
     ?assertEqual(#{f => 0},             M1:from_json(#{}, 'Int32Msg')),
     ?assertEqual(#{f => 0},             M1:from_json(#{}, 'Int64Msg')),
-    ?assertEqual(#{f => 0.0},           M1:from_json(#{}, 'FloatMsg')),
+    ?assertEqual(#{f => +0.0},          M1:from_json(#{}, 'FloatMsg')),
     unload_code(M1),
     unload_code(M2).
 -endif. % -ifndef(NO_HAVE_MAPS).
@@ -823,7 +823,7 @@ float_to_duration(Fl) ->
 duration_to_float({'google.protobuf.Duration', Seconds, Nanos}) ->
     Seconds + nanos_to_fraction(Nanos).
 
-fraction_to_nanos(Fl) when 0.0 =< Fl, Fl < 1.0 ->
+fraction_to_nanos(Fl) when +0.0 =< Fl, Fl < 1.0 ->
     trunc(Fl * 1000000000).
 
 nanos_to_fraction(Nanos) when 0 =< Nanos, Nanos < 1000000000 ->
@@ -940,11 +940,11 @@ p3wellknown_wrappers_test() ->
     [{F, <<"YQA=">>}] = M1:to_json({'Bytes', {BytesValue, <<"a",0>>}}),
     [{}]              = M1:to_json({'Bytes', undefined}),
     %% Decoding ---
-    {'Double', {DoubleValue, 0.0}}   = M1:from_json([{}],         'Double'),
-    {'Double', {DoubleValue, 0.0}}   = M1:from_json([{F, null}],  'Double'),
+    {'Double', {DoubleValue, +0.0}}  = M1:from_json([{}],         'Double'),
+    {'Double', {DoubleValue, +0.0}}  = M1:from_json([{F, null}],  'Double'),
     {'Double', {DoubleValue, 0.125}} = M1:from_json([{F, 0.125}], 'Double'),
-    {'Float', {FloatValue, 0.0}}   = M1:from_json([{}],         'Float'),
-    {'Float', {FloatValue, 0.0}}   = M1:from_json([{F, null}],  'Float'),
+    {'Float', {FloatValue, +0.0}}  = M1:from_json([{}],         'Float'),
+    {'Float', {FloatValue, +0.0}}  = M1:from_json([{F, null}],  'Float'),
     {'Float', {FloatValue, 0.125}} = M1:from_json([{F, 0.125}], 'Float'),
     {'I64', {I64Value, 0}}  = M1:from_json([{}],            'I64'),
     {'I64', {I64Value, 0}}  = M1:from_json([{F, null}],     'I64'),

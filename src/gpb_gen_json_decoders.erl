@@ -376,7 +376,8 @@ mk_check_null_decode_value_update_field_expr(
                              end,
             ?expr(if 'JValueExpr' =:= null;
                      'JValueExpr' =:= 0;
-                     'JValueExpr' =:= 0.0;
+                     'JValueExpr' =:= +0.0;
+                     'JValueExpr' =:= -0.0;
                      is_jstring('JValueExpr') ->
                           '<update-field-expr>';
                      is_number('JValueExpr') ->
