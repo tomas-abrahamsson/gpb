@@ -23,7 +23,21 @@ NoHaveErl20StrFunctions =
                  catch error:undef -> [{d,'NO_HAVE_ERL20_STR_FUNCTIONS'}]
                  end.
 
-ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions.
+%% In Erlang 27, the expression +0.0 =:= -0.0 will evaluate to false
+%% whereas in Erlang 26 and earlier, it evaluates to true.
+%% In Erlang 26.1, as a prep for Erlang 27, using 0.0 in match expreessions or
+%% in comparisons with =:= or =/= will result in a warning that hints about
+%% rewriting the value to either +0.0 or -0.0.
+%% This preprocessor definition is for we want to run something, eg a unit
+%% test, in Erlang versions that can tell +0.0 and -0.0 apart.
+NoHavePlusMinusZeroFloat =
+                 case +0.0 =:= -0.0 of
+                     true  -> [{d,'NO_HAVE_PLUS_MINUS_ZERO_FLOAT'}];
+                     false -> []
+                 end.
+
+ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
+                 NoHavePlusMinusZeroFloat.
 
 [{require_otp_vsn, ".*"},
 

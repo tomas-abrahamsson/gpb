@@ -178,6 +178,20 @@ ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
 endif
 endif
 
+ifdef NO_HAVE_PLUS_MINUS_ZERO_FLOAT
+override ERLC_FLAGS += -DNO_HAVE_PLUS_MINUS_ZERO_FLOAT=true
+else
+## attempt to auto-detect
+HAVE_PLUS_MINUS_ZERO_FLOAT := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                             io:format("~p~n", [+0.0 =/= -0.0]), \
+                             receive after 10 -> ok end.' \
+                         -s erlang halt)
+ifeq ($(HAVE_PLUS_MINUS_ZERO_FLOAT),false)
+override ERLC_FLAGS += -DNO_HAVE_PLUS_MINUS_ZERO_FLOAT=true
+endif
+endif
+
+
 
 # Sorting it also eliminates duplicates
 MODULES := \
