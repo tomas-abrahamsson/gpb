@@ -299,6 +299,7 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
                                replace_tree('M', MsgVar)])
                 end
         end,
+    AllowPreencodedSubmsgs = proplists:get_bool(allow_preencoded_submsgs, Opts),
     [[[[[gpb_codegen:format_fn(
            gpb_lib:mk_fn(encode_msg_, MsgName),
            fun(Msg) ->
@@ -317,10 +318,19 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
        "\n"] || IncludeStarter],
      gpb_codegen:format_fn(
        FnName,
-       fun('<msg-matching>', Bin, TrUserData) ->
+       fun('Preencoded', _Bin, _TrUserData) when is_binary('Preencoded') ->
+               'Preencoded';
+          ('<msg-matching>', Bin, TrUserData) ->
                '<encode-param-exprs>'
        end,
-       [replace_tree('<msg-matching>', FieldMatching),
+       [repeat_clauses(
+          'Preencoded',
+          if AllowPreencodedSubmsgs ->
+                  [[replace_tree('Preencoded', gpb_lib:var("Preencoded", []))]];
+             not AllowPreencodedSubmsgs ->
+                  [] % don't include this clause at all
+          end),
+        replace_tree('<msg-matching>', FieldMatching),
         splice_trees('<encode-param-exprs>', EncodeExprs)])].
 
 field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
@@ -418,6 +428,25 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                   end
                               end,
                               Transforms);
+                   Type == float;
+                   Type == double ->
+                        %% Need to compare with +0.0 since Erl 26.1 to avoid
+                        %% compilation warnings. Only +0.0 is the type default.
+                        ?expr(
+                           begin
+                               'TrF' = 'Tr'('<F>', 'TrUserData'),
+                               if 'TrF' =:= '+0.0';
+                                  'TrF' =:= 0 ->
+                                       '<Bin>';
+                                  true ->
+                                       '<enc>'('TrF',
+                                               <<'<Bin>'/binary, '<Key>'>>,
+                                               'TrUserData')
+                               end
+                           end,
+                           [replace_tree('+0.0', erl_syntax:text("+0.0"))
+                            | Transforms]);
+
                    IsEnum ->
                         TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(

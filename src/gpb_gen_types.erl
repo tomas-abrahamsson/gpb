@@ -39,7 +39,8 @@
          map_type_fields :: '2tuples' | maps,
          module :: module(),
          nif :: boolean(),
-         verify_decode_required_present :: boolean()}).
+         verify_decode_required_present :: boolean(),
+         allow_preencoded_submsgs :: boolean()}).
 
 -record(type_text,
         {text :: string(),
@@ -208,6 +209,7 @@ t_env(Opts) ->
     Mod = proplists:get_value(module, Opts),
     Nif = proplists:get_bool(nif, Opts),
     DecVfy = proplists:get_bool(verify_decode_required_present, Opts),
+    AllowPreencodedSubmsgs = proplists:get_bool(allow_preencoded_submsgs, Opts),
     #t_env{type_specs = TypeSpecs,
            can_do_map_presence = TypespecsCanIndicateMapItemPresence,
            mapping_and_unset = MappingAndUnset,
@@ -215,7 +217,8 @@ t_env(Opts) ->
            map_type_fields = MapTypeFieldsRepr,
            module = Mod,
            nif = Nif,
-           verify_decode_required_present = DecVfy}.
+           verify_decode_required_present = DecVfy,
+           allow_preencoded_submsgs = AllowPreencodedSubmsgs}.
 
 calc_keytype_override([], _TEnv) ->
     no_override;
@@ -766,13 +769,17 @@ float_spec() ->
 msg_to_typestr(M, AnRes, TEnv) ->
     MsgType = rename_msg_type(M, AnRes),
     #t_env{mapping_and_unset=MappingAndUnset,
-           module = Mod} = TEnv,
+           module = Mod,
+           allow_preencoded_submsgs=AllowPreencodedSubmsgs} = TEnv,
+    OrBinary = if AllowPreencodedSubmsgs -> " | binary()";
+                  true -> ""
+               end,
     case MappingAndUnset of
         records ->
             %% Prefix with module since records live in an hrl file
-            ?f("~p:~p()", [Mod, MsgType]);
+            ?f("~p:~p()~s", [Mod, MsgType, OrBinary]);
         #maps{} ->
-            ?f("~p()", [MsgType])
+            ?f("~p()~s", [MsgType, OrBinary])
     end.
 
 enum_typestr(E, Defs, #t_env{nif=Nif}) ->

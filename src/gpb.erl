@@ -1631,13 +1631,13 @@ proto3_type_default(Type, MsgDefs) ->
         bool     -> false;
         fixed64  -> 0;
         sfixed64 -> 0;
-        double   -> 0.0;
+        double   -> 0.0; % only +0.0 is the type-default
         string   -> "";
         bytes    -> <<>>;
         {msg,_}  -> undefined;
         fixed32  -> 0;
         sfixed32 -> 0;
-        float    -> 0.0;
+        float    -> 0.0; % only +0.0 is the type-default
         {map,_KT,_VT} -> [];
         {enum, _EnumName}=Key ->
             {Key, EnumDef} = lists:keyfind(Key, 1, MsgDefs),

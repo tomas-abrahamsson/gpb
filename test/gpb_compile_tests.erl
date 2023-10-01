@@ -2400,6 +2400,108 @@ gen_verifiers_test() ->
     unload_code(M),
     ok.
 
+gen_encoders_test() ->
+    Proto = "syntax='proto2';
+             message m1 { optional uint32 f = 1;}",
+    S = compile_to_string(Proto, [{gen_encoders,false}]),
+    assert_not_contains_regexp(S, "encode_msg"),
+    assert_not_contains_regexp(S, "verify_msg"),
+    M = compile_iolist(Proto, [{gen_encoders,false}]),
+    ?assertError(undef, M:encode_msg({m1, 4711})),
+    ?assertError(undef, M:verify_msg({m1, 4711})),
+    {m1, 4711} = M:decode_msg(<<8, 231, 36>>, m1),
+    unload_code(M),
+    ok.
+
+gen_decoders_test() ->
+    Proto = "syntax='proto2';
+             message m1 { optional uint32 f = 1;}",
+    compile_and_assert_that_format_error_produces_iolist(
+      Proto,
+      [],
+      [{gen_decoders, true}, {gen_mergers, false}],
+      ["Option error", "Decoders", "mergers"]),
+    S = compile_to_string(Proto, [{gen_decoders,false}]),
+    assert_not_contains_regexp(S, "decode_msg"),
+    assert_not_contains_regexp(S, "merge_msgs"),
+    M = compile_iolist(Proto, [{gen_decoders,false}]),
+    ?assertError(undef, M:decode_msg(<<8, 231, 36>>, m1)),
+    ?assertError(undef, M:merge_msgs({m1, 4711}, {m1, 4712})),
+    ?assert(is_binary(M:encode_msg({m1, 4711}, m1, []))),
+    unload_code(M),
+    ok.
+
+%% --- pre-encoded submsgs during encoding ------------
+
+preencoded_msg_with_verify_test() ->
+    M = compile_iolist(["message Top { optional Sub s = 1; }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top = M:encode_msg({'Top', {'Sub', 17}}),
+    Sub = M:encode_msg({'Sub', 17}),
+    ok  = M:verify_msg({'Top', Sub}),
+    Top = M:encode_msg({'Top', Sub}, [{verify, true}]),
+    unload_code(M).
+
+preencoded_msg_with_no_fields_test() ->
+    M = compile_iolist(["message Top { optional Sub s = 1; }
+                         message Sub { }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top = M:encode_msg({'Top', {'Sub'}}),
+    Sub = M:encode_msg({'Sub'}),
+    ok  = M:verify_msg({'Top', Sub}),
+    Top = M:encode_msg({'Top', Sub}, [{verify, true}]),
+    unload_code(M).
+
+preencoded_msg_in_oneof_test() ->
+    M = compile_iolist(["message Top { oneof c { Sub s = 1; } }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top = M:encode_msg({'Top', {s, {'Sub', 17}}}),
+    Sub = M:encode_msg({'Sub', 17}),
+    ok  = M:verify_msg({'Top', {s, Sub}}),
+    Top = M:encode_msg({'Top', {s, Sub}}),
+    unload_code(M).
+
+preencoded_msg_in_maptype_field_test() ->
+    M = compile_iolist(["message Top { map<uint32, Sub> m = 1; }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top = M:encode_msg({'Top', [{42, {'Sub', 17}}]}),
+    Sub = M:encode_msg({'Sub', 17}),
+    ok  = M:verify_msg({'Top', [{42, Sub}]}),
+    Top = M:encode_msg({'Top', [{42, Sub}]}),
+    unload_code(M).
+
+preencoded_msg_with_repeated_test() ->
+    M = compile_iolist(["message Top { repeated Sub r = 1; }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs]),
+    Top   = M:encode_msg({'Top', [{'Sub', 17}, {'Sub', 18}]}),
+    Sub17 = M:encode_msg({'Sub', 17}),
+    Sub18 = M:encode_msg({'Sub', 18}),
+    ok    = M:verify_msg({'Top', [Sub17, Sub18]}),
+    Top   = M:encode_msg({'Top', [Sub17, Sub18]}),
+    unload_code(M).
+
+-ifndef(NO_HAVE_MAPS).
+preencoded_msg_with_maps_test() ->
+    M = compile_iolist(["message Top { optional Sub s = 1; }
+                         message Sub { required uint32 a = 1; }
+                        "],
+                       [allow_preencoded_submsgs, maps]),
+    Top = M:encode_msg(#{s => #{a => 17}}, 'Top'),
+    Sub = M:encode_msg(#{a => 17}, 'Sub'),
+    ok  = M:verify_msg(#{s => Sub}, 'Top'),
+    Top = M:encode_msg(#{s => Sub}, 'Top', [{verify, true}]),
+    unload_code(M).
+-endif. % -ifndef(NO_HAVE_MAPS).
+
 %% --- locate_import and read_import ----------
 
 read_import_test() ->
@@ -2641,6 +2743,15 @@ list_io_with_nif_options_includes_nif_cc_output_test() ->
      {sources, ["/main.proto"]},
      {missing, []}] =
         do_list_io_defs(FileSystem, [nif]),
+    ok.
+
+list_io_with_gen_enum_macros_and_maps_test() ->
+    FileSystem = [{"/main.proto", ["message M { optional uint32 f = 1; }"]}],
+    [{erl_output, "/main.erl"},
+     {hrl_output, "/main.hrl"},
+     {sources, ["/main.proto"]},
+     {missing, []}] =
+        do_list_io_defs(FileSystem, [maps, gen_enum_macros]),
     ok.
 
 generates_makefile_deps_to_stdout_test() ->
@@ -3406,6 +3517,50 @@ defaults_for_proto3_fields_test() ->
     P2M = MkMod(proto2, []),
     {m, undefined, undefined, undefined, [], undefined, []} = P2M:new_m_msg(),
     unload_code(P2M).
+
+enum_macros_test() ->
+    Proto1 = ["package foo.bar;
+               enum A { NO = 0; YES = 1; }
+               enum B { option allow_alias=true;
+                        FALSE = 0; TRUE = 1; YES = 1; }
+               message M { optional A f1 = 1; optional B f2 = 2; }
+              "],
+    %% Basic contains
+    Hrl1 = compile_to_string_get_hrl(Proto1, [gen_enum_macros]),
+    assert_contains_regexp(Hrl1, "-define.'A.NO', *'NO'"),
+    assert_contains_regexp(Hrl1, "-define.'A.YES', *'YES'"),
+    assert_contains_regexp(Hrl1, "-define.'B.FALSE', *'FALSE'"),
+    assert_contains_regexp(Hrl1, "-define.'B.TRUE', *'TRUE'"),
+    assert_contains_regexp(Hrl1, "-define.'B.YES', *'YES'"),
+    %%
+    %% Use packages
+    Hrl2 = compile_to_string_get_hrl(Proto1, [gen_enum_macros, use_packages]),
+    assert_contains_regexp(Hrl2, "-define.'foo.bar.A.NO', *'NO'"),
+    %% Prefix and suffix (string)
+    Hrl3 = compile_to_string_get_hrl(
+             Proto1,
+             [gen_enum_macros,
+              {rename, {enum_macro, {prefix, "abc/"}}},
+              {rename, {enum_macro, {suffix, "/xyz"}}}]),
+    assert_contains_regexp(Hrl3, "-define.'abc/A.NO/xyz', *'NO'"),
+    %% Prefix and suffix (atom)
+    Hrl4 = compile_to_string_get_hrl(
+             Proto1,
+             [use_packages, gen_enum_macros,
+              {rename, {enum_macro, uppercase}}]),
+    assert_contains_regexp(Hrl4, "-define.'FOO.BAR.A.NO', *'NO'"),
+    ok.
+
+
+-ifndef(NO_HAVE_MAPS).
+enum_macros_means_hrl_even_with_maps_test() ->
+    Proto = ["enum A { NO = 0; YES = 1; }
+              message M { optional A f1 = 1; }
+              "],
+    Hrl = compile_to_string_get_hrl(Proto, [maps, gen_enum_macros]),
+    assert_contains_regexp(Hrl, "-define.'A.YES', *'YES'"),
+    ok.
+-endif. % NO_HAVE_MAPS
 
 %% --- nif generation tests -----------------
 
@@ -5319,7 +5474,8 @@ renaming_options_test() ->
            {rename,{service_fqname,{prefix,"serice_prefix_"}}},
            {rename,{rpc_name,{prefix,"rpc_prefix_"}}},
            {rename,{msg_typename,{prefix,"msgtype_"}}},
-           {rename,{enum_typename,{prefix,"enumtype_"}}}] = WhatOpts,
+           {rename,{enum_typename,{prefix,"enumtype_"}}},
+           {rename,{enum_macro,uppercase}}] = WhatOpts,
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-rename", "pkg_name:prefix=pkg_prefix_",
@@ -5332,12 +5488,14 @@ renaming_options_test() ->
            "-rename", "rpc_name:prefix=rpc_prefix_",
            "-rename", "msg_typename:prefix=msgtype_",
            "-rename", "enum_typename:prefix=enumtype_",
+           "-rename", "enum_macro:uppercase",
            "x.proto"]),
     [] = lists:filter(fun gpb_names:is_not_renaming_opt/1, WhatOpts),
 
     %% Misc `How' renaming option values
     {ok, {[{rename,{msg_fqname,{suffix,"_msg_suffix"}}},
-           {rename,{msg_fqname,lower_case}},
+           {rename,{msg_fqname,lowercase}},
+           {rename,{msg_fqname,uppercase}},
            {rename,{msg_fqname,snake_case}},
            {rename,{msg_fqname,dots_to_underscores}},
            {rename,{msg_fqname,base_name}},
@@ -5349,7 +5507,8 @@ renaming_options_test() ->
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-rename", "msg_fqname:suffix=_msg_suffix",
-           "-rename", "msg_fqname:lower_case",
+           "-rename", "msg_fqname:lowercase",
+           "-rename", "msg_fqname:uppercase",
            "-rename", "msg_fqname:snake_case",
            "-rename", "msg_fqname:dots_to_underscores",
            "-rename", "msg_fqname:base_name",
@@ -5431,6 +5590,17 @@ no_gen_mergers_test() ->
         gpb_compile:parse_opts_and_args(["-nif", "-no-gen-mergers",
                                          "x.proto"]).
 
+no_gen_encoders_decoders_cmdline_opts_test() ->
+    {ok, {[{gen_encoders, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-no-gen-encoders", "x.proto"]),
+    {ok, {[{gen_decoders, false}], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-no-gen-decoders", "x.proto"]),
+    ok.
+
+allow_preencoded_submsgs_options_test() ->
+    {ok, {[allow_preencoded_submsgs], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-allow-preencoded-submsgs",
+                                         "x.proto"]).
 no_gen_intospections_test() ->
     {ok, {[{gen_introspect, false}], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-no-gen-introspect", "x.proto"]),
@@ -5441,6 +5611,11 @@ no_gen_intospections_test() ->
 preserve_unknown_fields_cmdline_opts_test() ->
     {ok, {[preserve_unknown_fields], ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(["-preserve-unknown-fields",
+                                         "x.proto"]).
+
+gen_enum_macros_cmdline_opts_test() ->
+    {ok, {[gen_enum_macros], ["x.proto"]}} =
+        gpb_compile:parse_opts_and_args(["-gen-enum-macros",
                                          "x.proto"]).
 
 verify_decode_required_present_cmdline_opts_test() ->

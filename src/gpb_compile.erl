@@ -135,6 +135,7 @@
         {maps_unset_optional, omitted | present_undefined} |
         {maps_oneof, tuples | flat} |
         {maps_key_type, atom | binary} |
+        boolean_opt(allow_preencoded_submsgs) |
         %% Verification of input
         {verify, optionally | always | never} |
         boolean_opt(verify_decode_required_present) |
@@ -160,7 +161,10 @@
         boolean_opt(type_defaults_for_omitted_optionals) |
         {target_erlang_version, target_erlang_version()} |
         boolean_opt(preserve_unknown_fields) |
+        boolean_opt(gen_enum_macros) |
         {erlc_compile_options, string()} |
+        boolean_opt(gen_encoders) |
+        boolean_opt(gen_decoders) |
         %% Introspection of the proto definitions
         {proto_defs_version, gpb_defs:version()} |
         {introspect_proto_defs_version, gpb_defs:version() | preferably_1} |
@@ -183,7 +187,7 @@
         boolean_opt(nif) |
         {load_nif, string()} |
         boolean_opt(gen_mergers) |
-        %% Transslations
+        %% Translations
         {translate_type, {gpb_field_type(), [translation()]}} |
         {any_translate, [translation()]} |
         {translate_field, {field_path(), [translation()]}} |
@@ -219,11 +223,13 @@
                     {service_fqname, name_change()} |
                     {rpc_name, name_change()} |
                     {msg_typename, name_change()} |
-                    {enum_typename, name_change()}.
+                    {enum_typename, name_change()} |
+                    {enum_macro, name_change()}.
 
 -type name_change() :: {prefix, name_part()} |
                        {suffix, name_part()} |
                        lowercase |
+                       uppercase |
                        snake_case |
                        dots_to_underscores |
                        base_name.
@@ -371,7 +377,9 @@ file(File) ->
 %%       <tt>{<a href="#option-maps_oneof">maps_oneof</a>,
 %%            tuples|flat}</tt>,
 %%       <tt>{<a href="#option-maps_key_type">maps_key_type</a>,
-%%            atom|binary}</tt>
+%%            atom|binary}</tt>,
+%%       <tt><a href="#option-allow_preencoded_submsgs"
+%%                           >allow_preencoded_submsgs</a></tt>
 %%       <br/>
 %%       See also <tt><a href="#option-use_packages">use_packages</a></tt>.
 %%   </dd>
@@ -398,7 +406,7 @@ file(File) ->
 %%       <tt>{<a href="#option-module_name_suffix">module_name_suffix</a>,
 %%            {@link name_part()}}</tt>,
 %%       <tt>{<a href="#option-module_name">module_name</a>
-%%            {@link new_name()}}</tt>,
+%%            {@link new_name()}}</tt>
 %%   </dd>
 %%   <dt>What to generate and how</dt>
 %%   <dd><tt><a href="#option-use_packages">use_packages</a></tt>,
@@ -418,8 +426,11 @@ file(File) ->
 %%            {@link target_erlang_version()}}</tt>,
 %%       <tt><a href="#option-preserve_unknown_fields"
 %%                   >preserve_unknown_fields</a></tt>,
+%%       <tt><a href="#option-gen_enum_macros">gen_enum_macros</a></tt>,
 %%       <tt>{<a href="#option-erlc_compile_options">erlc_compile_options</a>,
-%%            string()}</tt>
+%%            string()}</tt>,
+%%       <tt>{<a href="#option-gen_encoders">gen_encoders</a>,boolean()}</tt>
+%%       <tt>{<a href="#option-gen_decoders">gen_decoders</a>,boolean()}</tt>
 %%       <br/>
 %%       See also <tt><a href="#option-gen_introspect">gen_introspect</a></tt>
 %%       and <tt><a href="#option-gen_verifiers">gen_verifiers</a></tt>
@@ -685,6 +696,16 @@ file(File) ->
 %% Corresponding command line option:
 %% <a href="#cmdline-option-maps_key_type">-maps_key_type</a>.
 %%
+%% <h4><a id="option-allow_preencoded_submsgs"/>`allow_preencoded_submsgs'</h4>
+%%
+%% Allow pre-encoded submsgs to save cpu during encoding. A sub-message
+%% can then be specified as a binary. It is not possible to combine this
+%% option neither with the option `nif' nor with encoding to json.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-allow-preencoded-submsgs"
+%%                        >-allow-preencoded-submsgs</a>.
+%%
 %% <h4>Related options</h4>
 %% <ul>
 %%   <li><a href="#option-use_packages">`use_packages'</a></li>
@@ -765,7 +786,9 @@ file(File) ->
 %% `Package.MsgName', while the `msg_name' refers to just the message
 %% name without package. The `service_fqname' and `service_name' specifiers
 %% work analogously. The `enum_typename' and `msg_typename' operate on
-%% any enum or msg renamings already applied.
+%% any enum or msg renamings already applied. The `enum_macro' operates on
+%% enum macros (see <a href="#option-gen_enum_macros"
+%% >`gen_enum_macros'</a>).
 %%
 %% It is possible to stack `rename' options, and they will be applied in
 %% the order they are specified. So it is for example possible to
@@ -997,6 +1020,30 @@ file(File) ->
 %% <a href="#cmdline-option-preserve-unknown-fields"
 %%    >-preserve-unknown-fields</a>.
 %%
+%% <h4><a id="option-gen_enum_macros"/>`gen_enum_macros'</h4>
+%%
+%% The `gen_enum_macros' option causes macros to be emitted on the form
+%% indicated by the following example:
+%% ```
+%%    x.proto:
+%%      syntax="proto3";
+%%      message Msg {
+%%        enum Status { NOT_SET = 0; FAILURE = 1; SUCCESS = 2; }
+%%        Status f = 1;
+%%      }
+%%    x.hrl:
+%%      -define('Msg.Status.NOT_SET', 'NOT_SET').
+%%      -define('Msg.Status.FAILURE', 'FAILURE').
+%%      -define('Msg.Status.SUCCESS', 'SUCCESS').
+%% '''
+%% The intention is to make it possible to catch errors already at compile-time
+%% if any enum symbol would get renamed in a future version of the proto file.
+%% Note that this option will cause `.hrl' files to be generated, even with
+%% the <a href="#option-maps">`maps'</a> option.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-gen-enum-macros">-gen-enum-macros</a>.
+%%
 %% <h4><a id="option-erlc_compile_options"/>
 %%     `{erlc_compile_options, string()}'</h4>
 %%
@@ -1005,6 +1052,32 @@ file(File) ->
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-erlc_compile_options">-erlc_compile_options</a>.
+%%
+%% <h4><a id="option-gen_encoders"/>`gen_encoders'</h4>
+%%
+%% The `{gen_encoders,false}' option tells gpb to not emit code
+%% for encoding messages. This may be useful to reduce the size of the
+%% generated code in cases when no encoding is needed.
+%% The default is to generate encoders.
+%% Setting this option to `false' also implicitly sets the
+%% <tt><a href="#option-gen_verifiers">{gen_verifiers,false}</a></tt>
+%% option.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-no-gen-encoders">-no-gen-encoders</a>.
+%%
+%% <h4><a id="option-gen_decoders"/>`gen_decoders'</h4>
+%%
+%% The `{gen_decoders,false}' option tells gpb to not emit code
+%% for decoding messages. This may be useful to reduce the size of the
+%% generated code in cases when no decoding is needed.
+%% The default is to generate decoders.
+%% Setting this option to `false' also implicitly sets the
+%% <tt><a href="#option-gen_mergers">{gen_mergers,false}</a></tt>
+%% option.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-no-gen-decoders">-no-gen-decoders</a>.
 %%
 %% <h4>Related options</h4>
 %% <ul>
@@ -1293,8 +1366,11 @@ file(File) ->
 %% <h4><a id="option-gen_mergers"/>`gen_mergers'</h4>
 %%
 %% The `{gen_mergers,false}' option will cause gpb to not generate code for
-%% merging of messages. This is only useful with the option `nif'. One
-%% rationale for this is option is to reduce the size of the generated code.
+%% merging of messages. This is only useful with the
+%% option <a href="#option-nif">`nif'</a> or with the
+%% option <tt>{<a href="#option-gen_decoders">gen_decoders</a>,false}</tt>.
+%% One rationale for this is option is to reduce the size of the generated
+%% code.
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-no-gen-mergers">-no-gen-mergers</a>.
@@ -1659,6 +1735,8 @@ normalize_alias_opts(Opts) ->
                  fun norm_opt_map_opts/1,
                  fun norm_opt_any_translate/1,
                  fun norm_opt_json_format/1,
+                 fun norm_opt_gen_encoders/1,
+                 fun norm_opt_gen_decoders/1,
                  fun norm_opt_gen_verifiers/1]).
 
 norm_opt_alias_to_msg_proto_defs(Opts) ->
@@ -1720,6 +1798,19 @@ norm_opt_json_format(Opts) ->
                                     {json_string_format, binary},
                                     {json_null, null}]}],
       Opts).
+
+norm_opt_gen_encoders(Opts) ->
+    proplists:expand(
+      [{{gen_encoders, false}, [{gen_verifiers, false},
+                                {gen_encoders, false}]}],
+      Opts).
+
+norm_opt_gen_decoders(Opts) ->
+    proplists:expand(
+      [{{gen_decoders, false}, [{gen_mergers, false},
+                                {gen_decoders, false}]}],
+      Opts).
+
 
 norm_opt_gen_verifiers(Opts) ->
     proplists:expand(
@@ -1864,8 +1955,9 @@ verify_opts(Defs, Opts) ->
               fun() -> verify_opts_preserve_unknown_fields_and_json(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
               fun() -> verify_opts_flat_oneof(Opts) end,
-              fun() -> verify_opts_no_gen_mergers(Opts) end,
-              fun() -> verify_opts_no_gen_verifiers(Opts) end]).
+              fun() -> verify_opts_no_gen_decoders_mergers_nif(Opts) end,
+              fun() -> verify_opts_no_gen_verifiers(Opts) end,
+              fun() -> verify_opts_allow_preencoded_submsgs(Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -1947,14 +2039,21 @@ check_maps_flat_oneof_may_fail_on_compilation(Opts) ->
             []
     end.
 
-verify_opts_no_gen_mergers(Opts) ->
+verify_opts_no_gen_decoders_mergers_nif(Opts) ->
+    %% Default for gen_decoders and gen_mergers is true.
+    DoMergers = gpb_lib:get_gen_mergers(Opts),
+    DoDecoders = gpb_lib:get_gen_decoders(Opts),
     DoNif = proplists:get_bool(nif, Opts),
-    GenMergers = proplists:get_value(gen_mergers, Opts),
-    case {DoNif, GenMergers} of
-        {_,     undefined} -> ok; % default for gen_mergers is true
-        {_,     true} -> ok;
-        {true,  false} -> ok;
-        {false, false} -> {error, {invalid_options, nif, {gen_mergers,false}}}
+    %% Decoders but no mergers is ok only if the nif option is set.
+    case {DoMergers, DoDecoders, DoNif} of
+        {true,  _,     _}     -> ok;
+        {false, false, false} -> ok;
+        {false, false, true}  -> ok;
+        {false, true,  false} -> {error, {invalid_options,
+                                          {gen_decoders, true},
+                                          {gen_mergers, false},
+                                          {nif,false}}};
+        {false, true,  true}  -> ok
     end.
 
 verify_opts_no_gen_verifiers(Opts) ->
@@ -1966,6 +2065,15 @@ verify_opts_no_gen_verifiers(Opts) ->
         {never, false} -> ok;
         {_, false} -> {error, {invalid_options,
                                {verify,Verify}, {gen_verifiers,false}}}
+    end.
+
+verify_opts_allow_preencoded_submsgs(Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    AllowPreencodedSubmsgs = proplists:get_bool(allow_preencoded_submsgs, Opts),
+    case {DoNif, AllowPreencodedSubmsgs} of
+        {true, true} -> {error, {invalid_options,
+                                 nif, allow_preencoded_submsgs}};
+        _ -> ok
     end.
 
 %% @equiv msg_defs(Mod, Defs, [])
@@ -2149,10 +2257,10 @@ get_output_files(Mod, Opts) ->
     NifCcOutDir = get_nif_cc_outdir(Opts),
     Erl = filename:join(ErlOutDir, atom_to_list(Mod) ++ ".erl"),
     Hrl =
-        case gpb_lib:get_records_or_maps_by_opts(Opts) of
-            records ->
+        case get_gen_hrl_file(Opts) of
+            true ->
                 filename:join(HrlOutDir, atom_to_list(Mod) ++ ".hrl");
-            maps ->
+            false ->
                 '$not_generated'
         end,
     NifCc =
@@ -2163,6 +2271,11 @@ get_output_files(Mod, Opts) ->
                 '$not_generated'
         end,
     {Erl, Hrl, NifCc}.
+
+get_gen_hrl_file(Opts) ->
+    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    DoEnumMacros = gpb_lib:get_enum_macros_by_opts(Opts),
+    Mapping == records orelse DoEnumMacros.
 
 get_erl_outdir(Opts) ->
     proplists:get_value(o_erl, Opts, get_outdir(Opts)).
@@ -2357,11 +2470,15 @@ fmt_err({unsupported_translation, _Type, non_msg_type}) ->
 fmt_err({invalid_options, epb_functions, maps}) ->
     "Option error: Not supported: both epb_compatibility (or epb_functions) "
         "and maps";
-fmt_err({invalid_options, nif, {gen_mergers, false}}) ->
-    "Option error: It is only possible to omit mergers with nif";
 fmt_err({invalid_options, {verify,Verify}, {gen_verifiers,false}}) ->
     ?f("Option error: It is not possible to omit verifiers when verify = ~p",
        [Verify]);
+fmt_err({invalid_options, {gen_decoders, true}, {gen_mergers,false},
+         {nif, false}}) ->
+    ?f("Option error: Decoders byt no mergers is only ok if the nif option "
+       "is set");
+fmt_err({invalid_options, nif, allow_preencoded_submsgs}) ->
+    "Option error: Not supported: both allow_preencoded_submsgs and nif";
 fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
@@ -2512,6 +2629,12 @@ c() ->
 %%     <dd>Specifies the key type for maps.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-maps_key_type">maps_key_type</a></dd>
+%%   <dt><a id="cmdline-option-allow-preencoded-submsgs"/>
+%%       `-allow-preencoded-submsgs'</dt>
+%%     <dd>Allow pre-encoded submsgs to save cpu during encoding<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-allow_preencoded_submsgs"
+%%                       >allow_preencoded_submsgs</a></dd>
 %% </dl>
 %%
 %% Verification of input
@@ -2563,6 +2686,8 @@ c() ->
 %%         <dd>Erlang type names for messages and groups.</dd>
 %%         <dt>`enum_typename'</dt>
 %%         <dd>Erlang type names for enums.</dd>
+%%         <dt>`enum_macro'</dt>
+%%         <dd>Enum macros.</dd>
 %%       </dl>
 %%       The following `How' values are available:
 %%       <dl>
@@ -2570,8 +2695,10 @@ c() ->
 %%         <dd>Prepend the Prefix to the beginning of the name.</dd>
 %%         <dt>`suffix=Suffix'</dt>
 %%         <dd>Append the Suffix to the end of the name.</dd>
-%%         <dt>`lower_case'</dt>
+%%         <dt>`lowercase'</dt>
 %%         <dd>Example: from `MsgName' to `msgname'</dd>
+%%         <dt>`uppercase'</dt>
+%%         <dd>Example: from `MsgName' to `MSGNAME'</dd>
 %%         <dt>`snake_case'</dt>
 %%         <dd>Example: from `MsgName' to `msg_name'</dd>
 %%         <dt>`dots_to_underscores'</dt>
@@ -2701,12 +2828,32 @@ c() ->
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-preserve_unknown_fields"
 %%                       >preserve_unknown_fields</a></dd>
+%%   <dt><a id="cmdline-option-gen-enum-macros"/>
+%%       `-gen-enum-macros'</dt>
+%%     <dd>Generate macro definitions for enum symbols. Note that this causes
+%%       a `.hrl' file to be generated even with the `-maps' option.<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-gen_enum_macros">gen_enum_macros</a></dd>
 %%   <dt><a id="cmdline-option-erlc_compile_options"/>
 %%       `-erlc_compile_options Options'</dt>
 %%     <dd>Specifies compilation options, in a comma separated string, to pass
 %%       along to the `-compile(...)' directive on the generated code.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-erlc_compile_options">erlc_compile_options</a></dd>
+%%   <dt><a id="cmdline-option-no-gen-encoders"/>
+%%       `-no-gen-encoders'</dt>
+%%     <dd>Do not generate `encode_msg' functions. Implies
+%%       <a href="#cmdline-option-no-gen-verifiers">`-no-gen-verifiers'</a>.
+%%       <br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-gen_encoders">gen_encoders</a></dd>
+%%   <dt><a id="cmdline-option-no-gen-decoders"/>
+%%       `-no-gen-decoders'</dt>
+%%     <dd>Do not generate `decode_msg' functions. Implies
+%%       <a href="#cmdline-option-no-gen-mergers">`-no-gen-mergers'</a>.
+%%       <br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-gen_decoders">gen_decoders</a></dd>
 %% </dl>
 %%
 %% Introspection of the proto definitions
@@ -3224,6 +3371,8 @@ opt_specs() ->
      {"maps_key_type", {atom, binary}, maps_key_type,
       "atom | binary\n"
       "       Specifies the key type for maps.\n"},
+     {"allow-preencoded-submsgs", undefined, allow_preencoded_submsgs, "\n"
+      "       Allow pre-encoded submsgs to save cpu during encoding.\n"},
      {{section, "Verification of inputs"}},
      {"v", {optionally, always, never}, verify, " optionally | always | never\n"
       "       Specify how the generated encoder should\n"
@@ -3249,10 +3398,12 @@ opt_specs() ->
       "         rpc_name       The RPC name.\n"
       "         msg_typename   Erlang type names for messages and groups.\n"
       "         enum_typename  Erlang type names for enums.\n"
+      "         enum_macro     Enum macros, see also -gen-enum-macros.\n"
       "       How:\n"
       "          prefix=Prefix        Prepend the Prefix.\n"
       "          suffix=Suffix        Append the Suffix.\n"
-      "          lower_case           Example: from MsgName to msgname\n"
+      "          lowercase            Example: from MsgName to msgname\n"
+      "          uppercase            Example: from MsgName to MSGNAME\n"
       "          snake_case           Example: from MsgName to msg_name\n"
       "          dots_to_underscores  Example: from Msg.Sub to Msg_Sub\n"
       "          base_name            Example: from Domain.Pkg.Msg to Msg\n"
@@ -3312,9 +3463,16 @@ opt_specs() ->
       "       Generate code for Erlang/OTP version N instead of current.\n"},
      {"preserve-unknown-fields", undefined, preserve_unknown_fields, "\n"
       "       Preserve unknown fields.\n"},
+     {"gen-enum-macros", undefined, gen_enum_macros, "\n"
+      "       Generate macro definitions for enum symbols. Note that this\n"
+      "       causes a .hrl file to be generated even with the -maps option.\n"},
      {"erlc_compile_options", 'string()', erlc_compile_options, "String\n"
       "       Specifies compilation options, in a comma separated string, to\n"
       "       pass along to the -compile() directive on the generated code.\n"},
+     {"no-gen-encoders", {'opt_value()', false}, gen_encoders, "\n"
+      "       Do not generate encoder functions.\n"},
+     {"no-gen-decoders", {'opt_value()', false}, gen_decoders, "\n"
+      "       Do not generate decoder functions.\n"},
      {{section, "Introspection of the proto definitions"}},
      {"introspect-get_proto_defs", undefined, introspect_get_proto_defs, "\n"
       "       For introspection, generate a get_proto_defs/0 function\n"
@@ -3514,6 +3672,7 @@ opt_rename_what(S) ->
         "rpc_name:"++S2       -> {rpc_name, S2};
         "msg_typename:"++S2   -> {msg_typename, S2};
         "enum_typename:"++S2  -> {enum_typename, S2};
+        "enum_macro:"++S2     -> {enum_macro, S2};
         _ -> throw({badopt, "Invalid thing to rename: "++S})
     end.
 
@@ -3521,7 +3680,8 @@ opt_rename_how(What, S) ->
     case S of
         "prefix="++Prefix -> {prefix, Prefix};
         "suffix="++Suffix -> {suffix, Suffix};
-        "lower_case" -> lower_case;
+        "lowercase" -> lowercase;
+        "uppercase" -> uppercase;
         "snake_case" -> snake_case;
         "dots_to_underscores" -> dots_to_underscores;
         "base_name" -> base_name;
@@ -4234,6 +4394,8 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
     DoMergers = gpb_lib:get_gen_mergers(Opts),
     DoVerifiers = gpb_lib:get_gen_verifiers(Opts),
     DoIntrospect = gpb_lib:get_gen_introspect(Opts),
+    DoEncoders = gpb_lib:get_gen_encoders(Opts),
+    DoDecoders = gpb_lib:get_gen_decoders(Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
       [?f("%% @private~n"
@@ -4247,8 +4409,8 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
            [_|_] -> ?f("-compile([~ts]).~n", [CompileOptsStr])
        end,
        "\n",
-       gpb_gen_encoders:format_exports(Defs, Opts),
-       gpb_gen_decoders:format_exports(Defs, Opts),
+       [gpb_gen_encoders:format_exports(Defs, Opts) || DoEncoders],
+       [gpb_gen_decoders:format_exports(Defs, Opts) || DoDecoders],
        [gpb_gen_mergers:format_exports(Defs, Opts) || DoMergers],
        [gpb_gen_verifiers:format_exports(Defs, Opts) || DoVerifiers],
        [[gpb_gen_json_encoders:format_exports(Defs, Opts),
@@ -4322,30 +4484,34 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
        %% to about 10000 msgs/s for a set of mixed message samples.
        %% f("-compile(inline).~n"),
        %%
-       gpb_gen_encoders:format_encoders_top_function(Defs, AnRes, Opts),
+       [[gpb_gen_encoders:format_encoders_top_function(Defs, AnRes, Opts),
+         "\n",
+         if DoNif ->
+                 ?f("~s~n", [gpb_gen_nif:format_nif_encoder_error_wrappers(
+                               Defs, AnRes, Opts)]);
+            not DoNif ->
+                 [gpb_gen_encoders:format_msg_encoders(Defs, AnRes, Opts,
+                                                       true),
+                  gpb_gen_encoders:format_map_encoders(MapsAsMsgs, AnRes, Opts,
+                                                       false),
+                  gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts),
+                  gpb_gen_encoders:format_aux_common_encoders(Defs, AnRes,
+                                                              Opts)]
+         end]
+        || DoEncoders],
        "\n",
-       if DoNif ->
-               ?f("~s~n", [gpb_gen_nif:format_nif_encoder_error_wrappers(
-                             Defs, AnRes, Opts)]);
-          not DoNif ->
-               [gpb_gen_encoders:format_msg_encoders(Defs, AnRes, Opts,
-                                                     true),
-                gpb_gen_encoders:format_map_encoders(MapsAsMsgs, AnRes, Opts,
-                                                     false),
-                gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts),
-                gpb_gen_encoders:format_aux_common_encoders(Defs, AnRes, Opts)]
-       end,
-       "\n",
-       gpb_gen_decoders:format_decoders_top_function(Defs, AnRes, Opts),
-       "\n\n",
-       if DoNif ->
-               [gpb_gen_nif:format_nif_decoder_error_wrappers(Defs,
-                                                              AnRes, Opts)];
-          not DoNif ->
-               [gpb_gen_decoders:format_msg_decoders(Defs, AnRes, Opts),
-                gpb_gen_decoders:format_map_decoders(DMapsAsMsgs, AnRes, Opts),
-                gpb_gen_decoders:format_aux_decoders(Defs, AnRes, Opts)]
-       end,
+       [[gpb_gen_decoders:format_decoders_top_function(Defs, AnRes, Opts),
+         "\n\n",
+         if DoNif ->
+                 [gpb_gen_nif:format_nif_decoder_error_wrappers(Defs,
+                                                                AnRes, Opts)];
+            not DoNif ->
+                 [gpb_gen_decoders:format_msg_decoders(Defs, AnRes, Opts),
+                  gpb_gen_decoders:format_map_decoders(DMapsAsMsgs, AnRes,
+                                                       Opts),
+                  gpb_gen_decoders:format_aux_decoders(Defs, AnRes, Opts)]
+         end]
+        || DoDecoders],
        "\n",
        [gpb_gen_mergers:format_msg_merge_code(Defs, AnRes, Opts)
         || DoMergers],
@@ -4466,13 +4632,15 @@ possibly_format_descriptor(Defs, Opts) ->
 %% -- hrl -----------------------------------------------------
 
 possibly_format_hrl(Mod, Defs, AnRes, Opts) ->
-    case gpb_lib:get_records_or_maps_by_opts(Opts) of
-        records -> format_hrl(Mod, Defs, AnRes, Opts);
-        maps    -> '$not_generated'
+    case get_gen_hrl_file(Opts) of
+        true  -> format_hrl(Mod, Defs, AnRes, Opts);
+        false -> '$not_generated'
     end.
 
-format_hrl(Mod, Defs, AnRes, Opts1) ->
-    Opts = [{module, Mod}|Opts1],
+format_hrl(Mod, Defs, AnRes, Opts0) ->
+    Opts = [{module, Mod} | Opts0],
+    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    DoEnumMacros = gpb_lib:get_enum_macros_by_opts(Opts),
     ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
     gpb_lib:iolist_to_utf8_or_escaped_binary(
       [?f("%% Automatically generated, do not edit~n"
@@ -4484,9 +4652,20 @@ format_hrl(Mod, Defs, AnRes, Opts1) ->
        "\n",
        ?f("-define(~p, \"~s\").~n", [ModVsn, gpb:version_as_string()]),
        "\n",
-       gpb_lib:nl_join(
-         [gpb_gen_types:format_msg_record(Msg, Fields, AnRes, Opts, Defs)
-          || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)]),
+       [gpb_lib:nl_join(
+          [[?f("-define(~p, ~p).~n",
+               [gpb_names:rename_enum_macro(
+                  list_to_atom(lists:concat([EnumName, '.', Sym])),
+                  Opts),
+                Sym])
+            || {Sym, _EValue, _EOpts} <- EnumDef]
+           || {{enum, EnumName}, EnumDef} <- Defs])
+        || DoEnumMacros],
+       "\n",
+       [gpb_lib:nl_join(
+          [gpb_gen_types:format_msg_record(Msg, Fields, AnRes, Opts, Defs)
+           || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)])
+        || Mapping == records],
        "\n",
        ?f("-endif.~n")],
       Opts).

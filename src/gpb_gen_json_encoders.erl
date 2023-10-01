@@ -363,6 +363,24 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                               end,
                               [replace_tree('<enc>', FEncoderExpr(TrFVar)) |
                                Transforms]);
+                   Type == float;
+                   Type == double ->
+                        %% Need to compare with +0.0 since Erl 26.1 to avoid
+                        %% compilation warnings. Only +0.0 is the type default.
+                        ?expr(
+                           begin
+                               'TrF' = 'Tr'('F', 'TrUserData'),
+                               if 'TrF' =:= '+0.0';
+                                  'TrF' =:= 0 ->
+                                       'Json';
+                                  true ->
+                                       tj_add_field(jfieldname, '<enc>',
+                                                    'Json')
+                               end
+                           end,
+                           [replace_tree('+0.0', erl_syntax:text("+0.0")),
+                            replace_tree('<enc>', FEncoderExpr(TrFVar)) |
+                            Transforms]);
                    IsEnum ->
                         TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
