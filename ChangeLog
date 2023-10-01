@@ -1,5 +1,27 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.20.0
+2023-Oct-01
+
+        * Add an option enum_macros (-gen-enum-macros) to generate macros for
+          enum values, with the intention to make it possible to catch
+          enumerator symbol changes already in compile-time (#229)
+          Add sub-options {rename,{What,uppercase}}
+          and {rename,{enum_macros,How}} (corresponding to
+          -rename What:uppercase and -rename enum_macro:How)
+        * Add an option allow_preencoded_submsgs to specify a binary
+          for a sub-message. The intention is to make it encoding faster
+          if sub-messages are already known or occur several times. (#220)
+        * Add options {gen_encoders,bool()} and {gen_decoders,bool()}
+          to make it possible to omit encoders or decoders. The intention is
+          is to make it possible to shrink the footprint when not only
+          encoding or decoding is needed.
+        * Bugfix the cmd line option -rename What:lowercase.
+        * Support Erlang 26.1 and later. In Erlang 26.1 and later, exact
+          comparison with zero must now be written as +0.0 or -0.0, as a
+          preparation for Erlang 27. This is for both generated code
+          and in gpb eunit tests. (#230)
+
 Version 4.19.9
 2023-Aug-06
 
