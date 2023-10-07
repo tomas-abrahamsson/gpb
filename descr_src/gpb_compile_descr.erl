@@ -21,12 +21,19 @@
 
 -export([encode_defs_to_descriptors/2, encode_defs_to_descriptors/3]).
 
+-export_type([opts/0, opt/0]).
+
 -include_lib("eunit/include/eunit.hrl").
 
 -include("gpb_descriptor.hrl").
 -include("../include/gpb.hrl").
 
 -define(ff(Fmt, Args), lists:flatten(io_lib:format(Fmt, Args))).
+
+-type opts() :: [opt()].
+-type opt() :: boolean_opt(use_packages)
+             | term().
+-type boolean_opt(Opt) :: Opt | {Opt, boolean()}.
 
 -record(to_defs_env, {pseudo_msg_names,
                       msg_options,
@@ -38,9 +45,27 @@
                       reserved_names,
                       name_adjuster}).
 
+%% @equiv encode_defs_to_descriptors(undefined, Defs, Opts)
+-spec encode_defs_to_descriptors(gpb_defs:defs(), opts()) -> Res when
+      Res :: {EncodedFileDescriptorSet::binary(),
+              [{FileName, EncodedFileDescriptorProto::binary()}]},
+      FileName :: string() % base name sans the .proto file name extension
+                | undefined.
 encode_defs_to_descriptors(Defs, Opts) ->
     encode_defs_to_descriptors(undefined, Defs, Opts).
 
+%% @doc Turn the definitions to a 'FileDescriptorSet' and encode it.
+%% Return also the constituent protos, ie the top-level proto and any
+%% imported proto definitions.
+%%
+%% The file name of the top-level proto is fetched from the first
+%% `file' element `Defs', if present. If it is omitted, the `DefaultName'
+%% is used.
+-spec encode_defs_to_descriptors(FileName, gpb_defs:defs(), opts()) -> Res when
+      Res :: {EncodedFileDescriptorSet::binary(),
+              [{FileName, EncodedFileDescriptorProto::binary()}]},
+      FileName :: string() % base name sans the .proto file name extension
+                | undefined.
 encode_defs_to_descriptors(DefaultName, Defs, Opts) ->
     %% In case this function is called directly (ie not from gpb_compile)
     %% with some defs:
