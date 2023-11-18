@@ -145,10 +145,13 @@ iterate_until_elapsed_2(NumIterations, MaxDuration, Action) ->
 
 time_action(NumIterations, Action) ->
     garbage_collect(),
-    T0 = os:timestamp(),
+    T0 = erlang:monotonic_time(),
     iterate_action(NumIterations, Action),
-    T1 = os:timestamp(),
-    timer:now_diff(T1, T0) / 1000000.
+    T1 = erlang:monotonic_time(),
+    to_seconds(T1 - T0, native).
+
+to_seconds(Time, InUnit) ->
+    erlang:convert_time_unit(Time, InUnit, microsecond) / 1000000.
 
 iterate_action(N, Action) when N > 0 ->
     Action(),
