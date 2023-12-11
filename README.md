@@ -33,7 +33,7 @@ Erlang/OTP 19 [erts-8.0.3] [source] [64-bit] [smp:12:12] [async-threads:10] [ker
 Eshell V8.0.3  (abort with ^G)
 1> rr("x.hrl").
 ['Person']
-2> x:encode_msg(#'Person'{name="abc def", id=345, email="a@example.com"}).    
+2> x:encode_msg(#'Person'{name="abc def", id=345, email="a@example.com"}).
 <<10,7,97,98,99,32,100,101,102,16,217,2,26,13,97,64,101,
   120,97,109,112,108,101,46,99,111,109>>
 3> Bin = v(-1).
