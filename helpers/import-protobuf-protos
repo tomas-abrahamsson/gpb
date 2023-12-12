@@ -31,14 +31,26 @@ cd "$repotop"
 echo
 
 protobuf_shortsha=$(cd "$local_protobuf_repo" && git log -1 --format="%h")
-protobuf_version=$(cat "$local_protobuf_repo"/CHANGES.txt | \
-			  awk '/.* version .*/ { \
+if [ -f "$local_protobuf_repo"/CMakeLists.txt ]
+then
+    protobuf_version=$(grep set.protobuf_VERSION_STRING \
+                            "$local_protobuf_repo"/CMakeLists.txt | \
+                           cut -d'"' -f2)
+elif [ -f "$local_protobuf_repo"/CHANGES.txt ]
+then
+    protobuf_version=$(cat "$local_protobuf_repo"/CHANGES.txt | \
+			   awk '/.* version .*/ { \
 				for (i=1;i<NF;i++) \
 				    if ($i == "version") { \
 				        print $(i+1); \
 				        exit(0); \
 				    } \
 			  }')
+else
+    printf 'Unable to automatically determine the version of protobuf,\n'
+    printf 'please specify the version of protobuf: '
+    read protobuf_version
+fi
 
 echo "Local protobuf repo info:"
 echo "   version: " "$protobuf_version"
@@ -51,6 +63,7 @@ import_proto () {
 
     cat > "$dest"  <<EOF
 // This file is imported from protobuf $protobuf_version ($protobuf_shortsha)
+//
 
 EOF
     cat "$f" >> "$dest"
