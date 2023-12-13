@@ -1,4 +1,4 @@
-// This file is imported from protobuf 3.12.3
+// This file is imported from protobuf 4.25.1
 //
 
 // Protocol Buffers - Google's data interchange format
@@ -30,7 +30,7 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+//
 // Wrappers for primitive (non-message) types. These types are useful
 // for embedding primitives in the `google.protobuf.Any` type and for places
 // where we need to distinguish between the absence of a primitive
@@ -45,13 +45,13 @@ syntax = "proto3";
 
 package google.protobuf;
 
-option csharp_namespace = "Google.Protobuf.WellKnownTypes";
 option cc_enable_arenas = true;
-option go_package = "github.com/golang/protobuf/ptypes/wrappers";
+option go_package = "google.golang.org/protobuf/types/known/wrapperspb";
 option java_package = "com.google.protobuf";
 option java_outer_classname = "WrappersProto";
 option java_multiple_files = true;
 option objc_class_prefix = "GPB";
+option csharp_namespace = "Google.Protobuf.WellKnownTypes";
 
 // Wrapper message for `double`.
 //
