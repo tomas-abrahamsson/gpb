@@ -557,7 +557,7 @@ Related projects
   using gpb with rebar3
 * [exprotobuf](https://github.com/bitwalker/exprotobuf) for using gpb from
   [Elixir](http://elixir-lang.org)
-* [enif_protobuf](https://github.com/jg513/enif_protobuf) for a NIF
+* [enif_protobuf](https://github.com/jinganix/enif_protobuf) for a NIF
   encoder/decoder
 * [grpcbox](https://github.com/tsloughter/grpcbox), for creating
   grpc services (client and server)
