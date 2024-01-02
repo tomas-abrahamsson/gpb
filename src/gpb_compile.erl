@@ -1868,13 +1868,7 @@ find_default_out_dir(File) -> filename:dirname(File).
 possibly_adjust_proto_defs_version_opt(Opts) ->
     case get_output_format(Opts) of
         proto_defs ->
-            case proplists:get_value(proto_defs_version, Opts) of
-                undefined ->
-                    %% Default version is 1 for now
-                    [{proto_defs_version, 1} | Opts];
-                _Vsn ->
-                    Opts
-            end;
+            gpb_lib:possibly_adjust_proto_defs_version_opt(Opts);
         binary ->
             Opts;
         file ->

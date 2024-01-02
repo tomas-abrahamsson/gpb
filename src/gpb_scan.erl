@@ -38,6 +38,8 @@
 -export([string/1]). % use opt to_proto_defs instead
 %% --^^--- bwd compat -- do not use these ----------------------------
 
+-export([read_number/1]).
+
 -type token() :: {token_data(), pos(), orig_text()}.
 -type token_data()  :: atom() | % punctuation(-like) characters, generally
                        binary() | % words
@@ -263,6 +265,25 @@ escape_char($v) -> $\v;                         %\v = VT
 escape_char(C)  -> C.
 
 %% -- number --
+
+read_number(Str) when is_list(Str) ->
+    read_number(unicode:characters_to_binary(Str));
+read_number(<<"inf">>)  -> {ok, infinity};
+read_number(<<"-inf">>) -> {ok, '-infinity'};
+read_number(<<"nan">>)  -> {ok, 'nan'};
+read_number(Bin) when is_binary(Bin) ->
+    {Sign, Bin2} = case Bin of
+                       <<"+", Rest/binary>> -> {1, Rest};
+                       <<"-", Rest/binary>> -> {-1, Rest};
+                       _ -> {1, Bin}
+                   end,
+    case read_number(Bin2, 1, []) of
+        {ok, [{{float_lit, V}, _Pos, _Orig}], _End} -> {ok, Sign * V};
+        {ok, [{{int_lit, {dec, V}}, _Pos, _Orig}], _End} -> {ok, Sign * V};
+        {ok, [{{int_lit, {oct, V}}, _Pos, _Orig}], _End} -> {ok, Sign * V};
+        {ok, [{{int_lit, {hex, V}}, _Pos, _Orig}], _End} -> {ok, Sign * V};
+        {error, Reason, _Line} -> {error, Reason}
+    end.
 
 read_number(Bin, Line, Acc) -> % always positive, sign is another token
     case Bin of

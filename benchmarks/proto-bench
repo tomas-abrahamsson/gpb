@@ -89,31 +89,36 @@ encode_msgs([], _, _) ->
 
 
 maybe_warn_skewed_results() ->
-    try list_to_integer(erlang:system_info(otp_release)) of
-        N when N >= 22 ->
-            io:format(
-              "\n"
-              "NB: The results are currently skewed on Erlang 22 and later.\n"
-              "    Optimizations in Erlang 22 and the way the benchmarks\n"
-              "    are implemented cause more GC than normal.\n"
-              "    The benchmarking code is not yet adapted. It will show\n"
-              "    pessimistic values.\n"
-              "    See https://github.com/erlang/otp/commit/7d941c529d#commitcomment-31091771\n"
-              "    for more info.\n"
-              "\n");
-        _ ->
-            ok
-    catch _:_ ->
-            ok
-    end.
+    ok.
+%%maybe_warn_skewed_results() ->
+%%    try list_to_integer(erlang:system_info(otp_release)) of
+%%        N when N >= 22 ->
+%%            io:format(
+%%              "\n"
+%%              "NB: The results are currently skewed on Erlang 22 and later.\n"
+%%              "    Optimizations in Erlang 22 and the way the benchmarks\n"
+%%              "    are implemented cause more GC than normal.\n"
+%%              "    The benchmarking code is not yet adapted. It will show\n"
+%%              "    pessimistic values.\n"
+%%              "    See https://github.com/erlang/otp/commit/7d941c529d#commitcomment-31091771\n"
+%%              "    for more info.\n"
+%%              "\n");
+%%        _ ->
+%%            ok
+%%    catch _:_ ->
+%%            ok
+%%    end.
 
 
 
 run_test(Description, DataSize, Action) ->
-    {P,M} = spawn_monitor(
-              fun() ->
-                      run_test_aux(Description, DataSize, Action)
-              end),
+    P = spawn_opt(
+          fun() ->
+                  run_test_aux(Description, DataSize, Action)
+          end,
+          [{min_heap_size,      10000000},
+           {min_bin_vheap_size, 10000000}]),
+    M = monitor(process, P),
     receive
         {'DOWN',M,process,P,normal} ->
             ok;
@@ -145,10 +150,13 @@ iterate_until_elapsed_2(NumIterations, MaxDuration, Action) ->
 
 time_action(NumIterations, Action) ->
     garbage_collect(),
-    T0 = os:timestamp(),
+    T0 = erlang:monotonic_time(),
     iterate_action(NumIterations, Action),
-    T1 = os:timestamp(),
-    timer:now_diff(T1, T0) / 1000000.
+    T1 = erlang:monotonic_time(),
+    to_seconds(T1 - T0, native).
+
+to_seconds(Time, InUnit) ->
+    erlang:convert_time_unit(Time, InUnit, microsecond) / 1000000.
 
 iterate_action(N, Action) when N > 0 ->
     Action(),

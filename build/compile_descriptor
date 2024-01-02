@@ -3,35 +3,44 @@
 -include_lib("kernel/include/file.hrl").
 
 
-is_up_to_date([Target|CheckResources]) ->
+is_up_to_date(Target, Deps) ->
     case file:read_file_info(Target) of
         {ok, #file_info{mtime = TargetMTime}} ->
-            lists:all(fun(File) ->
-                              case file:read_file_info(File) of
+            lists:all(fun(Dep) ->
+                              case file:read_file_info(Dep) of
                                   {ok, #file_info{mtime = MTime}} ->
                                       MTime =< TargetMTime;
                                   _ ->
                                       false
                               end
-                      end, CheckResources);
+                      end, Deps);
         _ ->
             false
     end.
 
-check_source(FileList, EchoString, Fun) ->
-    case is_up_to_date(FileList) of
+make_target(Target, Deps, CmdFun) ->
+    case is_up_to_date(Target, Deps) of
         true ->
             ok;
         _ ->
-            io:format("~s~n",[EchoString]),
-            erlang:apply(Fun, [])
+            io:format("Compiling ~s...~n", [filename:basename(hd(Deps))]),
+            CmdFun()
     end.
 
-gpb_compile_file(Proto, Opts) ->
-    check_ok_or_halt(gpb_compile:file(Proto, Opts)).
+make(Makescript) ->
+    lists:foreach(
+      fun({Target, Deps, CmdFun}) -> make_target(Target, Deps, CmdFun) end,
+      Makescript).
 
-compile_file(Erl, Opts) ->
-    check_ok_or_halt(compile:file(Erl, Opts)).
+gpb_compile_file_cmd(Proto, Opts) ->
+    fun() ->
+            check_ok_or_halt(gpb_compile:file(Proto, Opts))
+    end.
+
+compile_file_cmd(Erl, Opts) ->
+    fun() ->
+            check_ok_or_halt(compile:file(Erl, Opts))
+    end.
 
 check_ok_or_halt(Res) ->
     if Res =:= ok -> ok;
@@ -79,58 +88,60 @@ main(_) ->
 
     filelib:ensure_dir(filename:join(EbinPath, ".dummy")),
 
-    CheckList =
-        [{["descr_src/gpb_descriptor.erl",
-           "priv/proto3/google/protobuf/descriptor.proto"],
-          "Compiling descriptor.proto...",
-          fun() ->
-                  code:add_patha(EbinPath),
-                  Opts = [{i, "priv/proto3/google/protobuf"},
-                          {o, "descr_src"}, {module_name_prefix, "gpb_"}],
-                  Opts2 = Opts ++ [report_warnings, report_errors],
-                  gpb_compile_file("descriptor.proto", Opts2)
-          end},
-         {[filename:join(EbinPath, "gpb_descriptor.beam"),
-           "descr_src/gpb_descriptor.erl"],
-          "Compiling gpb_descriptor.erl...",
-          fun() ->
-                  compile_file("descr_src/gpb_descriptor.erl",
-                               [{i, "descr_src"},{i,"include"},
-                                {outdir, EbinPath},debug_info,
-                                report])
-          end},
-         {[filename:join(EbinPath, "gpb_compile_descr.beam"),
-           "descr_src/gpb_compile_descr.erl",
+    GpbcOpts = [{i, "priv/proto3/google/protobuf"},
+                {o, "descr_src"}, {module_name_prefix, "gpb_"},
+                report],
+    ErlcOpts = [{i, "descr_src"}, {i,"include"},
+                {outdir, EbinPath}, debug_info,
+                report],
+
+    code:add_patha(EbinPath),
+
+    MakeScript =
+        [{"descr_src/gpb_descriptor.erl",
+          ["priv/proto3/google/protobuf/descriptor.proto"],
+          gpb_compile_file_cmd("descriptor.proto", GpbcOpts)},
+
+         {filename:join(EbinPath, "gpb_descriptor.beam"),
+          ["descr_src/gpb_descriptor.erl"],
+          compile_file_cmd("descr_src/gpb_descriptor.erl", ErlcOpts)},
+
+         {filename:join(EbinPath, "gpb_compile_descr.beam"),
+          ["descr_src/gpb_compile_descr.erl",
            "descr_src/gpb_descriptor.hrl"],
-          "Compiling gpb_compile_descr.proto...",
-          fun() ->
-                  compile_file("descr_src/gpb_compile_descr.erl",
-                               [{i, "descr_src"},{i,"include"},
-                                {outdir, EbinPath},debug_info,
-                                report])
-          end}
-        ],
-    [check_source(FileList, EchoStr, Cmd)
-     || {FileList, EchoStr, Cmd} <- CheckList],
+          compile_file_cmd("descr_src/gpb_compile_descr.erl", ErlcOpts)},
+
+         {filename:join(EbinPath, "gpb_parse_descr.beam"),
+          ["descr_src/gpb_parse_descr.erl",
+           "descr_src/gpb_descriptor.hrl"],
+          compile_file_cmd("descr_src/gpb_parse_descr.erl", ErlcOpts)}],
+
+    make(MakeScript),
     case filelib:is_dir(TestPath) of
         true ->
             %% eg: "rebar3 eunit" or "rebar2 eunit"
             %% but not "rebar3 compile"
             %% and not when compiling gpb as a dependency, since
             %% the test directory does not exist in the hex package.
-            TestBeamFile =
-                filename:join(TestPath, "gpb_compile_descr_tests.beam"),
-            Fun = fun() ->
-                          compile_file("descr_src/gpb_compile_descr_tests.erl",
-                                       [{i, "descr_src"},{i,"include"},
-                                        {outdir, TestPath},debug_info])
-                  end,
-            check_source([TestBeamFile,
-                          "descr_src/gpb_compile_descr.erl",
-                          "descr_src/gpb_compile_descr_tests.erl",
-                          "descr_src/gpb_descriptor.hrl"],
-                         "Compiling gpb_compile_descr_tests.erl...",
-                         Fun);
+
+            ErlcTestOpts = [{i, "descr_src"}, {i, "include"},
+                            {outdir, TestPath}, debug_info],
+
+            TestMakeScript =
+                [{filename:join(TestPath, "gpb_compile_descr_tests.beam"),
+                  ["descr_src/gpb_compile_descr_tests.erl",
+                   "descr_src/gpb_compile_descr.erl",
+                   "descr_src/gpb_descriptor.hrl"],
+                  compile_file_cmd("descr_src/gpb_compile_descr_tests.erl",
+                                   ErlcTestOpts)},
+
+                 {filename:join(TestPath, "gpb_parse_descr_tests.beam"),
+                  ["descr_src/gpb_parse_descr_tests.erl",
+                   "descr_src/gpb_parse_descr.erl",
+                   "descr_src/gpb_descriptor.hrl"],
+                  compile_file_cmd("descr_src/gpb_parse_descr_tests.erl",
+                                   ErlcTestOpts)}],
+            make(TestMakeScript);
         _ ->
             next
     end.
