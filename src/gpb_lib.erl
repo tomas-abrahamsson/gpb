@@ -573,7 +573,6 @@ record_update(Var, RecordName, FieldsValueTrees) ->
        || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
 
 %% maps
--ifndef(NO_HAVE_MAPS).
 map_match(Fields, Opts) ->
     Literal = mapkey_literal_by_opts(Opts),
     erl_syntax:map_expr(
@@ -633,79 +632,6 @@ mapkey_expr_by_opts(Opts) ->
                                                 [Expr]))])
             end
     end.
-
--else. %% on a pre Erlang 17 system
-
-map_match(Fields, Opts) ->
-    KVs = case get_maps_key_type_by_opts(Opts) of
-              atom ->
-                  [?ff("~p := ~s", [FName, Var])
-                   || {FName, Var} <- map_kvars(Fields)];
-              binary ->
-                  [?ff("<<\"~s\">> := ~s", [FName, Var])
-                   || {FName, Var} <- map_kvars(Fields)]
-          end,
-    erl_syntax:text(?ff("#{~s}", [string:join(KVs, ", ")])).
-
-map_create(Fields, Opts) ->
-    KVs = case get_maps_key_type_by_opts(Opts) of
-              atom ->
-                  [?ff("~p => ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(Fields)];
-              binary ->
-                  [?ff("<<\"~s\">> => ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(Fields)]
-          end,
-    erl_syntax:text(?ff("#{~s}", [string:join(KVs, ", ")])).
-
-map_update(Var, [], _Opts) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-map_update(Var, FieldsValueTrees, Opts) ->
-    KVs = case get_maps_key_type_by_opts(Opts) of
-              atom ->
-                  [?ff("~p := ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(FieldsValueTrees)];
-              binary ->
-                  [?ff("<<\"~s\">> := ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(FieldsValueTrees)]
-          end,
-    erl_syntax:text(?ff("~s#{~s}", [var_literal(Var), string:join(KVs, ", ")])).
-
-
-map_set(Var, [], _Opts) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-map_set(Var, FieldsValueTrees, Opts) ->
-    KVs = case get_maps_key_type_by_opts(Opts) of
-              atom ->
-                  [?ff("~p => ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(FieldsValueTrees)];
-              binary ->
-
-                  [?ff("<<\"~s\">> => ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(FieldsValueTrees)]
-          end,
-    erl_syntax:text(?ff("~s#{~s}", [var_literal(Var), string:join(KVs, ", ")])).
-
-
-%% -> [{atom(), string()}]
-map_kvars(KVars) ->
-    [{Key, var_literal(Var)} || {Key, Var} <- KVars].
-
-var_literal(Var) ->
-    variable = erl_syntax:type(Var),
-    erl_syntax:variable_literal(Var).
-
-%% -> [{atom(), string()}]
-map_kvalues(KVars) ->
-    [begin
-         ExprAsStr = erl_prettypr:format(Expr),
-         {Key, ExprAsStr}
-     end
-     || {Key, Expr} <- KVars].
-
--endif. %% NO_HAVE_MAPS
 
 %% Option helpers ---------------
 

@@ -22,16 +22,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
--ifdef(NO_HAVE_MAPS).
-
-no_maps_tests__test() ->
-    %% rebar.config.script or the Makefile
-    %% sets HAVE_MAPS if they detect that there is
-    %% support for maps.
-    ok.
-
--else. %% NO_HAVE_MAPS
-
 -include("gpb_nif_test_helpers.hrl"). % the `?nif_if_supported(FnName)' macro
 
 -export([dict_to_map/1, map_to_dict/1]).
@@ -1585,5 +1575,3 @@ can_do_flat_oneof() ->
        not CanDoFlatMaps ->
             {error, "flat oneof for maps skipped (Erlang 17 or earlier)"}
     end.
-
--endif. %% NO_HAVE_MAPS

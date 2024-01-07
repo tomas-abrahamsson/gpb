@@ -1,10 +1,5 @@
 %% -*- erlang -*-
 
-NoHaveMapsOpts = try maps:size(maps:new()) of
-                     0 -> []
-                 catch error:undef -> [{d,'NO_HAVE_MAPS',true}]
-                 end.
-
 %% In Erlang 19, the random module is deprecated
 NoHaveRandOpts = try rand:uniform() of
                      F when is_float(F) -> []
@@ -36,7 +31,7 @@ NoHavePlusMinusZeroFloat =
                      false -> []
                  end.
 
-ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
+ConfigOpts = NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
                  NoHavePlusMinusZeroFloat.
 
 [{require_otp_vsn, ".*"},

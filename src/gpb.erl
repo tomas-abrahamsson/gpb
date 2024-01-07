@@ -67,11 +67,8 @@
 -export([field_record_to_proplist/1,   proplist_to_field_record/1]).
 -export([defs_records_to_proplists/1,  proplists_to_defs_records/1]).
 -export([rpc_records_to_proplists/1, rpc_record_to_proplist/1, proplists_to_rpc_records/1]).
-
--ifndef(NO_HAVE_MAPS).
 -export([msg_to_map/3]).
 -export([msg_from_map/4]).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 -ifdef(OTP_RELEASE).
 %% Erlang 21 introduced new syntax for getting the stack trace.
@@ -110,6 +107,11 @@
                              {output_stream, boolean()} |
                              {opts, [term()]}.
 
+-type map_opts()          :: map_opts(none()).
+-type map_opts(OtherOpts) :: [map_opt(OtherOpts)].
+-type map_opt(Other) :: {maps_unset_optional, omitted | present_undefined} |
+                        {maps_oneof, flat | tuples} |
+                        Other.
 
 %% +infinity, -infinity, not a number:
 %% +Inf: sign: 0    exponent: all ones, fraction: all zeros
@@ -1652,13 +1654,6 @@ proto3_type_default(Type, MsgDefs) ->
             end
     end.
 
--ifndef(NO_HAVE_MAPS).
--type map_opts()          :: map_opts(none()).
--type map_opts(OtherOpts) :: [map_opt(OtherOpts)].
--type map_opt(Other) :: {maps_unset_optional, omitted | present_undefined} |
-                        {maps_oneof, flat | tuples} |
-                        Other.
-
 %% @doc Convert a message, as returned by eg {@link decode_msg/3}
 %%      on tuple format to a map.
 %%
@@ -1878,8 +1873,6 @@ fetch_field_by_name(Name, Fields) ->
             Names = [Nm || #?gpb_field{name=Nm} <- Fields],
             erlang:error({error, {no_such_field, Name, Names}})
     end.
-
--endif. % -ifndef(NO_HAVE_MAPS).
 
 keyfetch(Key, KVPairs) ->
     case lists:keysearch(Key, 1, KVPairs) of

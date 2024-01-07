@@ -270,7 +270,6 @@ analyze_field_infos(MsgName, Fields, AnRes, Opts, Defs, TEnv) ->
        fun(FIs) -> augment_occurrence(FIs) end,
        fun(FIs) -> augment_field_number(FIs) end]).
 
--ifndef(NO_HAVE_MAPS).
 %% For debugging: add fun dump_field_infos/1 after interesting steps
 -compile({nowarn_unused_function, dump_field_infos/1}).
 dump_field_infos(FieldInfos) ->
@@ -280,7 +279,6 @@ dump_field_infos(FieldInfos) ->
                             tl(tuple_to_list(FI))))
                 || FI <- FieldInfos]]),
     FieldInfos.
--endif. % -ifndef(NO_HAVE_MAPS).
 
 %% Step:
 %% Add elem paths

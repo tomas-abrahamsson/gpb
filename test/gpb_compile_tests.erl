@@ -2481,7 +2481,6 @@ preencoded_msg_with_repeated_test() ->
     Top   = M:encode_msg({'Top', [Sub17, Sub18]}),
     unload_code(M).
 
--ifndef(NO_HAVE_MAPS).
 preencoded_msg_with_maps_test() ->
     M = compile_iolist(["message Top { optional Sub s = 1; }
                          message Sub { required uint32 a = 1; }
@@ -2492,7 +2491,6 @@ preencoded_msg_with_maps_test() ->
     ok  = M:verify_msg(#{s => Sub}, 'Top'),
     Top = M:encode_msg(#{s => Sub}, 'Top', [{verify, true}]),
     unload_code(M).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 %% --- locate_import and read_import ----------
 
@@ -3543,8 +3541,6 @@ enum_macros_test() ->
     assert_contains_regexp(Hrl4, "-define.'FOO.BAR.A.NO', *'NO'"),
     ok.
 
-
--ifndef(NO_HAVE_MAPS).
 enum_macros_means_hrl_even_with_maps_test() ->
     Proto = ["enum A { NO = 0; YES = 1; }
               message M { optional A f1 = 1; }
@@ -3552,7 +3548,6 @@ enum_macros_means_hrl_even_with_maps_test() ->
     Hrl = compile_to_string_get_hrl(Proto, [maps, gen_enum_macros]),
     assert_contains_regexp(Hrl, "-define.'A.YES', *'YES'"),
     ok.
--endif. % NO_HAVE_MAPS
 
 %% --- nif generation tests -----------------
 

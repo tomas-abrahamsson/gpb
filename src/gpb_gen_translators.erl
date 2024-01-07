@@ -287,14 +287,7 @@ abstractify_tr_param(B, _Outs) when is_bitstring(B) ->
     catch error:{badarg,_} ->
             erl_parse:abstract(B)
     end;
-abstractify_tr_param(X, Outs) ->
-    abstractify_tr_param_check_for_map(X, Outs).
-
--ifdef(NO_HAVE_MAPS).
-abstractify_tr_param_check_for_map(X, _Outs) ->
-    error({translator,cant_make_abstraxt_code_for,X}).
--else.
-abstractify_tr_param_check_for_map(M, Outs) when is_map(M) ->
+abstractify_tr_param(M, Outs) when is_map(M) ->
     {MItems, MUsed} =
         lists:unzip([begin
                          {AK,UK} = abstractify_tr_param(K, Outs),
@@ -303,9 +296,8 @@ abstractify_tr_param_check_for_map(M, Outs) when is_map(M) ->
                      end
                      || {K,V} <- maps:to_list(M)]),
     {erl_syntax:map_expr(MItems), lists:usort(lists:append(MUsed))};
-abstractify_tr_param_check_for_map(X, _Outs) ->
+abstractify_tr_param(X, _Outs) ->
     error({translator,cant_make_abstraxt_code_for,X}).
--endif. % NO_HAVE_MAPS.
 
 mk_pass_straight_through_rel(Names) ->
     [{Name,[Name]} || Name <- Names].

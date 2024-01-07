@@ -1760,7 +1760,6 @@ verify_repeated_and_optional_group_test() ->
     ?assertError({gpb_type_error, {_, [_, {path, "m1.h.hf"}]}},
                  verify_msg({m1, [], {'m1.h', x}}, Defs)).
 
--ifndef(NO_HAVE_MAPS).
 msg_to_from_map_test() ->
     %% map<_,_> messages
     MtDefs = [{{msg,m1},
@@ -1893,8 +1892,6 @@ msg_to_from_map_test() ->
 
 sort_elem2(Tuple) ->
     setelement(2, Tuple, lists:sort(element(2, Tuple))).
--endif. % -ifndef(NO_HAVE_MAPS).
-
 
 version_test() ->
     case gpb:version_source() of

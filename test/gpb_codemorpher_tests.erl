@@ -190,7 +190,6 @@ explode_record_fields_to_params_with_passthrough_test() ->
     {r,4711,6} = M:fastpath(<<1,2,3>>, 4711, 0),
     {r,1,5}    = M:fn_1(<<0,3>>).
 
--ifndef(NO_HAVE_MAPS).
 implode_to_map_exprs_test() ->
     F = fun(FnSTree) ->
                 gpb_codemorpher:marked_map_expr_to_map_expr(
@@ -252,7 +251,6 @@ implode_to_map_exprs_with_flat_oneof_aux() ->
 
     #{c := [3,2,1]} = Map2 = M:fn_f(<<>>, '$novalue', '$novalue', [1,2,3]),
     1 = maps:size(Map2).
--endif. % NO_HAVE_MAPS
 
 analyze_case_clauses_test() ->
     S = "case M of
@@ -286,7 +284,6 @@ analyze_if_clauses_test() ->
      {'_', [_]}] =
         gpb_codemorpher:analyze_if_clauses(Pat, If, undefined).
 
--ifndef(NO_HAVE_MAPS).
 rework_clauses_for_records_to_maps_for_submsg_test() ->
     PatS = "#r{a=Prev}=Msg.",
     IfS  = "if Prev =:= undefined -> 'New';
@@ -524,8 +521,6 @@ rework_records_to_maps_with_flat_oneof_aux() -> % implies omitted
     2 = maps:size(Msg9),
     ok.
 
--endif. % NO_HAVE_MAPS
-
 ls(Mod, FormStrs) ->
     Forms = parse_transform_form_strs(FormStrs),
     format_forms_debug(Forms),
@@ -602,16 +597,13 @@ parse_form(S) ->
     {Form, _EndLine} = parse_x(S, 1),
     Form.
 
--ifndef(NO_HAVE_MAPS). % because unused otherwise
 parse_exprs(Ss) -> [parse_expr(S) || S <- Ss].
--endif. % NO_HAVE_MAPS
 
 parse_expr(S) ->
     {ok, Toks, _End} = erl_scan:string(S),
     {ok, [Expr]} = erl_parse:parse_exprs(Toks),
     Expr.
 
--ifndef(NO_HAVE_MAPS). % because unused otherwise
 eval_expr(Expr, Bindings) ->
     {value, Res, _Binds1} = erl_eval:expr(Expr, mk_bindings_struct(Bindings)),
     Res.
@@ -620,7 +612,6 @@ mk_bindings_struct(KVs) ->
     lists:foldl(fun({K,V},BS) -> erl_eval:add_binding(K,V,BS) end,
                 erl_eval:new_bindings(),
                 KVs).
--endif. % NO_HAVE_MAPS
 
 get_exports_from_forms(Forms) ->
     lists:append([get_exports_from_form(Form) || Form <- Forms]).

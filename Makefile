@@ -131,22 +131,6 @@ OTP_MAJOR_MINOR = $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
 plt = $(GPB_PREFIX).gpb-$(OTP_MAJOR_MINOR).plt
 
 
-ifdef NO_HAVE_MAPS
-override ERLC_FLAGS += -DNO_HAVE_MAPS=true
-else
-## attempt to auto-detect
-ERLVM_SUPPORTS_MAPS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
-                             try maps:size(maps:new()) of \
-                                0 -> io:format("true~n") \
-                             catch error:undef -> io:format("false~n") \
-                             end, \
-                             receive after 10 -> ok end.' \
-                         -s erlang halt)
-ifeq ($(ERLVM_SUPPORTS_MAPS),false)
-override ERLC_FLAGS += -DNO_HAVE_MAPS=true
-endif
-endif
-
 ifdef NO_HAVE_RAND
 override ERLC_FLAGS += -DNO_HAVE_RAND=true
 else
