@@ -137,7 +137,6 @@
 -export([split_indent_iolist/2]).
 -export([split_indent_butfirst_iolist/2]).
 -export([cond_split_indent_iolist/3]).
--export([iolist_to_utf8_or_escaped_binary/2]).
 -export([nowarn_unused_function/2]).
 -export([nowarn_dialyzer_attr/3]).
 -export([no_underspecs_dialyzer_attr/3]).
@@ -1068,39 +1067,6 @@ split_indent_iolist(Indent, IoList) ->
 
 linesplit_iolist(Iolist) ->
     re:split(Iolist, ["\n"], [trim, {return,binary}]).
-
-iolist_to_utf8_or_escaped_binary(IoList, Opts) ->
-    case understands_coding(Opts) of
-        true  ->
-            unicode:characters_to_binary(
-              ["%% -*- coding: utf-8 -*-\n",
-               IoList]);
-        false ->
-            %% What to do if on Erlang R15 or earlier?  We can't utf8-encode
-            %% the file, because Erlang R15 will read it as latin1.
-            %%
-            %% For now, Assume such encodings are in strings only.
-            %% So far, this is safe, since neither message names nor field
-            %% names nor enum symbols are allowed to be non-ascii.
-            %%
-            %% This means only place for non-ascii is in comments and
-            %% in default strings. Hope I haven't overlooked some
-            %% important place...
-            iolist_to_binary(esc_non_ascii(IoList))
-    end.
-
-understands_coding(Opts) ->
-    %% version   coding: X             default source encoding
-    %% R15:      ignores               latin1
-    %% R16:      understands           latin1
-    %% 17:       understands           utf-8
-    is_target_major_version_at_least(16, Opts).
-
-esc_non_ascii([H|T]) -> [esc_non_ascii(H) | esc_non_ascii(T)];
-esc_non_ascii([])    -> [];
-esc_non_ascii(B) when is_binary(B) -> B;
-esc_non_ascii(C) when is_integer(C), C =< 127 -> C;
-esc_non_ascii(C) when is_integer(C), C > 127  -> ?f("\\x{~.16b}", [C]).
 
 nowarn_dialyzer_attr(FnName,Arity,Opts) ->
     %% Especially for the verifiers, dialyzer's success typing can

@@ -1556,20 +1556,6 @@ error_for_invalid_boms_test() ->
                 <<16#FE,16#FF>>,     % utf16-big
                 <<16#FF,16#FE>>]].   % utf16-little
 
-
-generates_escaped_utf8_for_old_erlang_versions_test() ->
-    Unicode = [255],
-    Utf8 = unicode:characters_to_binary(Unicode),
-    Proto = ["message m1 {"
-             "  required string f1 = 1 [default=\"",Unicode,"\"];",
-             "}"],
-    S1 = compile_to_string_get_hrl(Proto, [{target_erlang_version,15}]),
-    true = gpb_lib:is_substr("x{ff}", S1), %% 255 = 16#ff
-    S2 = compile_to_string_get_hrl(Proto, [{target_erlang_version,16}]),
-    true = gpb_lib:is_substr(binary_to_list(Utf8), S2),
-    [Line1 | _] = gpb_lib:string_lexemes(S2, "\n"),
-    true = gpb_lib:is_substr("coding: ", Line1).
-
 %% -- translation of google.protobuf.Any ----------
 
 -define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).
