@@ -1,5 +1,15 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.21.0
+2024-Jan-07
+
+        * Update the set of Google well-known protos by
+          importing from protobuf 4.25.1. Thanks to Gilbert. (#231)
+        * Add the possibility to parse a descriptor back to
+          gpb-internal definitions.
+        * Fix several minor bugs in the generation of descriptors.
+        * Set a minimum heap size to benchmarks to avoid excessive gc.
+
 Version 4.20.0
 2023-Oct-01
 
