@@ -30,7 +30,7 @@
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [replace_term/2, replace_tree/2,
+-import(gpb_lib, [replace_term/2, replace_tree/2, replace_map_key/3,
                   splice_trees/2, repeat_clauses/2]).
 
 format_exports(_Defs, Opts) ->
@@ -335,15 +335,15 @@ field_verifier(MsgName,
                           RReplacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                              #{'<FName>' := '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FNameAtom>' | Path],
                                                 'TrUserData');
                               _ ->
                                   ok
                           end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
+                          [replace_map_key('<FName>', FName, Opts),
+                           replace_term('<FNameAtom>', FName),
+                           replace_tree('<F>', FVar),
                            replace_tree('M', MsgVar) | RReplacements])
             end;
         repeated when not IsMapField ->
@@ -383,29 +383,31 @@ field_verifier(MsgName,
                           end,
                           Replacements);
                 #maps{unset_optional=omitted} ->
-                    ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  if is_list('<F>') ->
-                                          %% _ = [...] to avoid dialyzer error
-                                          %% "Expression produces a value of type
-                                          %% ['ok'], but this value is unmatched"
-                                          %% with the -Wunmatched_returns flag.
-                                          _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                                             'TrUserData')
-                                               || Elem <- '<F>'],
-                                          ok;
-                                     true ->
-                                          mk_type_error(
-                                            {invalid_list_of, '<Type>'},
-                                            '<F>',
-                                            ['<FName>' | Path])
-                                  end;
-                              _ -> ok
-                          end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
-                           replace_tree('M', MsgVar) | Replacements])
+                    ?expr(
+                       case 'M' of
+                           #{'<FName>' := '<F>'} ->
+                               if is_list('<F>') ->
+                                       %% _ = [...] to avoid dialyzer error
+                                       %% "Expression produces a value of type
+                                       %% ['ok'], but this value is unmatched"
+                                       %% with the -Wunmatched_returns flag.
+                                       _ = ['<verify-fn>'(Elem,
+                                                          ['<FNameAtom>'|Path],
+                                                          'TrUserData')
+                                            || Elem <- '<F>'],
+                                       ok;
+                                  true ->
+                                       mk_type_error(
+                                         {invalid_list_of, '<Type>'},
+                                         '<F>',
+                                         ['<FNameAtom>' | Path])
+                               end;
+                           _ -> ok
+                       end,
+                       [replace_map_key('<FName>', FName, Opts),
+                        replace_term('<FNameAtom>', FName),
+                        replace_tree('<F>', FVar),
+                        replace_tree('M', MsgVar) | Replacements])
             end;
         repeated when IsMapField ->
             MFVerifierFn = gpb_gen_translators:find_translation(
@@ -423,15 +425,15 @@ field_verifier(MsgName,
                           MReplacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                              #{'<FName>' := '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FNameAtom>' | Path],
                                                 'TrUserData');
                               _ ->
                                   ok
                           end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
+                          [replace_map_key('<FName>', FName, Opts),
+                           replace_term('<FNameAtom>', FName),
+                           replace_tree('<F>', FVar),
                            replace_tree('M', MsgVar) | MReplacements])
             end;
         optional ->
@@ -450,15 +452,15 @@ field_verifier(MsgName,
                           Replacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                              #{'<FName>' := '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FNameAtom>' | Path],
                                                 'TrUserData');
                               _ ->
                                   ok
                           end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
+                          [replace_map_key('<FName>', FName, Opts),
+                           replace_term('<FNameAtom>', FName),
+                           replace_tree('<F>', FVar),
                            replace_tree('M', MsgVar) | Replacements])
             end;
         defaulty ->
@@ -477,15 +479,15 @@ field_verifier(MsgName,
                           Replacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                              #{'<FName>' := '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FNameAtom>' | Path],
                                                 'TrUserData');
                               _ ->
                                   ok
                           end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
+                          [replace_map_key('<FName>', FName, Opts),
+                           replace_term('<FNameAtom>', FName),
+                           replace_tree('<F>', FVar),
                            replace_tree('M', MsgVar) | Replacements])
             end
     end;
@@ -597,18 +599,17 @@ field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
     ?expr(
        case 'M' of
            '<oneof-pattern>' ->
-               '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
+               '<verify-fn>'('<OFVar>', ['<OFName>', '<FNameAtom>' | Path],
                              'TrUserData');
-           '#{<FName> := <F>}' ->
-               mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path]);
+           #{'<FName>' := '<F>'} ->
+               mk_type_error(invalid_oneof, '<F>', ['<FNameAtom>' | Path]);
            _ ->
                ok
        end,
        [replace_tree('<F>', FVar),
-        replace_term('<FName>', FName),
+        replace_map_key('<FName>', FName, Opts),
+        replace_term('<FNameAtom>', FName),
         replace_tree('M', MsgVar),
-        replace_tree('#{<FName> := <F>}',
-                     gpb_lib:map_match([{FName, FVar}], Opts)),
         repeat_clauses(
           '<oneof-pattern>',
           [begin
@@ -638,14 +639,15 @@ field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
 tr_field_oneof_omitted_tuples_verifier(MsgVar, FName, FVar,
                                        Transl, TrUserDataVar, Opts) ->
     ?expr(case 'M' of
-              '#{fname := F}' ->
-                  'Tr'('F', ['fname' | Path], 'TrUserData');
+              #{fname := 'F'} ->
+                  'Tr'('F', ['fname-atom' | Path], 'TrUserData');
               _ ->
                   ok
           end,
           [replace_tree('M', MsgVar),
-           replace_tree('#{fname := F}', gpb_lib:map_match([{FName, FVar}],
-                                                           Opts)),
+           replace_map_key(fname, FName, Opts),
+           replace_term('fname-atom', FName),
+           replace_tree('F', FVar),
            replace_term('Tr', Transl),
            replace_tree('F', FVar),
            replace_term('fname', FName),

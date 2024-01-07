@@ -685,6 +685,21 @@ mapfield_map_test() ->
                               'StrToSub')),
     unload_code(M1).
 
+mapfields_with_binary_keys_test() ->
+    M1 = compile_iolist("message M { map<int32,string> f = 1; }",
+                        [json, maps, {maps_key_type, binary}]),
+    ?assertEqual(#{<<"f">> => #{<<"0">> => <<"a">>,
+                                <<"1">> => <<"b">>}},
+                 M1:to_json(#{<<"f">> => #{0 => "a",
+                                           1 => "b"}},
+                            'M')),
+    ?assertEqual(#{<<"f">> => #{0 => "a",
+                                1 => "b"}},
+                 M1:from_json(#{<<"f">> => #{<<"0">> => <<"a">>,
+                                             <<"1">> => <<"b">>}},
+                              'M')),
+    unload_code(M1).
+
 mapfields_as_maps_test() ->
     M1 = compile_iolist(small_mapfields_proto(),
                         [json, mapfields_as_maps]),

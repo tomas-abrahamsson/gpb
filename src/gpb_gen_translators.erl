@@ -49,7 +49,8 @@
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [replace_term/2, replace_tree/2, splice_trees/2]).
+-import(gpb_lib, [replace_term/2, replace_tree/2, splice_trees/2,
+                  replace_map_key/3]).
 
 format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
     [[[format_field_op_translator(ElemPath, Op, CallTemplates)
@@ -419,14 +420,12 @@ format_default_map_translators(#anres{map_types=MapTypes,
                  end),
                "\n"];
           maps ->
-              {M,K,V} = {?expr(M), ?expr(K), ?expr(V)},
               [inline_attr(mt_maptuple_to_pseudomsg_m,1),
                gpb_codegen:format_fn(
                  mt_maptuple_to_pseudomsg_m,
-                 fun({K,V}) -> '#{key => K, value => V}' end,
-                 [replace_tree('#{key => K, value => V}',
-                               gpb_lib:map_create([{key,K}, {value,V}],
-                                                  Opts))]),
+                 fun({K,V}) -> #{key => K, value => V} end,
+                 [replace_map_key(key, key, Opts),
+                  replace_map_key(value, value, Opts)]),
                "\n",
                inline_attr(mt_map_to_list_m,1),
                gpb_codegen:format_fn(
@@ -436,34 +435,27 @@ format_default_map_translators(#anres{map_types=MapTypes,
                inline_attr(mt_empty_map_m,0),
                gpb_codegen:format_fn(
                  mt_empty_map_m,
-                 fun() -> '#{}' end,
-                 [replace_tree('#{}', gpb_lib:map_create([], []))]),
+                 fun() -> #{} end),
                "\n",
                [[inline_attr(mt_add_item_m,2),
                  gpb_codegen:format_fn(
                    mt_add_item_m,
-                   fun('#{key := K,value := V}', M) -> 'M#{K => V}' end,
-                   [replace_tree(
-                      '#{key := K,value := V}',
-                      gpb_lib:map_match([{key,K}, {value,V}], Opts)),
-                    replace_tree(
-                      'M#{K => V}',
-                      gpb_lib:map_set(M, [{K,V}], []))])]
+                   fun(#{key := K,value := V}, M) -> M#{K => V} end,
+                   [replace_map_key(key, key, Opts),
+                    replace_map_key(value, value, Opts)])]
                 || HaveMapNonSubmsgs],
                [[inline_attr(mt_add_item_m_verify_value,2),
                  gpb_codegen:format_fn(
                    mt_add_item_m_verify_value,
-                   fun('#{key := K,value := V}', M) ->
+                   fun(#{key := K,value := V}, M) ->
                            if V =:= '$undef' ->
                                    error({gpb_error, missing_value});
                               true ->
-                                   'M#{K => V}'
+                                   M#{K => V}
                            end
                    end,
-                   [replace_tree('#{key := K,value := V}',
-                                 gpb_lib:map_match([{key,K}, {value,V}], Opts)),
-                    replace_tree('M#{K => V}',
-                                 gpb_lib:map_set(M, [{K,V}], []))])]
+                   [replace_map_key(key, key, Opts),
+                    replace_map_key(value, value, Opts)])]
                 || HaveMapSubmsgs],
                "\n"]
       end,

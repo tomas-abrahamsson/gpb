@@ -31,7 +31,7 @@
 -include("gpb_compile.hrl").
 -include("gpb_decoders_lib.hrl").
 
--import(gpb_lib, [replace_term/2, replace_tree/2,
+-import(gpb_lib, [replace_term/2, replace_tree/2, replace_map_key/3,
                   splice_trees/2, repeat_clauses/2]).
 
 format_exports(Defs, Opts) ->
@@ -770,9 +770,6 @@ format_mapfield_helper(#anres{map_types=MapTypes}, Opts) ->
                         end
                 end);
           maps ->
-              {EKey, EValue} = {?expr(EKey), ?expr(EValue)},
-              MkMapExpr = gpb_lib:map_create([{key, EKey}, {value, EValue}],
-                                             Opts),
               gpb_codegen:format_fn(
                 fj_mapfield_fold_aux,
                 fun(JIter, MapMsgName, DecodeKey, DecodeValue,
@@ -781,7 +778,7 @@ format_mapfield_helper(#anres{map_types=MapTypes}, Opts) ->
                             {JKey, JValue, JRest} ->
                                 EKey = DecodeKey(JKey),
                                 EValue = DecodeValue(JValue),
-                                TmpMsg = '#{key => EKey, value => EValue}',
+                                TmpMsg = #{key => EKey, value => EValue},
                                 Acc1 = AddElem(TmpMsg, Acc, TrUserData),
                                 call_self(JRest,
                                           MapMsgName, DecodeKey, DecodeValue,
@@ -790,7 +787,9 @@ format_mapfield_helper(#anres{map_types=MapTypes}, Opts) ->
                                 Acc
                         end
                 end,
-                [replace_tree('#{key => EKey, value => EValue}', MkMapExpr)])
+                [%% This seemingly nop is needed for when map keys are binary:
+                 replace_map_key(key, key, Opts),
+                 replace_map_key(value, value, Opts)])
       end] || HaveMapfields].
 
 %%% --- proto3 wellknowns ---
@@ -1707,9 +1706,8 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
              [gpb_codegen:format_fn(
                 fj_mk_msg,
                 fun(Values, _MsgName, FieldInfos, TrUserData) ->
-                        fj_mk_msg2(Values, FieldInfos, '#{}', TrUserData)
-                end,
-                [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
+                        fj_mk_msg2(Values, FieldInfos, #{}, TrUserData)
+                end),
               gpb_codegen:format_fn(
                 fj_mk_msg2,
                 fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,
@@ -1738,9 +1736,8 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
              [gpb_codegen:format_fn(
                 fj_mk_msg,
                 fun(Values, _MsgName, FieldInfos, TrUserData) ->
-                        fj_mk_msg2(Values, FieldInfos, '#{}', TrUserData)
-                end,
-                [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
+                        fj_mk_msg2(Values, FieldInfos, #{}, TrUserData)
+                end),
               gpb_codegen:format_fn(
                 fj_mk_msg2,
                 fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,

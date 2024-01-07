@@ -77,6 +77,7 @@
 -export([record_match/2]).
 -export([record_create/2]).
 -export([record_update/3]).
+-export([replace_map_key/3]).
 -export([map_match/2]).
 -export([map_create/2]).
 -export([map_set/3]).
@@ -567,6 +568,31 @@ record_update(Var, RecordName, FieldsValueTrees) ->
        || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
 
 %% maps
+replace_map_key(Marker, Key, Opts) when is_atom(Key) ->
+    case get_maps_key_type_by_opts(Opts) of
+        atom ->
+            replace_term(Marker, Key);
+        binary ->
+            replace_tree(
+              Marker,
+              erl_syntax:binary(
+                [erl_syntax:binary_field(
+                   erl_syntax:string(atom_to_list(Key)))]))
+    end;
+replace_map_key(Marker, KeyExpr, Opts) ->
+    case get_maps_key_type_by_opts(Opts) of
+        atom ->
+            replace_tree(Marker, KeyExpr);
+        binary ->
+            replace_tree(
+              Marker,
+              erl_syntax:binary(
+                [erl_syntax:binary_field(
+                   erl_syntax:application(erl_syntax:atom(erlang),
+                                          erl_syntax:atom(atom_to_list),
+                                          [KeyExpr]))]))
+    end.
+
 map_match(Fields, Opts) ->
     Literal = mapkey_literal_by_opts(Opts),
     erl_syntax:map_expr(
