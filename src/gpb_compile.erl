@@ -1953,9 +1953,7 @@ proto_defs(Mod, Defs, DefsNoRenamings, Renamings, Opts) ->
 
 do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
     possibly_probe_defs(Defs, Opts),
-    Warns0 = check_unpackables_marked_as_packed(Defs),
-    Warns1 = check_maps_flat_oneof_may_fail_on_compilation(Opts),
-    Warns = Warns0 ++ Warns1,
+    Warns = check_unpackables_marked_as_packed(Defs),
     Defs1 = case proplists:get_bool(preserve_unknown_fields, Opts) of
                 true  -> gpb_defs:extend_with_field_for_unknowns(Defs);
                 false -> Defs
@@ -1976,7 +1974,6 @@ verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_translation_and_nif(Opts) end,
               fun() -> verify_opts_preserve_unknown_fields_and_json(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
-              fun() -> verify_opts_flat_oneof(Opts) end,
               fun() -> verify_opts_no_gen_decoders_mergers_nif(Opts) end,
               fun() -> verify_opts_no_gen_verifiers(Opts) end,
               fun() -> verify_opts_allow_preencoded_submsgs(Opts) end]).
@@ -2032,34 +2029,6 @@ verify_opts_epb_compat(Defs, Opts) ->
                        ok
                end
        end]).
-
-verify_opts_flat_oneof(Opts) ->
-    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        #maps{oneof=flat} ->
-            case gpb_lib:target_can_do_flat_oneof_for_maps(Opts) of
-                true ->
-                    ok;
-                false -> {error, maps_flat_oneof_not_supported_for_target_version}
-            end;
-        _ ->
-            ok
-    end.
-
-check_maps_flat_oneof_may_fail_on_compilation(Opts) ->
-    CanFlatOneof = gpb_lib:target_can_do_flat_oneof_for_maps(Opts),
-    MayFail = gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps(Opts),
-    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        #maps{oneof=flat} ->
-            if CanFlatOneof, MayFail ->
-                    [maps_flat_oneof_generated_code_may_fail_to_compile];
-               not CanFlatOneof ->
-                    []; % a later check will signal an error
-               true ->
-                    []
-            end;
-        _ ->
-            []
-    end.
 
 verify_opts_no_gen_decoders_mergers_nif(Opts) ->
     %% Default for gen_decoders and gen_mergers is true.
@@ -2505,8 +2474,6 @@ fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
         "'encode_msg' and 'decode_msg'";
-fmt_err(maps_flat_oneof_not_supported_for_target_version) ->
-    "Flat oneof for maps is only supported on Erlang 18 and later";
 fmt_err({rename_defs, Reason}) ->
     gpb_names:format_error(Reason);
 fmt_err({cvt_proto_defs_version_to_latest_error, Reason}) ->
@@ -2532,9 +2499,6 @@ format_warning({ignored_field_opt_packed_for_unpackable_type,
                 MsgName, FName, Type, _Opts}) ->
     ?f("Warning: ignoring option packed for non-packable field ~s.~s "
        "of type ~w", [MsgName, FName, Type]);
-format_warning(maps_flat_oneof_generated_code_may_fail_to_compile) ->
-    "Warning: Generated code for flat oneof for maps may fail to compile "
-        "on 18.3.4.6, or later Erlang 18 versions, due to a compiler issue";
 format_warning(X) ->
     case io_lib:deep_char_list(X) of
         true  -> X;

@@ -1185,6 +1185,8 @@ format_tagged_proplist_object_helpers(Tag) ->
        [replace_term(struct, Tag)])].
 
 format_map_object_helpers(Opts) ->
+    {Object, FieldName, Value} =
+        {?expr(Object), ?expr(FieldName), ?expr(Value)},
     ["%% map object format helpers\n"
      "%% For example jsx, jiffy, others\n",
      gpb_lib:nowarn_unused_function(tj_new_object, 0),
@@ -1193,25 +1195,14 @@ format_map_object_helpers(Opts) ->
        fun() -> '#{}' end,
        [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
      gpb_lib:nowarn_unused_function(tj_add_field, 3),
-     case gpb_lib:target_has_variable_key_map_update(Opts) of
-         true ->
-             {Object, FieldName, Value} =
-                 {?expr(Object), ?expr(FieldName), ?expr(Value)},
-             gpb_codegen:format_fn(
-               tj_add_field,
-               fun(FieldName, Value, Object) ->
-                       'Object#{FieldName => Value}'
-               end,
-               [replace_tree(
-                  'Object#{FieldName => Value}',
-                  gpb_lib:map_set(Object, [{FieldName,Value}], []))]);
-         false ->
-             gpb_codegen:format_fn(
-               tj_add_field,
-               fun(FieldName, Value, Object) ->
-                       maps:put(FieldName, Value, Object)
-               end)
-     end,
+     gpb_codegen:format_fn(
+       tj_add_field,
+       fun(FieldName, Value, Object) ->
+               'Object#{FieldName => Value}'
+       end,
+       [replace_tree(
+          'Object#{FieldName => Value}',
+          gpb_lib:map_set(Object, [{FieldName,Value}], []))]),
      gpb_lib:nowarn_unused_function(tj_finalize_obj, 1),
      gpb_codegen:format_fn(
        tj_finalize_obj,

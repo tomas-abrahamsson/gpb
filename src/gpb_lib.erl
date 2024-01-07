@@ -95,10 +95,7 @@
 -export([get_enum_macros_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
 -export([target_has_lists_join/1]).
--export([target_has_variable_key_map_update/1]).
 -export([target_can_specify_map_item_presence_in_typespecs/1]).
--export([target_can_do_flat_oneof_for_maps/1]).
--export([target_may_fail_compilation_for_flat_oneof_for_maps/1]).
 -export([target_has_stacktrace_syntax/1]).
 -export([target_has_map_iterators/1]).
 -export([target_has_nifs_directive/1]).
@@ -738,43 +735,11 @@ is_digit(_) -> false.
 target_has_lists_join(Opts) ->
     is_target_major_version_at_least(19, Opts).
 
-%% Whether target version supports M#{K => V} when K is a variable.
-%% If before this support was added, one must use maps:put(K, V, M) instead.
-target_has_variable_key_map_update(Opts) ->
-    is_target_major_version_at_least(18, Opts).
-
 %% Whether target version supports #{key := type()} type spec syntax.
 %% In Erlang 19, := indicates mandatory presence and => optional presence.
 %% In Erlang 18, only => was supported.
 target_can_specify_map_item_presence_in_typespecs(Opts) ->
     is_target_major_version_at_least(19, Opts).
-
-target_can_do_flat_oneof_for_maps(Opts) ->
-    %% Not possible in Erlang 17 because:
-    %%    Variables as map keys appeared in 18.0. In 17, supports only literals
-    %%    as map keys.
-    is_target_major_version_at_least(18, Opts).
-
-target_may_fail_compilation_for_flat_oneof_for_maps(Opts) ->
-    %% In Erlang 18.3.4.6 .. 18.3.4.9
-    %% (ie the currently last/highest 4 Erlang 18 versions) this happens:
-    %% --
-    %%    % erlc <erl for flat oneof>.erl
-    %%    beamvalidatorerror: function v_msg_m1/3+75:
-    %%      Internal consistency check failed - please report this bug.
-    %%      Instruction: {move,{x,2},{y,0}}
-    %%      Error:       {uninitialized_reg,{x,2}}:
-    %% --
-    %% (introduced in c803276c9)
-    %% All Erlang 19 versions and later seems fine.
-    case target_can_do_flat_oneof_for_maps(Opts) of
-        true ->
-            AtLeast19 = is_target_major_version_at_least(19, Opts),
-            AtLeast18 = is_target_major_version_at_least(18, Opts),
-            AtLeast18 andalso (not AtLeast19);
-        false ->
-            true % On pre-18, it will definitely fail
-    end.
 
 %% In Erlang 21, the function erlang:get_stacktrace/0 was deprecated
 %% and there is new syntax for retrieving the stacktrace:

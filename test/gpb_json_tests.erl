@@ -34,8 +34,6 @@
 -import(gpb_compile_tests, [in_separate_vm/4]).
 -import(gpb_compile_tests, [compile_nif_msg_defs/4]).
 
--import(gpb_compile_maps_tests, [flat_map_prerequisites/1]).
-
 -export([json_encode/1, json_decode/1]). % for debugging
 
 %% For testing translations
@@ -558,11 +556,7 @@ oneof_maps_test() ->
     ?assertEqual(#{c => {b, true}}, M1:from_json(#{<<"b">> => true}, 'Msg')),
     unload_code(M1).
 
-flat_oneof_maps_test_() ->
-    flat_map_prerequisites(
-      [{"flat oneof", fun flat_oneof_maps_test_aux/0}]).
-
-flat_oneof_maps_test_aux() ->
+flat_oneof_maps_test() ->
     M1 = compile_iolist(oneof_proto(), [json, maps, {maps_oneof, flat}]),
     ?assertEqual(#{},                M1:to_json(#{}, 'Msg')),
     ?assertEqual(#{<<"a">> => 10},   M1:to_json(#{a => 10}, 'Msg')),
@@ -1096,11 +1090,7 @@ p3wellknown_struct_list_value_map_test() ->
     ?assertEqual(E2, M1:from_json(J2, 'S')),
     unload_code(M1).
 
-p3wellknown_struct_list_value_flat_map_test_() ->
-    flat_map_prerequisites(
-      [{"flat oneof", fun p3wellknown_struct_list_value_flat_map_aux/0}]).
-
-p3wellknown_struct_list_value_flat_map_aux() ->
+p3wellknown_struct_list_value_flat_map_test() ->
     Proto = "
         syntax='proto3';
         import 'google/protobuf/struct.proto';
@@ -1639,7 +1629,6 @@ nif_oneof_maps() ->
       [json, maps]).
 
 nif_oneof_flat_maps(features) -> [json | guess_features(oneof_proto())];
-nif_oneof_flat_maps(extra_checks) -> [fun can_do_flat_oneof/1];
 nif_oneof_flat_maps(title) -> "oneof (flat maps)".
 nif_oneof_flat_maps() ->
     nif_to_from_json_aux(
@@ -1770,10 +1759,6 @@ nif_json_name() ->
 -compile({nowarn_unused_function, with_tmpdir/1}).
 with_tmpdir(F) ->
     with_tmpdir(dont_save, F). % -import()ed from gpb_compile_tests
-
-can_do_flat_oneof(Features) ->
-    gpb_compile_maps_tests:can_do_flat_oneof(Features).
-
 
 %% roundtrip for records/tuples
 j_roundtrip(Msg, NifModule, ErlModule) ->

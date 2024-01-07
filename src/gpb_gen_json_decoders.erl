@@ -1669,7 +1669,6 @@ p3wellknown_wrappers() ->
      'google.protobuf.BytesValue'].
 
 format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
-    CanDoVarKeyUpdate = gpb_lib:target_has_variable_key_map_update(Opts),
     [case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
          records ->
              [gpb_codegen:format_fn(
@@ -1698,7 +1697,7 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                    ([], [], Msg, _TrUserData) ->
                         Msg
                 end)];
-         #maps{unset_optional=present_undefined} when CanDoVarKeyUpdate ->
+         #maps{unset_optional=present_undefined} ->
              MapPutV1 = gpb_lib:map_set(?expr(Msg0),
                                         [{?expr(Key), ?expr(V1)}],
                                         Opts),
@@ -1732,7 +1731,7 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                 end,
                 [replace_tree('Msg0#{Key => V1}', MapPutV1),
                  replace_tree('Msg0#{Key => Default1}', MapPutDefault1)])];
-         #maps{unset_optional=omitted} when CanDoVarKeyUpdate ->
+         #maps{unset_optional=omitted} ->
              MapPut = gpb_lib:map_set(?expr(Msg0),
                                       [{?expr(Key), ?expr(V1)}],
                                       Opts),
@@ -1754,52 +1753,7 @@ format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
                    ([], _FRest, Msg, _TrUserData) ->
                         Msg
                 end,
-                [replace_tree('Msg0#{Key => V1}', MapPut)])];
-         #maps{unset_optional=present_undefined} when not CanDoVarKeyUpdate ->
-             [gpb_codegen:format_fn(
-                fj_mk_msg,
-                fun(Values, _MsgName, FieldInfos, TrUserData) ->
-                        fj_mk_msg2(Values, FieldInfos, '#{}', TrUserData)
-                end,
-                [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
-              gpb_codegen:format_fn(
-                fj_mk_msg2,
-                fun([V | VRest], [{Key, _RNum, _D, Tr} | FRest], Msg0,
-                    TrUserData) ->
-                        V1 = if Tr =:= id -> V;
-                                true -> fj_tr(Tr, V, TrUserData)
-                             end,
-                        Msg1 = maps:put(Key, V1, Msg0),
-                        call_self(VRest, FRest, Msg1, TrUserData);
-                   ([], [{Key, _RNum, Default, Tr} | FRest], Msg,
-                    TrUserData) -> % future update
-                        Default1 = if Tr =:= id -> Default;
-                                      true -> fj_tr(Tr, Default, TrUserData)
-                                   end,
-                        Msg1 = maps:put(Key, Default1, Msg),
-                        call_self([], FRest, Msg1, TrUserData);
-                   ([], [], Msg, _TrUserData) ->
-                        Msg
-                end)];
-         #maps{unset_optional=omitted} when not CanDoVarKeyUpdate ->
-             [gpb_codegen:format_fn(
-                fj_mk_msg,
-                fun(Values, _MsgName, FieldInfos, TrUserData) ->
-                        fj_mk_msg2(Values, FieldInfos, '#{}', TrUserData)
-                end,
-                [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
-              gpb_codegen:format_fn(
-                fj_mk_msg2,
-                fun([V | VRest], [{Key, _RNum, _Default, Tr} | FRest], Msg0,
-                    TrUserData) ->
-                        V1 = if Tr =:= id -> V;
-                                true -> fj_tr(Tr, V, TrUserData)
-                             end,
-                        Msg1 = maps:put(Key, V1, Msg0),
-                        call_self(VRest, FRest, Msg1, TrUserData);
-                   ([], _FRest, Msg, _TrUserData) ->
-                        Msg
-                end)]
+                [replace_tree('Msg0#{Key => V1}', MapPut)])]
      end,
      gpb_codegen:format_fn(
        fj_tr,
