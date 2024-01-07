@@ -4664,7 +4664,6 @@ with_tmpdir(Save, Fun) ->
     end.
 
 get_tmpdir() ->
-    rand_seed(),
     mktempdir(
       filename:join(case os:getenv("TMPDIR") of
                         false -> "/tmp";
@@ -4674,7 +4673,7 @@ get_tmpdir() ->
                                   os:getpid(),"-"]))).
 
 mktempdir(Base) ->
-    D = Base ++ f("~8..0w", [rand_uniform(90000000)]),
+    D = Base ++ f("~8..0w", [rand:uniform(90000000)]),
     case file:make_dir(D) of
         ok             -> {ok, D};
         {error, exist} -> mktempdir(Base);
@@ -5250,11 +5249,7 @@ random_nth(Seq) ->
     lists:nth(random_int(1, length(Seq)), Seq).
 
 random_int(LowerLim, UpperLim) ->
-    ensure_seeded(),
-    rand_uniform(UpperLim - LowerLim + 1) + LowerLim - 1.
-
-ensure_seeded() ->
-    rand_seed().
+    rand:uniform(UpperLim - LowerLim + 1) + LowerLim - 1.
 
 %% --- command line options tests -----------------
 
@@ -6005,18 +6000,6 @@ find_unused_module(Prefix, N) ->
 id(X) -> X.
 
 f(Fmt, Args) -> lists:flatten(io_lib:format(Fmt, Args)).
-
--ifndef(NO_HAVE_RAND).
-%% Erlang 19 or later
-rand_uniform(Limit) -> rand:uniform(Limit).
-rand_seed() -> _ = rand:uniform().
--else.
-%% Erlang 18 or earlier
-rand_uniform(Limit) -> random:uniform(Limit).
-rand_seed() ->
-    {A, B, C} = os:timestamp(),
-    random:seed(erlang:phash2(A+B+C), erlang:phash2(B+C), erlang:phash2(A+C)).
--endif. % NO_HAVE_RAND
 
 -ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
 

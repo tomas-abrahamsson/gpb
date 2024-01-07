@@ -1,11 +1,5 @@
 %% -*- erlang -*-
 
-%% In Erlang 19, the random module is deprecated
-NoHaveRandOpts = try rand:uniform() of
-                     F when is_float(F) -> []
-                 catch error:undef -> [{d,'NO_HAVE_RAND',true}]
-                 end.
-
 %% In Erlang 21, a number of string module functions are deprecated:
 %%   string:join/2 -> lists:join/2       (appeared in Erlang 19)
 %%   string:str/2  -> string:find/2      (appeared in Erlang 20)
@@ -31,8 +25,7 @@ NoHavePlusMinusZeroFloat =
                      false -> []
                  end.
 
-ConfigOpts = NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
-                 NoHavePlusMinusZeroFloat.
+ConfigOpts = NoHaveErl20StrFunctions ++ NoHavePlusMinusZeroFloat.
 
 [{require_otp_vsn, ".*"},
 

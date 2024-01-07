@@ -131,22 +131,6 @@ OTP_MAJOR_MINOR = $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
 plt = $(GPB_PREFIX).gpb-$(OTP_MAJOR_MINOR).plt
 
 
-ifdef NO_HAVE_RAND
-override ERLC_FLAGS += -DNO_HAVE_RAND=true
-else
-## attempt to auto-detect
-ERL_HAS_RAND := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
-                             try rand:uniform() of \
-                                F when is_float(F) -> io:format("true~n") \
-                             catch error:undef -> io:format("false~n") \
-                             end, \
-                             receive after 10 -> ok end.' \
-                         -s erlang halt)
-ifeq ($(ERL_HAS_RAND),false)
-override ERLC_FLAGS += -DNO_HAVE_RAND=true
-endif
-endif
-
 ifdef NO_HAVE_ERL20_STR_FUNCTIONS
 override ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
 else
