@@ -135,7 +135,7 @@
 -export([split_indent_butfirst_iolist/2]).
 -export([cond_split_indent_iolist/3]).
 -export([nowarn_unused_function/2]).
--export([nowarn_dialyzer_attr/3]).
+-export([nowarn_dialyzer_attr/2]).
 -export([no_underspecs_dialyzer_attr/3]).
 
 -export([drop_filename_ext/1]).
@@ -1033,7 +1033,7 @@ split_indent_iolist(Indent, IoList) ->
 linesplit_iolist(Iolist) ->
     re:split(Iolist, ["\n"], [trim, {return,binary}]).
 
-nowarn_dialyzer_attr(FnName,Arity,Opts) ->
+nowarn_dialyzer_attr(FnName,Arity) ->
     %% Especially for the verifiers, dialyzer's success typing can
     %% think that some code paths in the verifiers can't be reached,
     %% and in a sense, it is right: the verifiers do much the same
@@ -1043,19 +1043,7 @@ nowarn_dialyzer_attr(FnName,Arity,Opts) ->
     %% can take some time to analyze a non-trivial proto file.
     %%
     %% So mute dialyzer for the verifier functions.
-    case can_do_dialyzer_attr(Opts) of
-        true ->
-            ?f("-dialyzer({nowarn_function,~p/~w}).~n", [FnName,Arity]);
-        false ->
-            %% Too old system (Erlang 17 or older), which will see
-            %% the dialyzer attr as just another plain attr,
-            %% which must be located before all functions.
-            %% Just don't silence dialyzer on these systems.
-            ""
-    end.
-
-can_do_dialyzer_attr(Opts) ->
-    is_target_major_version_at_least(18, Opts).
+    ?f("-dialyzer({nowarn_function,~p/~w}).~n", [FnName,Arity]).
 
 no_underspecs_dialyzer_attr(FnName, Arity, Opts) ->
     %% Silence 'dialyzer -Wunderspecs' warnings about functions' specs

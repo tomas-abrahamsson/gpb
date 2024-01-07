@@ -52,20 +52,20 @@
 -import(gpb_lib, [replace_term/2, replace_tree/2, splice_trees/2]).
 
 format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
+    [[[format_field_op_translator(ElemPath, Op, CallTemplates)
        || {Op, CallTemplates} <- OpTransls,
           Op /= type_spec]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_translators(AnRes, Opts)].
 
 format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
+    [[[format_field_op_translator(ElemPath, Op, CallTemplates)
        || {Op, CallTemplates} <- OpTransls,
           Op == merge]
       || {ElemPath, OpTransls} <- dict:to_list(Ts)],
      format_default_merge_translators(AnRes, Opts)].
 
-format_field_op_translator(ElemPath, Op, CallTemplates, Opts) ->
+format_field_op_translator(ElemPath, Op, CallTemplates) ->
     FnName = mk_tr_fn_name(ElemPath, Op),
     {InPatterns, Body} =
         stack_transl_calls(
@@ -77,7 +77,7 @@ format_field_op_translator(ElemPath, Op, CallTemplates, Opts) ->
              %% Dialyzer might complain that "The created fun has no
              %% local return", for a $errorf, which is true, but also
              %% not surprising, so shut this warning down.
-             gpb_lib:nowarn_dialyzer_attr(FnName,length(InPatterns),Opts);
+             gpb_lib:nowarn_dialyzer_attr(FnName,length(InPatterns));
         true ->
              ""
      end,

@@ -506,15 +506,6 @@ code_generation_when_map_enum_size_is_unknown_at_compile_time_test() ->
     true = is_binary(M:encode_msg({m1,[{true,x1}]})),
     unload_code(M).
 
-no_dialyzer_attributes_for_erlang_version_pre_18_test() ->
-    %% -dialyzer({nowarn_function,f/1}). attrs first appeared in Erlang/OTP 18
-    %% such attributes are emitted for verifiers and map translators
-    Proto = "message m { map<uint32,string> m = 1; }",
-    S1 = compile_to_string(Proto, [{target_erlang_version,17}]),
-    false = gpb_lib:is_substr("-dialyzer(", S1),
-    S2 = compile_to_string(Proto, [{target_erlang_version,18}]),
-    true = gpb_lib:is_substr("-dialyzer(", S2).
-
 nifs_attribute_for_erlang_version_25_or_later_test() ->
     %% -nifs([...]). for Erlang >= 25 helps the compiler and loader to do better
     Proto = "message m { repeated uint32 f1 = 1; }",
@@ -1796,7 +1787,7 @@ verify_callback_with_and_without_errorf_test() ->
     unload_code(Mod2).
 
 dialzer_nowarn_when_scalar_only_for_translated_fields_test_() ->
-    case gpb_lib:nowarn_dialyzer_attr(a, 0, []) of
+    case gpb_lib:nowarn_dialyzer_attr(a, 0) of
         "" -> %
             {"dialzer_nowarn_when_scalar_only_for_translated_fields_test_"
              " skipped on older Erlang", []};

@@ -133,8 +133,8 @@ format_verifiers_top_with_msgs(Defs, AnRes, Opts) ->
 
 format_verifiers(Defs, AnRes, Opts) ->
     [format_msg_verifiers(Defs, AnRes, Opts),
-     format_enum_verifiers(Defs, AnRes, Opts),
-     format_type_verifiers(AnRes, Opts),
+     format_enum_verifiers(Defs, AnRes),
+     format_type_verifiers(AnRes),
      format_map_verifiers(AnRes, Opts),
      format_verifier_auxiliaries(Defs, Opts)
     ].
@@ -156,7 +156,7 @@ format_submsg_verifier_wrapper(MsgName, Opts) ->
     case proplists:get_bool(allow_preencoded_submsgs, Opts) of
         true ->
             [gpb_lib:nowarn_unused_function(FnNameSub, 3),
-             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3,Opts),
+             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3),
              gpb_codegen:format_fn(
                FnNameSub,
                fun(Preencoded, _Path, _TrUserData) when is_binary(Preencoded) ->
@@ -167,7 +167,7 @@ format_submsg_verifier_wrapper(MsgName, Opts) ->
                [replace_term('FnName', FnName)])];
         false ->
             [gpb_lib:nowarn_unused_function(FnNameSub, 3),
-             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3,Opts),
+             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3),
              gpb_codegen:format_fn(
                FnNameSub,
                fun(Msg, Path, TrUserData) ->
@@ -228,7 +228,7 @@ format_msg_verifier(MsgName, MsgDef0, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(v_msg_, MsgName),
     TrUserDataVar = ?expr(TrUserData),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName,3,Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun('<msg-match>', '<Path>', 'TrUserData') ->
@@ -699,15 +699,15 @@ field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
 
-format_enum_verifiers(Defs, #anres{used_types=UsedTypes}, Opts) ->
-    [format_enum_verifier(EnumName, Def, Opts)
+format_enum_verifiers(Defs, #anres{used_types=UsedTypes}) ->
+    [format_enum_verifier(EnumName, Def)
      || {{enum,EnumName}, Def} <- Defs,
         gpb_lib:smember({enum, EnumName}, UsedTypes)].
 
-format_enum_verifier(EnumName, EnumMembers, Opts) ->
+format_enum_verifier(EnumName, EnumMembers) ->
     FnName = gpb_lib:mk_fn(v_enum_, EnumName),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun('<sym>', _Path, _TrUserData) ->
@@ -722,13 +722,13 @@ format_enum_verifier(EnumName, EnumMembers, Opts) ->
                                  || {EnumSym, _Value, _} <- EnumMembers]),
         replace_term('<EnumName>', EnumName)])].
 
-format_type_verifiers(#anres{used_types=UsedTypes}, Opts) ->
+format_type_verifiers(#anres{used_types=UsedTypes}) ->
     NeedBool   = gpb_lib:smember(bool, UsedTypes),
     NeedFloat  = gpb_lib:smember(float, UsedTypes),
     NeedDouble = gpb_lib:smember(double, UsedTypes),
     NeedString = gpb_lib:smember(string, UsedTypes),
     NeedBytes  = gpb_lib:smember(bytes, UsedTypes),
-    [[format_int_verifier(Type, Signedness, Bits, Opts)
+    [[format_int_verifier(Type, Signedness, Bits)
       || {Type, Signedness, Bits} <- [{sint32,   signed,   32},
                                       {sint64,   signed,   64},
                                       {int32,    signed,   32},
@@ -740,13 +740,13 @@ format_type_verifiers(#anres{used_types=UsedTypes}, Opts) ->
                                       {sfixed32, signed,   32},
                                       {sfixed64, signed,   64}],
          gpb_lib:smember(Type, UsedTypes)],
-     [format_bool_verifier(Opts)                || NeedBool],
-     [format_float_verifier(float, Opts)        || NeedFloat],
-     [format_float_verifier(double, Opts)       || NeedDouble],
-     [format_string_verifier(Opts)              || NeedString],
-     [format_bytes_verifier(Opts)               || NeedBytes]].
+     [format_bool_verifier()                    || NeedBool],
+     [format_float_verifier(float)              || NeedFloat],
+     [format_float_verifier(double)             || NeedDouble],
+     [format_string_verifier()                  || NeedString],
+     [format_bytes_verifier()                   || NeedBytes]].
 
-format_int_verifier(IntType, Signedness, NumBits, Opts) ->
+format_int_verifier(IntType, Signedness, NumBits) ->
     Min = case Signedness of
               unsigned -> 0;
               signed   -> -(1 bsl (NumBits-1))
@@ -757,7 +757,7 @@ format_int_verifier(IntType, Signedness, NumBits, Opts) ->
           end,
     FnName = gpb_lib:mk_fn(v_type_, IntType),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(N, _Path, _TrUserData) when is_integer(N),
@@ -774,10 +774,10 @@ format_int_verifier(IntType, Signedness, NumBits, Opts) ->
                                    erl_syntax:atom(Signedness),
                                    erl_syntax:integer(NumBits)])])].
 
-format_bool_verifier(Opts) ->
+format_bool_verifier() ->
     FnName = gpb_lib:mk_fn(v_type_, bool),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(false, _Path, _TrUserData) -> ok;
@@ -787,11 +787,11 @@ format_bool_verifier(Opts) ->
           (X, Path, _TrUserData) -> mk_type_error(bad_boolean_value, X, Path)
        end)].
 
-format_float_verifier(FlType, Opts) ->
+format_float_verifier(FlType) ->
     BadTypeOfValue = list_to_atom(lists:concat(["bad_", FlType, "_value"])),
     FnName = gpb_lib:mk_fn(v_type_, FlType),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(N, _Path, _TrUserData) when is_float(N) -> ok;
@@ -808,10 +808,10 @@ format_float_verifier(FlType, Opts) ->
        end,
        [replace_term('<bad_x_value>', BadTypeOfValue)])].
 
-format_string_verifier(Opts) ->
+format_string_verifier() ->
     FnName = gpb_lib:mk_fn(v_type_, string),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(S, Path, _TrUserData) when is_list(S); is_binary(S) ->
@@ -827,10 +827,10 @@ format_string_verifier(Opts) ->
                mk_type_error(bad_unicode_string, X, Path)
        end)].
 
-format_bytes_verifier(Opts) ->
+format_bytes_verifier() ->
     FnName = gpb_lib:mk_fn(v_type_, bytes),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(B, _Path, _TrUserData) when is_binary(B) ->
@@ -843,10 +843,10 @@ format_bytes_verifier(Opts) ->
 
 format_map_verifiers(#anres{map_types=MapTypes}=AnRes, Opts) ->
     MapsOrTuples = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
-    [format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts)
+    [format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes)
      || {KeyType,ValueType} <- sets:to_list(MapTypes)].
 
-format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
+format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes) ->
     MsgName = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
     FnName = gpb_lib:mk_fn(v_, MsgName),
     KeyVerifierFn = gpb_lib:mk_fn(v_type_, KeyType),
@@ -860,7 +860,7 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
                          ElemPath, verify, AnRes,
                          ValueVerifierFn1),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      case MapsOrTuples of
          '2tuples' ->
              gpb_codegen:format_fn(
@@ -917,7 +917,7 @@ format_verifier_auxiliaries(Defs, Opts) ->
                fun([]) -> top_level end);
          true ->
              [gpb_lib:nowarn_unused_function(prettify_path, 1),
-              gpb_lib:nowarn_dialyzer_attr(prettify_path, 1, Opts),
+              gpb_lib:nowarn_dialyzer_attr(prettify_path, 1),
               case gpb_lib:target_has_lists_join(Opts) of
                   true ->
                       format_prettify_path_with_lists_join();
