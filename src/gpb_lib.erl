@@ -94,7 +94,6 @@
 -export([get_bypass_wrappers_by_opts/1]).
 -export([get_enum_macros_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
--export([target_has_lists_join/1]).
 -export([target_has_stacktrace_syntax/1]).
 -export([target_has_map_iterators/1]).
 -export([target_has_nifs_directive/1]).
@@ -729,10 +728,6 @@ is_not_digit(C) -> not is_digit(C).
 
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
-
-%% Whether target version has the function lists:join/2.
-target_has_lists_join(Opts) ->
-    is_target_major_version_at_least(19, Opts).
 
 %% In Erlang 21, the function erlang:get_stacktrace/0 was deprecated
 %% and there is new syntax for retrieving the stacktrace:

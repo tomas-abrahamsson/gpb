@@ -136,7 +136,7 @@ format_verifiers(Defs, AnRes, Opts) ->
      format_enum_verifiers(Defs, AnRes),
      format_type_verifiers(AnRes),
      format_map_verifiers(AnRes, Opts),
-     format_verifier_auxiliaries(Defs, Opts)
+     format_verifier_auxiliaries(Defs)
     ].
 
 format_msg_verifiers(Defs, AnRes, Opts) ->
@@ -899,7 +899,7 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes) ->
                 replace_term('VerifyValue', ValueVerifierFn2)])
      end].
 
-format_verifier_auxiliaries(Defs, Opts) ->
+format_verifier_auxiliaries(Defs) ->
     [gpb_lib:nowarn_unused_function(mk_type_error, 3),
      "-spec mk_type_error(_, _, list()) -> no_return().\n",
      gpb_codegen:format_fn(
@@ -918,15 +918,10 @@ format_verifier_auxiliaries(Defs, Opts) ->
          true ->
              [gpb_lib:nowarn_unused_function(prettify_path, 1),
               gpb_lib:nowarn_dialyzer_attr(prettify_path, 1),
-              case gpb_lib:target_has_lists_join(Opts) of
-                  true ->
-                      format_prettify_path_with_lists_join();
-                  false ->
-                      format_prettify_path_with_string_join()
-              end]
+              format_prettify_path()]
      end].
 
-format_prettify_path_with_lists_join() ->
+format_prettify_path() ->
     gpb_codegen:format_fn(
       prettify_path,
       fun([]) ->
@@ -935,17 +930,6 @@ format_prettify_path_with_lists_join() ->
               lists:append(
                 lists:join(".", lists:map(fun atom_to_list/1,
                                           lists:reverse(PathR))))
-      end).
-
-format_prettify_path_with_string_join() ->
-    gpb_codegen:format_fn(
-      prettify_path,
-      fun([]) ->
-              top_level;
-         (PathR) ->
-              string:join(lists:map(fun atom_to_list/1,
-                                    lists:reverse(PathR)),
-                          ".")
       end).
 
 map_keys_to_strees(Keys, Opts) ->
