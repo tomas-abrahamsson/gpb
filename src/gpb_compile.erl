@@ -943,14 +943,13 @@ file(File) ->
 %%
 %% The `copy_bytes' option specifies whether when decoding data of
 %% type `bytes' (or strings if the `strings_as_binaries' is set), the
-%% decoded bytes should be copied or not.  Copying requires the
-%% `binary' module, which first appeared in Erlang R14A. When not
-%% copying decoded bytes, they will become sub binaries of the larger
-%% input message binary. This may tie up the memory in the input
-%% message binary longer than necessary after it has been
-%% decoded. Copying the decoded bytes will avoid creating sub
-%% binaries, which will in turn make it possible to free the input message
-%% binary earlier. The `copy_bytes' option can have the following values:
+%% decoded bytes should be copied or not. When not copying decoded bytes,
+%% they will become sub binaries of the larger input message binary.
+%% This may tie up the memory in the input message binary longer than
+%% necessary after it has been decoded. Copying the decoded bytes will
+%% avoid creating sub binaries, which will in turn make it possible to free
+%% the input message binary earlier.
+%% The `copy_bytes' option can have the following values:
 %% <dl>
 %%   <dt>`false'</dt><dd>Never copy bytes/(sub-)binaries.</dd>
 %%   <dt>`true'</dt><dd>Always copy bytes/(sub-)binaries.</dd>
