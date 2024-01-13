@@ -5281,10 +5281,10 @@ opt_test() ->
         gpb_compile:parse_opts_and_args(
           ["-epb", "-epb-functions",
            "x.proto"]),
-    {ok, {[{target_erlang_version,18}],
+    {ok, {[{target_erlang_version,99}],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
-          ["-for-version", "18",
+          ["-for-version", "99",
            "x.proto"]),
     {ok, {[bypass_wrappers],
           ["x.proto"]}} =
@@ -5541,10 +5541,10 @@ makedeps_cmdline_opts_test() ->
     ok.
 
 dashes_and_underscores_are_interchangeable_in_options_test() ->
-    {ok, {[{target_erlang_version,18}, {target_erlang_version,18}],
+    {ok, {[{target_erlang_version,96}, {target_erlang_version,99}],
           ["x.proto"]}} =
-        gpb_compile:parse_opts_and_args(["-for-version", "18", % norm
-                                         "-for_version", "18", % also accepted
+        gpb_compile:parse_opts_and_args(["-for-version", "96", % norm
+                                         "-for_version", "99", % also accepted
                                          "x.proto"]),
     {ok, {[{erlc_compile_options, "debug_info, inline_list_funcs"},
            {erlc_compile_options, "debug_info, inline_list_funcs"}],
