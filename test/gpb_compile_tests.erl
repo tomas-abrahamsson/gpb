@@ -5017,7 +5017,7 @@ mk_fields_of_type(Types, Occurrence) ->
 mk_fields_of_type(Types, Occurrence, Opts) ->
     FieldOptsF = proplists:get_value(field_opts_f, Opts, fun(_) -> [] end),
     Offset = proplists:get_value(offset, Opts, 0),
-    Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
+    Types1 = [Type || Type <- Types],
     [#?gpb_field{name=list_to_atom(lists:concat([f, I + Offset])),
                  rnum=I + 1 + Offset,
                  fnum=I + Offset,
@@ -5027,7 +5027,7 @@ mk_fields_of_type(Types, Occurrence, Opts) ->
      || {I, Type} <- index_seq(Types1)].
 
 mk_oneof_fields_of_type(Types, Pos) ->
-    Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
+    Types1 = [Type || Type <- Types],
     [#gpb_oneof{
         name   = o,
         rnum   = Pos+1,
@@ -5040,8 +5040,8 @@ mk_oneof_fields_of_type(Types, Pos) ->
                   || {I, Type} <- index_seq(Types1)]}].
 
 mk_map_fields_of_type(KeyTypes, ValueTypes) ->
-    KeyTypes1 = [KT1 | _] = [T || T <- KeyTypes, can_do_nif_type(T)],
-    ValueTypes1 = [VT1 | _] = [T || T <- ValueTypes, can_do_nif_type(T)],
+    KeyTypes1 = [KT1 | _] = [T || T <- KeyTypes],
+    ValueTypes1 = [VT1 | _] = [T || T <- ValueTypes],
     Fs1 = [#?gpb_field{type={map,KT1,VT}, occurrence=repeated, opts=[]}
            || VT <- ValueTypes1],
     Fs2 = [#?gpb_field{type={map,KT,VT1}, occurrence=repeated, opts=[]}
@@ -5057,60 +5057,6 @@ maybe_packed({map,_,_}) -> [];
 maybe_packed(string)    -> [];
 maybe_packed(bytes)     -> [];
 maybe_packed(_)         -> [packed].
-
-can_do_nif_type(Type) ->
-    if Type == int64;
-       Type == sint64;
-       Type == sfixed64 ->
-            %% There's an issue with Erlang 17.0+ (will probably be
-            %% fixed in 17.2): if compiled with gcc 4.9.0 (or newer, probably)
-            %% and running on a 32-bit, there is an undefined behaviour
-            %% which will make the test fail for nifs for sint64
-            %% for INT64_MIN (-9223372036854775808). See also:
-            %% http://erlang.org/pipermail/erlang-bugs/2014-July/004513.html
-            case {is_erlvm_compiled_with_gcc490_or_later(), is_32_bit_os()} of
-                {true, true} ->
-                    OtpVsn = get_erlang_otp_major(),
-                    if OtpVsn <  17 -> true;
-                       OtpVsn == 17 -> false; % assume bug present
-                       OtpVsn >  17 -> true   % assume fixed
-                    end;
-                _ ->
-                    true
-            end;
-       true ->
-            true
-    end.
-
-is_erlvm_compiled_with_gcc490_or_later() ->
-    {Compiler, Version} = erlang:system_info(c_compiler_used),
-    if Compiler == gnuc, is_tuple(Version) ->
-            tuple_to_list(Version) >= [4,9,0];
-       true ->
-            undefined
-    end.
-
-is_32_bit_os() ->
-    erlang:system_info({wordsize,external}) == 4. %% Erlang R14+
-
-get_erlang_otp_major() ->
-    case erlang:system_info(otp_release) of
-        "R"++Rest -> % R16 or earlier
-            list_to_integer(lists:takewhile(fun is_digit/1, Rest));
-        RelStr ->
-            %% In Erlang 17 the leading "R" was dropped,
-            %% allow for some (possible?) variation
-            try list_to_integer(RelStr)
-            catch error:badarg ->
-                    [NStr | _] = gpb_lib:string_lexemes(RelStr, ".-"),
-                    try list_to_integer(NStr)
-                    catch error:badarg -> error({unexpected_otp_version,RelStr})
-                    end
-            end
-    end.
-
-is_digit(C) when $0 =< C, C =< $9 -> true;
-is_digit(_) -> false.
 
 mk_msg(MsgName, Defs, Variant) ->
     {{msg, MsgName}, Fields} = lists:keyfind({msg, MsgName}, 1, Defs),
