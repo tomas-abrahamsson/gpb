@@ -33,7 +33,6 @@
 %% of needing check opts at many places.
 -record(t_env,
         {type_specs :: boolean(),
-         can_do_map_presence :: boolean(),
          mapping_and_unset :: records | #maps{},
          map_key_type :: atom | binary,
          map_type_fields :: '2tuples' | maps,
@@ -200,8 +199,6 @@ format_record_typespec(Msg, Fields, Defs, AnRes, Opts,
 
 t_env(Opts) ->
     TypeSpecs = gpb_lib:get_type_specs_by_opts(Opts),
-    TypespecsCanIndicateMapItemPresence =
-        gpb_lib:target_can_specify_map_item_presence_in_typespecs(Opts),
     MappingAndUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     KeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
     MapTypeFieldsRepr = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(
@@ -211,7 +208,6 @@ t_env(Opts) ->
     DecVfy = proplists:get_bool(verify_decode_required_present, Opts),
     AllowPreencodedSubmsgs = proplists:get_bool(allow_preencoded_submsgs, Opts),
     #t_env{type_specs = TypeSpecs,
-           can_do_map_presence = TypespecsCanIndicateMapItemPresence,
            mapping_and_unset = MappingAndUnset,
            map_key_type = KeyType,
            map_type_fields = MapTypeFieldsRepr,
@@ -224,19 +220,15 @@ calc_keytype_override([], _TEnv) ->
     no_override;
 calc_keytype_override(_Fields, TEnv) ->
     #t_env{map_key_type=KeyType,
-           mapping_and_unset=#maps{unset_optional=UnsetOpt},
-           can_do_map_presence=TypespecsCanIndicateMapItemPresence}=TEnv,
+           mapping_and_unset=#maps{unset_optional=UnsetOpt}}=TEnv,
     case KeyType of
         atom ->
             no_override;
         binary ->
-            if TypespecsCanIndicateMapItemPresence,
-               UnsetOpt == present_undefined ->
+            case UnsetOpt of
+                present_undefined ->
                     "binary() := _";
-               TypespecsCanIndicateMapItemPresence,
-               UnsetOpt == omitted ->
-                    "binary() => _";
-               true ->
+                omitted ->
                     "binary() => _"
             end
     end.
@@ -326,8 +318,7 @@ add_base_type_comment(FieldInfos, TEnv) ->
      || #field_info{field=Field}=FI <- FieldInfos].
 
 base_type_comment(#?gpb_field{type=Type}=Field, TEnv) ->
-    #t_env{type_specs=TypeSpecs,
-           can_do_map_presence=TypespecsCanIndicateMapItemPresence} = TEnv,
+    #t_env{type_specs=TypeSpecs} = TEnv,
     IsMapTypeField = is_map_type_field(Field),
     case Type of
         sint32   -> "32 bits";
@@ -343,7 +334,6 @@ base_type_comment(#?gpb_field{type=Type}=Field, TEnv) ->
         {enum,E} -> "enum "++atom_to_list(E);
         _ -> if not TypeSpecs ->
                      ?f("~p", [Type]);
-                not TypespecsCanIndicateMapItemPresence,
                 IsMapTypeField ->
                      ?f("~p", [Type]);
                 true ->
@@ -672,12 +662,12 @@ render_comment(CommentChunks, BaseTypeComment) ->
 
 calc_field_type_sep(#?gpb_field{occurrence=Occurrence},
                     #t_env{mapping_and_unset=MappingAndUnset,
-                           verify_decode_required_present=DecVfy}=TEnv) ->
+                           verify_decode_required_present=DecVfy}) ->
     case MappingAndUnset of
         records ->
             "::";
         #maps{unset_optional=present_undefined} ->
-            mandatory_map_item_type_sep(TEnv);
+            ":=";
         #maps{unset_optional=omitted} ->
             %% Even for required (proto2) fields, we generally use "=>",
             %% since we cannot guarantee that we will always decode
@@ -688,7 +678,7 @@ calc_field_type_sep(#?gpb_field{occurrence=Occurrence},
             %% option set, we can actually use ":=".
             if Occurrence == required,
                DecVfy ->
-                    mandatory_map_item_type_sep(TEnv);
+                    ":=";
                true ->
                     "=>"
             end
@@ -697,34 +687,6 @@ calc_field_type_sep(#gpb_oneof{}, #t_env{mapping_and_unset=MappingAndUnset}) ->
     case MappingAndUnset of
         records -> "::";
         #maps{} -> "=>"
-    end.
-
-mandatory_map_item_type_sep(TEnv) ->
-    %% With Erlang 19 we write #{n := integer()} to say that a
-    %% map must contain a map item with key `n' and an integer value.
-    %%
-    %% With earlier Erlang versions, we can only write #{n => integer()}
-    %% and we can never distinguish between map items that may or must
-    %% be present.
-    %%
-    %% Ideally, we would want to know for which version of Erlang we're
-    %% generating code.  For now, we assume the run-time version is the
-    %% same as the compile-time version, which is not necessarily true.  For
-    %% instance, we can generate code for maps even on pre-map Erlang R15.
-    %%
-    %% (At the time of this writing, the OTP_RELEASE pre-defined macro
-    %% does not exist, but even if it had existed, it would have been of
-    %% limited value because it would have linked the Erlang version at
-    %% proto-encoding run-time with the Erlang version at compile-time
-    %% of `gpb' not at compile-time of the .proto file.  In some
-    %% scenario with a package manager, it might have a `gpb'
-    %% pre-compiled with an old Erlang-version to be compatible with
-    %% many environments.  Better to check version at run-time.)
-    %%
-    #t_env{can_do_map_presence = TypespecsCanIndicateMapItemPresence} = TEnv,
-    case TypespecsCanIndicateMapItemPresence of
-        true  -> ":=";
-        false -> "=>"
     end.
 
 type_to_typestr(sint32, _Defs, _AnRes, _TEnv)   -> "integer()";
@@ -749,14 +711,12 @@ type_to_typestr({msg,M}, _Defs, AnRes, TEnv) ->
 type_to_typestr({group,G}, _Defs, AnRes, TEnv) ->
     msg_to_typestr(G, AnRes, TEnv);
 type_to_typestr({map,KT,VT}, Defs, AnRes, TEnv) ->
-    #t_env{map_type_fields=MapTypeFieldsRepr,
-           can_do_map_presence=TypespecsCanIndicateMapItemPresence} = TEnv,
+    #t_env{map_type_fields=MapTypeFieldsRepr} = TEnv,
     KTStr = type_to_typestr(KT, Defs, AnRes, TEnv),
     VTStr = type_to_typestr(VT, Defs, AnRes, TEnv),
-    case {MapTypeFieldsRepr, TypespecsCanIndicateMapItemPresence} of
-        {'2tuples', _} -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
-        {maps, true}   -> ?f("#{~s => ~s}", [KTStr, VTStr]); % map can be empty
-        {maps, false}  -> "#{}" % map can be empty
+    case MapTypeFieldsRepr of
+        '2tuples' -> ?f("[{~s, ~s}]", [KTStr, VTStr]);
+        maps      -> ?f("#{~s => ~s}", [KTStr, VTStr]) % map can be empty
     end;
 type_to_typestr(unknown, _Defs, _AnRes, _TEnv) ->
     "term()".

@@ -690,19 +690,6 @@ type_syntax_for_required_fields_test() ->
     RepProto = "message m { repeated uint32 f = 1; }",
     Common = [type_specs, maps],
 
-    RqS1 = compile_to_string(ReqProto, [{target_erlang_version,18} | Common]),
-    OpS1 = compile_to_string(OptProto, [{target_erlang_version,18} | Common]),
-    RpS1 = compile_to_string(RepProto, [{target_erlang_version,18} | Common]),
-    RqT1 = get_type(RqS1),
-    OpT1 = get_type(OpS1),
-    RpT1 = get_type(RpS1),
-    [true, false] = [gpb_lib:is_substr(X, RqT1) || X <- ["=>", ":="]],
-    [true, false] = [gpb_lib:is_substr(X, OpT1) || X <- ["=>", ":="]],
-    [true, false] = [gpb_lib:is_substr(X, RpT1) || X <- ["=>", ":="]],
-    ?assertMatch({false, _}, {type_is_out_commented(RqT1), RqT1}),
-    ?assertMatch({false, _}, {type_is_out_commented(OpT1), OpT1}),
-    ?assertMatch({false, _}, {type_is_out_commented(RpT1), RpT1}),
-
     RqS2 = compile_to_string(ReqProto, [{target_erlang_version,19} | Common]),
     OpS2 = compile_to_string(OptProto, [{target_erlang_version,19} | Common]),
     RpS2 = compile_to_string(RepProto, [{target_erlang_version,19} | Common]),
@@ -726,10 +713,6 @@ type_syntax_for_required_fields_test() ->
     [false, true] = [gpb_lib:is_substr(X, RqT3) || X <- ["=>", ":="]],
     [true, false] = [gpb_lib:is_substr(X, OpT3) || X <- ["=>", ":="]],
     [true, false] = [gpb_lib:is_substr(X, RpT3) || X <- ["=>", ":="]],
-
-    RqS4 = compile_to_string(ReqProto, [{target_erlang_version,18} | Common2]),
-    RqT4 = get_type(RqS4),
-    [true, false] = [gpb_lib:is_substr(X, RqT4) || X <- ["=>", ":="]],
 
     ok.
 
