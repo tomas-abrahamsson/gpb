@@ -707,24 +707,12 @@ is_current_major_version_at_least(VsnMin) ->
     current_otp_release() >= VsnMin.
 
 current_otp_release() ->
-    case erlang:system_info(otp_release) of
-        "R"++Rest -> % R16 or earlier
-            FirstChunkOfDigits = lists:takewhile(fun is_digit/1, Rest),
-            list_to_integer(FirstChunkOfDigits);
-        RelStr ->
-            %% In Erlang 17 the leading "R" was dropped
-            %% The exact format isn't super documented,
-            %% so be prepared for some (future?) alternatives.
-            try list_to_integer(RelStr) of
-                N when is_integer(N) -> N
-            catch error:badarg ->
-                    Rel = lists:dropwhile(fun is_not_digit/1, RelStr),
-                    FirstChunkOfDigits = lists:takewhile(fun is_digit/1, Rel),
-                    list_to_integer(FirstChunkOfDigits)
-            end
+    RelStr = erlang:system_info(otp_release),
+    try list_to_integer(RelStr)
+    catch error:badarg ->
+            FirstChunkOfDigits = lists:takewhile(fun is_digit/1, RelStr),
+            list_to_integer(FirstChunkOfDigits)
     end.
-
-is_not_digit(C) -> not is_digit(C).
 
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
