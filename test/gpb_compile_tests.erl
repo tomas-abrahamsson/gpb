@@ -1278,16 +1278,10 @@ assert_not_contains_regexp(IoData, Re) ->
 %% --- bytes ----------
 
 list_as_bytes_indata_test() ->
-    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
-    if HasBinary ->
-            M = compile_iolist(["message m1 { required bytes f1 = 1; }"]),
-            Data = M:encode_msg({m1, [1,2,3,4]}),
-            {m1, <<1,2,3,4>>} = M:decode_msg(Data, m1),
-            unload_code(M);
-       true ->
-            %% nothing to test
-            ok
-    end.
+    M = compile_iolist(["message m1 { required bytes f1 = 1; }"]),
+    Data = M:encode_msg({m1, [1,2,3,4]}),
+    {m1, <<1,2,3,4>>} = M:decode_msg(Data, m1),
+    unload_code(M).
 
 -define(btest(Fn, N), {atom_to_list(Fn), fun() -> Fn(N) end}).
 copy_bytes_test_() ->
