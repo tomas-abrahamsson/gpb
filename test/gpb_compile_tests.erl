@@ -4709,24 +4709,7 @@ main_in_separate_vm([FBinFile, FResFile]) ->
     ResBin = term_to_binary(Res),
     WRes = file:write_file(FResFile, ResBin),
     io:format("Wrote result file (~p bytes) -> ~p~n", [byte_size(ResBin),WRes]),
-    ensure_output_flushed_halt().
-
-ensure_output_flushed_halt() ->
-    case erlang:system_info(otp_release) of
-        "R"++_ = Release ->
-            %% Erlang R16 or earlier, attempt to support earlier releases
-            %% if not too much work.
-            if Release >= "R15B01" ->
-                    %% R15B01 and later: halt waits until pending io has finished
-                    halt(0);
-               Release < "R15B01" ->
-                    timer:sleep(100),
-                    halt(0)
-            end;
-        _ ->
-            %% Erlang 17 or later
-            halt(0)
-    end.
+    halt(0).
 
 run_cmd_collect_output(Cmd, Args) ->
     case os:find_executable(Cmd) of
