@@ -169,7 +169,6 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_oneof_version_check_if_present(Defs),
        format_nif_cc_maptype_version_check_if_present(Defs),
        format_nif_cc_proto3_version_check_if_present(Defs),
-       format_nif_cc_map_api_check_if_needed(Opts),
        format_nif_cc_json_api_check_if_needed(Opts),
        format_nif_cc_json_includes_if_needed(Opts),
        format_nif_cc_byte_size_macros(Defs),
@@ -383,24 +382,6 @@ format_nif_cc_proto3_version_check_if_present(Defs) ->
              "\n"];
         _ ->
             ""
-    end.
-
-format_nif_cc_map_api_check_if_needed(Opts) ->
-    case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
-        '2tuples' ->
-            "";
-        maps ->
-            %% The maps api functions appeared in erl_nif.h version 2.6,
-            %% which is Erlang 17, but they were not documented until 18.0.
-            %% There were some changes to the iterators in 2.8 (= Erlang 18.0)
-            %% but those are not needed.
-            ["#if (!(", format_nif_check_version_or_later(2, 6), "))\n"
-             "#error \"Maps was specified. The needed nif interface for\"\n"
-             "#error \"maps appeared in version 2.6 (Erlang 17), but\"\n"
-             "#error \"it appears your erl_nif version is older.  Please\"\n"
-             "#error \"update Erlang.\"\n"
-             "#endif\n"
-             "\n"]
     end.
 
 format_nif_cc_json_api_check_if_needed(Opts) ->
@@ -1207,6 +1188,7 @@ format_nif_cc_foot(Mod, Defs, Opts) ->
      "{\n",
      %% Dirty schedulers flags appeared in Erlang 17.3 = enif 2.7
      %% but only if Erlang was configured with --enable-dirty-schedulers
+     %% In Erlang 21.0, it is no longer possible to disable dirty schedulers.
      "#if ", format_nif_check_version_or_later(2, 7), "\n"
      "#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT\n",
      format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND, ", Opts),
