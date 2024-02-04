@@ -46,8 +46,7 @@
 -include("../include/gpb.hrl").
 
 -type renamings() :: no_renamings |
-                     [{item_type(), dictionary()}].
--type dictionary() :: term(). %% dict:dict().
+                     [{item_type(), dict:dict()}].
 -type item_type() :: pkgs | % not present if use_packages option is not set
                      msgs |
                      groups |

@@ -25,7 +25,16 @@ NoHavePlusMinusZeroFloat =
                      false -> []
                  end.
 
-ConfigOpts = NoHaveErl20StrFunctions ++ NoHavePlusMinusZeroFloat.
+%% maps:merge_with/3 appeared in Erlang 24.0
+NoHaveMapsMergeWith3 =
+                 try maps:merge_with(fun(K, V1, V2) -> V1 + V2 end,
+                                     #{a => 1}, #{a => 2}) of
+                     #{a := 3} -> []
+                 catch error:undef -> [{d,'NO_HAVE_MAPS_MERGE_WITH_3'}]
+                 end.
+
+ConfigOpts = NoHaveErl20StrFunctions ++ NoHavePlusMinusZeroFloat ++
+                 NoHaveMapsMergeWith3.
 
 [{require_otp_vsn, ".*"},
 

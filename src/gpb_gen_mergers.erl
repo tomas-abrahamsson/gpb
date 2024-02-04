@@ -106,8 +106,11 @@ format_msg_merge_code_msgs(Defs, AnRes, Opts) ->
       end
       || {Type, Name, MsgDef} <- gpb_lib:msgs_or_groups(Defs)]].
 
-is_repeated_group(GroupName, #anres{group_occurrences=D}) ->
-    dict:fetch(GroupName, D) == repeated.
+is_repeated_group(GroupName, #anres{group_occurrences=M}) ->
+    case M of
+        #{GroupName := repeated} -> true;
+        #{GroupName := _}        -> false
+    end.
 
 format_merge_msgs_top_level(MsgNames, AnRes, Opts) ->
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),

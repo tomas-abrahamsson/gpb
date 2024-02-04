@@ -789,10 +789,10 @@ possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].
 
 is_msgsize_known_at_generationtime(MsgName, #anres{known_msg_size=MsgSizes}) ->
-    case dict:fetch(MsgName, MsgSizes) of
-        MsgSize when is_integer(MsgSize) ->
+    case MsgSizes of
+        #{MsgName := MsgSize} when is_integer(MsgSize) ->
             {yes, MsgSize};
-        undefined ->
+        #{MsgName := undefined} ->
             no
     end.
 

@@ -157,6 +157,8 @@
 
 -export([ljoin/2]).
 
+-export([maps_merge_with/3]).
+
 -include("../include/gpb.hrl").
 
 
@@ -280,15 +282,17 @@ at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
            known_msg_size=KnownSize} = AnRes,
     SubMsgNames = [MsgName || {msg,MsgName} <- sets:to_list(UsedTypes)],
     MapMsgNames = [MsgName || {{msg,MsgName},_} <- MapsAsMsgs],
-    IsMsgSizeUnknown = fun(Nm) -> dict:fetch(Nm, KnownSize) == undefined end,
+    IsMsgSizeUnknown = fun(Nm) -> maps:get(Nm, KnownSize) == undefined end,
     lists:any(IsMsgSizeUnknown, SubMsgNames) orelse
         lists:any(IsMsgSizeUnknown, MapMsgNames).
 
-get_field_pass(MsgName, #anres{d_field_pass_method=D}) ->
-    dict:fetch(MsgName, D).
+get_field_pass(MsgName, #anres{d_field_pass_method=M}) ->
+    #{MsgName := FieldPass} = M,
+    FieldPass.
 
-get_num_fields(MsgName, #anres{num_fields=D}) ->
-    dict:fetch(MsgName, D).
+get_num_fields(MsgName, #anres{num_fields=M}) ->
+    #{MsgName := NumFields} = M,
+    NumFields.
 
 is_packed(#?gpb_field{type=Type, opts=Opts}=Field) ->
     case is_field_for_unknowns(Field) of
@@ -1191,3 +1195,20 @@ ljoin(_Sep, [Elem]) -> [Elem];
 ljoin(Sep, [Hd | Rest]) -> [Hd, Sep | ljoin(Sep, Rest)].
 
 -endif. % NO_HAVE_ERL20_STR_FUNCTIONS
+
+-ifndef(NO_HAVE_MAPS_MERGE_WITH_3).
+
+maps_merge_with(Combiner, Map1, Map2) ->
+    maps:merge_with(Combiner, Map1, Map2). % appeared in Erlang 24
+
+-else. % NO_HAVE_MAPS_MERGE_WITH_3
+
+maps_merge_with(Combiner, Map1, Map2) ->
+    maps:fold(
+      fun(K, V1, Acc) ->
+              maps:update_with(K, fun(V2) -> Combiner(K, V1, V2) end, V1, Acc)
+      end,
+      Map2,
+      Map1).
+
+-endif. % NO_HAVE_MAPS_MERGE_WITH_3

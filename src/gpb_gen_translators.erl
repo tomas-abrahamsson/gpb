@@ -56,14 +56,14 @@ format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
     [[[format_field_op_translator(ElemPath, Op, CallTemplates)
        || {Op, CallTemplates} <- OpTransls,
           Op /= type_spec]
-      || {ElemPath, OpTransls} <- dict:to_list(Ts)],
+      || {ElemPath, OpTransls} <- maps:to_list(Ts)],
      format_default_translators(AnRes, Opts)].
 
 format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
     [[[format_field_op_translator(ElemPath, Op, CallTemplates)
        || {Op, CallTemplates} <- OpTransls,
           Op == merge]
-      || {ElemPath, OpTransls} <- dict:to_list(Ts)],
+      || {ElemPath, OpTransls} <- maps:to_list(Ts)],
      format_default_merge_translators(AnRes, Opts)].
 
 format_field_op_translator(ElemPath, Op, CallTemplates) ->
@@ -500,7 +500,7 @@ format_default_msg_translators(#anres{translations=Translations}, _Opts) ->
        "\n"] || sets:is_element(verify, Needs)]].
 
 compute_needed_default_translations(Translations, Defaults) ->
-    dict:fold(
+    maps:fold(
       fun(_ElemPath, Ops, Acc) ->
               lists:foldl(
                 fun({type_spec, _}, Acc2) ->
@@ -567,22 +567,22 @@ find_translation(ElemPath, Op, AnRes, Default) ->
             default_fn_by_op(Op, Default)
     end.
 
-has_translation(ElemPath, Op, #anres{translations=Ts}) ->
-    case dict:find(ElemPath, Ts) of
-        {ok, OpTransls} ->
+has_translation(ElemPath, Op, #anres{translations=Translations}) ->
+    case Translations of
+        #{ElemPath := OpTransls} ->
             case lists:keyfind(Op, 1, OpTransls) of
                 {Op, _Calls} ->
                     {true, mk_tr_fn_name(ElemPath, Op)};
                 false ->
                     false
             end;
-        error ->
+        #{} ->
             false
     end.
 
-has_type_spec_translation(ElemPath, #anres{translations=Ts}) ->
-    case dict:find(ElemPath, Ts) of
-        {ok, OpTransls} ->
+has_type_spec_translation(ElemPath, #anres{translations=Translations}) ->
+    case Translations of
+        #{ElemPath := OpTransls} ->
             case lists:keyfind(type_spec, 1, OpTransls) of
                 {type_spec, TypeSpec} when is_list(TypeSpec) ->
                     {true, TypeSpec};
@@ -591,7 +591,7 @@ has_type_spec_translation(ElemPath, #anres{translations=Ts}) ->
                 false ->
                     false
             end;
-        error ->
+        #{} ->
             false
     end.
 
@@ -625,7 +625,7 @@ default_merge_translator() -> {msg_m_overwrite,['$2','$user_data']}.
 default_verify_translator() -> {msg_v_no_check,['$1', '$user_data']}.
 
 exists_tr_for_msg(MsgName, Op, #anres{translations=Translations}) ->
-    dict:fold(fun(_Key, _OpCalls, true) ->
+    maps:fold(fun(_Key, _OpCalls, true) ->
                       true;
                  ([Name,_Field|_], OpCalls, false) when Name == MsgName ->
                       lists:keymember(Op, 1, OpCalls);

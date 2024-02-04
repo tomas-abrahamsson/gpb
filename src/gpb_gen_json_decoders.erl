@@ -180,9 +180,8 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
     end.
 
 set_field_pass_as_params_for_all_msgs(#anres{d_field_pass_method=FP}=AnRes) ->
-    FP1 = dict:fold(fun(K, _Pass, D) -> dict:store(K, pass_as_params, D) end,
-                    dict:new(),
-                    FP),
+    FP1 = maps:map(fun(_K, _Pass) -> pass_as_params end,
+                   FP),
     AnRes#anres{d_field_pass_method = FP1}.
 
 format_msg_decoder_no_fields(MsgName, Opts) ->

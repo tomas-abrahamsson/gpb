@@ -161,15 +161,15 @@ find_num_packed_fields(Defs) ->
 
 find_num_fields(Defs) ->
     lists:foldl(fun({_msg_or_group, MsgName, MsgDef}, Acc) ->
-                        dict:store(MsgName, length(MsgDef), Acc)
+                        Acc#{MsgName => length(MsgDef)}
                 end,
-                dict:new(),
+                #{},
                 gpb_lib:msgs_or_groups(Defs)).
 
 find_msgsizes_known_at_compile_time(Defs) ->
     T = ets:new(gpb_msg_sizes, [set, public]),
     [find_msgsize(MsgName, Defs, T) || {{msg,MsgName},_Fields} <- Defs],
-    Result = dict:from_list(ets:tab2list(T)),
+    Result = maps:from_list(ets:tab2list(T)),
     ets:delete(T),
     Result.
 
@@ -267,12 +267,12 @@ all_enum_values_encode_to_same_size(EnumName, Defs) ->
     end.
 
 compute_decode_field_pass_methods(Defs, Opts) ->
-    lists:foldl(fun({_Type, Name, Fields}, D) ->
+    lists:foldl(fun({_Type, Name, Fields}, Acc) ->
                         PassHow = d_field_pass_method(Name, Fields, Opts),
                         %% FIXME:GROUP: are all group+msg names unique?
-                        dict:store(Name, PassHow, D)
+                        Acc#{Name => PassHow}
                 end,
-                dict:new(),
+                #{},
                 gpb_lib:msgs_or_groups(Defs)).
 
 d_field_pass_method(MsgName, MsgDef, Opts) ->
@@ -352,33 +352,33 @@ compute_translations(Defs, Opts) ->
       remove_merge_translations_for_repeated_elements(
         decode_init_default_for_decode_for_p3_non_compounds(
           lists:foldl(
-            fun({_Name, Dict}, Acc) ->
-                    dict:merge(
+            fun({_Name, Transls}, Acc) ->
+                    gpb_lib:maps_merge_with(
                       fun(_Key, Ts1, Ts2) -> merge_transls(Ts1, Ts2) end,
-                      Acc, Dict)
+                      Acc, Transls)
             end,
-            dict:new(),
+            #{},
             [{map_translations, compute_map_translations(Defs, Opts)},
              {type_translations, compute_type_translations(Defs, Opts)},
              {field_translations, compute_field_translations(Defs, Opts)}]),
           Defs))).
 
-dict_from_translation_list(PTransls) ->
+map_from_translation_list(PTransls) ->
     lists:foldl(
-      fun({Path, Transls1}, D) ->
-              case dict:find(Path, D) of
-                  {ok, Transls2} ->
-                      dict:store(Path, merge_transls(Transls1, Transls2), D);
-                  error ->
-                      dict:store(Path, merge_transls(Transls1, []), D)
+      fun({Path, Transls1}, Acc) ->
+              case Acc of
+                  #{Path := Transls2} ->
+                      Acc#{Path := merge_transls(Transls1, Transls2)};
+                  #{} ->
+                      Acc#{Path => merge_transls(Transls1, [])}
               end
       end,
-      dict:new(),
+      #{},
       PTransls).
 
 merge_transls(Transls1, Transls2) ->
-    dict:to_list(
-      dict:merge(
+    maps:to_list(
+      gpb_lib:maps_merge_with(
         fun(encode, L1, L2)                   -> L2 ++ L1;
            (decode, L1, L2)                   -> L1 ++ L2;
            (decode_init_default, L1, L2)      -> L1 ++ L2;
@@ -388,8 +388,8 @@ merge_transls(Transls1, Transls2) ->
            (verify, _L1, L2)                  -> [hd(L2)];
            (type_spec, _V1, V2)               -> V2
         end,
-        dict:from_list([{Op,ensure_list(Op,Call)} || {Op,Call} <- Transls1]),
-        dict:from_list([{Op,ensure_list(Op,Call)} || {Op,Call} <- Transls2]))).
+        maps:from_list([{Op,ensure_list(Op,Call)} || {Op,Call} <- Transls1]),
+        maps:from_list([{Op,ensure_list(Op,Call)} || {Op,Call} <- Transls2]))).
 
 ensure_list(_Op, L) when is_list(L) -> L;
 ensure_list(type_spec, Elem)        -> Elem;
@@ -407,11 +407,10 @@ ensure_list(_Op, Elem)              -> [Elem].
 %% * oneof fields and sub message fields (which don't have any default value)
 %% * proto2 message fields
 decode_init_default_for_decode_for_p3_non_compounds(Transls, Defs) ->
-    case dict:size(Transls) of
-        0 ->
+    if Transls =:= #{} ->
             %% Common enough case: Save work when no translations are specified.
             Transls;
-        _ ->
+       true ->
             decode_init_default_for_decode_for_p3_non_compounds2(Transls, Defs)
     end.
 
@@ -420,7 +419,7 @@ decode_init_default_for_decode_for_p3_non_compounds2(Transls, Defs) ->
                      {proto3_msgs, Names} -> sets:from_list(Names);
                      false                -> sets:new()
                  end,
-    dict:map(
+    maps:map(
       fun([MsgName,FName], FTransls) ->
               case sets:is_element(MsgName, P3MsgNames)
                   andalso is_scalar_msg_field(MsgName, FName, Defs) of
@@ -456,7 +455,7 @@ is_scalar_field(FName, [_Field | Rest]) ->
     is_scalar_field(FName, Rest).
 
 remove_merge_translations_for_repeated_elements(D) ->
-    dict:map(fun(Key, Ops) ->
+    maps:map(fun(Key, Ops) ->
                      case is_repeated_element_path(Key) of
                          true -> lists:keydelete(merge, 1, Ops);
                          false -> Ops
@@ -468,7 +467,7 @@ is_repeated_element_path([_, _, []]) -> true;
 is_repeated_element_path(_) -> false.
 
 remove_empty_translations(D) ->
-    dict:filter(fun(_Key, Ops) -> Ops /= [] end, D).
+    maps:filter(fun(_Key, Ops) -> Ops /= [] end, D).
 
 compute_map_translations(Defs, Opts) ->
     MapInfos =
@@ -481,7 +480,7 @@ compute_map_translations(Defs, Opts) ->
           [],
           Defs),
     MapFieldFmt = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
-    dict_from_translation_list(
+    map_from_translation_list(
       lists:append(
         [mk_map_transls(MsgName, FName, KeyType, ValueType, MapFieldFmt)
          || {{MsgName, FName}, {KeyType, ValueType}} <- MapInfos])).
@@ -524,7 +523,7 @@ compute_type_translations(Defs, Opts) ->
                     Opts),
     %% Traverse all message definitions only when there are translations
     if TypeTranslations == [] ->
-            dict:new();
+            #{};
        true ->
             compute_type_translations_2(Defs, TypeTranslations)
     end.
@@ -532,7 +531,7 @@ compute_type_translations(Defs, Opts) ->
 compute_type_translations_2(Defs, TypeTranslations) ->
     Infos = compute_type_translation_infos(Defs, TypeTranslations),
     Infos2 = add_type_translation_infos_for_msgs(TypeTranslations, Infos),
-    dict_from_translation_list(
+    map_from_translation_list(
       [begin
            Decode = case Type of
                         {map,_,_} -> decode_repeated_finalize;
@@ -636,7 +635,7 @@ add_type_translation_infos_for_msgs(TypeTranslations, Infos) ->
       TypeTranslations).
 
 compute_field_translations(Defs, Opts) ->
-    dict_from_translation_list(
+    map_from_translation_list(
       lists:append(
         [[{Path, augment_field_translations(Field, Path, Translations, Opts)}
           || {translate_field, {[_,_|_]=Path, Translations}} <- Opts,
@@ -791,8 +790,8 @@ find_types_used_only_via_translations(UsedTypes, Defs, Translations) ->
       Defs).
 
 has_enc_dec_translation(FieldPath, Translations) ->
-    case dict:find(FieldPath, Translations) of
-        {ok, FieldTranslations}  ->
+    case Translations of
+        #{FieldPath := FieldTranslations} ->
             lists:any(fun({encode, _}) -> true;
                          ({decode, _}) -> true;
                          ({decode_init_default, _}) -> true;
@@ -803,7 +802,7 @@ has_enc_dec_translation(FieldPath, Translations) ->
                          ({type_spec, _}) -> false
                       end,
                       FieldTranslations);
-        error ->
+        #{} ->
             false
     end.
 
@@ -811,12 +810,12 @@ find_group_occurrences(Defs) ->
     gpb_lib:fold_msg_or_group_fields_o(
       fun(_msg_or_group, _MsgName,
           #?gpb_field{type={group,GroupName}, occurrence=Occurrence},
-          _IsOneof, D)->
-              dict:store(GroupName, Occurrence, D);
-         (_msg_or_group, _MsgName, _Field, _IsOneof, D) ->
-              D
+          _IsOneof, Acc)->
+              Acc#{GroupName => Occurrence};
+         (_msg_or_group, _MsgName, _Field, _IsOneof, Acc) ->
+              Acc
       end,
-      dict:new(),
+      #{},
       Defs).
 
 has_p3_opt_strings(Defs) ->

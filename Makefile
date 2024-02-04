@@ -160,7 +160,21 @@ override ERLC_FLAGS += -DNO_HAVE_PLUS_MINUS_ZERO_FLOAT=true
 endif
 endif
 
-
+ifdef NO_HAVE_MAPS_MERGE_WITH_3
+override ERLC_FLAGS += -DNO_HAVE_MAPS_MERGE_WITH_3=true
+else
+## attempt to auto-detect
+ERL_HAS_MAPS_MERGE_WITH_3 := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                          try maps:merge_with(fun(K, V1, V2) -> V1 + V2 end, \
+                                              #{a => 1}, #{a => 2}) of \
+                              #{a := 3} -> io:format("true~n") \
+                          catch error:undef -> io:format("false~n") \
+                          end.' \
+                      -s erlang halt)
+ifeq ($(ERL_HAS_MAPS_MERGE_WITH_3),false)
+override ERLC_FLAGS += -DNO_HAVE_MAPS_MERGE_WITH_3=true
+endif
+endif
 
 # Sorting it also eliminates duplicates
 MODULES := \
