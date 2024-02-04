@@ -46,7 +46,7 @@
 -include("../include/gpb.hrl").
 
 -type renamings() :: no_renamings |
-                     [{item_type(), dict:dict()}].
+                     #{item_type() := #{From::any() => To::any()}}.
 -type item_type() :: pkgs | % not present if use_packages option is not set
                      msgs |
                      groups |
@@ -180,24 +180,30 @@ is_not_renaming_opt(Opt) ->
 %% @hidden
 original_pkg_name(PkgName, no_renamings) -> PkgName;
 original_pkg_name(PkgName, Renamings) ->
-    InversePkgRenamings =
-        proplists:get_value(inverse_pkgs, Renamings, dict:new()),
-    dict_fetch_or_default(PkgName, InversePkgRenamings, '').
+    case Renamings of
+        #{inverse_pkgs := #{PkgName := OrigPkgName}} ->
+            OrigPkgName;
+        _ ->
+            ''
+    end.
 
 %% @hidden
 original_msg_name(MsgName, no_renamings) -> MsgName;
 original_msg_name(MsgName, Renamings) ->
-    dict_fetch(MsgName, proplists:get_value(inverse_msgs, Renamings)).
+    #{inverse_msgs := #{MsgName := OrigMsgName}} = Renamings,
+    OrigMsgName.
 
 %% @hidden
 original_group_name(GName, no_renamings) -> GName;
 original_group_name(GName, Renamings) ->
-    dict_fetch(GName, proplists:get_value(inverse_groups, Renamings)).
+    #{inverse_groups := #{GName := OrigGName}} = Renamings,
+    OrigGName.
 
 %% @hidden
 original_enum_name(EnumName, no_renamings) -> EnumName;
 original_enum_name(EnumName, Renamings) ->
-    dict_fetch(EnumName, proplists:get_value(inverse_enums, Renamings)).
+    #{inverse_enums := #{EnumName := OrigEnumName}} = Renamings,
+    OrigEnumName.
 
 format_error({error, {rename_defs, Reason}}) -> fmt_err(Reason);
 format_error({rename_defs, Reason}) -> fmt_err(Reason);
@@ -375,80 +381,82 @@ mk_renamings(RenameOps, Defs, Opts) ->
             InverseMsgRenamings = invert_renaming(MsgRenamings),
             InverseGroupRenamings = invert_renaming(GroupRenamings),
             InverseEnumRenamings = invert_renaming(EnumRenamings),
-            Renamings = lists:append(
-                          [[%% No pkg_containment items present in Defs
-                            %% when the use_packages option is not set.
-                            {pkgs, PkgRenamings} || UsePackages],
-                           [{msgs, MsgRenamings},
-                            {groups, GroupRenamings},
-                            {enums, EnumRenamings},
-                            {services, ServiceRenamings},
-                            {rpcs, RpcRenamings},
-                            {msg_types, MsgTypeRenamings},
-                            {enum_types, EnumTypeRenamings}],
-                            %% Reverse renamings:
-                           [{inverse_pkgs, InversePkgRenamings}
-                            || UsePackages],
-                           [{inverse_msgs, InverseMsgRenamings},
-                            {inverse_groups, InverseGroupRenamings},
-                            {inverse_enums, InverseEnumRenamings}]]),
+            Renamings =
+                maps:from_list(
+                  lists:append(
+                    [[%% No pkg_containment items present in Defs
+                      %% when the use_packages option is not set.
+                      {pkgs, PkgRenamings} || UsePackages],
+                     [{msgs, MsgRenamings},
+                      {groups, GroupRenamings},
+                      {enums, EnumRenamings},
+                      {services, ServiceRenamings},
+                      {rpcs, RpcRenamings},
+                      {msg_types, MsgTypeRenamings},
+                      {enum_types, EnumTypeRenamings}],
+                     %% Reverse renamings:
+                     [{inverse_pkgs, InversePkgRenamings}
+                      || UsePackages],
+                     [{inverse_msgs, InverseMsgRenamings},
+                      {inverse_groups, InverseGroupRenamings},
+                      {inverse_enums, InverseEnumRenamings}]])),
             {ok, Renamings};
         {error, Reason}  ->
             {error, Reason}
     end.
 
 mk_renamer(Renamings) ->
-    PkgRenamings = proplists:get_value(pkgs, Renamings),
-    MsgRenamings = key1fetch(msgs, Renamings),
-    GroupRenamings = key1fetch(groups, Renamings),
-    EnumRenamings = key1fetch(enums, Renamings),
-    ServiceRenamings = key1fetch(services, Renamings),
-    RpcRenamings = key1fetch(rpcs, Renamings),
     fun(package, Name) ->
-            if PkgRenamings /= undefined ->
-                    dict_fetch(Name, PkgRenamings);
-               PkgRenamings == undefined ->
+            case Renamings of
+                #{pkgs := #{Name := NewName}} ->
+                    NewName;
+                #{} ->
                     %% No pkg_containment items present in Defs
                     %% when the use_packages option is not set.
                     Name
             end;
        (msg, Name) ->
-            dict_fetch(Name, MsgRenamings);
+            #{msgs := #{Name := NewName}} = Renamings,
+            NewName;
        (group, Name) ->
-            dict_fetch(Name, GroupRenamings);
+            #{groups := #{Name := NewName}} = Renamings,
+            NewName;
        (enum, Name) ->
-            dict_fetch(Name, EnumRenamings);
+            #{enums := #{Name := NewName}} = Renamings,
+            NewName;
        (service, Name) ->
-            dict_fetch(Name, ServiceRenamings);
+            #{services := #{Name := NewName}} = Renamings,
+            NewName;
        ({rpc, ServiceName}, RpcName) ->
-            dict_fetch({ServiceName, RpcName}, RpcRenamings)
+            Key = {ServiceName, RpcName}, % can be inlined in Erlang 23+
+            #{rpcs := #{Key := New}} = Renamings,
+            New
     end.
 
 
-
 calc_package_by_proto(Defs) ->
-    dict:from_list(
+    maps:from_list(
       [{Proto, PkgName}
        || {{pkg_containment, Proto}, PkgName} <- Defs]).
 
 pkg_renamings(PkgByProto, RenameOps) ->
-    dict:from_list(
+    maps:from_list(
       lists:map(
         fun({Proto, Pkg}) ->
                 Pkg1 = run_ops(pkg_name, Pkg, Proto, RenameOps),
                 {Pkg, Pkg1}
         end,
-        dict:to_list(PkgByProto))).
+        maps:to_list(PkgByProto))).
 
 msg_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
-    dict:from_list(
+    maps:from_list(
       lists:append(
         [begin
-             Pkg = dict_fetch_or_default(Proto, PkgByProto, ''),
+             Pkg = maps:get(Proto, PkgByProto, ''),
              [begin
                   Name = drop_prefix(Pkg, FqName),
                   Name1 = run_ops(msg_name, Name, Proto, RenameOps),
-                  Pkg1 = dict_fetch_or_default(Pkg, PkgRenamings, ''),
+                  Pkg1 = maps:get(Pkg, PkgRenamings, ''),
                   FqName1 = prefix(Pkg1, Name1),
                   FqName2 = run_ops(msg_fqname, FqName1, Proto, RenameOps),
                   {FqName, FqName2}
@@ -458,18 +466,18 @@ msg_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
          || {{msg_containment, Proto}, MsgNames} <- Defs])).
 
 group_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
-    ProtoByMsg = dict:from_list(
+    ProtoByMsg = maps:from_list(
                    lists:append(
                      [[{MsgName, Proto} || MsgName <- MsgNames]
                       || {{msg_containment, Proto}, MsgNames} <- Defs])),
-    dict:from_list(
+    maps:from_list(
       [begin
            MsgName = group_name_to_msg_name(GroupFqName),
-           Proto = dict:fetch(MsgName, ProtoByMsg),
-           Pkg = dict_fetch_or_default(Proto, PkgByProto, ''),
+           #{MsgName := Proto} = ProtoByMsg,
+           Pkg = maps:get(Proto, PkgByProto, ''),
            Name = drop_prefix(Pkg, GroupFqName),
            Name1 = run_ops(group_name, Name, Proto, RenameOps),
-           Pkg1 = dict_fetch_or_default(Pkg, PkgRenamings, ''),
+           Pkg1 = maps:get(Pkg, PkgRenamings, ''),
            FqName1 = prefix(Pkg1, Name1),
            FqName2 = run_ops(group_fqname, FqName1, Proto, RenameOps),
            {GroupFqName, FqName2}
@@ -482,10 +490,10 @@ group_name_to_msg_name(GName) ->
     list_to_atom(gpb_lib:dot_join(lists:reverse(ButLast))).
 
 enum_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
-    dict:from_list(
+    maps:from_list(
       lists:append(
         [begin
-             Pkg = dict_fetch_or_default(Proto, PkgByProto, ''),
+             Pkg = maps:get(Proto, PkgByProto, ''),
              [calc_enum_name_renaming(FqName, Pkg, PkgRenamings, Proto,
                                       RenameOps)
               || FqName <- EnumNames]
@@ -500,11 +508,11 @@ calc_enum_name_renaming(FqName, Pkg, PkgRenamings, Proto, RenameOps) ->
     %% be renamed according to message renaming rules.
     case split_enum_name(Name) of
         {EnumName} ->
-            Pkg1 = dict_fetch_or_default(Pkg, PkgRenamings, ''),
+            Pkg1 = maps:get(Pkg, PkgRenamings, ''),
             {FqName, prefix(Pkg1, EnumName)};
         {MsgName, EnumBase} ->
             MsgName1 = run_ops(msg_name, MsgName, Proto, RenameOps),
-            Pkg1 = dict_fetch_or_default(Pkg, PkgRenamings, ''),
+            Pkg1 = maps:get(Pkg, PkgRenamings, ''),
             FqMsgName1 = prefix(Pkg1, MsgName1),
             FqMsgName2 = run_ops(msg_fqname, FqMsgName1, Proto, RenameOps),
             FqName2 = prefix(FqMsgName2, EnumBase),
@@ -523,14 +531,14 @@ split_enum_name(Name) ->
     end.
 
 service_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
-    dict:from_list(
+    maps:from_list(
       lists:append(
         [begin
-             Pkg = dict_fetch_or_default(Proto, PkgByProto, ''),
+             Pkg = maps:get(Proto, PkgByProto, ''),
              [begin
                   Name = drop_prefix(Pkg, FqName),
                   Name1 = run_ops(service_name, Name, Proto, RenameOps),
-                  Pkg1 = dict_fetch_or_default(Pkg, PkgRenamings, ''),
+                  Pkg1 = maps:get(Pkg, PkgRenamings, ''),
                   FqName1 = prefix(Pkg1, Name1),
                   FqName2 = run_ops(service_fqname, FqName1, Proto, RenameOps),
                   {FqName, FqName2}
@@ -540,7 +548,7 @@ service_renamings(PkgByProto, PkgRenamings, Defs, RenameOps) ->
          || {{service_containment, Proto}, ServiceNames} <- Defs])).
 
 rpc_renamings(Defs, RenameOps) ->
-    dict:from_list(
+    maps:from_list(
       lists:append(
         [begin
              [begin
@@ -552,8 +560,8 @@ rpc_renamings(Defs, RenameOps) ->
          || {{rpc_containment, Proto}, Rpcs} <- Defs])).
 
 msg_type_renamings(MsgRenamings, GroupRenamings, RenameOps) ->
-    Renamed = dict_values(MsgRenamings) ++ dict_values(GroupRenamings),
-    dict:from_list(
+    Renamed = maps:values(MsgRenamings) ++ maps:values(GroupRenamings),
+    maps:from_list(
       [begin
            Name2 = run_ops(msg_typename, Name, '', RenameOps),
            {Name, Name2}
@@ -561,16 +569,13 @@ msg_type_renamings(MsgRenamings, GroupRenamings, RenameOps) ->
        || Name <- Renamed]).
 
 enum_type_renamings(EnumRenamings, RenameOps) ->
-    dict:from_list(
+    maps:from_list(
       [begin
            Name2 = run_ops(enum_typename, Name, '', RenameOps),
            {Name, Name2}
        end
-       || Name <- dict_values(EnumRenamings)]).
+       || Name <- maps:values(EnumRenamings)]).
 
-
-dict_values(Dict) ->
-    dict:fold(fun(_K, V, Acc) -> [V | Acc] end, [], Dict).
 
 run_ops(What, Name0, Proto, RenameOps) ->
     lists:foldl(fun(F, Name) -> F(Name, Proto) end,
@@ -595,30 +600,6 @@ prefix(P, '') ->
 prefix(P, V) ->
     list_to_atom(lists:concat([P, ".", V])).
 
-dict_fetch_or_default(Key, Dict, Default) ->
-    case dict:find(Key, Dict) of
-        {ok, Value} ->
-            Value;
-        error ->
-            Default
-    end.
-
-dict_fetch(Key, Dict) ->
-    case dict:find(Key, Dict) of
-        {ok, Value} ->
-            Value;
-        error ->
-            error({not_found_in_dict, Key, dict:to_list(Dict)})
-    end.
-
-key1fetch(Key, KVs) ->
-    case lists:keyfind(Key, 1, KVs) of
-        {Key, Value} ->
-            Value;
-        false ->
-            error({not_found_among_kvs, Key, KVs})
-    end.
-
 check_no_dups(Renamings, RpcRenamings) ->
     Errs1 = lists:foldl(fun renaming_dups/2, [], Renamings),
     Errs2 = renaming_rpc_dups(RpcRenamings, Errs1),
@@ -628,36 +609,41 @@ check_no_dups(Renamings, RpcRenamings) ->
             {error, {duplicates, Errs2}}
     end.
 
-renaming_dups(Dict, Errs) ->
-    RDict = dict:fold(fun(K, V, RDict) -> dict:append(V, K, RDict) end,
-                      dict:new(),
-                      Dict),
-    DupsDict = dict:filter(fun(_V, [_K1,_K2|_]) -> true; % >= 2 entries
+renaming_dups(Map, Errs) ->
+    RDict = maps:fold(fun(K, V, RDict) ->
+                              case RDict of
+                                  #{V := Ks} -> RDict#{V := Ks ++ [K]};
+                                  #{}        -> RDict#{V => [K]}
+                              end
+                      end,
+                      #{},
+                      Map),
+    DupsDict = maps:filter(fun(_V, [_K1,_K2|_]) -> true; % >= 2 entries
                               (_V, [_]) -> false
                            end,
                            RDict),
-    [{Keys, V} || {V, Keys} <- dict:to_list(DupsDict)] ++ Errs.
+    [{Keys, V} || {V, Keys} <- maps:to_list(DupsDict)] ++ Errs.
 
 %% check for dups on a per service basis
-renaming_rpc_dups(Dict, Errs) ->
-    %% split into dict of dicts, one per service (service name is used as key)
-    Ds = dict:fold(
-           fun({Service,_Rpc}=Entry, NewName, D) ->
-                   ED = case dict:find(Service, D) of
-                            error    -> dict:store(Entry, NewName, dict:new());
-                            {ok,ED0} -> dict:store(Entry, NewName, ED0)
+renaming_rpc_dups(Map, Errs) ->
+    %% split into map of maps, one per service (service name is used as key)
+    Ds = maps:fold(
+           fun({Service,_Rpc}=Entry, NewName, Acc) ->
+                   ED = case Acc of
+                            #{Service := ED0} -> ED0#{Entry => NewName};
+                            #{}               -> #{Entry => NewName}
                         end,
-                   dict:store(Service, ED, D)
+                   Acc#{Service => ED}
            end,
-           dict:new(),
-           Dict),
+           #{},
+           Map),
     lists:foldl(fun renaming_dups/2,
                 Errs,
-                [D || {_Service,D} <- dict:to_list(Ds)]).
+                [D || {_Service,D} <- maps:to_list(Ds)]).
 
 
 invert_renaming(Renaming) ->
-    dict:from_list(invert_pairs(dict:to_list(Renaming))).
+    maps:from_list(invert_pairs(maps:to_list(Renaming))).
 
 invert_pairs(L) ->
     [{B, A} || {A, B} <- L].
@@ -727,5 +713,5 @@ rename_rpcs(RF, ServiceName, RPCs) ->
       RPCs).
 
 do_rename_type(Name, Key, Renamings) ->
-    TypeRenamings = proplists:get_value(Key, Renamings),
-    dict:fetch(Name, TypeRenamings).
+    #{Key := #{Name := NewName}} = Renamings,
+    NewName.
