@@ -346,12 +346,12 @@ defs_to_types([{{Path, {{_msg_or_group, MsgName}, Fields0}}, ChildItems}
               Acc) when _msg_or_group == msg;
                         _msg_or_group == group ->
     Extendsings = extensions_to_types(Path, ToDefsEnv),
-    ExtFields = dict_fetch_list(Path, ExtMsgs),
+    ExtFields = map_fetch_list(Path, ExtMsgs),
     ExtRanges = extension_ranges(Path, ExtRangesByMsg),
     Fields1 = remove_extended_fields(Fields0, ExtFields),
     OneofNames = oneof_names_synthetic_last(Fields1),
     ReservedRanges = reserved_ranges(Path, ReservedNumsByMsg),
-    ReservedNames = dict_fetch_list(Path, ReservedNamesByMsg),
+    ReservedNames = map_fetch_list(Path, ReservedNamesByMsg),
     {SubMsgs, SubEnums} = defs_to_types(ChildItems, ToDefsEnv, []),
     Item = #'DescriptorProto'{
               name            = atom_to_ustring_base(MsgName),
@@ -417,7 +417,7 @@ is_synthetic_oneof(Field) ->
     end.
 
 extension_ranges(Path, ExtRangesByMsg) ->
-    ExtRanges = dict_fetch_list(Path, ExtRangesByMsg),
+    ExtRanges = map_fetch_list(Path, ExtRangesByMsg),
     [#'DescriptorProto.ExtensionRange'{start = Start, % inclusive
                                        'end' = range_end(End)} % exclusive
      || {Start, End} <- ExtRanges].
@@ -430,7 +430,7 @@ reserved_ranges(Path, NumsByMsg) ->
          #'DescriptorProto.ReservedRange'{start = Start, % inclusive
                                           'end' = range_end(End)} % exclusive
      end
-     || Num <- dict_fetch_list(Path, NumsByMsg)].
+     || Num <- map_fetch_list(Path, NumsByMsg)].
 
 range_end(max) -> 16#20000000; % 536870912
 range_end(Max) when is_integer(Max) -> Max + 1. % inclusive -> exclusive
@@ -451,7 +451,7 @@ maptype_defs_to_msgtype(MapPseudoMsgs, ToDefsEnv) ->
 
 extensions_to_types(Path, #to_defs_env{ext_origins=ExtOrigins,
                                        name_adjuster=NameAdjuster}=ToDefsEnv) ->
-    Exts = dict_fetch_list(Path, ExtOrigins),
+    Exts = map_fetch_list(Path, ExtOrigins),
     %% FIXME: is it possible to extend with oneofs alternatives?
     %% Is it possible to extend with new oneofs fields?
     AllOneofs = [],
@@ -541,7 +541,7 @@ type_to_descr_type({map,_,_})        -> 'TYPE_MESSAGE'.
 type_to_descr_type_name({msg,MsgName}, _)   -> atom_to_ustring(MsgName);
 type_to_descr_type_name({group,Name}, _)    -> atom_to_ustring(Name);
 type_to_descr_type_name({enum,EnumName}, _) -> atom_to_ustring(EnumName);
-type_to_descr_type_name({map,_,_}=T, M)     -> atom_to_ustring(dict:fetch(T,M));
+type_to_descr_type_name({map,_,_}=T, M)     -> atom_to_ustring(maps:get(T, M));
 type_to_descr_type_name(_, _)               -> undefined.
 
 field_default_value(#?gpb_field{type=Type, opts=Opts}) ->
@@ -569,8 +569,8 @@ field_options(Opts) ->
     FNames = record_info(fields, 'FieldOptions'),
     set_options(Opts, FNames, #'FieldOptions'{}).
 
-msg_options(MsgName, D) ->
-    case dict:find(MsgName, D) of
+msg_options(MsgName, M) ->
+    case maps:find(MsgName, M) of
         error ->
             undefined;
         {ok, []} ->
@@ -580,8 +580,8 @@ msg_options(MsgName, D) ->
             set_options(Opts, FNames, #'MessageOptions'{})
     end.
 
-enum_options(EnumName, D) ->
-    case dict:find(EnumName, D) of
+enum_options(EnumName, M) ->
+    case maps:find(EnumName, M) of
         error ->
             undefined;
         {ok, []} ->
@@ -627,7 +627,7 @@ compute_map_field_pseudo_msgs(Defs, Opts, Adjuster) ->
     MapTypePseudoMsgNames1 = [Adjuster(Name) || Name <- MapTypePseudoMsgNames],
     ToName = lists:zip(AllMapTypes, MapTypePseudoMsgNames1),
     ToMapT = lists:zip(MapTypePseudoMsgNames1, AllMapTypes),
-    {dict:from_list(ToName),
+    {maps:from_list(ToName),
      [{{msg, Name}, gpb:map_item_pseudo_fields(KeyType, ValueType)}
       || {Name, {map, KeyType, ValueType}} <- ToMapT]}.
 
@@ -664,22 +664,22 @@ invent_unused_msg_names_aux(Base, I, N, AllMsgNames) ->
 
 collect_msg_options(Defs) ->
     lists:foldl(
-      fun({{msg_options, MsgName}, Opts}, D) ->
-              dict:append_list(MsgName, Opts, D);
-         (_Other, D) ->
-              D
+      fun({{msg_options, MsgName}, Opts}, M) ->
+              map_append_list(MsgName, Opts, M);
+         (_Other, M) ->
+              M
       end,
-      dict:new(),
+      #{},
       Defs).
 
 collect_enum_options(Defs) ->
     lists:foldl(
-      fun({{enum_options, EnumName}, Opts}, D) ->
-              dict:append_list(EnumName, Opts, D);
-         (_Other, D) ->
-              D
+      fun({{enum_options, EnumName}, Opts}, M) ->
+              map_append_list(EnumName, Opts, M);
+         (_Other, M) ->
+              M
       end,
-      dict:new(),
+      #{},
       Defs).
 
 enum_value_options(Opts) ->
@@ -688,16 +688,16 @@ enum_value_options(Opts) ->
 
 collect_service_options(Defs) ->
     lists:foldl(
-      fun({{service_options, ServiceName}, Opts}, D) ->
-              dict:append_list(ServiceName, Opts, D);
-         (_Other, D) ->
-              D
+      fun({{service_options, ServiceName}, Opts}, M) ->
+              map_append_list(ServiceName, Opts, M);
+         (_Other, M) ->
+              M
       end,
-      dict:new(),
+      #{},
       Defs).
 
-service_options(ServiceName, D) ->
-    case dict:find(ServiceName, D) of
+service_options(ServiceName, M) ->
+    case maps:find(ServiceName, M) of
         error ->
             undefined;
         {ok, []} ->
@@ -748,39 +748,39 @@ collect_ext_origins(Defs) ->
       fun({{ext_origin, Extendee}, {Location, Fields}}, {ByLoc, ByMsg}) ->
               LPath = name_to_components(Location),
               MPath = name_to_components(Extendee),
-              ByLoc1 = dict:append(LPath, {Extendee, Fields}, ByLoc),
-              ByMsg1 = dict:append_list(MPath, Fields, ByMsg),
+              ByLoc1 = map_append(LPath, {Extendee, Fields}, ByLoc),
+              ByMsg1 = map_append_list(MPath, Fields, ByMsg),
               {ByLoc1, ByMsg1};
          (_Other, {ByLoc, ByMsg}) ->
               {ByLoc, ByMsg}
       end,
-      {dict:new(), dict:new()},
+      {#{}, #{}},
       Defs).
 
 collect_extension_ranges(Defs) ->
     lists:foldl(
-      fun({{extensions, Msg}, Ranges}, D) ->
-              dict:store(name_to_components(Msg), Ranges, D);
+      fun({{extensions, Msg}, Ranges}, M) ->
+              M#{name_to_components(Msg) => Ranges};
          (_Other, Acc) ->
               Acc
       end,
-      dict:new(),
+      #{},
       Defs).
 
 collect_reserved_nums_names(Defs) ->
     lists:foldl(
       fun({{reserved_numbers, Msg}, Reserved}, {Nums, Names}) ->
               Path = name_to_components(Msg),
-              Nums1 = dict:append_list(Path, Reserved, Nums),
+              Nums1 = map_append_list(Path, Reserved, Nums),
               {Nums1, Names};
          ({{reserved_names, Msg}, Reserved}, {Nums, Names}) ->
               Path = name_to_components(Msg),
-              Names1 = dict:append_list(Path, Reserved, Names),
+              Names1 = map_append_list(Path, Reserved, Names),
               {Nums, Names1};
          (_Other, {Nums, Names}) ->
               {Nums, Names}
       end,
-      {dict:new(), dict:new()},
+      {#{}, #{}},
       Defs).
 
 atom_to_ustring(A) ->
@@ -806,8 +806,16 @@ escape_bytes(<<>>) ->
 
 escape_char(C) -> ?ff("\\~.8b", [C]).
 
-dict_fetch_list(Key, D) ->
-    case dict:find(Key, D) of
+map_append(Key, Value, M) ->
+    OrigValues = maps:get(Key, M, []),
+    M#{Key => OrigValues ++ [Value]}.
+
+map_append_list(Key, MoreValues, M) ->
+    OrigValues = maps:get(Key, M, []),
+    M#{Key => OrigValues ++ MoreValues}.
+
+map_fetch_list(Key, M) ->
+    case maps:find(Key, M) of
         {ok, Elems} when is_list(Elems) -> Elems;
         error -> []
     end.

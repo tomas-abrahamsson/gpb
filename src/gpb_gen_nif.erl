@@ -274,7 +274,7 @@ calc_cc_mapping(Defs, #anres{renamings=Renamings}, Opts) ->
           end,
           {[], '$undefined', ""},
           Defs),
-    dict:from_list(CCMapping).
+    maps:from_list(CCMapping).
 
 split_enum_with_pkg(EnumName, Pkg) ->
     EnumStr = atom_to_list(EnumName),
@@ -455,7 +455,7 @@ format_nif_cc_local_function_decls(_Mod, Defs, CCMapping, AnRes, _Opts) ->
     [[begin
           PackFnName = mk_c_fn(p_msg_, MsgName),
           UnpackFnName = mk_c_fn(u_msg_, MsgName),
-          #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+          #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
           [["static int ",PackFnName,["(ErlNifEnv *env, ",
                                       "const ERL_NIF_TERM r,",
                                       CMsgType," *m);\n"]],
@@ -1230,7 +1230,7 @@ format_nif_cc_encoders(Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_encoder(_Mod, MsgName, _Fields, CCMapping, _Opts) ->
     FnName = mk_c_fn(encode_msg_, MsgName),
     PackFnName = mk_c_fn(p_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     ["static ERL_NIF_TERM\n",
      FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
      "{\n",
@@ -1288,7 +1288,7 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
                       MsgFields
               end,
     PackFnName = mk_c_fn(p_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     ["static int\n",
      PackFnName,["(ErlNifEnv *env, ",
                  "const ERL_NIF_TERM r,",
@@ -1546,7 +1546,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, CCMapping,
                [SrcVar, SetFn(["1"]), SrcVar, SetFn(["1"]), SetFn(["0"])]);
         {enum, EnumName} ->
             #cc_enum{type=EType,
-                     enums=CCEnums} = dict:fetch(EnumName, CCMapping),
+                     enums=CCEnums} = maps:get(EnumName, CCMapping),
             ["{\n",
              ?f("    int v;\n"
                 "    if (enif_get_int(env, ~s, &v))\n"
@@ -1614,7 +1614,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, CCMapping,
                [SrcVar, SetFn(["reinterpret_cast<char *>(b.data)", "b.size"]),
                 SrcVar, SrcVar, SetFn(["reinterpret_cast<char *>(b.data)", "b.size"])]);
         {msg, Msg2Name} ->
-            #cc_msg{type=CMsg2Type} = dict:fetch(Msg2Name, CCMapping),
+            #cc_msg{type=CMsg2Type} = maps:get(Msg2Name, CCMapping),
             PackFnName = mk_c_fn(p_msg_, Msg2Name),
             NewMsg2 = case Setter of
                           set -> ?f("~s->mutable_~s()", [MsgVar, CxxFName]);
@@ -1759,7 +1759,7 @@ format_nif_cc_decoders(Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_decoder(_Mod, MsgName, _Fields, CCMapping, _Opts) ->
     FnName = mk_c_fn(decode_msg_, MsgName),
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     ["static ERL_NIF_TERM\n",
      FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
      "{\n",
@@ -1804,7 +1804,7 @@ format_nif_cc_unpackers(_Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     IFields = gpb_lib:index_seq(Fields),
     Is = [I || {I,_} <- IFields],
     %% Initialize the keys to silence "may be used uninitialized"
@@ -1934,7 +1934,7 @@ format_nif_cc_field_oneof_unpacker(MsgVar, MsgName,
                                    #gpb_oneof{name=OFName, fields=OFields},
                                    KSetter, VSetter, UndefSetter,
                                    Defs, CCMapping, _Opts) ->
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     UCOFName = to_upper(OFName),
     [?f("switch (~s->~s_case())\n", [MsgVar, OFName]),
      ?f("{\n"),
@@ -2044,7 +2044,7 @@ format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType,
              ?f("    ~s = gpb_aa_false;\n", [DestVar])];
         {enum, EnumName} ->
             #cc_enum{unaliased_enums=CCEnums} =
-                dict:fetch(EnumName, CCMapping),
+                maps:get(EnumName, CCMapping),
             [] ++
                 [?f("switch (~s) {\n", [SrcExpr])] ++
                 [?f("    case ~s: ~s = ~s; break;\n",
@@ -2153,7 +2153,7 @@ format_nif_cc_to_jsoners(Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_to_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
     FnName = mk_c_fn(to_json_msg_, MsgName),
     PackFnName = mk_c_fn(p_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     PrintNoPresence =
         atom_to_list(
           proplists:get_bool(json_always_print_fields_with_no_presence, Opts)),
@@ -2228,7 +2228,7 @@ format_nif_cc_from_jsoners(Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_from_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
     FnName = mk_c_fn(from_json_msg_, MsgName),
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     CaseInsensitiveEnums =
         atom_to_list(
           proplists:get_bool(json_case_insensitive_enum_parsing, Opts)),
@@ -2284,13 +2284,13 @@ format_nif_cc_from_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
      "\n"].
 
 mk_cctype_name({enum,EnumName}, CCMapping) ->
-    #cc_enum{type = CCType} = dict:fetch(EnumName, CCMapping),
+    #cc_enum{type = CCType} = maps:get(EnumName, CCMapping),
     CCType;
 mk_cctype_name({msg,MsgName}, CCMapping) ->
-    #cc_msg{type = CCType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type = CCType} = maps:get(MsgName, CCMapping),
     CCType;
 mk_cctype_name({group,GName}, CCMapping) ->
-    #cc_msg{type = CCType} = dict:fetch(GName, CCMapping),
+    #cc_msg{type = CCType} = maps:get(GName, CCMapping),
     CCType;
 mk_cctype_name({map,KeyType,ValueType}, CCMapping) ->
     CKeyType = mk_cctype_name(KeyType, CCMapping),

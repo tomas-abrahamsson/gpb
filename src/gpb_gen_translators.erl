@@ -407,16 +407,15 @@ format_default_map_translators(#anres{map_types=MapTypes,
                gpb_codegen:format_fn(
                  mt_finalize_items_r,
                  fun(Acc) ->
-                         %% Reverse to store the items in the dict
+                         %% Reverse to store the items in the map
                          %% in the same order they were decoded,
                          %% in case a key occurs more than once.
-                         mt_finalize_items_r_aux(lists:reverse(Acc),
-                                                 dict:new())
+                         mt_finalize_items_r_aux(lists:reverse(Acc), #{})
                  end),
                gpb_codegen:format_fn(
                  mt_finalize_items_r_aux,
-                 fun([{K,V} | Tl], D) -> call_self(Tl, dict:store(K, V, D));
-                    ([], D) -> dict:to_list(D)
+                 fun([{K,V} | Tl], M) -> call_self(Tl, M#{K => V});
+                    ([], M) -> maps:to_list(M)
                  end),
                "\n"];
           maps ->
@@ -471,9 +470,8 @@ format_default_merge_translators(#anres{map_types=MapTypes}, Opts) ->
               gpb_codegen:format_fn(
                 mt_merge_maptuples_r,
                 fun(L1, L2) ->
-                        dict:to_list(dict:merge(fun(_Key, _V1, V2) -> V2 end,
-                                                dict:from_list(L1),
-                                                dict:from_list(L2)))
+                        maps:to_list(maps:merge(maps:from_list(L1),
+                                                maps:from_list(L2)))
                 end),
               "\n"];
          maps ->

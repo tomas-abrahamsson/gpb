@@ -649,40 +649,36 @@ convert_default_values_field(#gpb_oneof{fields=OFs}=Field) ->
     OFs2 = lists:map(fun convert_default_values_field/1, OFs),
     Field#gpb_oneof{fields=OFs2}.
 
--record(elem_dicts, {msg=dict:new(),
-                     enum=dict:new(),
-                     service=dict:new()}).
 join_any_elem_options(Defs) ->
-    {NonOptDefs, Dicts} =
+    #{non_opt_defs := NonOptDefs,
+      msg_opts := MsgOptsM,
+      enum_opts := EnumOptsM,
+      service_opts := ServiceOptsM} =
         lists:foldl(
-          fun({{msg_option,MsgName},Opt}, {Ds, #elem_dicts{msg=D0}=Dicts}) ->
-                  D1 = dict:append(MsgName, Opt, D0),
-                  Dicts1 = Dicts#elem_dicts{msg=D1},
-                  {Ds, Dicts1};
-             ({{enum_option,EName},Opt}, {Ds, #elem_dicts{enum=D0}=Dicts}) ->
-                  D1 = dict:append(EName, Opt, D0),
-                  Dicts1 = Dicts#elem_dicts{enum=D1},
-                  {Ds, Dicts1};
-             ({{service_option,SName},Opt},
-              {Ds, #elem_dicts{service=D0}=Dicts}) ->
-                  D1 = dict:append(SName, Opt, D0),
-                  Dicts1 = Dicts#elem_dicts{service=D1},
-                  {Ds, Dicts1};
-             (OtherDef, {Ds, Dicts}) ->
-                  {[OtherDef | Ds], Dicts}
+          fun({{msg_option,MsgName},Opt}, #{msg_opts := M0}=Ctxts) ->
+                  M1 = map_append(MsgName, Opt, M0),
+                  Ctxts#{msg_opts := M1};
+             ({{enum_option,EName},Opt}, #{enum_opts := M0}=Ctxts) ->
+                  M1 = map_append(EName, Opt, M0),
+                  Ctxts#{enum_opts := M1};
+             ({{service_option,SName},Opt}, #{service_opts := M0}=Ctxts) ->
+                  M1 = map_append(SName, Opt, M0),
+                  Ctxts#{service_opts := M1};
+             (OtherDef, #{non_opt_defs := Ds}=Ctxts) ->
+                  Ctxts#{non_opt_defs := [OtherDef | Ds]}
           end,
-          {[], #elem_dicts{}},
+          #{non_opt_defs => [],
+            msg_opts => #{},
+            enum_opts => #{},
+            service_opts => #{}},
           Defs),
-    #elem_dicts{msg=MsgOptsDict,
-                enum=EnumOptsDict,
-                service=ServiceOptsDict} = Dicts,
     MsgOpts = [{{msg_options, MsgName}, Opts}
-               || {MsgName, Opts} <- dict:to_list(MsgOptsDict)],
+               || {MsgName, Opts} <- maps:to_list(MsgOptsM)],
     EnumOpts = [{{enum_options, EnumName}, Opts}
-               || {EnumName, Opts} <- dict:to_list(EnumOptsDict)],
+               || {EnumName, Opts} <- maps:to_list(EnumOptsM)],
     ServiceOpts = [{{service_options, ServiceName}, Opts}
-                   || {ServiceName, Opts} <- dict:to_list(ServiceOptsDict)],
-    lists:reverse(NonOptDefs, EnumOpts++MsgOpts++ServiceOpts).
+                   || {ServiceName, Opts} <- maps:to_list(ServiceOptsM)],
+    lists:reverse(NonOptDefs, EnumOpts ++ MsgOpts ++ ServiceOpts).
 
 handle_proto_syntax_version_one_file(Defs) ->
     case proplists:get_value(syntax, Defs) of
@@ -923,26 +919,26 @@ verify_json_field_names({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
                     end,
                     [],
                     Fields)),
-    D = lists:foldl(
-          fun(#?gpb_field{name=FName}=Field, D) ->
+    M = lists:foldl(
+          fun(#?gpb_field{name=FName}=Field, M) ->
                   %% Store info both for collisions between json field names
                   %% (normally lowerCamelCase) and json field names and
                   %% ordinary field names, since decoding must accept both.
                   FNameStr = atom_to_list(FName),
-                  D1 = dict:append(FNameStr, FName, D),
+                  M1 = map_append(FNameStr, FName, M),
                   %% Take precautions not to crash on bad values
                   %% for the json_name option
                   try gpb_lib:get_field_json_name(Field) of
-                      FNameStr  -> D1; % json name same as field name; ignore
-                      JsonFName -> dict:append(JsonFName, FName, D1)
-                  catch error:_ -> D1
+                      FNameStr  -> M1; % json name same as field name; ignore
+                      JsonFName -> map_append(JsonFName, FName, M1)
+                  catch error:_ -> M1
                   end
           end,
-          dict:new(),
+          #{},
           AllFields),
-    %% Dict of field names that collide when converted to lowerCamelCase.
-    D1 = dict:filter(fun(_K, FNames) -> length(FNames) >= 2 end, D),
-    case dict:to_list(D1) of
+    %% Map of field names that collide when converted to lowerCamelCase.
+    M1 = maps:filter(fun(_K, FNames) -> length(FNames) >= 2 end, M),
+    case maps:to_list(M1) of
         [] ->
             ok;
         Dups ->
@@ -964,22 +960,22 @@ all_field_names2([]) ->
 
 verify_field_numbers({{_msg_or_group, MsgName}, Fields}, _AllDefs) ->
     %% For each number, store the names associated to it
-    D = gpb_lib:fold_msgdef_fields(
-          fun(#?gpb_field{name=Name, fnum=Num}, D) ->
-                  dict:append(Num, Name, D)
+    M = gpb_lib:fold_msgdef_fields(
+          fun(#?gpb_field{name=Name, fnum=Num}, M) ->
+                  map_append(Num, Name, M)
           end,
-          dict:new(),
+          #{},
           Fields),
     %% Filter for numbers with more than one name
-    D2 = dict:filter(fun(_Num, Names) -> length(Names) > 1 end, D),
+    M2 = maps:filter(fun(_Num, Names) -> length(Names) > 1 end, M),
     Errs2 = [{field_number_used_more_than_once,
               {name_to_dstr(MsgName), Num, FNames}}
-             || {Num, FNames} <- dict:to_list(D2)],
+             || {Num, FNames} <- maps:to_list(M2)],
     %% Check for field numbers not positive
-    D3 = dict:filter(fun(Num, _Names) -> Num =< 0 end, D),
+    M3 = maps:filter(fun(Num, _Names) -> Num =< 0 end, M),
     Errs3 = [{field_number_must_be_positive,
               {name_to_dstr(MsgName), Num, FNames}}
-             || {Num, FNames} <- dict:to_list(D3)],
+             || {Num, FNames} <- maps:to_list(M3)],
     case Errs2 ++ Errs3 of
         [] -> ok;
         Errs -> {error, Errs}
@@ -1771,4 +1767,10 @@ cvt_defs_2_to_1(Defs) ->
           || Item <- Defs]}
     catch {p3_optional, MsgName, FName} ->
             {error, {defs_unrepresentable_in_fmt_1,p3_optional,MsgName,FName}}
+    end.
+
+map_append(Key, NewElem, M) ->
+    case M of
+        #{Key := Elems} -> M#{Key := Elems ++ [NewElem]};
+        #{}             -> M#{Key => [NewElem]}
     end.

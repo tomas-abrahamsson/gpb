@@ -300,12 +300,12 @@ format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes, Opts) ->
     Rest = ?expr(Rest),
     {Param, FParam, FParamBinds} =
         gpb_decoders_lib:decoder_read_field_param(MsgName, MsgDef, Opts),
-    Bindings = new_bindings([{'Param', Param},
-                             {'FParam', FParam},
-                             {'FFields', FParamBinds},
-                             {'Key', Key},
-                             {'Rest', Rest},
-                             {'TrUserData', ?expr(TrUserData)}]),
+    Bindings = #{'Param' => Param,
+                 'FParam' => FParam,
+                 'FFields' => FParamBinds,
+                 'Key' => Key,
+                 'Rest' => Rest,
+                 'TrUserData' => ?expr(TrUserData)},
     [format_msg_init_decoder(MsgName, InitExprs),
      format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts),
      format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts)].
@@ -328,9 +328,9 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The fast-path decoder directly matches the minimal varint form
     %% of the field-number combined with the wiretype.
     %% Unrecognized fields fall back to the more generic decoder-loop
-    Param = fetch_binding('Param', Bindings),
-    FParam = fetch_binding('FParam', Bindings),
-    FFields = fetch_binding('FFields', Bindings),
+    #{'Param' := Param,
+      'FParam' := FParam,
+      'FFields' := FFields} = Bindings,
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(dfp_read_field_def_, MsgName),
           fun('precomputed-binary-match', Z1, Z2, F, 'Param', TrUserData) ->
@@ -366,11 +366,11 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
 format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The more general field selecting decoder
     %% Stuff that ends up here: non-minimal varint forms and field to skip
-    Key = fetch_binding('Key', Bindings),
-    Rest = fetch_binding('Rest', Bindings),
-    Param = fetch_binding('Param', Bindings),
-    FParam = fetch_binding('FParam', Bindings),
-    FFields = fetch_binding('FFields', Bindings),
+    #{'Key' := Key,
+      'Rest' := Rest,
+      'Param' := Param,
+      'FParam' := FParam,
+      'FFields' := FFields} = Bindings,
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(dg_read_field_def_, MsgName),
           fun(<<1:1, X:7, 'Rest'/binary>>, N, Acc, F, 'Param', TrUserData)
@@ -405,9 +405,9 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
 
 %% compute info for the fast-path field recognition/decoding-call
 decoder_fp(Bindings, MsgName, MsgDef) ->
-    Rest = fetch_binding('Rest', Bindings),
-    Param = fetch_binding('Param', Bindings),
-    TrUserDataVar = fetch_binding('TrUserData', Bindings),
+    #{'Rest' := Rest,
+      'Param' := Param,
+      'TrUserData' := TrUserDataVar} = Bindings,
     [begin
          BMatch = ?expr(<<'field-and-wiretype-bytes', 'Rest'/binary>>,
                         [splice_trees('field-and-wiretype-bytes',
@@ -425,16 +425,16 @@ decoder_fp(Bindings, MsgName, MsgDef) ->
      || {Selector, DecodeFn} <- decoder_field_selectors(MsgName, MsgDef)].
 
 decoder_field_calls(Bindings, MsgName, []=_MsgDef, _AnRes) ->
-    Key = fetch_binding('Key', Bindings),
+    #{'Key' := Key} = Bindings,
     WiretypeExpr = ?expr('Key' band 7, [replace_tree('Key', Key)]),
-    Bindings1 = add_binding({'wiretype-expr', WiretypeExpr}, Bindings),
+    Bindings1 = Bindings#{'wiretype-expr' => WiretypeExpr},
     decoder_skip_calls(Bindings1, MsgName);
 decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
-    Key = fetch_binding('Key', Bindings),
-    Rest = fetch_binding('Rest', Bindings),
-    Param = fetch_binding('Param', Bindings),
+    #{'Key' := Key,
+      'Rest' := Rest,
+      'Param' := Param,
+      'TrUserData' := TrUserDataVar} = Bindings,
     SkipCalls = decoder_field_calls(Bindings, MsgName, [], AnRes),
-    TrUserDataVar = fetch_binding('TrUserData', Bindings),
     FieldSelects = decoder_field_selectors(MsgName, MsgDef),
     ?expr(case 'Key' of
               'selector' -> 'decode_field'('Rest', 0, 0, 0, 'Param',
@@ -452,12 +452,12 @@ decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
         replace_tree('TrUserData', TrUserDataVar)]).
 
 decoder_skip_calls(Bindings, MsgName) ->
-    KeyExpr = fetch_binding('Key', Bindings),
+    #{'Key'           := KeyExpr,
+      'wiretype-expr' := WiretypeExpr,
+      'Rest'          := RestExpr,
+      'Param'         := Param,
+      'TrUserData'    := TrUserDataVar} = Bindings,
     FieldNumExpr = ?expr('Key' bsr 3, [replace_tree('Key', KeyExpr)]),
-    WiretypeExpr = fetch_binding('wiretype-expr', Bindings),
-    RestExpr = fetch_binding('Rest', Bindings),
-    Param = fetch_binding('Param', Bindings),
-    TrUserDataVar = fetch_binding('TrUserData', Bindings),
     ?expr(case 'wiretype-expr' of
               0 -> skip_vi('Rest', 0, 0, 'FNum', 'Param', 'TrUserData');
               1 -> skip_64('Rest', 0, 0, 'FNum', 'Param', 'TrUserData');
@@ -1409,18 +1409,6 @@ format_field_skippers(MsgName) ->
          passes_msg = true,
          tree=T}
      || T <- lists:flatten(Ts)].
-
-new_bindings(Tuples) ->
-    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
-
-new_bindings() ->
-    dict:new().
-
-add_binding({Key, Value}, Bindings) ->
-    dict:store(Key, Value, Bindings).
-
-fetch_binding(Key, Bindings) ->
-    dict:fetch(Key, Bindings).
 
 %% The fun takes two args: Fun(#?gpb_field{}, IsOneofField) -> term()
 map_msgdef_fields_o_for_non_unknowns(Fun, Fields) ->

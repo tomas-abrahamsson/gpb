@@ -111,29 +111,29 @@ process_map_msgs_and_mapfield_types(Defs) ->
     Maps = lists:foldl(
              fun({{msg, MsgName}, [#?gpb_field{type=KType},
                                    #?gpb_field{type=VType}]},
-                 D) ->
+                 M) ->
                      case sets:is_element(MsgName, MapfieldMsgs) of
-                         true  -> dict:store(MsgName, {map, KType, VType}, D);
-                         false -> D
+                         true  -> M#{MsgName => {map, KType, VType}};
+                         false -> M
                      end;
-                (_Other, D) ->
-                     D
+                (_Other, M) ->
+                     M
              end,
-             dict:new(),
+             #{},
              Defs),
     process_mapfield_msgs2(Defs, Maps).
 
 process_mapfield_msgs2([Elem | Rest], Maps) ->
     case Elem of
         {{msg, MsgName}, Fields} ->
-            case dict:is_key(MsgName, Maps) of
+            case maps:is_key(MsgName, Maps) of
                 true ->
                     process_mapfield_msgs2(Rest, Maps); % remove this
                 false ->
                     Fields1 =
                         gpb_lib:map_msgdef_fields_o(
                           fun(#?gpb_field{type={msg,SubMsg}}=F, _IsOneof) ->
-                                  case dict:find(SubMsg, Maps) of
+                                  case maps:find(SubMsg, Maps) of
                                       {ok, MapType} ->
                                           F#?gpb_field{type=MapType};
                                       error ->
@@ -147,7 +147,7 @@ process_mapfield_msgs2([Elem | Rest], Maps) ->
                     [Elem1 | process_mapfield_msgs2(Rest, Maps)]
             end;
         {{msg_options, MsgName}, _} ->
-            case dict:is_key(MsgName, Maps) of
+            case maps:is_key(MsgName, Maps) of
                 true ->
                     process_mapfield_msgs2(Rest, Maps); % remove this
                 false ->
@@ -155,12 +155,12 @@ process_mapfield_msgs2([Elem | Rest], Maps) ->
             end;
         {{msg_containment, F}, MsgNames} ->
             MsgNames1 = [MsgName || MsgName <- MsgNames,
-                                    not dict:is_key(MsgName, Maps)],
+                                    not maps:is_key(MsgName, Maps)],
             Elem1 = {{msg_containment, F}, MsgNames1},
             [Elem1 | process_mapfield_msgs2(Rest, Maps)];
         {proto3_msgs, MsgNames} ->
             MsgNames1 = [MsgName || MsgName <- MsgNames,
-                                    not dict:is_key(MsgName, Maps)],
+                                    not maps:is_key(MsgName, Maps)],
             Elem1 = {proto3_msgs, MsgNames1},
             [Elem1 | process_mapfield_msgs2(Rest, Maps)];
         _Other ->
@@ -333,7 +333,7 @@ ext_elems_from_descr(DescrFields, Scope, Env) ->
 
 ext_elems_from_descr_aux([#'FieldDescriptorProto'{extendee=Extendee}=DF | Rest],
                          Scope, Env, Acc) ->
-    NoOneofCounts = dict:new(), %% Extend cannot extend oneof elems
+    NoOneofCounts = #{}, %% Extend cannot extend oneof elems
     Field = field_from_descr(DF, NoOneofCounts, Env),
     Acc1 = add_ext_field_to_acc(Field, Extendee, Acc),
     ext_elems_from_descr_aux(Rest, Scope, Env, Acc1);
@@ -400,29 +400,29 @@ drop_any_prefix(ProbablyPrefix, List) ->
 collect_oneof_fields(Fields) ->
     %% First collect fields for each oneof
     Oneofs = lists:foldl(
-               fun(#gpb_oneof{name=CFName, fields=[Field]}, D) ->
-                       dict:append(CFName, Field, D);
-                  (#?gpb_field{}, D) ->
-                       D
+               fun(#gpb_oneof{name=CFName, fields=[Field]}, M) ->
+                       map_append(CFName, Field, M);
+                  (#?gpb_field{}, M) ->
+                       M
                end,
-               dict:new(),
+               #{},
                Fields),
     %% Then replace the first such occurrence for each oneof
     {Fields1R, _Empty} =
         lists:foldl(
-          fun(#gpb_oneof{name=CFName}=OF, {AccFields, RemainingD}) ->
-                  case dict:find(CFName, RemainingD) of
+          fun(#gpb_oneof{name=CFName}=OF, {AccFields, RemainingM}) ->
+                  case maps:find(CFName, RemainingM) of
                       {ok, OFields} ->
                           %% First time for this oneof
                           F = OF#gpb_oneof{fields=OFields},
-                          RemainingD1 = dict:erase(CFName, RemainingD),
-                          {[F | AccFields], RemainingD1};
+                          RemainingM1 = maps:remove(CFName, RemainingM),
+                          {[F | AccFields], RemainingM1};
                       error ->
                           %% Already inserted
-                          {AccFields, RemainingD}
+                          {AccFields, RemainingM}
                   end;
-             (#?gpb_field{}=F, {AccFields, RemainingD}) ->
-                  {[F | AccFields], RemainingD}
+             (#?gpb_field{}=F, {AccFields, RemainingM}) ->
+                  {[F | AccFields], RemainingM}
           end,
           {[], Oneofs},
           Fields),
@@ -442,22 +442,22 @@ collect_oneof_fields_test() ->
            #?gpb_field{name=f2}]).
 
 count_oneof_fields(Fields, OneofDecls) ->
-    %% Return a dict OneofDecl -> {OneofName, HowManyInTheOneof}
+    %% Return #{OneofDecl => {OneofName, HowManyInTheOneof}}
     lists:foldl(
-      fun(#'FieldDescriptorProto'{oneof_index=OneofIndex}, D) ->
+      fun(#'FieldDescriptorProto'{oneof_index=OneofIndex}, M) ->
               if is_integer(OneofIndex) ->
                       CFName = find_oneof_name(OneofIndex, OneofDecls),
-                      case dict:find(OneofIndex, D) of
+                      case maps:find(OneofIndex, M) of
                           {ok, {CFName, N}} ->
-                              dict:store(OneofIndex, {CFName, N + 1}, D);
+                              M#{OneofIndex => {CFName, N + 1}};
                           error ->
-                              dict:store(OneofIndex, {CFName, 1}, D)
+                              M#{OneofIndex => {CFName, 1}}
                       end;
                  OneofIndex == undefined ->
-                      D
+                      M
               end
       end,
-      dict:new(),
+      #{},
       Fields).
 
 find_oneof_name(OneofIndex, OneofDecls) ->
@@ -511,7 +511,7 @@ field_from_descr(#'FieldDescriptorProto'{name=FName,
                         occurrence = Occurrence,
                         opts = FieldOpts},
     if is_integer(OneofIndex) ->
-            case dict:fetch(OneofIndex, OneofCounts) of
+            case maps:get(OneofIndex, OneofCounts) of
                 {_CFName, 1} when Syntax == "proto3",
                                   Occurrence == optional ->
                     %% This is a proto3 optional message wrapped in a
@@ -802,3 +802,7 @@ index2_seq_test() ->
     [] = index2_seq([]),
     [{2, a}] = index2_seq([a]),
     [{2, a}, {3, b}] = index2_seq([a, b]).
+
+map_append(Key, Value, M) ->
+    Values = maps:get(Key, M, []),
+    M#{Key => Values ++ [Value]}.

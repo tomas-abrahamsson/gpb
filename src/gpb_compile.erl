@@ -4710,16 +4710,16 @@ nano_epp(Code, ModAsStr, HrlText, Opts) ->
     %% Setup a dictionary, mostly to handle -ifdef...-endif
     %% in hrls and in the decoders.
     %% The OTP_RELEASE first appeared in Erlang 21.
-    D0 = dict:new(),
+    M0 = #{},
     OtpRelease = gpb_lib:current_otp_release(),
     TargetOtpRelease = proplists:get_value(target_erlang_version, Opts,
                                            OtpRelease),
-    D1 = if TargetOtpRelease >= 21 ->
-                 dict:store('OTP_RELEASE', OtpRelease, D0);
+    M1 = if TargetOtpRelease >= 21 ->
+                 M0#{'OTP_RELEASE' => OtpRelease};
             TargetOtpRelease < 21 ->
-                 D0
+                 M0
          end,
-    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=D1},
+    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=M1},
     {Txt, <<>>, _EndNState, _EndLine} = nepp1(Code, NState, _Line=1, []),
     Txt.
 
@@ -4794,7 +4794,7 @@ nepp2_def(Rest, #nepp{defs=Ds}=NState, N, Acc) ->
     {Sym, Rest2} = read_until(Rest1, ",", ""),
     {Val, Rest3} = read_until(Rest2, ")", ""),
     {_,   Rest4} = read_until(Rest3, "\n", ""),
-    Ds1 = dict:store(parse_term(Sym), parse_term(Val), Ds),
+    Ds1 = Ds#{parse_term(Sym) => parse_term(Val)},
     nepp2_nl(Rest4, NState#nepp{defs=Ds1}, N+1, Acc).
 
 nepp2_ifdef(Rest, SkipCond, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
@@ -4802,7 +4802,7 @@ nepp2_ifdef(Rest, SkipCond, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
     {Sym, Rest2} = read_until(Rest1, ")", ""),
     {_,   Rest3} = read_until(Rest2, "\n", ""),
     {Txt, Rest4, NState2, N2} =
-        case {dict:is_key(parse_term(Sym), Ds), SkipCond} of
+        case {maps:is_key(parse_term(Sym), Ds), SkipCond} of
             {true,  ifdef}  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
             {false, ifndef} -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
             _ -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
@@ -4849,7 +4849,7 @@ nepp2_eval_cond(Str, Ds) ->
 
 nepp2_simple_expand([{'?', _}, {var, _, Sym} | Rest], Ds) ->
     nepp2_assert_not_parameterized(Sym, Rest),
-    Val = dict:fetch(Sym, Ds),
+    Val = maps:get(Sym, Ds),
     [erl_parse:abstract(Val) | nepp2_simple_expand(Rest, Ds)];
 nepp2_simple_expand([Tok | Rest], Ds) ->
     [Tok | nepp2_simple_expand(Rest, Ds)];
