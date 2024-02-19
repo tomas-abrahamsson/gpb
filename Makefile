@@ -96,7 +96,8 @@ endif
 endif
 
 
-ERLC_FLAGS += -Wall +debug_info -I$(incdir)
+ERLC_FLAGS ?= -Wall +debug_info
+override ERLC_FLAGS += -I$(incdir)
 
 ERL_BATCH_FLAGS = +B -noshell -noinput
 
@@ -131,7 +132,7 @@ plt = $(GPB_PREFIX).gpb-$(OTP_MAJOR_MINOR).plt
 
 
 ifdef NO_HAVE_MAPS
-ERLC_FLAGS += -DNO_HAVE_MAPS=true
+override ERLC_FLAGS += -DNO_HAVE_MAPS=true
 else
 ## attempt to auto-detect
 ERLVM_SUPPORTS_MAPS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
@@ -142,12 +143,12 @@ ERLVM_SUPPORTS_MAPS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
                              receive after 10 -> ok end.' \
                          -s erlang halt)
 ifeq ($(ERLVM_SUPPORTS_MAPS),false)
-ERLC_FLAGS += -DNO_HAVE_MAPS=true
+override ERLC_FLAGS += -DNO_HAVE_MAPS=true
 endif
 endif
 
 ifdef NO_HAVE_RAND
-ERLC_FLAGS += -DNO_HAVE_RAND=true
+override ERLC_FLAGS += -DNO_HAVE_RAND=true
 else
 ## attempt to auto-detect
 ERL_HAS_RAND := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
@@ -158,12 +159,12 @@ ERL_HAS_RAND := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
                              receive after 10 -> ok end.' \
                          -s erlang halt)
 ifeq ($(ERL_HAS_RAND),false)
-ERLC_FLAGS += -DNO_HAVE_RAND=true
+override ERLC_FLAGS += -DNO_HAVE_RAND=true
 endif
 endif
 
 ifdef NO_HAVE_ERL20_STR_FUNCTIONS
-ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
+override ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
 else
 ## attempt to auto-detect
 ERL_HAS_ERL20_STR_FUNCTIONS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
@@ -174,7 +175,7 @@ ERL_HAS_ERL20_STR_FUNCTIONS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
                              receive after 10 -> ok end.' \
                          -s erlang halt)
 ifeq ($(ERL_HAS_ERL20_STR_FUNCTIONS),false)
-ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
+override ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
 endif
 endif
 
