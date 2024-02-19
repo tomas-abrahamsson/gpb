@@ -1,5 +1,12 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.21.1
+2024-Feb-19
+
+        * Emit @generated to mitigate a performance issue with ELP (#233)
+        * Update to support Erlang 27
+        * Bugfix edoc for {json_format, maps}
+
 Version 4.21.0
 2024-Jan-07
 
