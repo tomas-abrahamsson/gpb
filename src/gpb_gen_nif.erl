@@ -2480,7 +2480,7 @@ underscore_suffix(A) when is_atom(A) ->
 'is_c++_keyword'(do) -> true;
 'is_c++_keyword'(double) -> true;
 'is_c++_keyword'(dynamic_cast) -> true;
-'is_c++_keyword'(else) -> true;
+'is_c++_keyword'('else') -> true;
 'is_c++_keyword'(enum) -> true;
 'is_c++_keyword'(explicit) -> true;
 'is_c++_keyword'(export) -> true;

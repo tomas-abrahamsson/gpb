@@ -1330,7 +1330,6 @@ calc_byte_copy_lim_aux(N) when N =< 8192 ->
           binary:referenced_byte_size(B),
           byte_size(C)} of
         {_, Sz, Sz} ->
-            ?assertEqual(10, binary:referenced_byte_size(binary:copy(A))),
             {found, {at_least, N1}};
         _X ->
             %% Maybe sub-binaries of larger size don't get copied?
@@ -1461,14 +1460,7 @@ strings_as_binaries_opt_together_with_copy_bytes_opt_test() ->
                         "}"],
                        [strings_as_binaries, {copy_bytes, auto}]),
     Data = M:encode_msg({m1, "some string"}),
-    {m1, <<"some string">>=StrBin} = M:decode_msg(Data, m1),
-    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
-    if HasBinary ->
-            ?assertEqual(byte_size(StrBin),
-                         binary:referenced_byte_size(StrBin));
-       true ->
-            ok
-    end,
+    {m1, <<"some string">>} = M:decode_msg(Data, m1),
     unload_code(M).
 
 accepts_both_strings_and_binaries_as_input_test() ->

@@ -1138,6 +1138,24 @@ proto3_type_default_values_never_serialized_for_enums_test() ->
     <<>> = encode_msg({m, 0}, Defs), % when given as integer
     {m, e0} = decode_msg(<<>>, m, Defs).
 
+-ifndef(NO_HAVE_PLUS_MINUS_ZERO_FLOAT).
+proto3_type_defaults_values_for_float_test() ->
+    DefsF = [{syntax,"proto3"},
+             {proto3_msgs,[m]},
+             {{msg,m},[#?gpb_field{name=f, fnum=1, rnum=2, type=float,
+                                   occurrence=defaulty, opts=[]}]}],
+    <<>> = encode_msg({m, 0.0}, DefsF),
+    %% -0.0 as a float or double: the signbit is 1, the rest of the bits are 0,
+    %% and it is little-endian.
+    <<13, 0,0,0,128>> = encode_msg({m, -0.0}, DefsF),
+    DefsD = [{syntax,"proto3"},
+             {proto3_msgs,[m]},
+             {{msg,m},[#?gpb_field{name=f, fnum=1, rnum=2, type=double,
+                                   occurrence=defaulty, opts=[]}]}],
+    <<>> = encode_msg({m, 0.0}, DefsD),
+    <<9, 0,0,0,0, 0,0,0,128>> = encode_msg({m, -0.0}, DefsD).
+-endif. % NO_HAVE_PLUS_MINUS_ZERO_FLOAT
+
 proto3_optional_test() ->
     Defs = [{proto_defs_version,2},
             {syntax,"proto3"},
