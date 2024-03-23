@@ -457,7 +457,7 @@ types_defaults_proto() ->
 type_defaults_test() ->
     M1 = compile_iolist(types_defaults_proto(), [json]),
     M2 = compile_iolist(types_defaults_proto(),
-                        [json, json_always_print_primitive_fields]),
+                        [json, json_always_print_fields_with_no_presence]),
     [{}]                 = M1:to_json({'EnumMsg', 'A'}),
     [{<<"f">>, <<"A">>}] = M2:to_json({'EnumMsg', 'A'}),
     [{}]                 = M1:to_json({'BoolMsg', false}),
@@ -479,6 +479,17 @@ type_defaults_test() ->
     {'Int32Msg', 0}      = M1:from_json([{}], 'Int32Msg'),
     {'Int64Msg', 0}      = M1:from_json([{}], 'Int64Msg'),
     {'FloatMsg', +0.0}   = M1:from_json([{}], 'FloatMsg'),
+
+    %% Included (due to json_always_print_fields_with_no_presence)
+    %% even when omitted, since proto3
+    [{<<"f">>, <<"A">>}] = M2:to_json({'EnumMsg', undefined}),
+    [{<<"f">>, false}]   = M2:to_json({'BoolMsg', undefined}),
+    [{<<"f">>, <<>>}]    = M2:to_json({'StringMsg', undefined}),
+    [{<<"f">>, <<>>}]    = M2:to_json({'BytesMsg', undefined}),
+    [{<<"f">>, 0}]       = M2:to_json({'Int32Msg', undefined}),
+    [{<<"f">>, <<"0">>}] = M2:to_json({'Int64Msg', undefined}),
+    [{<<"f">>, +0.0}]    = M2:to_json({'FloatMsg', undefined}),
+
     unload_code(M1),
     unload_code(M2).
 
@@ -486,7 +497,8 @@ type_defaults_test() ->
 type_defaults_maps_test() ->
     M1 = compile_iolist(types_defaults_proto(), [json, maps]),
     M2 = compile_iolist(types_defaults_proto(),
-                        [json, json_always_print_primitive_fields, maps]),
+                        [json, json_always_print_fields_with_no_presence,
+                         maps]),
     ?assertEqual(#{},                   M1:to_json(#{f => 'A'}, 'EnumMsg')),
     ?assertEqual(#{<<"f">> => <<"A">>}, M2:to_json(#{f => 'A'}, 'EnumMsg')),
     ?assertEqual(#{},                   M1:to_json(#{f => false}, 'BoolMsg')),
@@ -508,6 +520,17 @@ type_defaults_maps_test() ->
     ?assertEqual(#{f => 0},             M1:from_json(#{}, 'Int32Msg')),
     ?assertEqual(#{f => 0},             M1:from_json(#{}, 'Int64Msg')),
     ?assertEqual(#{f => +0.0},          M1:from_json(#{}, 'FloatMsg')),
+
+    %% Included (due to json_always_print_fields_with_no_presence)
+    %% even when omitted, since proto3
+    ?assertEqual(#{<<"f">> => <<"A">>}, M2:to_json(#{}, 'EnumMsg')),
+    ?assertEqual(#{<<"f">> => false},   M2:to_json(#{}, 'BoolMsg')),
+    ?assertEqual(#{<<"f">> => <<>>},    M2:to_json(#{}, 'StringMsg')),
+    ?assertEqual(#{<<"f">> => <<>>},    M2:to_json(#{}, 'BytesMsg')),
+    ?assertEqual(#{<<"f">> => 0},       M2:to_json(#{}, 'Int32Msg')),
+    ?assertEqual(#{<<"f">> => <<"0">>}, M2:to_json(#{}, 'Int64Msg')),
+    ?assertEqual(#{<<"f">> => +0.0},    M2:to_json(#{}, 'FloatMsg')),
+
     unload_code(M1),
     unload_code(M2).
 -endif. % -ifndef(NO_HAVE_MAPS).
@@ -1450,11 +1473,13 @@ cmdline_json_opt_test() ->
     %% Misc options
     {ok, {[json,
            json_always_print_primitive_fields,
+           json_always_print_fields_with_no_presence,
            json_preserve_proto_field_names,
            json_case_insensitive_enum_parsing],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
           ["-json", "-json-always-print-primitive-fields",
+           "-json-always-print-fields-with-no-presence",
            "-json-preserve-proto-field-names",
            "-json-case-insensitive-enum-parsing",
            "x.proto"]),
@@ -1620,7 +1645,7 @@ nif_type_defaults() ->
               [{_,  1}]       = json_decode(NifM:to_json(Msg1)),
               ok
       end,
-      [json, json_always_print_primitive_fields]).
+      [json, json_always_print_fields_with_no_presence]).
 
 nif_oneof_rec(features) -> [json | guess_features(oneof_proto())];
 nif_oneof_rec(title) -> "oneof (records)".

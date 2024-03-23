@@ -175,6 +175,7 @@
         %% JSON
         boolean_opt(json) |
         boolean_opt(json_always_print_primitive_fields) |
+        boolean_opt(json_always_print_fields_with_no_presence) |
         boolean_opt(json_preserve_proto_field_names) |
         boolean_opt(json_case_insensitive_enum_parsing) |
         {json_format, json_format()} |
@@ -453,6 +454,8 @@ file(File) ->
 %%   <dd><tt><a href="#option-json">json</a></tt>,
 %%       <tt><a href="#option-json_always_print_primitive_fields"
 %%                           >json_always_print_primitive_fields</a></tt>,
+%%       <tt><a href="#option-json_always_print_fields_with_no_presence"
+%%                           >json_always_print_fields_with_no_presence</a></tt>,
 %%       <tt><a href="#option-json_preserve_proto_field_names"
 %%                           >json_preserve_proto_field_names</a></tt>,
 %%       <tt><a href="#option-json_case_insensitive_enum_parsing"
@@ -1178,6 +1181,7 @@ file(File) ->
 %% binaries, with no further processing required. When `nif' is
 %% specified, the various JSON format options are thus not used.
 %% The `json_always_print_primitive_fields', the
+%% `json_always_print_fields_with_no_presence', the
 %% `json_preserve_proto_field_names' and the
 %% `json_case_insensitive_enum_parsing' options are honoured with `nif',
 %% though.
@@ -1188,15 +1192,32 @@ file(File) ->
 %% <h4><a id="option-json_always_print_primitive_fields"/>
 %%     `json_always_print_primitive_fields'</h4>
 %%
-%% The `json_always_print_primitive_fields' makes the generated
+%% This is a synonym for <a
+%%    href="#option-json_always_print_fields_with_no_presence"
+%%    >`json_always_print_fields_with_no_presence'</a>.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-json-always-print-primitive-fields"
+%%    >-json-always-print-primitive-fields</a>.
+%%
+%% <h4><a id="option-json_always_print_fields_with_no_presence"/>
+%%     `json_always_print_fields_with_no_presence'</h4>
+%%
+%% The `json_always_print_fields_with_no_presence' makes the generated
 %% `to_json' function always emit json key-value items also when the
 %% value is the type's default value.  The default is to omit such
 %% values, as per the language guide.  This holds for messages in files
 %% with proto3 syntax.
 %%
+%% When the option <a href="#option-nif">`nif'</a> is set, it sets the
+%% JSON print option `always_print_fields_with_no_presence' if the protobuf
+%% library is version 26.0 or newer. If the protobuf library is older,
+%% it sets the print option `always_print_primitive_fields' instead.
+%% These differ in whether omitted optional proto2 fields are printed.
+%%
 %% Corresponding command line option:
-%% <a href="#cmdline-option-json-always-print-primitive-fields"
-%%    >-json-always-print-primitive-fields</a>.
+%% <a href="#cmdline-option-json-always-print-fields-with-no-presence"
+%%    >-json-always-print-fields-with-no-presence</a>.
 %%
 %% <h4><a id="option-json_preserve_proto_field_names"/>
 %%     `json_preserve_proto_field_names'</h4>
@@ -1735,6 +1756,7 @@ normalize_alias_opts(Opts) ->
                  fun norm_opt_map_opts/1,
                  fun norm_opt_any_translate/1,
                  fun norm_opt_json_format/1,
+                 fun norm_opt_json_print_fields_with_no_presence/1,
                  fun norm_opt_gen_encoders/1,
                  fun norm_opt_gen_decoders/1,
                  fun norm_opt_gen_verifiers/1]).
@@ -1797,6 +1819,12 @@ norm_opt_json_format(Opts) ->
                                     {json_array_format, list},
                                     {json_string_format, binary},
                                     {json_null, null}]}],
+      Opts).
+
+norm_opt_json_print_fields_with_no_presence(Opts) ->
+    proplists:substitute_aliases(
+      [{json_always_print_primitive_fields,
+        json_always_print_fields_with_no_presence}],
       Opts).
 
 norm_opt_gen_encoders(Opts) ->
@@ -2891,10 +2919,19 @@ c() ->
 %%       <a href="#option-json">json</a></dd>
 %%   <dt><a id="cmdline-option-json-always-print-primitive-fields"/>
 %%       `-json-always-print-primitive-fields'</dt>
-%%     <dd>Print also fields whose value is their type's default.<br/>
+%%     <dd>This is a synonym for
+%%       <a href="#cmdline-option-json-always-print-fields-with-no-presence"
+%%                              >-json-always-print-fields-with-no-presence</a><br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-json_always_print_primitive_fields"
 %%                       >json_always_print_primitive_fields</a></dd>
+%%   <dt><a id="cmdline-option-json-always-print-fields-with-no-presence"/>
+%%       `-json-always-print-fields-with-no-presence'</dt>
+%%     <dd>Print also (proto3) fields whose value is omitted or have
+%%         their type's default.<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-json_always_print_fields_with_no_presence"
+%%                       >json_always_print_fields_with_no_presence</a></dd>
 %%   <dt><a id="cmdline-option-json-preserve-proto-field-names"/>
 %%       `-json-preserve-proto-field-names'</dt>
 %%     <dd>Print the fields' names as in `.proto' file, not
@@ -3488,7 +3525,11 @@ opt_specs() ->
       "       a JSON representation.\n"},
      {"json-always-print-primitive-fields", undefined,
       json_always_print_primitive_fields, "\n"
-      "       Print also fields whose value is their type's default.\n"},
+      "       Same as -json-always-print-fields-with-no-presence.\n"},
+     {"json-always-print-fields-with-no-presence", undefined,
+      json_always_print_fields_with_no_presence, "\n"
+      "       Print also (proto3) fields that are omitted or have a value"
+      "       that is their type's default"},
      {"json-preserve-proto-field-names", undefined,
       json_preserve_proto_field_names, "\n"
       "       Print the fields' names as in the .proto file, not as\n"

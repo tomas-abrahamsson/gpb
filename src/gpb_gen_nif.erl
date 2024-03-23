@@ -2195,9 +2195,9 @@ format_nif_cc_to_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
     FnName = mk_c_fn(to_json_msg_, MsgName),
     PackFnName = mk_c_fn(p_msg_, MsgName),
     #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
-    AlwaysPrintPrimitives =
+    PrintNoPresence =
         atom_to_list(
-          proplists:get_bool(json_always_print_primitive_fields, Opts)),
+          proplists:get_bool(json_always_print_fields_with_no_presence, Opts)),
     PreserveFNames =
         atom_to_list(proplists:get_bool(json_preserve_proto_field_names, Opts)),
     %% The preserve_proto_field_names and always_print_enums_as_ints
@@ -2213,7 +2213,11 @@ format_nif_cc_to_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
      "    ::google::protobuf::util::JsonPrintOptions jopts;\n\n"
      ""
      "    jopts.add_whitespace = false;\n"
-     "    jopts.always_print_primitive_fields = ",AlwaysPrintPrimitives,";\n"
+     "#if GOOGLE_PROTOBUF_VERSION >= 5026000\n"
+     "    jopts.always_print_fields_with_no_presence = ", PrintNoPresence,";\n"
+     "#else\n"
+     "    jopts.always_print_primitive_fields = ", PrintNoPresence,";\n"
+     "#endif\n"
      "#if GOOGLE_PROTOBUF_VERSION >= 3003000\n"
      "    jopts.preserve_proto_field_names = ",PreserveFNames,";\n"
      "    jopts.always_print_enums_as_ints = false;\n\n"

@@ -282,11 +282,10 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                           {enum,'google.protobuf.NullValue'} -> true;
                           _ -> false
                       end,
-    %% Should EmitTypeDefaults be a run-time option?
-    %% or alternatively a run-time option?
-    EmitTypeDefaults =
-        proplists:get_bool(json_always_print_primitive_fields, Opts)
+    P3PrintNoPresence =
+        proplists:get_bool(json_always_print_fields_with_no_presence, Opts)
         or IsNullValueEnum,
+    IsPrimitiveType = is_primitive_type(Type),
 
     case Occurrence of
         optional ->
@@ -329,8 +328,9 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                         | Transforms])
             end;
         defaulty ->
+            TypeDefault = gpb:proto3_type_default(Type, Defs),
             EncodeExpr =
-                if EmitTypeDefaults ->
+                if P3PrintNoPresence ->
                         ?expr(begin
                                   'TrF' = 'Tr'('F', 'TrUserData'),
                                   tj_add_field(jfieldname, '<enc>', 'Json')
@@ -382,7 +382,6 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                             replace_tree('<enc>', FEncoderExpr(TrFVar)) |
                             Transforms]);
                    IsEnum ->
-                        TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
                            begin
                                'TrF' = 'Tr'('F', 'TrUserData'),
@@ -398,7 +397,6 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                             replace_tree('<enc>', FEncoderExpr(TrFVar)) |
                             Transforms]);
                    true ->
-                        TypeDefault = gpb:proto3_type_default(Type, Defs),
                         ?expr(
                            begin
                                'TrF' = 'Tr'('F', 'TrUserData'),
@@ -413,35 +411,51 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                             replace_tree('<enc>', FEncoderExpr(TrFVar)) |
                             Transforms])
                 end,
+            OnOmittedExpr =
+                case P3PrintNoPresence of
+                    true when IsPrimitiveType ->
+                        JTypeDefault = primitive_type_default_to_json_expr(
+                                         TypeDefault, Type, Opts),
+                        ?expr(
+                           tj_add_field(jfieldname, '<JTypeDefault>', 'Json'),
+                           [replace_tree('<JTypeDefault>', JTypeDefault)]);
+                    _ ->
+                        PrevJVar
+                end,
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                 records ->
                     ?expr(
                        if 'F' == undefined ->
-                               'Json';
+                               '<omitted-handling>';
                           true ->
                                '<encodeit>'
                        end,
-                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                       [replace_tree('<encodeit>', EncodeExpr),
+                        replace_tree('<omitted-handling>', OnOmittedExpr) |
+                        Transforms]);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(
                        if 'F' == undefined ->
-                               'Json';
+                               '<omitted-handling>';
                           true ->
                                '<encodeit>'
                        end,
-                       [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                       [replace_tree('<encodeit>', EncodeExpr),
+                        replace_tree('<omitted-handling>', OnOmittedExpr) |
+                        Transforms]);
                 #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
                            '#{fieldname := <F>}' ->
                                '<encodeit>';
                            _ ->
-                               'Json'
+                               '<omitted-handling>'
                        end,
                        [replace_tree('M', MsgVar),
                         replace_tree('#{fieldname := <F>}',
                                      gpb_lib:map_match([{FName,FVar}], Opts)),
-                        replace_tree('<encodeit>', EncodeExpr)
+                        replace_tree('<encodeit>', EncodeExpr),
+                        replace_tree('<omitted-handling>', OnOmittedExpr)
                         | Transforms])
             end;
         repeated ->
@@ -693,6 +707,50 @@ type_to_json_expr(Var, #?gpb_field{type=Type}, TrUserDataVar, Opts) ->
                   [replace_term('to_json_group_...', FnName),
                    replace_tree('Value', Var),
                    replace_tree('TrUserData', TrUserDataVar)])
+    end.
+
+primitive_type_default_to_json_expr(TypeDefault, Type, Opts) ->
+    TypeDefaultExpr = ?expr('Value', [replace_term('Value', TypeDefault)]),
+    case Type of
+        Int32 when Int32 == sint32;
+                   Int32 == int32;
+                   Int32 == uint32 ->
+            TypeDefaultExpr;
+        Int64 when Int64 == sint64;
+                   Int64 == int64;
+                   Int64 == uint64 ->
+            ?expr(tj_string(integer_to_list('Value')),
+                  [replace_tree('Value', TypeDefaultExpr)]);
+        bool ->
+            TypeDefaultExpr;
+        {enum,EnumName} ->
+            if EnumName =:= 'google.protobuf.NullValue' ->
+                    %% use of guards also avoids unused variable warnings,
+                    %% for better or worse...
+                    ?expr(null,
+                          [replace_term(null, gpb_lib:json_null(Opts))]);
+               true ->
+                    ?expr(tj_string(atom_to_list('Value')),
+                          [replace_tree('Value', TypeDefaultExpr)])
+            end;
+        Int32 when Int32 == fixed32;
+                   Int32 == sfixed32 ->
+            TypeDefaultExpr;
+        Int64 when Int64 == fixed64;
+                   Int64 == sfixed64 ->
+            ?expr(tj_string(integer_to_list('Value')),
+                  [replace_tree('Value', TypeDefaultExpr)]);
+        Float when Float == float;
+                   Float == double ->
+            ?expr(tj_float('Value'),
+                  [replace_tree('Value', TypeDefaultExpr)]);
+        string ->
+            ?expr(tj_string('Value'),
+                  [replace_tree('Value', TypeDefaultExpr)]);
+        bytes ->
+            %% Need option for "websafe base64 escape with padding"?
+            ?expr(tj_bytes('Value'),
+                  [replace_tree('Value', TypeDefaultExpr)])
     end.
 
 %%% --- proto3 wellknowns ---
@@ -1396,3 +1454,8 @@ json_field_name(#?gpb_field{name=FName}=Field, Opts) ->
         string ->
             erl_syntax:string(JFName)
     end.
+
+is_primitive_type({msg,_}) -> false;
+is_primitive_type({group,_}) -> false;
+is_primitive_type({map,_,_}) -> false;
+is_primitive_type(_) -> true.
