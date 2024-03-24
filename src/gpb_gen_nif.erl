@@ -1330,38 +1330,29 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
                  "const ERL_NIF_TERM r,",
                  " ",CMsgType," *m)\n"],
      "{\n",
-     if Maps ->
-             NFieldsPlus1 = integer_to_list(length(MsgFields)+1),
-             ["    ERL_NIF_TERM k, v;\n",
+     if Maps, MsgFields =/= [] ->
+             ["    ERL_NIF_TERM k, elem;\n",
               "    ErlNifMapIterator iter;\n",
-              "    ERL_NIF_TERM elem[",NFieldsPlus1,"];\n",
               "    ErlNifMapIteratorEntry first;\n",
-              "    int i;\n\n",
               "",
               initialize_map_iterator(4, "first"),
-              "    for (i = 1; i < ",NFieldsPlus1,"; i++)\n",
-              "        elem[i] = gpb_x_no_value;\n\n",
-              ""
               "    if (!enif_map_iterator_create(env, r, &iter, first))\n",
               "        return 0;\n\n",
               ""
-              "    while (enif_map_iterator_get_pair(env, &iter, &k, &v))\n",
+              "    while (enif_map_iterator_get_pair(env, &iter, &k, &elem))\n",
               "    {\n",
               gpb_lib:split_indent_iolist(
                 8,
                 [begin
-                     ElemIndex = gpb_lib:get_field_rnum(Field)-1,
-                     SrcVar = ?f("elem[~w]",[ElemIndex]),
+                     SrcVar = "elem",
                      ?f("~sif (is_key(env, k, ~s))\n"
                         "{\n"
-                        "    elem[~w] = v;\n"
                         "~s\n"
                         "}\n",
                         [if I == 1 -> "";
                             I >  1 -> "else "
                          end,
                          mk_c_field_var(gpb_lib:get_field_name(Field)),
-                         ElemIndex,
                          gpb_lib:split_indent_iolist(
                            4,
                            format_nif_cc_field_packer(
@@ -1381,6 +1372,11 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
               "    }\n",
               "    enif_map_iterator_destroy(env, &iter);\n",
               "\n"];
+        Maps, MsgFields =:= [] ->
+             %% No fields, mark the fn params as unused to silence warns
+             ["    (void)(env); // unused\n",
+              "    (void)(r); // unused\n",
+              "    (void)(m); // unused\n"];
         not Maps ->
              ["    int arity;\n"
               "    const ERL_NIF_TERM *elem;\n\n"
