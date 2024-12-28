@@ -1,5 +1,19 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.21.2
+2024-Dec-28
+
+        * Add a missing option to the gpb_defs:def() type. Thanks to
+          Paulo F. Oliveira. (#236)
+        * Support Google protobuf 26.0 and later with NIGs and JSON.
+          This version of Google protobuf deprecates the JSON option
+          always_print_primitive_fields and adds another option, the
+          always_print_fields_with_no_presence. Gpb now supports both
+          options. In gpb they both have the same behaviour as the
+          always_print_fields_with_no_presence option. For proto3
+          optional fields with omitted values, this brings a change,
+          in that the such fields are now printed for JSON.
+
 Version 4.21.1
 2024-Feb-19
 
