@@ -61,6 +61,7 @@
                {{service, Name::atom()}, [#?gpb_rpc{}]} |
                {package, Name::atom()} |
                {syntax, string()} | % "proto2" | "proto3"
+               {option, Name::atom(), Val::term()} |
                {{extensions, MsgName::atom()}, [field_number_extension()]} |
                {{extend, MsgName::atom()}, MoreFields::[field()]} |
                {{ext_origin,MsgName::atom()}, {atom(), MoreFields::[field()]}} |
