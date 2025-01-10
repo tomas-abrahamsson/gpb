@@ -1,5 +1,11 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.21.3
+2025-Jan-13
+
+        * Add priv/proto3/google/protobuf/LICENSE covering
+          the .proto files in that directory. Thanks to Peter Lemenkov.
+
 Version 4.21.2
 2024-Dec-28
 
