@@ -743,7 +743,7 @@ type_to_typestr(sfixed32, _Defs, _AnRes, _TEnv) -> "integer()";
 type_to_typestr(sfixed64, _Defs, _AnRes, _TEnv) -> "integer()";
 type_to_typestr(float, _Defs, _AnRes, _TEnv)    -> float_spec();
 type_to_typestr(double, _Defs, _AnRes, _TEnv)   -> float_spec();
-type_to_typestr(string, _Defs, _AnRes, _TEnv)   -> "unicode:chardata()";
+type_to_typestr(string, _Defs, _AnRes, _TEnv)   -> "unicode:unicode_binary()";
 type_to_typestr(bytes, _Defs, _AnRes, _TEnv)    -> "iodata()";
 type_to_typestr({enum,E}, Defs, _AnRes, TEnv) ->
     enum_typestr(E, Defs, TEnv);
