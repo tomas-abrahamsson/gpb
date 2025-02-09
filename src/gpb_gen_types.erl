@@ -736,7 +736,7 @@ type_to_typestr(int32, _Defs, _AnRes, _TEnv)    -> "integer()";
 type_to_typestr(int64, _Defs, _AnRes, _TEnv)    -> "integer()";
 type_to_typestr(uint32, _Defs, _AnRes, _TEnv)   -> "non_neg_integer()";
 type_to_typestr(uint64, _Defs, _AnRes, _TEnv)   -> "non_neg_integer()";
-type_to_typestr(bool, _Defs, _AnRes, _TEnv)     -> "boolean() | 0 | 1";
+type_to_typestr(bool, _Defs, _AnRes, _TEnv)     -> "boolean()";
 type_to_typestr(fixed32, _Defs, _AnRes, _TEnv)  -> "non_neg_integer()";
 type_to_typestr(fixed64, _Defs, _AnRes, _TEnv)  -> "non_neg_integer()";
 type_to_typestr(sfixed32, _Defs, _AnRes, _TEnv) -> "integer()";
