@@ -4574,6 +4574,14 @@ compile_nif_several_msg_defs_aux(M, ProtoTexts, MsgDefs, TmpDir, Opts) ->
                                             Opts2),
     Code = proplists:get_value(erl, Codes),
     NifTxt = proplists:get_value(nif, Codes),
+
+    %% -vv-- For debugging, in case the tmp-dir gets saved:
+    Opts2b = [{o, TmpDir}] ++ (Opts2 -- [binary]),
+    ok = gpb_compile:proto_defs(M, MsgDefs2, MsgDefs, Renamings, Opts2b),
+    Beam = filename:join(TmpDir, atom_to_list(M) ++ ".beam"),
+    ok = file:write_file(Beam, Code),
+    %% -^^--
+
     %%
     ok = file:write_file(NifCcPath, NifTxt),
     [ok = file:write_file(ProtoPath, ProtoTxt)
