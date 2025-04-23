@@ -4733,6 +4733,16 @@ main_in_separate_vm([FBinFile, FResFile]) ->
     Fun = binary_to_term(FBin),
     Res = try Fun()
           catch ?STACKTRACE(Class,Reason,Stack) % ->
+                  if Reason == {badmatch, {error, on_load_failure}} ->
+                          %% A .nif.so might have failed to load.
+                          io:format("LD_LIBRARY_PATH='~ts'~n",
+                                    [os:getenv("LD_LIBRARY_PATH")]),
+                          %% Delay a bit to give any stderr/stdout from logger
+                          %% a chance to complete, for increased debugging.
+                          timer:sleep(500);
+                     true ->
+                          ok
+                  end,
                   {'EXIT',{Class,Reason,Stack}}
           end,
     ResBin = term_to_binary(Res),
@@ -4781,6 +4791,7 @@ analyze_output_from_separate_vm({ExitCode, Output}, ResultFile) ->
         {ok, B} ->
             case binary_to_term(B) of
                 {'EXIT',{Class,Reason,StackTrace}} ->
+                    io:put_chars(Output),
                     erlang:raise(Class, {in_separate_vm,Reason}, StackTrace);
                 _Result ->
                     %% Anything not a crash is success, just like usual
