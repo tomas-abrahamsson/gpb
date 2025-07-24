@@ -70,16 +70,6 @@
 -export([msg_to_map/3]).
 -export([msg_from_map/4]).
 
--ifdef(OTP_RELEASE).
-%% Erlang 21 introduced new syntax for getting the stack trace.
-%% The OTP_RELEASE macro was also introduced in Erlang 21.
--define(with_stacktrace(Class, Reason, Stack),
-        Class:Reason:Stack ->).
--else. % -ifdef(OTP_RELEASE).
--define(with_stacktrace(Class, Reason, Stack),
-        Class:Reason -> Stack = erlang:get_stacktrace(),).
--endif. % -ifdef(OTP_RELEASE).
-
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 -include("../include/gpb_version.hrl").
@@ -278,9 +268,9 @@ decode_msg(Bin, MsgName, MsgDefs) ->
     try
         decode_msg2(Bin, MsgName, MsgDefs)
     catch
-        ?with_stacktrace(error, {gpb_error, _Reason}=Error, Stack)
+        error:{gpb_error, _Reason}=Error:Stack ->
             erlang:raise(error, Error, Stack);
-        ?with_stacktrace(Class, Reason, Stack)
+        Class:Reason:Stack ->
             error({gpb_error, {decoding_failure,
                                {Bin, MsgName, {Class, Reason, Stack}}}})
     end.
@@ -723,9 +713,9 @@ merge_msgs(PrevMsg, NewMsg, MsgDefs) ->
     try
         merge_msgs2(PrevMsg, NewMsg, MsgDefs)
     catch
-        ?with_stacktrace(error, {gpb_error, _Reason}=Error, Stack)
+        error:{gpb_error, _Reason}=Error:Stack ->
             erlang:raise(error, Error, Stack);
-        ?with_stacktrace(Class, Reason, Stack)
+        Class:Reason:Stack ->
             error({gpb_error, {merging_failure,
                                {PrevMsg, NewMsg, {Class, Reason, Stack}}}})
     end.
@@ -828,9 +818,9 @@ encode_msg(Msg, MsgDefs) ->
     try
         iolist_to_binary(encode_msg2(Msg, MsgDefs))
     catch
-        ?with_stacktrace(error, {gpb_error, _Reason}=Error, Stack)
+        error:{gpb_error, _Reason}=Error:Stack ->
             erlang:raise(error, Error, Stack);
-        ?with_stacktrace(Class, Reason, Stack)
+        Class:Reason:Stack ->
             error({gpb_error, {encoding_failure,
                                {Msg, {Class, Reason, Stack}}}})
     end.

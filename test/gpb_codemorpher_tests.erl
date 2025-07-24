@@ -21,12 +21,6 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R:St ->).
--else. % -ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
--endif. % -ifdef(OTP_RELEASE).
-
 %% ------------------------------------------------------------------
 
 -define(dummy_mod, list_to_atom(lists:concat([?MODULE, "-test"]))).
@@ -510,7 +504,7 @@ l(Mod, Exports, Forms) ->
             ?debugFmt("~nCompilation Error:~n~s~n  ~p~n",
                       [format_forms_debug(Forms), Error]),
             Error
-    catch ?STACKTRACE(error,Error,ST) % ->
+    catch error:Error:ST ->
             ?debugFmt("~nCompilation crashed (malformed parse-tree?):~n"
                       ++ "~s~n"
                       ++ "  ~p~n",

@@ -95,7 +95,6 @@
 -export([get_bypass_wrappers_by_opts/1]).
 -export([get_enum_macros_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
--export([target_has_stacktrace_syntax/1]).
 -export([target_has_nifs_directive/1]).
 -export([current_otp_release/0]).
 -export([proto2_type_default/3]).
@@ -745,15 +744,6 @@ current_otp_release() ->
 
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
-
-%% In Erlang 21, the function erlang:get_stacktrace/0 was deprecated
-%% and there is new syntax for retrieving the stacktrace:
-%%
-%%   try ...
-%%   catch Class:Reason:Stacktrace -> ...
-%%   end
-target_has_stacktrace_syntax(Opts) ->
-    is_target_major_version_at_least(21, Opts).
 
 %% In Erlang 25, declaring functions overridden as NIFs
 %% in -nifs([fn1/1, fn2/1, ...]). allows for the compiler and loader

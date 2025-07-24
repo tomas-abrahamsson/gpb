@@ -81,12 +81,6 @@
 -export([e_l2b/1, d_b2l/1, v_l/1]).
 
 
--ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R:St ->).
--else. % -ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
--endif. % -ifdef(OTP_RELEASE).
-
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
 %% for gpb and for the code that gpb_compile generates.
@@ -2927,7 +2921,7 @@ report_or_return_warnings_or_errors_test_aux() ->
          Options = WarningOptions ++ ErrorOptions ++ WarnsAsErrsOpts,
          try
              rwre_go(Options, CompileTo, SrcType, SrcQuality)
-         catch ?STACKTRACE(Class,Reason,Stack)
+         catch Class:Reason:Stack ->
                  %% Need some trouble shooting info for the failing combination
                  %% This could have been made into a test generator,
                  %% with each combination its won test,
@@ -3391,7 +3385,7 @@ compile_and_assert_that_format_x_produces_iolist(Contents,
                   {ok, Warns} when FormatWhat == format_warning ->
                       [gpb_compile:format_warning(Warn) || Warn <- Warns]
               end
-          catch ?STACKTRACE(Class, Reason, Stack)
+          catch Class:Reason:Stack ->
                   %% for debugging, if gpb_compile:format_error crashes:
                   io:format("Res from gpb_compile:file =~n"
                             "  ~p~n", [Res]),
@@ -4697,7 +4691,7 @@ main_in_separate_vm([FBinFile, FResFile]) ->
     {ok, FBin} = file:read_file(FBinFile),
     Fun = binary_to_term(FBin),
     Res = try Fun()
-          catch ?STACKTRACE(Class,Reason,Stack) % ->
+          catch Class:Reason:Stack ->
                   {'EXIT',{Class,Reason,Stack}}
           end,
     ResBin = term_to_binary(Res),

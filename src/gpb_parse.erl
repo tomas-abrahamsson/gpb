@@ -75,12 +75,6 @@ format_error({syntax_error, {before, Tokens}, Why}) ->
 -define(syntax_error(Where, Why),
         throw({syntax_error, line(Where), Where, Why})).
 
--ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R:St ->).
--else. % -ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
--endif. % -ifdef(OTP_RELEASE).
-
 %% Principles that most of the recursive descent parser below follow:
 %%
 %% * To parse each an item, there is a corresponding function p_item.
@@ -132,7 +126,7 @@ p_top(Tokens, Acc, Errors) when Tokens /= [] ->
             _ ->
                 ?syntax_error(Tokens)
         end
-    catch ?STACKTRACE(throw, {syntax_error, Line, FollowingTokens}, St)
+    catch throw:{syntax_error, Line, FollowingTokens}:St ->
             maybe_debug_syntax_error(Line, FollowingTokens, St, undefined),
             ParenStack = [],
             Rest1 = try_recover(ParenStack, safe_tl(Tokens)),
@@ -140,7 +134,7 @@ p_top(Tokens, Acc, Errors) when Tokens /= [] ->
             Where = safe_max_n_on_same_line(FollowingTokens, 3),
             Error = {Line, ?MODULE, {syntax_error, {before, Where}}},
             p_top(Rest2, Acc, [Error | Errors]);
-          ?STACKTRACE(throw, {syntax_error, Line, FollowingTokens, Why}, St)
+          throw:{syntax_error, Line, FollowingTokens, Why}:St ->
             maybe_debug_syntax_error(Line, FollowingTokens, St, Why),
             ParenStack = [],
             Rest1 = try_recover(ParenStack, safe_tl(Tokens)),

@@ -75,21 +75,6 @@ format_top_function_no_msgs(_Opts) ->
        end)].
 
 format_top_function_msgs(Defs, AnRes, Opts) ->
-    Error = ("error({gpb_error," ++
-             ""     "{from_json_failure," ++
-             ""     " {Json, MsgName, {Class, Reason, StackTrace}}}})"),
-    FromJsonMsg1Catch_GetStackTraceAsPattern =
-        ?f("from_json_1_catch(Json, MsgName, TrUserData) ->~n"
-           "    try from_json_2_doit(MsgName, Json, TrUserData)~n"
-           "    catch Class:Reason:StackTrace -> ~s~n"
-           "    end.~n", [Error]),
-    FromJsonMsg1Catch_GetStackTraceAsCall =
-        ?f("from_json_1_catch(Json, MsgName, TrUserData) ->~n"
-           "    try from_json_2_doit(MsgName, Json, TrUserData)~n"
-           "    catch Class:Reason ->~n"
-           "        StackTrace = erlang:get_stacktrace(),~n"
-           "        ~s~n"
-           "    end.~n", [Error]),
     DoNif = proplists:get_bool(nif, Opts),
     [gpb_codegen:format_fn(
        from_json,
@@ -102,11 +87,15 @@ format_top_function_msgs(Defs, AnRes, Opts) ->
                TrUserData = proplists:get_value(user_data, Opts),
                from_json_1_catch(Json, MsgName, TrUserData)
        end),
-     ["-ifdef('OTP_RELEASE').\n", % This macro appeared in Erlang 21
-      FromJsonMsg1Catch_GetStackTraceAsPattern,
-      "-else.\n",
-      FromJsonMsg1Catch_GetStackTraceAsCall,
-      "-endif.\n\n"],
+     "\n"
+     "from_json_1_catch(Json, MsgName, TrUserData) ->\n"
+     "    try from_json_2_doit(MsgName, Json, TrUserData)\n"
+     "    catch Class:Reason:StackTrace ->\n"
+     "            error({gpb_error,\n"
+     "                   {from_json_failure,\n"
+     "                    {Json, MsgName, {Class, Reason, StackTrace}}}})\n"
+     "    end.\n"
+     "\n",
      gpb_codegen:format_fn(
        from_json_2_doit,
        fun('MsgName', Json, TrUserData) ->

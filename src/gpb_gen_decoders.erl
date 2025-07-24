@@ -109,28 +109,6 @@ format_decoders_top_function_no_msgs(Opts) ->
 
 format_decoders_top_function_msgs(Defs, AnRes, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
-    Error = ("error({gpb_error," ++
-             ""     "{decoding_failure," ++
-             ""     " {Bin, MsgName, {Class, Reason, StackTrace}}}})"),
-    DecodeMsg1Catch_GetStackTraceAsPattern =
-        ?f("decode_msg_1_catch(Bin, MsgName, TrUserData) ->~n"
-           "    try decode_msg_2_doit(MsgName, Bin, TrUserData)~n"
-           "    catch~n"
-           "        error:{gpb_error,_}=Reason:StackTrace ->~n"
-           "            erlang:raise(error, Reason, StackTrace);~n"
-           "        Class:Reason:StackTrace -> ~s~n"
-           "    end.~n", [Error]),
-    DecodeMsg1Catch_GetStackTraceAsCall =
-        ?f("decode_msg_1_catch(Bin, MsgName, TrUserData) ->~n"
-           "    try decode_msg_2_doit(MsgName, Bin, TrUserData)~n"
-           "    catch~n"
-           "        error:{gpb_error,_}=Reason ->~n"
-           "            erlang:raise(error, Reason,~n"
-           "                         erlang:get_stacktrace());~n"
-           "        Class:Reason ->~n"
-           "            StackTrace = erlang:get_stacktrace(),~n"
-           "            ~s~n"
-           "    end.~n", [Error]),
     [gpb_codegen:format_fn(
        decode_msg,
        fun(Bin, MsgName) when is_binary(Bin) ->
@@ -142,11 +120,18 @@ format_decoders_top_function_msgs(Defs, AnRes, Opts) ->
                TrUserData = proplists:get_value(user_data, Opts),
                decode_msg_1_catch(Bin, MsgName, TrUserData)
        end),
-     ["-ifdef('OTP_RELEASE').\n", % This macro appeared in Erlang 21
-      DecodeMsg1Catch_GetStackTraceAsPattern,
-      "-else.\n",
-      DecodeMsg1Catch_GetStackTraceAsCall,
-      "-endif.\n\n"],
+     "\n"
+     "decode_msg_1_catch(Bin, MsgName, TrUserData) ->\n"
+     "    try decode_msg_2_doit(MsgName, Bin, TrUserData)\n"
+     "    catch\n"
+     "        error:{gpb_error,_}=Reason:StackTrace ->\n"
+     "            erlang:raise(error, Reason, StackTrace);\n"
+     "        Class:Reason:StackTrace ->\n"
+     "            error({gpb_error,\n"
+     "                   {decoding_failure,\n"
+     "                    {Bin, MsgName, {Class, Reason, StackTrace}}}})\n"
+     "    end.\n"
+     "\n",
      gpb_codegen:format_fn(
        decode_msg_2_doit,
        fun('MsgName', Bin, TrUserData) ->

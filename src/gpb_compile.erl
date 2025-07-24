@@ -309,12 +309,6 @@
 -export_type([comp_ret/0]).
 -export_type([io_info_item/0]).
 
--ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R:St ->).
--else. % -ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
--endif. % -ifdef(OTP_RELEASE).
-
 -record(path,
         {%% The path as located eg on the file system
          %% via the {i,Dir} options:
@@ -4607,7 +4601,7 @@ possibly_format_descriptor(Defs, Opts) ->
                           [[replace_term('"base"', ProtoBase),
                             replace_term('<<PBin>>', PBin)]
                            || {ProtoBase, PBin} <- PBins])])]
-            catch ?STACKTRACE(error,undef,ST) % ->
+            catch error:undef:ST ->
                     case {element(1,hd(ST)), element(2,hd(ST))} of
                         {gpb_compile_descr, encode_defs_to_descriptors} ->
                             ["-spec descriptor() -> no_return().\n",
