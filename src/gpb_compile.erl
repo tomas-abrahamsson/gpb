@@ -4674,7 +4674,7 @@ possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
 
 compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
     ModAsStr = flatten_iolist(?f("~p", [Mod])),
-    ErlCode2 = nano_epp(ErlCode, ModAsStr, HrlText, Opts),
+    ErlCode2 = nano_epp(ErlCode, ModAsStr, HrlText),
     {ok, Toks, _EndLine} = erl_scan:string(ErlCode2),
     FormToks = split_toks_at_dot(Toks),
     Forms = [case erl_parse:parse_form(Ts) of
@@ -4696,7 +4696,7 @@ compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
          hrl,
          defs}).
 
-nano_epp(Code, ModAsStr, HrlText, Opts) ->
+nano_epp(Code, ModAsStr, HrlText) ->
     %% nepp = nano-erlang-preprocessor. Couldn't find a way to run
     %% the epp from a string, and don't want or need to use the file
     %% system when everything is already in memory.
@@ -4704,16 +4704,8 @@ nano_epp(Code, ModAsStr, HrlText, Opts) ->
     %% Setup a dictionary, mostly to handle -ifdef...-endif
     %% in hrls and in the decoders.
     %% The OTP_RELEASE first appeared in Erlang 21.
-    M0 = #{},
-    OtpRelease = gpb_lib:current_otp_release(),
-    TargetOtpRelease = proplists:get_value(target_erlang_version, Opts,
-                                           OtpRelease),
-    M1 = if TargetOtpRelease >= 21 ->
-                 M0#{'OTP_RELEASE' => OtpRelease};
-            TargetOtpRelease < 21 ->
-                 M0
-         end,
-    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=M1},
+    M = #{'OTP_RELEASE' => gpb_lib:current_otp_release()},
+    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=M},
     {Txt, <<>>, _EndNState, _EndLine} = nepp1(Code, NState, _Line=1, []),
     Txt.
 
