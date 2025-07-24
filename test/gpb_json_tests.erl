@@ -42,32 +42,6 @@
 -export([string_to_int/1, int_to_string/1]).
 -export([id/1]).
 
--ifdef('OTP_RELEASE').
-%% ?assertEqual/3 appeared in Erlang 20 already,
-%% but it is easier to test for 'OTP_RELEASE' which
-%% appeared in Erlang 21, and we need a fallback to
-%% support older releases anyway...
--define(assert_eq_3(ExpectedExpr, ActualExpr, DebugInfo),
-        ?assertEqual(ExpectedExpr, ActualExpr, DebugInfo)).
--else. % -ifdef('OTP_RELEASE').
-%% Fallback
--define(assert_eq_3(ExpectedExpr, ActualExpr, DebugInfo),
-        ((fun() ->
-                  X@@ = (ExpectedExpr),
-                  case (ActualExpr) of
-                      X@@ -> ok;
-                      Actual@@ ->
-                          error({not_equal, [{line, ?LINE},
-                                             {expr,??ActualExpr},
-                                             {debug, DebugInfo},
-                                             {expected,X@@},
-                                             {actual,Actual@@}]})
-                  end
-
-          end)())).
--endif. % -ifdef('OTP_RELEASE').
-
-
 object_format_test() ->
     Proto = "
         message Msg {
@@ -1787,14 +1761,14 @@ j_roundtrip_nif_to_erl(Msg, NifModule, ErlModule, PrepF) ->
     JRepr = json_decode(JStr),
     MsgName = element(1, Msg),
     DebugInfo = [nif_to_erl, {jstr, JStr}, {jrepr, JRepr}],
-    ?assert_eq_3(Msg, PrepF(ErlModule:from_json(JRepr, MsgName)), DebugInfo).
+    ?assertEqual(Msg, PrepF(ErlModule:from_json(JRepr, MsgName)), DebugInfo).
 
 j_roundtrip_erl_to_nif(Msg, NifModule, ErlModule, PrepF) ->
     JRepr = ErlModule:to_json(Msg),
     JStr = json_encode(JRepr),
     MsgName = element(1, Msg),
     DebugInfo = [erl_to_nif, {jstr, JStr}, {jrepr, JRepr}],
-    ?assert_eq_3(Msg, PrepF(NifModule:from_json(JStr, MsgName)), DebugInfo).
+    ?assertEqual(Msg, PrepF(NifModule:from_json(JStr, MsgName)), DebugInfo).
 
 id(X) -> X.
 
@@ -1807,13 +1781,13 @@ j_map_roundtrip_nif_to_erl(Msg, MsgName, NifModule, ErlModule) ->
     JStr = NifModule:to_json(Msg, MsgName),
     JRepr = pl_to_map(json_decode(JStr)),
     DebugInfo = [nif_to_erl, {jstr, JStr}, {jrepr, JRepr}],
-    ?assert_eq_3(Msg, ErlModule:from_json(JRepr, MsgName), DebugInfo).
+    ?assertEqual(Msg, ErlModule:from_json(JRepr, MsgName), DebugInfo).
 
 j_map_roundtrip_erl_to_nif(Msg, MsgName, NifModule, ErlModule) ->
     JRepr = ErlModule:to_json(Msg, MsgName),
     JStr = json_encode(map_to_pl(JRepr)),
     DebugInfo = [erl_to_nif, {jstr, JStr}, {jrepr, JRepr}],
-    ?assert_eq_3(Msg, NifModule:from_json(JStr, MsgName), DebugInfo).
+    ?assertEqual(Msg, NifModule:from_json(JStr, MsgName), DebugInfo).
 
 %% -- Simplified json encoder/decoder for subset that occurs here --
 json_encode(Obj) -> iolist_to_binary(je(Obj)).
