@@ -631,7 +631,6 @@ format_helpers(Defs, AnRes, Opts) ->
 
 format_json_msg_iterator_helpers(Defs, Opts) ->
     HaveNonemptyMsgs = have_nonempty_msg(Defs),
-    HaveMapIterators = gpb_lib:target_has_map_iterators(Opts),
     [[case gpb_lib:json_object_format_by_opts(Opts) of
           eep18 ->
               [gpb_codegen:format_fn(
@@ -665,7 +664,7 @@ format_json_msg_iterator_helpers(Defs, Opts) ->
                  fun([{Key,Value} | Rest]) -> {Key, Value, Rest};
                     ([]) -> none
                  end)];
-          map when HaveMapIterators ->
+          map ->
               [gpb_codegen:format_fn(
                  fj_iter,
                  fun(Map) -> maps:iterator(Map)
@@ -673,16 +672,6 @@ format_json_msg_iterator_helpers(Defs, Opts) ->
                gpb_codegen:format_fn(
                  fj_next,
                  fun(Iter) -> maps:next(Iter)
-                 end)];
-          map when not HaveMapIterators ->
-              [gpb_codegen:format_fn(
-                 fj_iter,
-                 fun(Map) -> maps:to_list(Map)
-                 end),
-               gpb_codegen:format_fn(
-                 fj_next,
-                 fun([{Key,Value} | Rest]) -> {Key, Value, Rest};
-                    ([]) -> none
                  end)]
       end] || HaveNonemptyMsgs].
 

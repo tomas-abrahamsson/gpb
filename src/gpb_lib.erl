@@ -96,7 +96,6 @@
 -export([get_enum_macros_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
 -export([target_has_stacktrace_syntax/1]).
--export([target_has_map_iterators/1]).
 -export([target_has_nifs_directive/1]).
 -export([current_otp_release/0]).
 -export([proto2_type_default/3]).
@@ -754,11 +753,6 @@ is_digit(_) -> false.
 %%   catch Class:Reason:Stacktrace -> ...
 %%   end
 target_has_stacktrace_syntax(Opts) ->
-    is_target_major_version_at_least(21, Opts).
-
-%% In Erlang 21, there is maps:iterator/1 and maps:next/1 where "the memory
-%% usage is guaranteed to be bounded no matter the size of the map."
-target_has_map_iterators(Opts) ->
     is_target_major_version_at_least(21, Opts).
 
 %% In Erlang 25, declaring functions overridden as NIFs
