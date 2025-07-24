@@ -5901,14 +5901,5 @@ id(X) -> X.
 
 f(Fmt, Args) -> lists:flatten(io_lib:format(Fmt, Args)).
 
--ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
-
 string_trim(Str) ->
     string:trim(Str).
-
--else.  % NO_HAVE_ERL20_STR_FUNCTIONS
-
-string_trim(Str) ->
-    string:strip(Str).
-
--endif. % NO_HAVE_ERL20_STR_FUNCTIONS

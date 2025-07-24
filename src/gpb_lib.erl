@@ -1074,8 +1074,6 @@ can_do_no_underspecs_dialyzer_attr(Opts) ->
 nowarn_unused_function(FnName, Arity) ->
     ?f("-compile({nowarn_unused_function,~p/~w}).~n", [FnName,Arity]).
 
--ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
-
 comma_join(Elements) ->
     lists:append(lists:join(", ", Elements)).
 
@@ -1105,40 +1103,6 @@ lowercase(Str) ->
 
 uppercase(Str) ->
     string:uppercase(Str).
-
--else.  % NO_HAVE_ERL20_STR_FUNCTIONS
-
-comma_join(Elements) ->
-    string:join(Elements, ", ").
-
-nl_join(Elements) ->
-    string:join(Elements, "\n").
-
-or_join(Alternatives) ->
-    string:join(Alternatives, " | ").
-
-dot_join(Alternatives) ->
-    string:join(Alternatives, ".").
-
-string_join(Alternatives, Sep) ->
-    string:join(Alternatives, Sep).
-
-is_substr(SearchPattern, String) ->
-    string:str(String, SearchPattern) > 0.
-
-string_slice(String, Start0) ->
-    string:substr(String, Start0 + 1).
-
-string_lexemes(String, Separators) ->
-    string:tokens(String, Separators).
-
-lowercase(Str) ->
-    string:to_lower(Str).
-
-uppercase(Str) ->
-    string:to_upper(Str).
-
--endif. % NO_HAVE_ERL20_STR_FUNCTIONS
 
 snake_case(Str) ->
     lowercase(
@@ -1181,20 +1145,8 @@ camel_case([], _) ->
 capitalize_letter(C) ->
     C + ($A - $a).
 
--ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
-%% Improve by making a separate test for lists:join (added in erl19)
-%% instead of piggybacking on the test for erl20 string functions.
-
 ljoin(Sep, List) ->
     lists:join(Sep, List).
-
--else. % NO_HAVE_ERL20_STR_FUNCTIONS
-
-ljoin(_Sep, []) -> [];
-ljoin(_Sep, [Elem]) -> [Elem];
-ljoin(Sep, [Hd | Rest]) -> [Hd, Sep | ljoin(Sep, Rest)].
-
--endif. % NO_HAVE_ERL20_STR_FUNCTIONS
 
 -ifndef(NO_HAVE_MAPS_MERGE_WITH_3).
 

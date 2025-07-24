@@ -131,22 +131,6 @@ OTP_MAJOR_MINOR = $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
 plt = $(GPB_PREFIX).gpb-$(OTP_MAJOR_MINOR).plt
 
 
-ifdef NO_HAVE_ERL20_STR_FUNCTIONS
-override ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
-else
-## attempt to auto-detect
-ERL_HAS_ERL20_STR_FUNCTIONS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
-                             try string:find("abc", "b") of \
-                                "bc" -> io:format("true~n") \
-                             catch error:undef -> io:format("false~n") \
-                             end, \
-                             receive after 10 -> ok end.' \
-                         -s erlang halt)
-ifeq ($(ERL_HAS_ERL20_STR_FUNCTIONS),false)
-override ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
-endif
-endif
-
 ifdef NO_HAVE_PLUS_MINUS_ZERO_FLOAT
 override ERLC_FLAGS += -DNO_HAVE_PLUS_MINUS_ZERO_FLOAT=true
 else

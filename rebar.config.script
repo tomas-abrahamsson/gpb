@@ -1,17 +1,5 @@
 %% -*- erlang -*-
 
-%% In Erlang 21, a number of string module functions are deprecated:
-%%   string:join/2 -> lists:join/2       (appeared in Erlang 19)
-%%   string:str/2  -> string:find/2      (appeared in Erlang 20)
-%%   string:substr/2 -> string:slice/2   (appeared in Erlang 20)
-%%   string:tokens/2 -> string:lexemes/2 (appeared in Erlang 20)
-%%   string:{to_lower,to_upper}/1 ->  and string:{lowercase,uppercase}/1
-NoHaveErl20StrFunctions =
-                 try string:find("abc", "b") of
-                     "bc" -> []
-                 catch error:undef -> [{d,'NO_HAVE_ERL20_STR_FUNCTIONS'}]
-                 end.
-
 %% In Erlang 27, the expression +0.0 =:= -0.0 will evaluate to false
 %% whereas in Erlang 26 and earlier, it evaluates to true.
 %% In Erlang 26.1, as a prep for Erlang 27, using 0.0 in match expreessions or
@@ -33,8 +21,7 @@ NoHaveMapsMergeWith3 =
                  catch error:undef -> [{d,'NO_HAVE_MAPS_MERGE_WITH_3'}]
                  end.
 
-ConfigOpts = NoHaveErl20StrFunctions ++ NoHavePlusMinusZeroFloat ++
-                 NoHaveMapsMergeWith3.
+ConfigOpts = NoHavePlusMinusZeroFloat ++ NoHaveMapsMergeWith3.
 
 [{require_otp_vsn, ".*"},
 
