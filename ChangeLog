@@ -1,5 +1,10 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.21.4
+2025-Aug-13
+
+        * Support Google protobuf 30.0 and later with NIFs.
+
 Version 4.21.3
 2025-Jan-13
 
@@ -11,7 +16,7 @@ Version 4.21.2
 
         * Add a missing option to the gpb_defs:def() type. Thanks to
           Paulo F. Oliveira. (#236)
-        * Support Google protobuf 26.0 and later with NIGs and JSON.
+        * Support Google protobuf 26.0 and later with NIFs and JSON.
           This version of Google protobuf deprecates the JSON option
           always_print_primitive_fields and adds another option, the
           always_print_fields_with_no_presence. Gpb now supports both
