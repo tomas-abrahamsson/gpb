@@ -85,5 +85,5 @@ yes_no () {
     unset ERL_LIBS
     git checkout -q "$repo_sha"
     make -j all doc
-    yes_no rebar3 hex docs
+    yes_no rebar3 hex publish docs
 )
