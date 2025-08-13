@@ -231,7 +231,7 @@
                        {suffix, name_part()} |
                        lowercase |
                        uppercase |
-                       snake_case |
+                       snake_case | old_snake_case |
                        dots_to_underscores |
                        base_name.
 
@@ -3673,6 +3673,7 @@ opt_rename_how(What, S) ->
         "lowercase" -> lowercase;
         "uppercase" -> uppercase;
         "snake_case" -> snake_case;
+        "old_snake_case" -> old_snake_case;
         "dots_to_underscores" -> dots_to_underscores;
         "base_name" -> base_name;
         "proto="++_ when What == msg_name;

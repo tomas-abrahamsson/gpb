@@ -150,6 +150,7 @@
 -export([lowercase/1]).
 -export([uppercase/1]).
 -export([snake_case/1]).
+-export([old_snake_case/1]).
 -export([camel_case/1]).
 -export([lower_camel_case/1]).
 
@@ -1082,7 +1083,44 @@ lowercase(Str) ->
 uppercase(Str) ->
     string:uppercase(Str).
 
+
+-define(is_lower(C), $a =< C, C =< $z).
+-define(is_upper(C), $A =< C, C =< $Z).
+-define(is_digit(C), $0 =< C, C =< $9).
+
 snake_case(Str) ->
+    sc_fsm(init, lists:reverse(Str), "").
+
+sc_fsm(State, [C | Rest], Out) ->
+    case {char_class(C), State} of
+        {Class, init}  -> sc_fsm(Class, Rest, [low_c(C) | Out]);
+        {upper, lower} -> sc_fsm(cap,   Rest, [low_c(C) | Out]);
+        {$.,    cap}   -> sc_fsm(init,  Rest, [C | Out]);
+        {$_,    cap}   -> sc_fsm(init,  Rest, [low_c(C) | Out]);
+        {Class, cap}   -> sc_fsm(Class, Rest, [low_c(C), $_ | Out]);
+        {$.,    digit} -> sc_fsm(init,  Rest, [C | Out]);
+        {digit, digit} -> sc_fsm(digit, Rest, [C | Out]);
+        {$_,    digit} -> sc_fsm(init,  Rest, [low_c(C) | Out]);
+        {Class, digit} -> sc_fsm(Class, Rest, [low_c(C), $_ | Out]);
+        {upper, upper} -> sc_fsm(upper, Rest, [low_c(C) | Out]);
+        {$.,    upper} -> sc_fsm(init,  Rest, [C | Out]);
+        {$_,    upper} -> sc_fsm(init,  Rest, [low_c(C) | Out]);
+        {Class, upper} -> sc_fsm(Class, Rest, [low_c(C), $_ | Out]);
+        {Class, _}     -> sc_fsm(Class, Rest, [low_c(C) | Out])
+    end;
+sc_fsm(_State, [], Out) ->
+    Out.
+
+char_class(C) when ?is_lower(C) -> lower;
+char_class(C) when ?is_upper(C) -> upper;
+char_class(C) when ?is_digit(C) -> digit;
+char_class(C) -> C.
+
+low_c(C) when ?is_upper(C) -> C + ($a - $A);
+low_c(C) -> C.
+
+%% Old snake case for bwd compat, but it is not idempotent
+old_snake_case(Str) ->
     lowercase(
       lists:foldl(fun(RE, Snaking) ->
                           re:replace(Snaking, RE, "\\1_\\2", [{return, list},
@@ -1104,14 +1142,11 @@ lower_camel_case(S) ->
     [LC1] = lowercase([C1]),
     [LC1 | Rest].
 
--define(is_lower_case(C), $a =< C, C =< $z).
--define(is_upper_case(C), $A =< C, C =< $Z).
--define(is_digit(C),      $0 =< C, C =< $9).
-camel_case([LC | Tl], CapNextLetter) when ?is_lower_case(LC) ->
+camel_case([LC | Tl], CapNextLetter) when ?is_lower(LC) ->
     if CapNextLetter     -> [capitalize_letter(LC) | camel_case(Tl, false)];
        not CapNextLetter -> [LC | camel_case(Tl, false)]
     end;
-camel_case([UC | Tl], _) when ?is_upper_case(UC) ->
+camel_case([UC | Tl], _) when ?is_upper(UC) ->
     [UC | camel_case(Tl, false)];
 camel_case([D | Tl], _) when ?is_digit(D) ->
     [D | camel_case(Tl, true)];

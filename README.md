@@ -608,6 +608,31 @@ defaulted to `maps`, and otherwise it defaulted to `jsx`.
 If you generate for records with gpb 5.0.0 or later and still need old
 format, set the `{json_format, jzx}` option (`-json-format jsx`).
 
+###### The snake_case renaming option
+
+The option `{rename,_,snake_case}` option has been made idempotent, that is,
+the result will be same when it is applied once as when it is applied twice
+or more.  However, if a name is already snake cased, the result will
+be non-backwards compatible, even when the renaming is applied only once, as
+illustrated in the table below.
+
+```
+          Name         snake_case    old behavior    comment
+
+       1  AbcDef       abc_def       abc_def         same
+       2  abc_def      abc_def       abc_def         same
+       3  Abc_Def      abc_def       abc__def        not same
+       4  X097Def      x_097_def     x_097_def       same
+       5  x_097_def    x_097_def     x__097_def      not same
+```
+
+In case this causes breakage, the preferred way is to update your code to
+avoid the double underscores, and if that is not possible, use
+the `{rename,_,old_snake_case}` option.
+
+The reason for making it idempotent was the confusing double underscores,
+when the snake casing accidentally got applied twice, once in a somewhat
+hidden way by a framework and once through an explicit option.
 
 ##### Major change in version 4.0.0: #####
 

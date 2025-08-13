@@ -175,6 +175,30 @@ override ERLC_FLAGS += -DNO_HAVE_JSON_MODULE=true
 endif
 endif
 
+ifdef NO_HAVE_PROPERTY_TESTER
+override ERLC_FLAGS += -DNO_HAVE_PROPERTY_TESTER=true
+else
+## attempt to auto-detect
+HAVE_PROPERTY_TESTER := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                             case [M || M <- [proper], \
+                                        code:ensure_loaded(M) =:= \
+                                            {module,M}] of \
+                               [] -> \
+                                   io:format("false~n"); \
+                               Ms -> \
+                                   Us = [string:uppercase(atom_to_list(M)) \
+                                         || M <- Ms], \
+                                   io:format("~s~n", [lists:join(" ", Us)]) \
+                             end, \
+                             receive after 10 -> ok end.' \
+                         -s erlang halt)
+ifeq ($(HAVE_PROPERTY_TESTER),false)
+override ERLC_FLAGS += -DNO_HAVE_PROPERTY_TESTER=true
+else
+override ERLC_FLAGS += $(patsubst %,-D%=true,$(HAVE_PROPERTY_TESTER))
+endif
+endif
+
 # Sorting it also eliminates duplicates
 MODULES := \
 	$(sort \

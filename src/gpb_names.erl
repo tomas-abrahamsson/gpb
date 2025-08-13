@@ -340,6 +340,8 @@ do_prim_op(uppercase, Name) ->
     list_to_atom(gpb_lib:uppercase(atom_to_list(Name)));
 do_prim_op(snake_case, Name) ->
     list_to_atom(gpb_lib:snake_case(atom_to_list(Name)));
+do_prim_op(old_snake_case, Name) ->
+    list_to_atom(gpb_lib:old_snake_case(atom_to_list(Name)));
 do_prim_op(dots_to_underscores, Name) ->
     list_to_atom(do_dot_uscore(atom_to_list(Name)));
 do_prim_op(base_name, Name) ->

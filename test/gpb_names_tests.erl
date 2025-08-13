@@ -196,6 +196,33 @@ x_proto() ->
        "}",
        "extend MsgName1 { optional uint32 fm2=2; }"]}].
 
+old_snake_case_opt_test() ->
+    Defs0 = parse_sort_several_file_lines(
+             [{"x.proto",
+               ["package TopPkg.SubPkg;",
+                "message MsgName1 {",
+                "  required MsgName2   f1=1;",
+                "  message MsgName2 {required uint32 m21=21;}"
+                "};"
+                %% An already snake-cased name. With the old snake_case
+                %% option, it will somewhat unexpectedly get double underscores:
+                "message Msg_Name_3 { required uint32 m31=31; }"
+               ]}]
+             , [use_packages]),
+    [{package,'TopPkg.SubPkg'},
+     {{enum_containment, _}, _},
+     {{msg,msg__name__3}, [#?gpb_field{}]}, % here are the double underscores
+     {{msg,msg_name_1}, [#?gpb_field{type={msg, msg_name_2}}]},
+     {{msg,msg_name_2}, [#?gpb_field{}]},
+     {{msg_containment,"x"},[msg_name_1, msg_name_2, msg__name__3]}, % and here
+     {{pkg_containment,"x"},'TopPkg.SubPkg'}] =
+        lists:sort(
+          filter_namey_things(
+            ok(gpb_names:rename_defs(
+                 Defs0,
+                 [{rename, {msg_fqname, base_name}},
+                  {rename, {msg_fqname, old_snake_case}}])))).
+
 renames_groups_test() ->
     Defs = parse_sort_several_file_lines(
              [{"x.proto",

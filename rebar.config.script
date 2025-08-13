@@ -28,8 +28,18 @@ NoHaveJsonModule =
                  catch error:undef -> [{d,'NO_HAVE_JSON_MODULE'}]
                  end.
 
-ConfigOpts = NoHavePlusMinusZeroFloat ++ NoHaveMapsMergeWith3 ++ 
-             NoHaveJsonModule.
+%% Run property-based tests if available.
+PropertyTesterOpts =
+                 case [M || M <- [proper],
+                            code:ensure_loaded(M) =:= {module, M}] of
+                     [] ->
+                         [{d, 'NO_HAVE_PROPERTY_TESTER'}];
+                     Ms ->
+                         [{d, string:uppercase(atom_to_list(M))} || M <- Ms]
+                 end.
+
+ConfigOpts = NoHavePlusMinusZeroFloat ++ NoHaveJsonModule ++
+                 PropertyTesterOpts.
 
 [{require_otp_vsn, ".*"},
 

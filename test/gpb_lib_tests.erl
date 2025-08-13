@@ -19,16 +19,83 @@
 
 -module(gpb_lib_tests).
 
+-ifndef(NO_HAVE_PROPERTY_TESTER).
+-include_lib("proper/include/proper.hrl").
+-endif.
 -include_lib("eunit/include/eunit.hrl").
 
 snake_case_test() ->
-    "winter_is_a_time_of_year" = gpb_lib:snake_case("WinterIsATimeOfYear"),
-    "winter_is_a_time_of_year" = gpb_lib:snake_case("winterIsATimeOfYear"),
-    "a_later_time" = gpb_lib:snake_case("ALaterTime"),
-    "a_later_time" = gpb_lib:snake_case("aLaterTime"),
-    %"dotted.name_part" = gpb_lib:snake_case("Dotted.NamePart"),
-    "already_snake_case" = gpb_lib:snake_case("already_snake_case"),
-    "this_is_273_k" = gpb_lib:snake_case("ThisIs273K"),
+    [?assertEqual(Expected, gpb_lib:snake_case(Input), {input_is, Input})
+     || {Expected, Input} <- snake_casings()],
+    ok.
+
+snake_case_is_idempotent_1_test() ->
+    [?assertEqual(Expected, gpb_lib:snake_case(gpb_lib:snake_case(Input)),
+                  {input_is, Input})
+     || {Expected, Input} <- snake_casings()],
+    ok.
+
+snake_casings() ->
+    [{"winter_is_a_time_of_year", "WinterIsATimeOfYear"},
+     {"winter_is_a_time_of_year", "winterIsATimeOfYear"},
+     {"a_later_time", "ALaterTime"},
+     {"a_later_time", "aLaterTime"},
+     {"dotted.name_part", "Dotted.NamePart"},
+     {"already_snake_case", "already_snake_case"},
+     {"this_is_273_k", "ThisIs273K"},
+     %% Some more:
+     {"aa.aa", "Aa.Aa"},
+     {"a.a_aa", "A.AAa"},
+     {"a.aa_a", "A.AaA"},
+     {"a.a_0_a", "A.A0A"},
+     %% When the name already contains an underscore:
+     {"abc_def", "Abc_Def"},
+     {"x_097_def", "x_097_Def"},
+     %% Some other cases
+     {"abc", "Abc"},
+     {"a_0_a", "A0A"},
+     {"a_0", "A0"},
+     {"_a_0", "_A0"},
+     {"_a_0", "_a0"},
+     {"a.a_0", "A.A0"},
+     {"a._0", "A._0"},
+     {"a.x_097_def", "A.x_097_Def"},
+     'end-marker'
+    ].
+
+snake_case_is_idempotent_2_test() ->
+    CamelCases =
+        ["A.Bb",
+         "BBcccA",
+         "BaCAACab.ab.BA3acCA.CCCA88.ab8b8b.BCB.aC4aA.BABcb6A",
+         "b1a99B.BbB8C",
+         "C",
+         "BCBcaABB4.baaABB.B3B2bc963a.b.c2b.A90.Ac8.BBCBbb.b2.aabb",
+         "B6c85.b6.c066",
+         "AC",
+         "c79A0aAC.a8A5A.c8cbCB9b.AbbbbB",
+         "B8c46aaAA.B25Aa.C.CBBAc06C",
+         "bACA0c.CABA9cbcc4.baA.bBaAbaBb.a4ca.b2cCa.cb9.aAB35c",
+         "accbCab8b"],
+    [?assert(is_idempotent(X)) || X <- CamelCases],
+    ok.
+
+is_idempotent(S) -> % applying twice should result in same as once
+    S2 = gpb_lib:snake_case(S),
+    S3 = gpb_lib:snake_case(S2),
+    S2 =:= S3.
+
+old_snake_name_test() ->
+    "winter_is_a_time_of_year" = gpb_lib:old_snake_case("WinterIsATimeOfYear"),
+    "winter_is_a_time_of_year" = gpb_lib:old_snake_case("winterIsATimeOfYear"),
+    "a_later_time" = gpb_lib:old_snake_case("ALaterTime"),
+    "a_later_time" = gpb_lib:old_snake_case("aLaterTime"),
+    "dotted.name_part" = gpb_lib:snake_case("Dotted.NamePart"),
+    "already_snake_case" = gpb_lib:old_snake_case("already_snake_case"),
+    "this_is_273_k" = gpb_lib:old_snake_case("ThisIs273K"),
+    %% A couple of oddities by the old snake_case, verify preserved behaviour:
+    "abc__def" = gpb_lib:old_snake_case("Abc_Def"),
+    "x__097_def" = gpb_lib:old_snake_case("x_097_def"),
     ok.
 
 basenameify_ish_test() ->
@@ -50,3 +117,79 @@ basenameify_ish_test() ->
     ?assertError({gpb_error, {multiply_defined_file_or_files, _}},
                  gpb_lib:basenameify_ish(["x", "x"])).
 
+-ifndef(NO_HAVE_PROPERTY_TESTER).
+idempotency_test_() ->
+    {timeout, 10,
+     fun() ->
+             ?assert(proper:quickcheck(prop_is_idempotent()))
+     end}.
+
+prop_is_idempotent() ->
+    ?FORALL(CamelCaseStr, camel_case_string(true),
+            ?WHENFAIL(io:format("For ~p:~n"
+                                "->  ~p~n"
+                                "->> ~p~n",
+                                [CamelCaseStr,
+                                 gpb_lib:snake_case(CamelCaseStr),
+                                 gpb_lib:snake_case(
+                                   gpb_lib:snake_case(CamelCaseStr))]),
+                      is_idempotent(CamelCaseStr))).
+
+backwards_compat_once_test_() ->
+    {timeout, 10,
+     fun() ->
+             ?assert(proper:quickcheck(prop_backwards_compat_once()))
+     end}.
+
+prop_backwards_compat_once() ->
+    ?FORALL(CamelCaseStr, camel_case_string(false),
+            ?WHENFAIL(io:format("For ~p:~n"
+                                "  old: ~p~n"
+                                "  new: ~p~n",
+                                [CamelCaseStr,
+                                 old_snake_case(CamelCaseStr),
+                                 gpb_lib:snake_case(CamelCaseStr)]),
+                      begin
+                          Old = old_snake_case(CamelCaseStr),
+                          New = gpb_lib:snake_case(CamelCaseStr),
+                          Old =:= New
+                      end)).
+
+old_snake_case(Str) -> % the old implementation, not idempotent
+    string:lowercase(
+      lists:foldl(fun(RE, Snaking) ->
+                          re:replace(Snaking, RE, "\\1_\\2", [{return, list},
+                                                              global])
+                  end, Str, [%% uppercase followed by lowercase
+                             "([^.])([A-Z][a-z]+)",
+                             %% any consecutive digits
+                             "([^.])([0-9]+)",
+                             %% uppercase with lowercase
+                             %% or digit before it
+                             "([a-z0-9])([A-Z])"])).
+
+%% generators:
+camel_case_string(U) ->  % U: whether or not to allow underscore as char
+    ?LET({Segment1, RestSegments}, {camel_case_segment(U),
+                                    list(camel_case_segment(U))},
+         lists:flatten(lists:join(".", [Segment1 | RestSegments]))).
+
+camel_case_segment(U) ->
+    ?LET({C1, Rest}, {segment_first_char(U), list(ident_char(U))},
+         [C1 | Rest]).
+
+segment_first_char(U) -> % U: whether or not to allow underscore as char
+    oneof(
+      lists:append(
+        [[integer($A, $Z)],
+         [integer($a, $z)],
+         [$_ || U]])).
+
+ident_char(U) -> % U: whether or not to allow underscore as char
+    oneof(
+      lists:append(
+        [[integer($A, $Z)],
+         [integer($a, $z)],
+         [integer($0, $9)],
+         [$_ || U]])).
+-endif. % -ifndef(NO_HAVE_PROPERTY_TESTER).
