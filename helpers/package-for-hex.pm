@@ -94,7 +94,7 @@ yes_no () {
           "COPYING.LIB", "README.*", "rebar.config.script",
           "ChangeLog", "Makefile"]},
  {build_tools, [rebar3, make]},
- {licenses, ["LGPL 2.1"]},
+ {licenses, ["LGPL-2.1-or-later"]},
  {links, [{"GitHub", "https://github.com/tomas-abrahamsson/gpb"}]},
  {exclude_files, ["include/gpb_version.hrl",
                   "descr_src/gpb_descriptor.erl",
