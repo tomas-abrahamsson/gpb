@@ -655,7 +655,11 @@ field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
                                   FVar, MsgVar, TrUserDataVar,
                                   AnRes, Opts) ->
     %% FIXME: Verify at most one oneof field is set
-    OFNames = gpb_lib:get_field_names(OFields),
+    OFNames0 = gpb_lib:get_field_names(OFields),
+    OFNames = case gpb_lib:get_maps_key_type_by_opts(Opts) of
+                  atom -> OFNames0;
+                  binary -> lists:map(fun(X) -> atom_to_binary(X, utf8) end, OFNames0)
+              end,
     ?expr(
        case 'M' of
            '#{OFName := OFVar}' ->
@@ -958,6 +962,7 @@ atom_to_stree(Atom) ->
     erl_syntax:atom(Atom).
 
 atom_to_binary_string_stree(Atom) ->
+    Cs = atom_to_list(Atom),
     erl_syntax:binary(
       [erl_syntax:binary_field(
-         erl_syntax:string(atom_to_list(Atom)))]).
+         erl_syntax:integer(C)) || C <- Cs]).

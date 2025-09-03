@@ -676,6 +676,33 @@ flat_oneof_with_translation_with_typespec_maps_test_aux() ->
             ]),
     ?assert(gpb_lib:is_substr("a1=>string()", strip_ws(Erl))).
 
+flat_oneof_with_maps_key_type_binary_test() ->
+    M = compile_iolist([ "message test {"
+                       , "  map<string, string> args = 1;"
+                       , "}"
+                       , "message union {"
+                       , "  oneof u {"
+                       , "    int32 a = 1;"
+                       , "    string b = 2;"
+                       , "  }"
+                       , "}"
+                       ],
+                       [{maps, true},
+                        {maps_oneof, flat},
+                        {maps_key_type, binary},
+                        {maps_unset_optional, omitted},
+                        strings_as_binaries,
+                        {verify, always}]),
+    MapInput1 = #{<<"args">> => #{<<"hello">> => <<"world">>}},
+    MapData1 = M:encode_msg(MapInput1, test),
+    ?assertEqual(MapInput1, M:decode_msg(MapData1, test)),
+    UnionInput1 = #{<<"a">> => 1},
+    UnionData1 = M:encode_msg(UnionInput1, union),
+    ?assertEqual(UnionInput1, M:decode_msg(UnionData1, union)),
+    UnionInput2 = #{<<"b">> => <<"hello">>},
+    UnionData2 = M:encode_msg(UnionInput2, union),
+    ?assertEqual(UnionInput2, M:decode_msg(UnionData2, union)),
+    unload_code(M).
 
 strip_ws(B) when is_list(B) ->
     binary_to_list(
