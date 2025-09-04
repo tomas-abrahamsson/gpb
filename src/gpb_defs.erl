@@ -48,7 +48,7 @@
 
 -define(is_non_empty_string(Str), (is_list(Str) andalso is_integer(hd(Str)))).
 
--type defs() :: [def()].
+-type defs() :: [def()] | map().
 -type def() :: {proto_defs_version, version()} |
                {{msg, Name::atom()}, [field()]} |
                {{group, Name::atom()}, [field()]} |
