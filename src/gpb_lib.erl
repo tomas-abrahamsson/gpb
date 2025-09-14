@@ -614,9 +614,10 @@ mapkey_literal_by_opts(Opts) ->
             fun(Atom) -> erl_syntax:atom(Atom) end;
         binary ->
             fun(Atom) ->
+                    Cs = atom_to_list(Atom),
                     erl_syntax:binary(
                            [erl_syntax:binary_field(
-                              erl_syntax:string(atom_to_list(Atom)))])
+                              erl_syntax:integer(C)) || C <- Cs])
             end
     end.
 
@@ -626,11 +627,9 @@ mapkey_expr_by_opts(Opts) ->
             fun(Expr) -> Expr end;
         binary ->
             fun(Expr) ->
-                    erl_syntax:binary(
-                      [erl_syntax:binary_field(
-                         erl_syntax:application(erl_syntax:atom(erlang),
-                                                erl_syntax:atom(atom_to_list),
-                                                [Expr]))])
+                    erl_syntax:application(erl_syntax:atom(erlang),
+                                           erl_syntax:atom(atom_to_binary),
+                                           [Expr, erl_syntax:atom(utf8)])
             end
     end.
 
