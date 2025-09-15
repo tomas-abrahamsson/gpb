@@ -1092,9 +1092,11 @@ format_string_encoder(AnRes, Opts) ->
      gpb_codegen:format_fn(
        FnName,
        fun(S, Bin, _TrUserData) ->
-               Utf8 = unicode:characters_to_binary(S),
-               Bin2 = e_varint(byte_size(Utf8), Bin),
-               <<Bin2/binary, Utf8/binary>>
+               case unicode:characters_to_binary(S) of
+                 Utf8 when is_binary(Utf8) ->
+                   Bin2 = e_varint(byte_size(Utf8), Bin),
+                   <<Bin2/binary, Utf8/binary>>
+               end
        end)].
 
 format_bytes_encoder(AnRes, Opts) ->
