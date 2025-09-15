@@ -284,7 +284,7 @@ format_field_merge_expr(#?gpb_field{name=FName, occurrence=Occur}=Field,
             if Occur == repeated ->
                 {uncond_merge, {{PF, NF}, Tr, 'erlang_++'}};
                true ->
-                {cond_merge, {{PF, NF}, Tr, 'erllang_++'}}
+                {cond_merge, {{PF, NF}, Tr, 'erlang_++'}}
             end;
         msgmerge when Occur == required ->
             Tr = gpb_gen_translators:mk_find_tr_fn_elem_or_default(
