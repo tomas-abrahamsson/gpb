@@ -10,7 +10,7 @@ jobs:
 
     strategy:
       matrix:
-        otpvsn: [27]
+        otpvsn: [27, 28]
       fail-fast: false
 
     container:
