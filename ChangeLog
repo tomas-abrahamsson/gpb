@@ -1,5 +1,13 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.21.6
+2025-Dec-18
+
+        * Bugfix unnecessary funtions with map type fields and
+        options {gen_decoders,false} or {gen_encoders,false} (Options
+        -no_gen_decoders or -no_gen_encoders) resulting in
+        compilation warnings. (#242)
+
 Version 4.21.5
 2025-Sep-14
 
