@@ -387,6 +387,71 @@ no_gen_introspect_test() ->
     [_] = Mod2:Fn(),
     unload_code(Mod2).
 
+no_gen_test() ->
+    {timeout,10,fun() -> no_gen_aux([{"a", 1}]) end}.
+
+-ifndef(NO_HAVE_MAPS).
+no_gen_maps_test() ->
+    {timeout,10,fun() -> no_gen_aux(#{"a" => 1}) end}.
+-endif. % -ifndef(NO_HAVE_MAPS).
+
+no_gen_aux(MapValue) ->
+    Booleans = [true, false],
+    [begin
+         Opts = [%% The option gen_decoders has implications for gen_mergers,
+                 %% so put gen_mergers before gen_decoders to be able to control
+                 %% it independently of gen_decoders, which expands in-place.
+                 {gen_mergers, DoMergers},
+                 {gen_verifiers, DoVerifiers}, % ditto for verifiers vs encoders
+                 {gen_encoders, DoEncoders},
+                 {gen_decoders, DoDecoders},
+                 {verify,never}],
+         io:format("----~nOpts=~p~nDefs=~p~n", [Opts, Defs]),
+         M = compile_iolist(Defs, Opts),
+         io:format("Compiled ok~n"),
+         if Msg /= no_msg ->
+                 should_succeed_or_fail(fun() -> M:encode_msg(Msg) end,
+                                        DoEncoders, encode),
+                 should_succeed_or_fail(fun() -> M:decode_msg(<<>>, 'M') end,
+                                        DoDecoders, decode),
+                 should_succeed_or_fail(fun() -> M:merge_msgs(Msg, Msg) end,
+                                        DoMergers, merge),
+                 should_succeed_or_fail(fun() -> M:verify_msg(Msg) end,
+                                        DoVerifiers, verify);
+            Msg == no_msg ->
+                 ok
+         end,
+         io:format("Tested ok~n"),
+         unload_code(M)
+     end
+     || {Defs, Msg} <- [{"message Msg { map<string, uint32> f1 = 1; }",
+                         {'Msg', MapValue}},
+                        {"message Msg { optional uint32 f1 = 1; }",
+                         {'Msg', 1}},
+                        {"", no_msg}],
+        DoEncoders <- Booleans,
+        {DoDecoders, DoMergers} <- [{true, true},
+                                    %% true, false is not a valid combination
+                                    {false, true}, % nb: depends on opts order!
+                                    {false, false}],
+        DoVerifiers <- Booleans],
+    ok.
+
+should_succeed_or_fail(F, ShouldSucceed, DebugInfo) ->
+    try F() of
+        _ when ShouldSucceed ->
+            ok;
+        X when not ShouldSucceed ->
+            error({unexpectedly_succeeded, F, DebugInfo, {res, X}})
+    catch Class:Reason:Stk ->
+            if ShouldSucceed ->
+                    error({unexpectedly_failed, F, DebugInfo,
+                           {crash, Class, Reason, Stk}});
+               not ShouldSucceed ->
+                    ok
+            end
+    end.
+
 field_pass_as_params_test() ->
     {timeout,10,fun field_pass_as_params_test_aux/0}.
 

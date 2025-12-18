@@ -35,9 +35,13 @@
 %% -- analysis -----------------------------------------------------
 
 analyze_defs(Defs, Sources, Renamings, Opts) ->
+    DoEncoders = gpb_lib:get_gen_encoders(Opts),
+    DoDecoders = gpb_lib:get_gen_decoders(Opts),
     ProtoDefsVsnElem = find_or_make_proto_defs_version_elem(Defs),
     MapTypes = find_map_types(Defs),
-    MapsAsMsgs = map_types_to_msgs(MapTypes),
+    MapsAsMsgs = if DoEncoders; DoDecoders -> map_types_to_msgs(MapTypes);
+                    true -> []
+                 end,
     DMapsAsMsgs = map_types_to_msgs_for_decoding(MapTypes),
     MapMsgEnums = enums_for_maps_as_msgs(MapTypes, Defs),
     Translations = compute_translations(Defs, Opts),
@@ -471,6 +475,9 @@ remove_empty_translations(D) ->
     dict:filter(fun(_Key, Ops) -> Ops /= [] end, D).
 
 compute_map_translations(Defs, Opts) ->
+    DoMergers = gpb_lib:get_gen_mergers(Opts),
+    DoEncoders = gpb_lib:get_gen_encoders(Opts),
+    DoDecoders = gpb_lib:get_gen_decoders(Opts),
     MapInfos =
         gpb_lib:fold_msg_fields(
           fun(MsgName, #?gpb_field{name=FName, type={map,KType,VType}}, Acc) ->
@@ -483,7 +490,9 @@ compute_map_translations(Defs, Opts) ->
     MapFieldFmt = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
     dict_from_translation_list(
       lists:append(
-        [mk_map_transls(MsgName, FName, KeyType, ValueType, MapFieldFmt)
+        [maybe_prune_translations(
+           mk_map_transls(MsgName, FName, KeyType, ValueType, MapFieldFmt),
+           DoEncoders, DoDecoders, DoMergers)
          || {{MsgName, FName}, {KeyType, ValueType}} <- MapInfos])).
 
 mk_map_transls(MsgName, FName, KeyType, ValueType, '2tuples')->
@@ -512,6 +521,35 @@ mk_map_transls(MsgName, FName, _KeyType, ValueType, maps)->
        {decode_repeated_add_elem, {AddItemTrFn,      ['$1', '$2']}},
        {decode_repeated_finalize, {id,               ['$1', '$user_data']}},
        {merge,                    {mt_merge_maps_m,  ['$1', '$2']}}]}].
+
+maybe_prune_translations(Transls, true, true, true) -> % common case fast path
+    Transls;
+maybe_prune_translations(Transls, DoEncoders, DoDecoders, DoMergers) ->
+    lists:filtermap(
+      fun({Path, Transls0}) ->
+              Transls1 =
+                  if DoEncoders -> Transls0;
+                     true -> delete_transl_ops([encode], Transls0)
+                  end,
+              Transls2 =
+                  if DoDecoders -> Transls1;
+                     true -> delete_transl_ops([decode_init_default,
+                                                decode_repeated_add_elem,
+                                                decode_repeated_finalize],
+                                               Transls1)
+                  end,
+              Transls3 =
+                  if DoMergers -> Transls2;
+                     true -> delete_transl_ops([merge], Transls2)
+                  end,
+              if Transls3 == [] -> false;
+                 Transls3 /= [] -> {true, {Path, Transls3}}
+              end
+      end,
+      Transls).
+
+delete_transl_ops(Ops, Transls) ->
+    lists:foldl(fun(Op, Acc) -> lists:keydelete(Op, 1, Acc) end, Transls, Ops).
 
 compute_type_translations(Defs, Opts) ->
     TypeTranslations =
