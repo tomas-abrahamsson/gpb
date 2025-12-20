@@ -912,7 +912,8 @@ file(File) ->
 %% top-level encode and decode functions without wrappers. The list
 %% below describe what functionality the wrappers provide. The main
 %% purpose of being able to bypass the wrappers is performance,
-%% especially when combined with the `nif' option. This option causes the following extra functions to be exported:
+%% especially when combined with the `nif' option.
+%% This option causes the following extra functions to be exported:
 %% <ul>
 %%   <li><code>encode_msg_<i>MsgName</i>/1</code></li>
 %%   <li><code>encode_msg_<i>MsgName</i>/2</code>
@@ -3409,7 +3410,7 @@ opt_specs() ->
       "       Specify how the generated encoder should\n"
       "       verify the message to be encoded.\n"},
      {"vdrp", undefined, verify_decode_required_present, "\n"
-      "       Verify that on decoding, required fields are present."},
+      "       Verify that on decoding, required fields are present.\n"},
      {"no-gen-verifiers", {'opt_value()', false}, gen_verifiers, "\n"
       "       Do not generate verify_msg functions.\n"
       "       Implies `-v never'.\n"},
@@ -3528,7 +3529,7 @@ opt_specs() ->
       "       Same as -json-always-print-fields-with-no-presence.\n"},
      {"json-always-print-fields-with-no-presence", undefined,
       json_always_print_fields_with_no_presence, "\n"
-      "       Print also (proto3) fields that are omitted or have a value"
+      "       Print also (proto3) fields that are omitted or have a value\n"
       "       that is their type's default"},
      {"json-preserve-proto-field-names", undefined,
       json_preserve_proto_field_names, "\n"
@@ -3904,6 +3905,7 @@ show_help_c() ->
     show_args().
 
 show_arg({{section,Section}}) ->
+    io:format("~n"),
     io:format("  ~s~n", [Section]);
 show_arg({OptDef, 'string_maybe_appended()', _, OptDoc}) ->
     io:format("   -~s   -~sOption ~s", [OptDef, OptDef, OptDoc]);
