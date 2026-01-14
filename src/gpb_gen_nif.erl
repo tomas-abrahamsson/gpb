@@ -1318,7 +1318,7 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
               "    ErlNifMapIterator iter;\n",
               "    ErlNifMapIteratorEntry first;\n",
               "",
-              initialize_map_iterator(4, "first"),
+              "    first = ERL_NIF_MAP_ITERATOR_FIRST;\n",
               "    if (!enif_map_iterator_create(env, r, &iter, first))\n",
               "        return 0;\n\n",
               ""
@@ -1747,7 +1747,7 @@ format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field,
        "    ErlNifMapIterator iter;\n"
        "    ErlNifMapIteratorEntry first;\n\n"
        ""
-       "~s\n\n" %% init of iterator `first'
+       "    first = ERL_NIF_MAP_ITERATOR_FIRST;\n\n"
        ""
        "    if (!enif_map_iterator_create(env, ~s, &iter, first))\n"
        "        return 0;\n\n"
@@ -1759,8 +1759,7 @@ format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field,
        "    }\n"
        "    enif_map_iterator_destroy(env, &iter);\n"
        "}\n",
-       [initialize_map_iterator(4, "first"),
-        SrcVar,
+       [SrcVar,
         gpb_lib:split_indent_butfirst_iolist(
           8, format_nif_cc_field_packer_single(
                {"ik", "iv"}, MsgVar, Field, Defs, CCMapping, Opts, add))]).
@@ -2356,16 +2355,6 @@ categorize_field_kind(#?gpb_field{occurrence=Occurrence, type=Type}=Field) ->
                     end
             end
     end.
-
-initialize_map_iterator(Indent, IteratorVarName) ->
-    ?f("#if ~s\n"
-       "~s = ERL_NIF_MAP_ITERATOR_FIRST;\n"
-       "#else /* before 2.8 which appeared in 18.0 */\n"
-       "~s = ERL_NIF_MAP_ITERATOR_HEAD;\n"
-       "#endif\n",
-       [format_nif_check_version_or_later(2, 8),
-        gpb_lib:indent(Indent, IteratorVarName),
-        gpb_lib:indent(Indent, IteratorVarName)]).
 
 split_indent_iolist_unless_curly_block(Indent, IoList) ->
     gpb_lib:cond_split_indent_iolist(
