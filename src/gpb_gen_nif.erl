@@ -1186,35 +1186,16 @@ format_nif_cc_foot(Mod, Defs, Opts) ->
      "\n",
      "static ErlNifFunc nif_funcs[] =\n",
      "{\n",
-     %% Dirty schedulers flags appeared in Erlang 17.3 = enif 2.7
-     %% but only if Erlang was configured with --enable-dirty-schedulers
-     %% In Erlang 21.0, it is no longer possible to disable dirty schedulers.
-     "#if ", format_nif_check_version_or_later(2, 7), "\n"
-     "#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT\n",
-     format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND, ", Opts),
-     "#else /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
-     format_nif_cc_nif_funcs_list(Defs, "", Opts),
-     "#endif /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
-     "#else /* before 2.7 or 17.3 */\n",
-     format_nif_cc_nif_funcs_list(Defs, no_flags, Opts),
-     "#endif /* before 2.7 or 17.3 */\n"
+     format_nif_cc_nif_funcs_list(Defs, Opts),
      "};\n",
      "\n",
      ?f("ERL_NIF_INIT(~s, nif_funcs, load, reload, upgrade, unload)\n",
         [Mod])].
 
-format_nif_check_version_or_later(Major, Minor) ->
-    ?f("ERL_NIF_MAJOR_VERSION > ~w"
-       " || "
-       "(ERL_NIF_MAJOR_VERSION == ~w && ERL_NIF_MINOR_VERSION >= ~w)",
-       [Major, Major, Minor]).
-
-format_nif_cc_nif_funcs_list(Defs, Flags, Opts) ->
+format_nif_cc_nif_funcs_list(Defs, Opts) ->
     DoJson = gpb_lib:json_by_opts(Opts),
     MsgNames = [MsgName || {{msg, MsgName}, _MsgFields} <- Defs],
-    FlagStr = if Flags == no_flags -> "";
-                 true -> ", " ++ Flags
-              end,
+    FlagStr = ", ERL_NIF_DIRTY_JOB_CPU_BOUND, ",
     [begin
          EncodeFnName = gpb_lib:mk_fn(encode_msg_, MsgName),
          EncodeCFnName = mk_c_fn(encode_msg_, MsgName),
