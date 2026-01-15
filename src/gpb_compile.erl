@@ -261,17 +261,17 @@
 -type fetcher_ret() :: from_file | {ok, string()} | {error, term()}.
 -type import_fetcher_fun() :: fun((string()) -> fetcher_ret()).
 
--type json_format() :: jsx | mochijson2 | jiffy | maps.
+-type json_format() :: maps | jsx | mochijson2 | jiffy | eep18.
 %% Convenience shorthand to specify object, key, array and string and null
 %% format.
--type json_object_format() :: eep18 | {proplist} | {atom(), proplist} | map.
+-type json_object_format() :: map | {proplist} | {atom(), proplist} | eep18.
 %% <ul>
-%%   <li>`eep18' means objects on format `[{}] | proplist()', such as
-%%       for instance for jsx.</li>
+%%   <li>`map' means as a map</li>
 %%   <li>`{proplist}' means a `proplist()' in a tuple.</li>
 %%   <li>`{atom(),proplist}' means a `proplist()' in a tagged tuple,
 %%       such as `{struct, proplist()}' for instance for mochijson2.</li>
-%%   <li>`map' means as a map</li>
+%%   <li>`eep18' means objects on format `[{}] | proplist()', such as
+%%       for instance for jsx.</li>
 %% </ul>
 -type json_key_format() :: atom | binary | string.
 -type json_array_format() :: list | {atom(), list}.
@@ -1240,9 +1240,14 @@ file(File) ->
 %%
 %% The `{json_format,Format}' option is a convenience shorthand, and will expand
 %% as indicated below. If the json_format is not specified, it defaults to
-%% `maps' if the <a href="#option-maps">`maps'</a> option is specified,
-%% and otherwise to `eep18' when generating code for records.
+%% `maps', which is compatible with the `json' module in Erlang/OTP.
 %% <dl>
+%%   <dt>maps (default)</dt>
+%%   <dd><code>[{json_object_format, map},
+%%              {json_key_format, binary},
+%%              {json_array_format, list},
+%%              {json_string_format, binary},
+%%              {json_null, null}]</code></dd>
 %%   <dt>jsx</dt>
 %%   <dd><code>[{json_object_format, eep18},
 %%              {json_key_format, binary},
@@ -1261,12 +1266,6 @@ file(File) ->
 %%              {json_array_format, list},
 %%              {json_string_format, binary},
 %%              {json_null, null}]</code></dd>
-%%   <dt>maps</dt>
-%%   <dd><code>[{json_object_format, map},
-%%              {json_key_format, binary},
-%%              {json_array_format, list},
-%%              {json_string_format, binary},
-%%              {json_null, null}]</code></dd>
 %% </dl>
 %%
 %% Corresponding command line option:
@@ -1279,16 +1278,16 @@ file(File) ->
 %% of json object, as indicated below. (Note that the format of the keys
 %% is specified by the `json_key_format' option, see further below.)
 %% <dl>
-%%   <dt>`eep18'</dt>
-%%   <dd>The empty json object is represented as `[{}]'.<br/>
-%%       Non-empty json objects are represented as proplists.</dd>
+%%   <dt>`map'</dt>
+%%   <dd>The json object is represented as an Erlang map.</dd>
 %%   <dt>`{proplist}'</dt>
 %%   <dd>A json object is represented as a proplist in a tuple.</dd>
 %%   <dt>`{atom(), proplist}'</dt>
 %%   <dd>A json object is represented as a proplist in a tagged tuple,
 %%       with the possibility to specify the tag.</dd>
-%%   <dt>`map'</dt>
-%%   <dd>The json object is represented as an Erlang map.</dd>
+%%   <dt>`eep18'</dt>
+%%   <dd>The empty json object is represented as `[{}]'.<br/>
+%%       Non-empty json objects are represented as proplists.</dd>
 %% </dl>
 %%
 %% Corresponding command line option:
@@ -1792,7 +1791,12 @@ norm_opt_any_translate(Opts) ->
 
 norm_opt_json_format(Opts) ->
     proplists:expand(
-      [{{json_format, jsx},        [{json_object_format, eep18},
+      [{{json_format, maps},       [{json_object_format, map},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]},
+       {{json_format, jsx},        [{json_object_format, eep18},
                                     {json_key_format, binary},
                                     {json_array_format, list},
                                     {json_string_format, binary},
@@ -1803,11 +1807,6 @@ norm_opt_json_format(Opts) ->
                                     {json_string_format, binary},
                                     {json_null, null}]},
        {{json_format, jiffy},      [{json_object_format, {proplist}},
-                                    {json_key_format, binary},
-                                    {json_array_format, list},
-                                    {json_string_format, binary},
-                                    {json_null, null}]},
-       {{json_format, maps},       [{json_object_format, map},
                                     {json_key_format, binary},
                                     {json_array_format, list},
                                     {json_string_format, binary},
@@ -2905,20 +2904,19 @@ c() ->
 %%       <a href="#option-json_case_insensitive_enum_parsing"
 %%                       >json_case_insensitive_enum_parsing</a></dd>
 %%   <dt><a id="cmdline-option-json-format"/>
-%%       `-json-format jsx | mochijson2 | jiffy | maps'</dt>
+%%       `-json-format maps | jsx | mochijson2 | jiffy'</dt>
 %%     <dd>Specify format for the JSON representation.
-%%       `maps' is default if the <a href="#cmdline-option-maps">`-maps'</a>
-%%       option is specified, otherwise the jsx format is default.<br/>
+%%       `maps' is default.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-json_format">json_format</a></dd>
 %%   <dt><a id="cmdline-option-json-object-format"/>
 %%       `-json-object-format eep18 | tpl | tpl:Tag | map'</dt>
 %%     <dd>Specify JSON object format:
 %%       <ul>
-%%         <li>`eep18' means `[{}] | proplist()', this is the default.</li>
+%%         <li>`map' means `map()'. This is the default</li>
 %%         <li>`tpl' means `{proplist()}'.</li>
 %%         <li>`tpl:Tag' means `{Tag, proplist()}'.</li>
-%%         <li>`map' means `map()'.</li>
+%%         <li>`eep18' means `[{}] | proplist()'.</li>
 %%       </ul>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-json_object_format">json_object_format</a>
@@ -3496,18 +3494,18 @@ opt_specs() ->
       "       Make case insignificant when parsing enums in JSON. Also allow\n"
       "       dash as alternative to underscore.\n"
       "       Default is that case _is_ significant when parsing enums.\n"},
-     {"json-format", {jsx,mochijson2,jiffy,maps}, json_format, "\n"
+     {"json-format", {maps,jsx,mochijson2,jiffy}, json_format, "\n"
       "       Specify format for JSON representation:\n"
-      "       * jsx          (default if -maps is not specified)\n"
+      "       * maps         (default)\n"
+      "       * jsx\n"
       "       * mochijson2\n"
-      "       * jiffy\n"
-      "       * maps         (default if -maps is specified)\n"},
+      "       * jiffy\n"},
      {"json-object-format", fun opt_json_object_format/2,json_object_format,"\n"
       "       Specify format for JSON object representation:\n"
-      "       * eep18        [{}] | proplist()  this is the default\n"
+      "       * map          map()    this is the default\n"
       "       * tpl          {proplist()}\n"
       "       * tpl:Tag      {Tag, proplist()}\n"
-      "       * map          map()\n"},
+      "       * eep18        [{}] | proplist()\n"},
      {"json-key-format", {binary,atom,string}, json_key_format, "\n"
       "       Specify format for JSON object keys:\n"
       "       * binary       (default)\n"
@@ -3806,10 +3804,10 @@ opt_arg_template(Arity) ->
 
 opt_json_object_format(OptTag, [S | Rest]) ->
     case S of
-        "eep18"     -> {ok, {{OptTag, eep18}, Rest}};
+        "map"       -> {ok, {{OptTag, map}, Rest}};
         "tpl"       -> {ok, {{OptTag, {proplist}}, Rest}};
         "tpl:"++Tag -> {ok, {{OptTag, {s2a(Tag), proplist}}, Rest}};
-        "map"       -> {ok, {{OptTag, map}, Rest}};
+        "eep18"     -> {ok, {{OptTag, eep18}, Rest}};
         _           -> {error, "Invalid JSON object format: "++S}
     end;
 opt_json_object_format(_OptTag, []) ->

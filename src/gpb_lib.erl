@@ -777,12 +777,7 @@ json_by_opts(Opts) ->
 json_object_format_by_opts(Opts) ->
     case proplists:get_value(json_object_format, Opts) of
         undefined ->
-            case gpb_lib:get_records_or_maps_by_opts(Opts) of
-                maps ->
-                    map;
-                records ->
-                    eep18
-            end;
+            map;
         eep18 ->
             eep18;
         {proplist} ->

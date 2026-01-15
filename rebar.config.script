@@ -21,7 +21,15 @@ NoHaveMapsMergeWith3 =
                  catch error:undef -> [{d,'NO_HAVE_MAPS_MERGE_WITH_3'}]
                  end.
 
-ConfigOpts = NoHavePlusMinusZeroFloat ++ NoHaveMapsMergeWith3.
+%% The json module appeared in Erlang 27.0
+NoHaveJsonModule =
+                 try json:encode(true) of
+                     <<"true">> -> []
+                 catch error:undef -> [{d,'NO_HAVE_JSON_MODULE'}]
+                 end.
+
+ConfigOpts = NoHavePlusMinusZeroFloat ++ NoHaveMapsMergeWith3 ++ 
+             NoHaveJsonModule.
 
 [{require_otp_vsn, ".*"},
 

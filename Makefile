@@ -160,6 +160,21 @@ override ERLC_FLAGS += -DNO_HAVE_MAPS_MERGE_WITH_3=true
 endif
 endif
 
+ifdef NO_HAVE_JSON_MODULE
+override ERLC_FLAGS += -DNO_HAVE_JSON_MODULE=true
+else
+## attempt to auto-detect
+HAVE_JSON_MODULE := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                             try json:encode(true) of \
+                                 <<"true">> -> io:format("true~n") \
+                             catch error:undef -> io:format("false~n") \
+                             end.' \
+                         -s erlang halt)
+ifeq ($(HAVE_JSON_MODULE),false)
+override ERLC_FLAGS += -DNO_HAVE_JSON_MODULE=true
+endif
+endif
+
 # Sorting it also eliminates duplicates
 MODULES := \
 	$(sort \

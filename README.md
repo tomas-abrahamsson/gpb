@@ -593,6 +593,22 @@ See the
 [ChangeLog](https://github.com/tomas-abrahamsson/gpb/blob/master/ChangeLog)
 for details.
 
+##### Major change in version 5.0.0: #####
+
+###### JSON
+
+Since gpb 5.0.0, the JSON format always defaults to `maps`. This format
+is compatible with the [`json` module](https://www.erlang.org/doc/apps/stdlib/json.html),
+in Erlang.
+
+In gpb 4.x.y, the default JSON format was `jsx` for records and `maps` for
+maps. That is, if the option `maps` (`-maps`) was specified, the json format
+defaulted to `maps`, and otherwise it defaulted to `jsx`.
+
+If you generate for records with gpb 5.0.0 or later and still need old
+format, set the `{json_format, jzx}` option (`-json-format jsx`).
+
+
 ##### Major change in version 4.0.0: #####
 
 The default value for the `maps_unset_optional` option has changed
