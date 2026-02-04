@@ -1621,10 +1621,14 @@ format_json_p3wellknown_helpers(Defs, AnRes, Opts) ->
                        false
                end,
     NonFlatMaps = not FlatMaps,
-    NeedsMkMsg = UsesP3Duration or UsesP3Timestamp or UsesP3Wrapper
-        or UsesP3Struct or (UsesP3Value and NonFlatMaps) or UsesP3ListValue
-        or UsesP3Empty or UsesP3FieldMask,
-    NeedsEnsureList = UsesP3Duration or UsesP3Timestamp or UsesP3FieldMask,
+    NeedsMkMsg = UsesP3Duration orelse UsesP3Timestamp orelse UsesP3Wrapper
+        orelse UsesP3Struct
+        orelse (UsesP3Value andalso NonFlatMaps)
+        orelse UsesP3ListValue
+        orelse UsesP3Empty
+        orelse UsesP3FieldMask,
+    NeedsEnsureList = UsesP3Duration orelse UsesP3Timestamp
+        orelse UsesP3FieldMask,
     [if not NeedsMkMsg ->
              "";
         NeedsMkMsg ->

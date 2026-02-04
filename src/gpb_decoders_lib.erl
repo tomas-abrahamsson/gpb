@@ -408,5 +408,5 @@ process_initializers_finalizers_and_msg_passers() ->
     fun(#fn{initializes_fields=B1,
             has_finalizer=B2,
             passes_msg=B3}) ->
-            B1 or B2 or B3
+            B1 orelse B2 orelse B3
     end.

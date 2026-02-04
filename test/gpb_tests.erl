@@ -208,9 +208,10 @@ skipping_with_oneof_test() ->
     #m1{a = undefined} = decode_msg(<<32,150,1>>, m1, Defs).
 
 skipping_groups_test() ->
-    DefsO = [{{msg,x1}, [Field1 = #?gpb_field{name=f1, fnum=1, rnum=2,
-                                              type=uint32, occurrence=required,
-                                              opts=[]}]}],
+    Field1 = #?gpb_field{name=f1, fnum=1, rnum=2,
+                         type=uint32, occurrence=required,
+                         opts=[]},
+    DefsO = [{{msg,x1}, [Field1]}],
     %% message with a group in a group
     DefsN = [{{msg,x1}, [Field1,
                          #?gpb_field{name=g, fnum=2, rnum=3,

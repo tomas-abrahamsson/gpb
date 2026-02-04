@@ -1352,16 +1352,10 @@ assert_not_contains_regexp(IoData, Re) ->
 %% --- bytes ----------
 
 list_as_bytes_indata_test() ->
-    HasBinary = (catch binary:copy(<<1>>)) == <<1>>, % binary exists since R14A
-    if HasBinary ->
-            M = compile_iolist(["message m1 { required bytes f1 = 1; }"]),
-            Data = M:encode_msg({m1, [1,2,3,4]}),
-            {m1, <<1,2,3,4>>} = M:decode_msg(Data, m1),
-            unload_code(M);
-       true ->
-            %% nothing to test
-            ok
-    end.
+    M = compile_iolist(["message m1 { required bytes f1 = 1; }"]),
+    Data = M:encode_msg({m1, [1,2,3,4]}),
+    {m1, <<1,2,3,4>>} = M:decode_msg(Data, m1),
+    unload_code(M).
 
 -define(btest(Fn, N), {atom_to_list(Fn), fun() -> Fn(N) end}).
 copy_bytes_test_() ->
@@ -1701,7 +1695,8 @@ translation_of_Any_as_a_map_value_test() ->
                            {decode,{?MODULE,any_d_atom,['$1']}},
                            {merge,{?MODULE,any_m_atom,['$1','$2']}}, % unused
                            {verify,{?MODULE,any_v_atom,['$1','$errorf']}}]}]),
-    R = {m, MapI=[{"x",a},{"y",b}]},
+    MapI = [{"x",a},{"y",b}],
+    R = {m, MapI},
     <<10,20, % "pseudo" msg for map item
       10,1,"x", % key=x
       18,15,?x_com_atom_1("a"), % value=a

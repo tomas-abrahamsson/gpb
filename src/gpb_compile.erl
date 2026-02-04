@@ -1992,7 +1992,7 @@ verify_opts_translation_and_nif(Opts) ->
     TranslType = lists:keymember(translate_type, 1, Opts),
     TranslField = lists:keymember(translate_field, 1, Opts),
     DoNif = proplists:get_bool(nif, Opts),
-    if (TranslType or TranslField) and DoNif ->
+    if (TranslType orelse TranslField) andalso DoNif ->
             {error, {invalid_options, translation, nif}};
        true ->
             ok
@@ -2001,7 +2001,7 @@ verify_opts_translation_and_nif(Opts) ->
 verify_opts_preserve_unknown_fields_and_json(Opts) ->
     Preserve = proplists:get_bool(preserve_unknown_fields, Opts),
     DoJson = gpb_lib:json_by_opts(Opts),
-    if Preserve and DoJson ->
+    if Preserve andalso DoJson ->
             {error, {invalid_options, preserve_unknown_fields, json}};
        true ->
             ok

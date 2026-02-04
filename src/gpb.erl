@@ -230,12 +230,13 @@ assert_version_format(S) ->
 -define(is_digit(C), $0 =< C, C =< $9).
 
 analyse_vsn_format(S) ->
-    case catch analyse_vsn_1(S) of
-        git -> git;
-        _X  -> text
+    try analyse_vsn_1(S) of
+        git -> git
+    catch _:_ ->
+            text
     end.
 
-analyse_vsn_1([C|T]) when ?is_digit(C) -> analyse_vsn_2(T). % must begin with 0-9
+analyse_vsn_1([C|T]) when ?is_digit(C) -> analyse_vsn_2(T). %must begin with 0-9
 
 analyse_vsn_2([C|T]) when ?is_digit(C) -> analyse_vsn_2(T);
 analyse_vsn_2("."++T)                  -> analyse_vsn_3(T);

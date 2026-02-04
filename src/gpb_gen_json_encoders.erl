@@ -284,7 +284,7 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                       end,
     P3PrintNoPresence =
         proplists:get_bool(json_always_print_fields_with_no_presence, Opts)
-        or IsNullValueEnum,
+        orelse IsNullValueEnum,
     IsPrimitiveType = is_primitive_type(Type),
 
     case Occurrence of
@@ -1303,13 +1303,16 @@ format_json_p3wellknowns_helpers(AnRes, Opts) ->
     UsesP3Value = uses_msg('google.protobuf.Value', AnRes),
     UsesP3ListValue = uses_msg('google.protobuf.ListValue', AnRes),
     UsesP3FieldMask = uses_msg('google.protobuf.FieldMask', AnRes),
-    NeedsGetFields = UsesP3Duration or UsesP3Timestamp
-        or UsesP3Float or UsesP3Double or UsesP3Int64 or UsesP3UInt64
-        or UsesP3Int32 or UsesP3UInt32 or UsesP3Bool or UsesP3String
-        or UsesP3Bytes
-        or UsesP3Struct or (UsesP3Value and not FlatMaps) or UsesP3ListValue
-        or UsesP3FieldMask,
-    NeedsDotNanos = UsesP3Duration or UsesP3Timestamp,
+    NeedsGetFields = UsesP3Duration orelse UsesP3Timestamp
+        orelse UsesP3Float orelse UsesP3Double
+        orelse UsesP3Int64 orelse UsesP3UInt64
+        orelse UsesP3Int32 orelse UsesP3UInt32
+        orelse UsesP3Bool
+        orelse UsesP3String orelse UsesP3Bytes
+        orelse UsesP3Struct orelse (UsesP3Value andalso not FlatMaps)
+        orelse UsesP3ListValue
+        orelse UsesP3FieldMask,
+    NeedsDotNanos = UsesP3Duration orelse UsesP3Timestamp,
     [if not NeedsGetFields ->
              "";
         NeedsGetFields ->
