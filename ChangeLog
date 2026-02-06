@@ -1,5 +1,13 @@
 -*- coding: utf-8; indent-tabs-mode: nil -*-
 
+Version 4.21.7
+2025-Feb-06
+
+        * Adapt for Erlang 29 (based on current OTP master, thus a
+          current guesstimate of needed changes)
+          The generated code already worked with Erlang 29, but gpb
+          itself needed some fixes to compile cleanly.
+
 Version 4.21.6
 2025-Dec-18
 
