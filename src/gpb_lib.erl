@@ -85,14 +85,14 @@
 
 -export([normalize_opts/1]).
 -export([get_2tuples_or_maps_for_maptype_fields_by_opts/1]).
--export([get_records_or_maps_by_opts/1]).
+-export([get_mapping_by_opts/1]).
 -export([get_mapping_and_unset_by_opts/1]).
 -export([get_strings_as_binaries_by_opts/1]).
 -export([get_type_specs_by_opts/1]).
 -export([get_gen_descriptor_by_opts/1]).
 -export([get_field_format_by_opts/1]).
--export([mk_get_defs_as_maps_or_records_fn/1]).
--export([get_defs_as_maps_or_records/1]).
+-export([mk_get_defs_format_fn/1]).
+-export([get_defs_format/1]).
 -export([get_epb_functions_by_opts/1]).
 -export([get_bypass_wrappers_by_opts/1]).
 -export([get_enum_macros_by_opts/1]).
@@ -526,25 +526,29 @@ map_msgdef_fields_o(FFun, Fields) ->
 %%
 %%
 mapping_match(RName, Fields, Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
+    case get_mapping_by_opts(Opts) of
         records -> record_match(RName, Fields);
+        natrecs  -> record_match(RName, Fields);
         maps    -> map_match(Fields, Opts)
     end.
 
 mapping_create(RName, Fields, Opts) when is_list(Opts) ->
-    Fn = fun() -> get_records_or_maps_by_opts(Opts) end,
+    Fn = fun() -> get_mapping_by_opts(Opts) end,
     mapping_create(RName, Fields, Fn, Opts).
 
 mapping_create(RName, Fields, RecordsOrMaps, Opts)
   when is_function(RecordsOrMaps) ->
     case RecordsOrMaps() of
         records -> record_create(RName, Fields);
+        natrecs  -> record_create(RName, Fields);
         maps    -> map_create(Fields, Opts)
     end.
 
 mapping_update(Var, RName, FieldsValues, Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
+    case get_mapping_by_opts(Opts) of
         records ->
+            record_update(Var, RName, FieldsValues);
+        natrecs ->
             record_update(Var, RName, FieldsValues);
         maps ->
             case get_mapping_and_unset_by_opts(Opts) of
@@ -681,11 +685,11 @@ term_mapping(Record, Records, Opts)
     case get_field_format_by_opts(Opts) of
         fields_as_records ->
             mapping_create(RName, FNamesValues,
-                           mk_get_defs_as_maps_or_records_fn(Opts),
+                           mk_get_defs_format_fn(Opts),
                            Opts);
         fields_as_maps ->
             mapping_create(RName, FNamesValues,
-                           mk_get_defs_as_maps_or_records_fn(Opts),
+                           mk_get_defs_format_fn(Opts),
                            Opts);
         fields_as_proplists ->
             erl_syntax:list(
@@ -714,6 +718,9 @@ normalize_alias_opts(Opts) ->
                 [fun norm_opt_alias_to_msg_proto_defs/1,
                  fun norm_opt_epb_compat_opt/1,
                  fun norm_opt_map_opts/1,
+                 fun norm_opt_msg_format/1,
+                 fun norm_opt_mapfield_format/1,
+                 fun norm_opt_defs_format/1,
                  fun norm_opt_any_translate/1,
                  fun norm_opt_json_format/1,
                  fun norm_opt_json_print_fields_with_no_presence/1,
@@ -746,6 +753,27 @@ norm_opt_map_opts(Opts) ->
        {{maps,false}, [{msgs_as_maps, false},
                        {mapfields_as_maps, false},
                        {defs_as_maps, false}]}],
+      Opts).
+
+norm_opt_msg_format(Opts) ->
+    proplists:expand(
+      [{msgs_as_maps,         [{msg_format, maps}]},
+       {{msgs_as_maps, true}, [{msg_format, maps}]}],
+      Opts).
+
+norm_opt_mapfield_format(Opts) ->
+    proplists:expand(
+      [{mapfields_as_maps,          [{mapfield_format, maps}]},
+       {{mapfields_as_maps, true},  [{mapfield_format, maps}]},
+       {{mapfields_as_maps, false}, [{mapfield_format, '2tuples'}]}],
+      Opts).
+
+norm_opt_defs_format(Opts) ->
+    proplists:expand(
+      [{defs_as_maps,              [{defs_format, maps}]},
+       {{defs_as_maps, true},      [{defs_format, maps}]},
+       {defs_as_proplists,         [{defs_format, proplists}]},
+       {{defs_as_proplists, true}, [{defs_format, proplists}]}],
       Opts).
 
 norm_opt_any_translate(Opts) ->
@@ -846,23 +874,24 @@ is_option_defined(Key, Opts) ->
               Opts).
 
 get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) ->
-    Default = false,
-    case proplists:get_value(mapfields_as_maps, Opts, Default) of
-        true  -> maps;
-        false -> '2tuples'
-    end.
+    Default = default_mapfield_format_by_opts(Opts),
+    proplists:get_value(mapfield_format, Opts, Default).
 
-get_records_or_maps_by_opts(Opts) ->
-    Default = false,
-    case proplists:get_value(msgs_as_maps, Opts, Default) of
-        false -> records;
-        true  -> maps
+get_mapping_by_opts(Opts) ->
+    Default = 'records',
+    case proplists:get_value(msg_format, Opts, Default) of
+        records        -> records;
+        native_records -> natrecs;
+        maps           -> maps
     end.
 
 get_mapping_and_unset_by_opts(Opts) ->
-    case get_records_or_maps_by_opts(Opts) of
+    case get_mapping_by_opts(Opts) of
         records ->
             records;
+        natrecs ->
+            Undef = proplists:get_value(native_records_unset, Opts, undefined),
+            #natrecs{unset_value=Undef};
         maps ->
             DefaultUnsetOptional = omitted,
             UnseOptional = proplists:get_value(maps_unset_optional, Opts,
@@ -882,24 +911,32 @@ get_gen_descriptor_by_opts(Opts) ->
     proplists:get_bool(descriptor, Opts).
 
 get_field_format_by_opts(Opts) ->
-    case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
-        false -> %% default
-            case get_defs_as_maps_or_records(Opts) of
-                records -> fields_as_records;
-                maps    -> fields_as_maps
-            end;
-        true ->
-            fields_as_proplists
+    Default = default_defs_format_by_opts(Opts),
+    case proplists:get_value(defs_format, Opts, Default) of
+        records   -> fields_as_records;
+        maps      -> fields_as_maps;
+        proplists -> fields_as_proplists
     end.
 
-mk_get_defs_as_maps_or_records_fn(Opts) ->
-    fun() -> get_defs_as_maps_or_records(Opts) end.
+mk_get_defs_format_fn(Opts) ->
+    fun() -> get_defs_format(Opts) end.
 
-get_defs_as_maps_or_records(Opts) ->
-    Default = false,
-    case proplists:get_value(defs_as_maps, Opts, Default) of
-        false -> records;
-        true  -> maps
+get_defs_format(Opts) ->
+    Default = default_defs_format_by_opts(Opts),
+    proplists:get_value(defs_format, Opts, Default).
+
+default_mapfield_format_by_opts(NormalizedOpts) ->
+    case get_mapping_by_opts(NormalizedOpts) of
+        records -> '2tuples';
+        natrecs -> maps;
+        maps    -> maps
+    end.
+
+default_defs_format_by_opts(NormalizedOpts) ->
+    case get_mapping_by_opts(NormalizedOpts) of
+        records -> records;
+        natrecs -> maps;
+        maps    -> maps
     end.
 
 get_epb_functions_by_opts(Opts) ->

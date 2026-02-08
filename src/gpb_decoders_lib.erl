@@ -33,6 +33,7 @@
 -export([explode_param_init/3]).
 -export([explode_param_pass/3]).
 -export([change_undef_marker_in_clauses/1]).
+-export([maybe_change_undef_marker_in_clauses/1]).
 -export([implode_to_map_exprs_all_mandatory/1]).
 -export([implode_to_map_exprs/4]).
 -export([rework_records_to_maps/4]).
@@ -57,13 +58,15 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     R = % Whether required fields are present in init-exprs
         case MappingUnset of
-            records -> o;
-            #maps{} -> if DecVfy -> m;
-                          true   -> o
-                       end
+            records    -> o;
+            #natrecs{} -> o;
+            #maps{}    -> if DecVfy -> m;
+                             true   -> o
+                          end
         end,
     Undef1 = case MappingUnset of
                 records -> undefined;
+                #natrecs{unset_value=NrUndef} -> NrUndef;
                 #maps{unset_optional=present_undefined} -> undefined;
                 #maps{unset_optional=omitted} -> '$undef'
             end,
@@ -125,6 +128,7 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
             pass_as_record ->
                 case MappingUnset of
                     records -> [m,d];
+                    #natrecs{} -> [m,d];
                     #maps{unset_optional=present_undefined} -> [m,d,o];
                     #maps{unset_optional=omitted} -> [m]
                 end
@@ -310,6 +314,17 @@ change_undef_marker_in_clauses(Undef) ->
               end,
               process_all(),
               Fns)
+    end.
+
+%% @doc If the unset_value has been redefined, change it by using
+%% change_undef_marker_in_clauses, otherwise leave it as is.
+maybe_change_undef_marker_in_clauses(UnsetValue) ->
+    if UnsetValue == undefined ->
+            fun(Fns) ->
+                    Fns
+            end;
+       true ->
+            change_undef_marker_in_clauses(UnsetValue)
     end.
 
 %% @doc The opposite of the {@link explode_param_init/3}, when a map is

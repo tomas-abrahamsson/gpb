@@ -39,8 +39,10 @@
                   splice_trees/2, repeat_clauses/2]).
 
 format_exports(_Defs, Opts) ->
-    case gpb_lib:get_records_or_maps_by_opts(Opts) of
+    case gpb_lib:get_mapping_by_opts(Opts) of
         records ->
+            ?f("-export([merge_msgs/2, merge_msgs/3, merge_msgs/4]).~n");
+        natrecs ->
             ?f("-export([merge_msgs/2, merge_msgs/3, merge_msgs/4]).~n");
         maps ->
             ?f("-export([merge_msgs/3, merge_msgs/4]).~n")
@@ -53,8 +55,9 @@ format_msg_merge_code(Defs, AnRes, Opts) ->
     end.
 
 format_msg_merge_code_no_msgs(Opts) ->
-    case gpb_lib:get_records_or_maps_by_opts(Opts) of
-        records ->
+    Mapping = gpb_lib:get_mapping_by_opts(Opts),
+    if Mapping == records;
+       Mapping == natrecs ->
             ["-spec merge_msgs(_, _) -> no_return().\n",
              gpb_codegen:format_fn(
                merge_msgs,
@@ -72,7 +75,7 @@ format_msg_merge_code_no_msgs(Opts) ->
                fun(_Prev, _New, _MsgName, _Opts) ->
                        erlang:error({gpb_error, no_messages})
                end)];
-        maps ->
+        Mapping == maps ->
             ["-spec merge_msgs(_, _, _) -> no_return().\n",
              gpb_codegen:format_fn(
                merge_msgs,
@@ -113,22 +116,55 @@ is_repeated_group(GroupName, #anres{group_occurrences=M}) ->
     end.
 
 format_merge_msgs_top_level(MsgNames, AnRes, Opts) ->
-    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
-    [[gpb_codegen:format_fn(
-       merge_msgs,
-       fun(Prev, New) when element(1,Prev) =:= element(1,New) ->
-               merge_msgs(Prev, New, element(1,Prev), [])
-       end) || Mapping == records],
-     gpb_codegen:format_fn(
-       merge_msgs,
-       fun(Prev, New, MsgName) when is_atom(MsgName) ->
-               merge_msgs(Prev, New, MsgName, []);
-          ('Prev', New, Opts) when element(1,'Prev') =:= element(1,New),
-                                   is_list(Opts) ->
-               merge_msgs(Prev, New, element(1,'Prev'), Opts)
-       end,
-       [repeat_clauses('Prev', [[replace_tree('Prev', ?expr(Prev))]
-                                || Mapping == records])]),
+    Mapping = gpb_lib:get_mapping_by_opts(Opts),
+    [%% Arity 2:
+     case Mapping of
+         records ->
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New) when element(1,Prev) =:= element(1,New) ->
+                       merge_msgs(Prev, New, element(1,Prev), [])
+               end);
+         natrecs ->
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New) when is_record(Prev), is_record(New) ->
+                       case {records:get_name(Prev), records:get_name(New)} of
+                           {Name, Name} ->
+                               merge_msgs(Prev, New, Name, [])
+                       end
+               end);
+         maps ->
+             ""
+     end,
+     %% Arity 3:
+     case Mapping of
+         records ->
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New, MsgName) when is_atom(MsgName) ->
+                       merge_msgs(Prev, New, MsgName, []);
+                  (Prev, New, Opts) when element(1,Prev) =:= element(1,New),
+                                         is_list(Opts) ->
+                       merge_msgs(Prev, New, element(1,Prev), Opts)
+               end);
+         natrecs ->
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New, MsgName) when is_atom(MsgName) ->
+                       merge_msgs(Prev, New, MsgName, []);
+                  (Prev, New, Opts) when is_record(Prev), is_record(New),
+                                         is_list(Opts) ->
+                       merge_msgs(Prev, New, element(1,Prev), Opts)
+               end);
+         maps ->
+             gpb_codegen:format_fn(
+               merge_msgs,
+               fun(Prev, New, MsgName) when is_atom(MsgName) ->
+                       merge_msgs(Prev, New, MsgName, [])
+               end)
+     end,
+     %% Arity 4:
      gpb_codegen:format_fn(
        merge_msgs,
        fun(Prev, New, MsgName, Opts) ->
@@ -206,7 +242,8 @@ format_msg_merger_fnclause_match(MsgName, MsgDef, Opts) ->
     NFields = lists:zip(FNames, NFVars),
     Infos = zip4(FNames, PFVars, NFVars, MsgDef),
     case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        records ->
+        Records when Records == records;
+                     is_record(Records, natrecs) ->
             PFields1 = [{FName,PFVar} || {FName,PFVar} <- PFields,
                                          PFVar /= none],
             P = gpb_lib:mapping_match(MsgName, PFields1, Opts),

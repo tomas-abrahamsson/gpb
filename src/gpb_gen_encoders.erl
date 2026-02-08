@@ -40,8 +40,10 @@
 
 format_exports(Defs, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
-    [case gpb_lib:get_records_or_maps_by_opts(Opts) of
+    [case gpb_lib:get_mapping_by_opts(Opts) of
          records ->
+             ?f("-export([encode_msg/1, encode_msg/2, encode_msg/3]).~n");
+         natrecs ->
              ?f("-export([encode_msg/1, encode_msg/2, encode_msg/3]).~n");
          maps ->
              ?f("-export([encode_msg/2, encode_msg/3]).~n")
@@ -73,23 +75,46 @@ format_encoders_top_function(Defs, AnRes, Opts) ->
     end.
 
 format_encoders_top_function_no_msgs(Opts) ->
-    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
-    [[[?f("-spec encode_msg(_) -> no_return().~n", []),
-       gpb_codegen:format_fn(
-         encode_msg,
-         fun(Msg) ->
-                 encode_msg(Msg, dummy_name, [])
-         end)] || Mapping == records],
+    Mapping = gpb_lib:get_mapping_by_opts(Opts),
+    [%% Arity 1:
+     if Mapping == records;
+        Mapping == natrecs ->
+             [?f("-spec encode_msg(_) -> no_return().~n", []),
+              gpb_codegen:format_fn(
+                encode_msg,
+                fun(Msg) ->
+                        encode_msg(Msg, dummy_name, [])
+                end)];
+        Mapping == maps ->
+             ""
+     end,
+     %% Arity  2:
      ?f("-spec encode_msg(_,_) -> no_return().~n", []),
-     gpb_codegen:format_fn(
-       encode_msg,
-       fun(Msg, MsgName) when is_atom(MsgName) ->
-               encode_msg(Msg, MsgName, []);
-          ('Msg', Opts) when tuple_size('Msg') >= 1, is_list(Opts) ->
-               encode_msg('Msg', element(1,'Msg'), [])
-       end,
-       [repeat_clauses('Msg', [[replace_tree('Msg', ?expr(Msg))]
-                               || Mapping == records])]),
+     case Mapping of
+         records ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       encode_msg(Msg, MsgName, []);
+                  (Msg, Opts) when tuple_size(Msg) >= 1, is_list(Opts) ->
+                       encode_msg(Msg, element(1, Msg), [])
+               end);
+         natrecs ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       encode_msg(Msg, MsgName, []);
+                  (Msg, Opts) when is_record(msg), is_list(Opts) ->
+                        encode_msg(Msg, records:get_name(Msg), Opts)
+               end);
+         maps ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       encode_msg(Msg, MsgName, [])
+               end)
+     end,
+     %% Arity 3
      ?f("-spec encode_msg(_,_,_) -> no_return().~n", []),
      gpb_codegen:format_fn(
        encode_msg,
@@ -105,34 +130,67 @@ format_encoders_top_function_no_msgs(Opts) ->
 
 format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
-    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    Mapping = gpb_lib:get_mapping_by_opts(Opts),
     MsgType = "'$msg'()",
     MsgNamesType = "'$msg_name'()",
     OrList = case Mapping of
                  records -> " | list()";
+                 natrecs -> " | list()";
                  maps -> ""
              end,
     DoNif = proplists:get_bool(nif, Opts),
-    [[[gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 1, Opts),
-       ?f("-spec encode_msg(~s) -> ~s.~n",
-          [MsgType, ret_type_all_msgs(Defs)]),
-       gpb_codegen:format_fn(
-         encode_msg,
-         fun(Msg) when tuple_size(Msg) >= 1 ->
-                 encode_msg(Msg, element(1, Msg), [])
-         end)] || Mapping == records],
+    [%% Arity 1
+     case Mapping of
+         records ->
+             [gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 1, Opts),
+              ?f("-spec encode_msg(~s) -> ~s.~n",
+                 [MsgType, ret_type_all_msgs(Defs)]),
+              gpb_codegen:format_fn(
+                encode_msg,
+                fun(Msg) when tuple_size(Msg) >= 1 ->
+                        encode_msg(Msg, element(1, Msg), [])
+                end)];
+         natrecs ->
+             [gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 1, Opts),
+              ?f("-spec encode_msg(~s) -> ~s.~n",
+                 [MsgType, ret_type_all_msgs(Defs)]),
+              gpb_codegen:format_fn(
+                encode_msg,
+                fun(Msg) when is_record(Msg) >= 1 ->
+                        encode_msg(Msg, records:get_name(Msg), [])
+                end)];
+         maps ->
+             ""
+     end,
+     %% Arity 2:
      gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 2, Opts),
      ?f("-spec encode_msg(~s, ~s~s) -> ~s.~n",
         [MsgType, MsgNamesType, OrList, ret_type_all_msgs(Defs)]),
-     gpb_codegen:format_fn(
-       encode_msg,
-       fun(Msg, MsgName) when is_atom(MsgName) ->
-               encode_msg(Msg, MsgName, []);
-          ('Msg', Opts) when tuple_size('Msg') >= 1, is_list(Opts) ->
-               encode_msg('Msg', element(1,'Msg'), Opts)
-       end,
-       [repeat_clauses('Msg', [[replace_tree('Msg', ?expr(Msg))]
-                               || Mapping == records])]),
+     case Mapping of
+         records ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       encode_msg(Msg, MsgName, []);
+                  (Msg, Opts) when tuple_size(Msg) >= 1, is_list(Opts) ->
+                       encode_msg(Msg, element(1, Msg), Opts)
+               end);
+         natrecs ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       encode_msg(Msg, MsgName, []);
+                  (Msg, Opts) when is_record(Msg), is_list(Opts) ->
+                       encode_msg(Msg, records:get_name(Msg), Opts)
+               end);
+         maps ->
+             gpb_codegen:format_fn(
+               encode_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       encode_msg(Msg, MsgName, [])
+               end)
+     end,
+     %% Arity 3:
      gpb_lib:no_underspecs_dialyzer_attr(encode_msg, 3, Opts),
      ?f("-spec encode_msg(~s, ~s, list()) -> ~s.~n",
         [MsgType, MsgNamesType, ret_type_all_msgs(Defs)]),
@@ -218,8 +276,8 @@ format_enum_encoders(Defs, #anres{used_types=UsedTypes}) ->
 format_map_encoders(Defs, AnRes, Opts0, IncludeStarter) ->
     Opts1 = case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts0)
             of
-                '2tuples' -> [{msgs_as_maps, false} | Opts0];
-                maps      -> [{msgs_as_maps, true} | Opts0]
+                '2tuples' -> [{msg_format, records} | Opts0];
+                maps      -> [{msg_format, maps} | Opts0]
             end,
     format_msg_encoders(Defs, AnRes, Opts1, IncludeStarter).
 
@@ -285,6 +343,8 @@ format_msg_encoder(MsgName, MsgDef, Defs, AnRes, Opts, IncludeStarter) ->
     FieldMatching =
         case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
             records ->
+                gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
+            #natrecs{} ->
                 gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
             #maps{unset_optional=present_undefined} ->
                 gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
@@ -378,6 +438,16 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                '<encodeit>'
                        end,
                        [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                #natrecs{unset_value=Undef} ->
+                    ?expr(
+                       if '<F>' == 'Undef' ->
+                               '<Bin>';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr),
+                        replace_tree('Undef', erl_syntax:abstract(Undef))
+                       | Transforms]);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(
                        if '<F>' == undefined ->
@@ -488,6 +558,16 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                '<encodeit>'
                        end,
                        [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                #natrecs{unset_value=Undef} ->
+                    ?expr(
+                       if '<F>' == 'Undef' ->
+                               '<Bin>';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr),
+                        replace_tree('Undef', erl_syntax:abstract(Undef))
+                        | Transforms]);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(
                        if '<F>' == undefined ->
@@ -513,6 +593,15 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
         repeated ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                 records ->
+                    ?expr(
+                       begin
+                           'TrF' = 'Tr'('<F>', 'TrUserData'),
+                           if 'TrF' == [] -> '<Bin>';
+                              true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
+                           end
+                       end,
+                       Transforms);
+                #natrecs{} ->
                     ?expr(
                        begin
                            'TrF' = 'Tr'('<F>', 'TrUserData'),
@@ -571,6 +660,18 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                                   MsgName, MsgVar, FVar, OFields,
                                   Transl, TrUserDataVar, PrevBVar,
                                   Defs, Tr, AnRes, Opts))]);
+        #natrecs{unset_value=Undef} ->
+            ?expr(if 'F' =:= 'Undef' -> 'Bin';
+                     true -> '<expr>'
+                  end,
+                  [replace_tree('F', FVar),
+                   replace_tree('Bin', PrevBVar),
+                   replace_tree('<expr>',
+                                field_encode_oneof(
+                                  MsgName, MsgVar, FVar, OFields,
+                                  Transl, TrUserDataVar, PrevBVar,
+                                  Defs, Tr, AnRes, Opts)),
+                   replace_tree('Undef', erl_syntax:abstract(Undef))]);
         #maps{unset_optional=present_undefined} ->
             ?expr(if 'F' =:= undefined -> 'Bin';
                      true -> '<expr>'

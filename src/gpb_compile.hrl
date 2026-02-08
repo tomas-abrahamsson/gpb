@@ -36,6 +36,9 @@
           unset_optional  :: omitted | present_undefined,
           oneof           :: tuples | flat
          }).
+-record(natrecs, {
+          unset_value :: term()
+         }).
 
 -define(f(Fmt),        io_lib:format(Fmt, [])).
 -define(f(Fmt, Args),  io_lib:format(Fmt, Args)).

@@ -21,7 +21,13 @@
 %%% @private
 -module(gpb_gen_types).
 
+%% Formatting records (tuple-style records):
 -export([format_msg_record/5]).
+%% Formatting native records:
+-export([format_import_records/2]).
+-export([format_export_records/1]).
+-export([format_msgs_as_native_records/3]).
+%% Other:
 -export([format_maps_as_msgs_record_defs/1]).
 -export([format_enum_typespec/3]).
 -export([format_export_types/3]).
@@ -33,7 +39,7 @@
 %% of needing check opts at many places.
 -record(t_env,
         {type_specs :: boolean(),
-         mapping_and_unset :: records | #maps{},
+         mapping_and_unset :: records | #natrecs{} | #maps{},
          map_key_type :: atom | binary,
          map_type_fields :: '2tuples' | maps,
          module :: module(),
@@ -66,6 +72,7 @@
                     | [#type_text{}] % for #gpb_oneof{} fields
                     | undefined,     % if no type specs
          or_undefined :: boolean() % whether " | undefined"
+                         | {true, term()} % " | <term()>"
                        | undefined,
          comment_chunks :: [string()]}).
 
@@ -81,6 +88,30 @@ format_msg_record(Msg, Fields, AnRes, Opts, Defs) ->
      "\n",
      ?f("        }).~n"),
      ?f("-endif.~n")].
+
+%% For native records:
+format_import_records(Mod, Defs) ->
+    %% should we wrap imports in some preprocessor check?
+    MsgNames = [Msg || {_,Msg,_Fields} <- gpb_lib:msgs_or_groups(Defs)],
+    ?f("-import_record(~p,~n"
+       "               ~p).~n",
+       [Mod, MsgNames]).
+
+format_export_records(Defs) ->
+    MsgNames = [Msg || {_, Msg, _Fields} <- gpb_lib:msgs_or_groups(Defs)],
+    ?f("-export_record(~p).~n", [MsgNames]).
+
+format_msgs_as_native_records(Defs, AnRes, Opts) ->
+    TEnv = t_env(Opts),
+    [format_msg_as_native_records(Msg, Fields, AnRes, Opts, Defs, TEnv)
+     || {_, Msg, Fields} <- gpb_lib:msgs_or_groups(Defs)].
+
+format_msg_as_native_records(Msg, Fields, AnRes, Opts, Defs, TEnv) ->
+    [?f("-record #~p{~n", [Msg]),
+     "         ",
+     format_hfields(Msg, 8+1, Fields, AnRes, Opts, Defs, TEnv),
+     "\n",
+     ?f("        }.~n")].
 
 format_maps_as_msgs_record_defs(MapsAsMsgs) ->
     [begin
@@ -134,6 +165,9 @@ format_all_msgs_types(Defs, AnRes,
            MappingAndUnset == records ->
                 gpb_lib:or_join([?f("#~p{}", [Nm]) || Nm <- MsgNames]);
            not TypeSpecs,
+           is_record(MappingAndUnset, natrecs) ->
+                gpb_lib:or_join([?f("#~p{}", [Nm]) || Nm <- MsgNames]);
+           not TypeSpecs,
            is_record(MappingAndUnset, maps) ->
                 "map()";
            TypeSpecs ->
@@ -178,6 +212,8 @@ format_record_typespec(Msg, Fields, Defs, AnRes, Opts,
     MsgType = rename_msg_type(Msg, AnRes),
     case MappingAndUnset of
         records ->
+            ?f("-type ~p() :: #~p{}.~n", [MsgType, Msg]);
+        #natrecs{} ->
             ?f("-type ~p() :: #~p{}.~n", [MsgType, Msg]);
         #maps{} ->
             HFields = format_hfields(Msg, 7 + 1, Fields,
@@ -287,6 +323,8 @@ maybe_expand_oneofs(FieldInfos, TEnv) ->
     #t_env{mapping_and_unset=MappingAndUnset} = TEnv,
     case MappingAndUnset of
         records ->
+            FieldInfos;
+        #natrecs{} ->
             FieldInfos;
         #maps{oneof=flat} ->
             expand_oneofs(FieldInfos);
@@ -445,6 +483,8 @@ augment_type_or_undefined(FieldInfos, TEnv) ->
     OrUndefined = case MappingAndUnset of
                       records ->
                           true;
+                      #natrecs{unset_value=Undef} ->
+                          {true, Undef};
                       #maps{unset_optional=present_undefined} ->
                           true;
                       #maps{unset_optional=omitted} ->
@@ -473,6 +513,15 @@ augment_default_values(FieldInfos, Opts, Defs, TEnv) ->
                      FI
              end
              || #field_info{field=Field}=FI <- FieldInfos];
+        #natrecs{unset_value=Undef} ->
+            [case Field of
+                 #?gpb_field{}=Field ->
+                     Default = record_field_default(Field, Opts, Defs, TEnv),
+                     FI#field_info{default = Default};
+                 #gpb_oneof{} ->
+                     FI#field_info{default = ?f("~p", [Undef])}
+             end
+             || #field_info{field=Field}=FI <- FieldInfos];
         #maps{} ->
             FieldInfos
     end.
@@ -481,7 +530,8 @@ record_field_default(#?gpb_field{type=Type,
                                  occurrence=Occurence,
                                  opts=FOpts}=Field,
                      Opts, Defs, TEnv) ->
-    #t_env{map_type_fields = MapTypeFieldsRepr} = TEnv,
+    #t_env{mapping_and_unset = MappingAndUnset,
+           map_type_fields = MapTypeFieldsRepr} = TEnv,
     case proplists:get_value(default, FOpts, '$no') of
         '$no' ->
             IsMapTypeField = is_map_type_field(Field),
@@ -494,6 +544,9 @@ record_field_default(#?gpb_field{type=Type,
                Occurence == defaulty ->
                     Default = gpb_lib:proto3_type_default(Type, Defs, Opts),
                     ?f("~p", [Default]);
+               is_record(MappingAndUnset, natrecs) ->
+                    #natrecs{unset_value=Undef} = MappingAndUnset,
+                    ?ff("~p", [Undef]);
                true ->
                     undefined
             end;
@@ -514,6 +567,9 @@ augment_out_commentation(FieldInfos, TEnv) ->
            map_key_type = KeyType} = TEnv,
     case MappingAndUnset of
         records ->
+            [FI#field_info{out_comment = false}
+             || FI <- FieldInfos];
+        #natrecs{} ->
             [FI#field_info{out_comment = false}
              || FI <- FieldInfos];
         #maps{} when KeyType == binary ->
@@ -639,16 +695,21 @@ has_next(I, Last) ->
     end.
 
 render_type_text(#type_text{text=TypeStr}, OrUndefined) ->
-    if OrUndefined     -> TypeStr ++ " | undefined";
-       not OrUndefined -> TypeStr
+    case OrUndefined of
+        true          -> TypeStr ++ " | undefined";
+        {true, Undef} -> TypeStr ++ ?ff(" | ~p", [Undef]);
+        false         -> TypeStr
     end;
 render_type_text(TypeTexts, OrUndefined) when is_list(TypeTexts) -> % oneof
     gpb_lib:or_join([?ff("{~p, ~s}", [Tag, TypeStr])
                      || #type_text{tag=Tag, text=TypeStr} <- TypeTexts]
-                    ++ ["undefined" || OrUndefined]);
+                    ++ case OrUndefined of
+                           true -> ["undefined"];
+                           {true, Undef} -> [?ff("~p", [Undef])];
+                           false -> []
+                       end);
 render_type_text(undefined, _) -> % no type specs
     undefined.
-
 
 render_comment(CommentChunks, BaseTypeComment) ->
     if BaseTypeComment == undefined ->
@@ -665,6 +726,8 @@ calc_field_type_sep(#?gpb_field{occurrence=Occurrence},
                            verify_decode_required_present=DecVfy}) ->
     case MappingAndUnset of
         records ->
+            "::";
+        #natrecs{} ->
             "::";
         #maps{unset_optional=present_undefined} ->
             ":=";
@@ -686,6 +749,7 @@ calc_field_type_sep(#?gpb_field{occurrence=Occurrence},
 calc_field_type_sep(#gpb_oneof{}, #t_env{mapping_and_unset=MappingAndUnset}) ->
     case MappingAndUnset of
         records -> "::";
+        #natrecs{} -> "::";
         #maps{} -> "=>"
     end.
 
@@ -736,6 +800,8 @@ msg_to_typestr(M, AnRes, TEnv) ->
         records ->
             %% Prefix with module since records live in an hrl file
             ?f("~p:~p()~s", [Mod, MsgType, OrBinary]);
+        #natrecs{} ->
+            ?f("~p()~s", [MsgType, OrBinary]);
         #maps{} ->
             ?f("~p()~s", [MsgType, OrBinary])
     end.

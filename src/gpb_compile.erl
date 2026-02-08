@@ -129,9 +129,12 @@
         boolean_opt(ignore_wellknown_types_directory) |
         %% Format of the Erlang representation
         boolean_opt(strings_as_binaries) |
-        boolean_opt(maps) |
-        boolean_opt(msgs_as_maps) |
-        boolean_opt(mapfields_as_maps) |
+        {msg_format, records | maps | native_records} |
+        boolean_opt(maps) |              % same as {msg_format, maps}
+        boolean_opt(msgs_as_maps) |      % same as {msg_format, maps}
+        {native_records_unset, atom()} |
+        {mapfield_format, '2tuples' | maps} |
+        boolean_opt(mapfields_as_maps) | % same as {mapfield_format, maps}
         {maps_unset_optional, omitted | present_undefined} |
         {maps_oneof, tuples | flat} |
         {maps_key_type, atom | binary} |
@@ -169,8 +172,9 @@
         {proto_defs_version, gpb_defs:version()} |
         {introspect_proto_defs_version, gpb_defs:version() | preferably_1} |
         boolean_opt(introspect_get_proto_defs) |
-        boolean_opt(defs_as_proplists) |
-        boolean_opt(defs_as_maps) |
+        {defs_format, records | maps} |
+        boolean_opt(defs_as_proplists) | % same as {defs_format, proplists}
+        boolean_opt(defs_as_maps) |      % same as {defs_format, maps}
         boolean_opt(gen_introspect) |
         %% JSON
         boolean_opt(json) |
@@ -364,6 +368,10 @@ file(File) ->
 %%   </dd>
 %%   <dt>Format of the Erlang representation</dt>
 %%   <dd><tt><a href="#option-strings_as_binaries">strings_as_binaries</a></tt>,
+%%       <tt>{<a href="#option-msg_format"
+%%                            >msg_format</a>, records|maps|native_records}</tt>,
+%%       <tt><a href="#option-mapfield_format"
+%%                          >{mapfield_format</a>, '2tuples'|maps}</tt>,
 %%       <tt><a href="#option-maps">maps</a></tt>,
 %%       <tt><a href="#option-msgs_as_maps">msgs_as_maps</a></tt>,
 %%       <tt><a href="#option-mapfields_as_maps">mapfields_as_maps</a></tt>,
@@ -373,6 +381,8 @@ file(File) ->
 %%            tuples|flat}</tt>,
 %%       <tt>{<a href="#option-maps_key_type">maps_key_type</a>,
 %%            atom|binary}</tt>,
+%%       <tt>{<a href="#option-native_records_unset">native_records_unset</a>,
+%%            atom()}</tt>,
 %%       <tt><a href="#option-allow_preencoded_submsgs"
 %%                           >allow_preencoded_submsgs</a></tt>
 %%       <br/>
@@ -438,6 +448,8 @@ file(File) ->
 %%            {@link gpb_defs:version()}|preferably_1}</tt>,
 %%       <tt><a href="#option-introspect_get_proto_defs"
 %%                           >introspect_get_proto_defs</a></tt>,
+%%       <tt>{<a href="#option-defs_format"
+%%                            >defs_format</a>, records|maps|proplists}</tt>,
 %%       <tt><a href="#option-defs_as_proplists">defs_as_proplists</a></tt>,
 %%       <tt><a href="#option-defs_as_maps">defs_as_maps</a></tt>,
 %%       <tt><a href="#option-gen_introspect">gen_introspect</a></tt>
@@ -610,6 +622,47 @@ file(File) ->
 %% Corresponding command line option:
 %% <a href="#cmdline-option-strbin">-strbin</a>.
 %%
+%% <h4><a id="option-msg_format"/>
+%%     <a id="option-mapfield_format"/>
+%%     <tt>{msg_format, records|maps|native_records}</tt><br/>
+%%     <tt>{mapfield_format, '2tuples'|maps}</tt></h4>
+%%
+%% The `msg_format' option specfies the Erlang-representation of protobuf
+%% messages:
+%% <dl>
+%%    <dt>`records' (default)</dt>
+%%    <dd>An Erlang record definitions is generated to the `.hrl' file
+%%        for each protobuf message.</dd>
+%%    <dt>`maps'</dt>
+%%    <dd>Erlang maps are used for protobuf messages.
+%%        No `.hrl' file is generated.
+%%        The `encode_msg', `merge_msgs' and `verify_msg' functions take the
+%%        message name as an additional parameter.</dd>
+%%    <dt>`native_records'</dt>
+%%    <dd>An Erlang native record definition is generated to the `.erl' file
+%%        for each protobuf message.
+%%        The default for `mapfield_format' when native_records is selected,
+%%        is `maps'.
+%%        Note: Support for native records is <em>EXPERIMENTAL</em> and
+%%        details may change.</dd>
+%% </dl>
+%%
+%% The `mapfield_format' option specfies the Erlang-representation of protobuf
+%% `map<_,_>' fields.:
+%% <dl>
+%%    <dt><tt>'2tuples'</tt> (default if msg_format is records)</dt>
+%%    <dd>The internal representation of the map fields is a list of
+%%        `{Key,Value}' tuples.</dd>
+%%    <dt>`maps' (default if msg_format is maps or native_records)</dt>
+%%    <dd>Erlang maps are used.</dd>
+%% </dl>
+%%
+%% Corresponding command line options:
+%% <a href="#cmdline-option-maps">-maps</a>,
+%% <a href="#cmdline-option-msgs-as-maps">-msgs-as-maps</a>,
+%% <a href="#cmdline-option-mapfields-as-maps">-mapfields-as-maps</a>.
+%% <a href="#cmdline-option-native-records">-native-record</a>,
+%%
 %% <h4><a id="option-maps"/>
 %%     <a id="option-msgs_as_maps"/>
 %%     <a id="option-mapfields_as_maps"/>
@@ -618,21 +671,29 @@ file(File) ->
 %%     `mapfields_as_maps'</h4>
 %%
 %% The `maps' option will generate a protobuf encoder/decoder that
-%% uses maps instead of records. This option expands to the following
+%% uses maps instead of records. The `maps' option expands to the following
 %% options:
 %% <dl>
-%%    <dt>`msgs_as_maps'</dt>
+%%    <dt><tt>{<a href="#option-msg_format"
+%%                             >msg_format</a>, maps}</tt></dt>
 %%    <dd>No `.hrl' file will be generated, and the functions
 %%        `encode_msg', `merge_msgs' and `verify_msg' will take the
 %%        message name as an additional parameter.</dd>
-%%    <dt>`mapfields_as_maps'</dt>
+%%    <dt><tt>{<a href="#option-mapfield_format"
+%%                             >mapfield_format</a>, maps}</tt></dt>
 %%    <dd>The value for fields of type `map<_,_>' will be a map
 %%        instead of a list of 2-tuples.</dd>
-%%    <dt>`defs_as_maps'</dt>
+%%    <dt><tt>{<a href="#option-defs_format"
+%%                             >defs_format</a>, maps}</tt></dt>
 %%    <dd>The introspection will generate message field descriptions
-%%        as maps, see the <a href="#option-defs_as_maps">`defs_as_maps'</a>.
-%%        for further info.</dd>
+%%        as maps.</dd>
 %% </dl>
+%%
+%% The `msgs_as_maps' and `mapfields_as_maps' options can also be specified
+%% individually, and are internally replaced by
+%% <tt>{<a href="#option-mapfield_format">mapfield_format</a>,maps}</tt> and
+%% <tt>{<a href="#option-defs_format">defs_format</a>, maps}</tt>
+%% respectively.
 %%
 %% Corresponding command line options:
 %% <a href="#cmdline-option-maps">-maps</a>,
@@ -692,6 +753,16 @@ file(File) ->
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-maps_key_type">-maps_key_type</a>.
+%%
+%% <h4><a id="option-native_records_unset"/>
+%%                 `{native_records_unset, atom()}'</h4>
+%%
+%% Specify another value for unset fields for native records. The default
+%% value is the atom `undefined'.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-native-records-unset-value"
+%%                       >`-native-records-unset-value'</a>.
 %%
 %% <h4><a id="option-allow_preencoded_submsgs"/>`allow_preencoded_submsgs'</h4>
 %%
@@ -1087,27 +1158,45 @@ file(File) ->
 %%     Introspection of the proto definitions
 %% </h3>
 %%
-%% <h4><a id="option-defs_as_proplists"/>`defs_as_proplists'</h4>
+%% <h4><a id="option-defs_format"/>
+%%     `{defs_format, records|maps}'</h4>
 %%
-%% The `defs_as_proplists' option changes the generated introspection
-%% functions `find_msg_def', `get_msg_defs' and `get_proto_defs'
-%% to return the description of each message field as a proplist,
-%% instead of as a `#field{}' record. The purpose is to make the
+%% The `defs_format' option specfies the Erlang-representation of protobuf
+%% messages:
+%% <dl>
+%%    <dt>`records' (default)</dt>
+%%    <dd>A list of protobuf defintions for messages, enums etc,
+%%        where each message definition contain a list of fields
+%%        represented as `#field{}' or `#gpb_oneof{}' records.</dd>
+%%    <dt>`maps'</dt>
+%%    <dd>Maps are used to represent the message fields.</dd>
+%%    <dt>`proplists'</dt>
+%%    <dd>Proplists are used to represent the message fields.</dd>
+%% </dl>
+%%
+%% The `defs_format' option controls the value returned from the
+%% generated introspection functions `find_msg_def', `get_msg_defs'
+%% and `get_proto_defs'.
+%% The `maps' and `proplists' formats can be useful to make the
 %% generated code completely independent of gpb, at compile-time
 %% (it is already independent at run-time). The keys of the proplist
-%% are the names of the record fields in the `#field{}' record.
-%% See also {@link gpb:proplists_to_field_records()} and related
+%% are the names of the record fields in the `#field{}' and `#gpb_oneof{}'
+%% records.
+%% See also {@link gpb:proplists_to_field_records/1} and related
 %% functions for conversion functions between these two formats.
+%%
+%% <h4><a id="option-defs_as_proplists"/>`defs_as_proplists'</h4>
+%%
+%% An alias for <tt>{<a href="#option-defs_format"
+%%                                   >defs_format</a>, proplists}</tt>.
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-pldefs">-pldefs</a>.
 %%
 %% <h4><a id="option-defs_as_maps"/>`defs_as_maps'</h4>
 %%
-%% The introspection will generate message field descriptions
-%% as maps instead of as `#field{}' records, unless, of course
-%% `defs_as_proplists' is specified, in which case they will be
-%% proplists instead.
+%% An alias for <tt>{<a href="#option-defs_format"
+%%                                   >defs_format</a>, maps}</tt>.
 %%
 %% Corresponding command line option:
 %% <a href="#cmdline-option-defs-as-maps">-defs-as-maps</a>.
@@ -1827,7 +1916,8 @@ verify_opts(Defs, Opts) ->
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
               fun() -> verify_opts_no_gen_decoders_mergers_nif(Opts) end,
               fun() -> verify_opts_no_gen_verifiers(Opts) end,
-              fun() -> verify_opts_allow_preencoded_submsgs(Opts) end]).
+              fun() -> verify_opts_allow_preencoded_submsgs(Opts) end,
+              fun() -> verify_opts_native_records_and_nif(Opts) end]).
 
 while_ok(Funs) ->
     lists:foldl(fun(F, ok) -> F();
@@ -1859,7 +1949,7 @@ verify_opts_epb_compat(Defs, Opts) ->
     while_ok(
       [fun() ->
                case {proplists:get_bool(epb_functions, Opts),
-                     gpb_lib:get_records_or_maps_by_opts(Opts)} of
+                     gpb_lib:get_mapping_by_opts(Opts)} of
                    {true, maps} ->
                        {error, {invalid_options, epb_functions,maps}};
                    _ ->
@@ -1915,6 +2005,13 @@ verify_opts_allow_preencoded_submsgs(Opts) ->
     case {DoNif, AllowPreencodedSubmsgs} of
         {true, true} -> {error, {invalid_options,
                                  nif, allow_preencoded_submsgs}};
+        _ -> ok
+    end.
+
+verify_opts_native_records_and_nif(Opts) ->
+    DoNif = proplists:get_bool(nif, Opts),
+    case {DoNif, gpb_lib:get_mapping_by_opts(Opts)} of
+        {true, natrecs} -> {error, {invalid_options, native_records, nif}};
         _ -> ok
     end.
 
@@ -2115,9 +2212,11 @@ get_output_files(Mod, Opts) ->
     {Erl, Hrl, NifCc}.
 
 get_gen_hrl_file(Opts) ->
-    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
-    DoEnumMacros = gpb_lib:get_enum_macros_by_opts(Opts),
-    Mapping == records orelse DoEnumMacros.
+    case gpb_lib:get_mapping_by_opts(Opts) of
+        records -> true;
+        natrecs -> true;
+        _       -> gpb_lib:get_enum_macros_by_opts(Opts)
+    end.
 
 get_erl_outdir(Opts) ->
     proplists:get_value(o_erl, Opts, get_outdir(Opts)).
@@ -2305,6 +2404,8 @@ fmt_err({write_failed, File, Reason}) ->
     ?f("failed to write ~s: ~s (~p)", [File, file:format_error(Reason),Reason]);
 fmt_err({invalid_options, translation, nif}) ->
     "Option error: Not supported: both translation option and nif";
+fmt_err({invalid_options, native_records, nif}) ->
+    "Option error: Not supported: both native_records option and nif";
 fmt_err({invalid_options, preserve_unknown_fields, json}) ->
     "Option error: Not supported: both preserve_unknown_fields and json";
 fmt_err({unsupported_translation, _Type, non_msg_type}) ->
@@ -2466,6 +2567,19 @@ c() ->
 %%     <dd>Specifies the key type for maps.<br/>
 %%       Corresponding Erlang-level option:
 %%       <a href="#option-maps_key_type">maps_key_type</a></dd>
+%%   <dt><a id="cmdline-option-native-records"/>
+%%       `-native-records'</dt>
+%%     <dd>Specifies that messages will be native records.
+%%       Note: Support for native records is <em>EXPERIMENTAL</em> and
+%%       details may change.<br/>
+%%       Corresponding Erlang-level options:
+%%       <a href="#option-msg-format">`{msg_format,native_records}'</a></dd>
+%%   <dt><a id="cmdline-option-native-records-unset-value"/>
+%%       `-native-records-unset-value Value'</dt>
+%%     <dd>Value to use to indicate that a field is not set.
+%%       Default is the atom `undefined'.<br/>
+%%       Corresponding Erlang-level options:
+%%       <a href="#option-native_records_unset">`native_records_unset'</a></dd>
 %%   <dt><a id="cmdline-option-allow-preencoded-submsgs"/>
 %%       `-allow-preencoded-submsgs'</dt>
 %%     <dd>Allow pre-encoded submsgs to save cpu during encoding<br/>
@@ -3216,6 +3330,11 @@ opt_specs() ->
      {"maps_key_type", {atom, binary}, maps_key_type,
       "atom | binary\n"
       "       Specifies the key type for maps.\n"},
+     {"native-records", undefined, {msg_format, native_records}, "\n"
+      "       Generate native records for messages. Note: Experimental.\n"},
+     {"native-records-unset-value", 'atom()', native_records_unset, "Atom\n"
+      "       Value to use to indicate that a field is not set.\n"
+      "       Default is the atom undefined.\n"},
      {"allow-preencoded-submsgs", undefined, allow_preencoded_submsgs, "\n"
       "       Allow pre-encoded submsgs to save cpu during encoding.\n"},
      {{section, "Verification of inputs"}},
@@ -4248,6 +4367,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
     DoEncoders = gpb_lib:get_gen_encoders(Opts),
     DoDecoders = gpb_lib:get_gen_decoders(Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
+
     unicode:characters_to_binary(
       ["%% -*- coding: utf-8 -*-\n",
        ?f("%% @private~n"
@@ -4288,13 +4408,15 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
          "-export([load_nif/0]). %% for debugging of nif loading\n",
          "\n"]
         || DoNif],
-       case gpb_lib:get_records_or_maps_by_opts(Opts) of
+       case gpb_lib:get_mapping_by_opts(Opts) of
            records ->
                ?f("-include(\"~s~s.hrl\").~n", [IncludeModHrlPrepend, Mod]);
+           natrecs ->
+               gpb_gen_types:format_export_records(Defs);
            maps ->
                ""
        end,
-       case gpb_lib:get_defs_as_maps_or_records(Opts) of
+       case gpb_lib:get_defs_format(Opts) of
            records when DoIntrospect ->
                [case gpb_lib:get_field_format_by_opts(Opts) of
                     fields_as_records ->
@@ -4310,11 +4432,24 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                 end];
            records when not DoIntrospect ->
                "";
+           proplists ->
+               "";
            maps ->
                ""
        end,
        "\n",
-       gpb_gen_types:format_export_types(Defs, AnRes, Opts),
+       case gpb_lib:get_mapping_by_opts(Opts) of
+           records ->
+               gpb_gen_types:format_export_types(Defs, AnRes, Opts);
+           natrecs ->
+               %% (native) record defs must precede their type definitions,
+               %% but with tuple-records, this seldomly needs consideration
+               %% since the .hrl file is included early.
+               [gpb_gen_types:format_msgs_as_native_records(Defs, AnRes, Opts),
+                gpb_gen_types:format_export_types(Defs, AnRes, Opts)];
+           maps ->
+               gpb_gen_types:format_export_types(Defs, AnRes, Opts)
+       end,
        "\n",
        if not DoNif ->
                case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts)
@@ -4328,6 +4463,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
           DoNif ->
                ""
        end,
+
        [[?f("~s~n", [gpb_gen_nif:format_load_nif(Mod, Opts)]),
          "\n"]
         || DoNif],
@@ -4490,7 +4626,7 @@ possibly_format_hrl(Mod, Defs, AnRes, Opts) ->
 
 format_hrl(Mod, Defs, AnRes, Opts0) ->
     Opts = [{module, Mod} | Opts0],
-    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    MappingAndUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     DoEnumMacros = gpb_lib:get_enum_macros_by_opts(Opts),
     ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
     unicode:characters_to_binary(
@@ -4514,10 +4650,17 @@ format_hrl(Mod, Defs, AnRes, Opts0) ->
            || {{enum, EnumName}, EnumDef} <- Defs])
         || DoEnumMacros],
        "\n",
-       [gpb_lib:nl_join(
-          [gpb_gen_types:format_msg_record(Msg, Fields, AnRes, Opts, Defs)
-           || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)])
-        || Mapping == records],
+       case MappingAndUnset of
+           records ->
+               gpb_lib:nl_join(
+                 [gpb_gen_types:format_msg_record(Msg, Fields, AnRes, Opts,
+                                                  Defs)
+                  || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)]);
+           #natrecs{} ->
+               gpb_gen_types:format_import_records(Mod, Defs);
+           #maps{} ->
+               ""
+       end,
        "\n",
        ?f("-endif.~n")]).
 

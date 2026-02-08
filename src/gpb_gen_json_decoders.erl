@@ -199,6 +199,8 @@ calc_init_msg_expr(MsgName, InitExprs, FieldInfos, Opts) ->
     case MappingUnset of
         records ->
             gpb_lib:record_create(MsgName, InitExprs);
+        #natrecs{} ->
+            gpb_lib:record_create(MsgName, InitExprs);
         #maps{unset_optional=present_undefined} ->
             gpb_lib:map_create(InitExprs, Opts);
         #maps{unset_optional=omitted, oneof=tuples} ->
@@ -401,7 +403,8 @@ mk_decode_value_update_field_expr(MsgName, #?gpb_field{name=FName}, IsOneof,
                                   AnRes, Opts) ->
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     case {MappingUnset, IsOneof} of
-        {records, false} ->
+        {Records, false} when Records == records;
+                              is_record(Records, natrecs) ->
             ElemPath = [MsgName, FName],
             FValue = tr_wrap({ElemPath, decode, AnRes},
                              DecExpr,
@@ -411,7 +414,8 @@ mk_decode_value_update_field_expr(MsgName, #?gpb_field{name=FName}, IsOneof,
                    replace_term('<MsgName>', MsgName),
                    replace_term('<field-name>', FName),
                    replace_tree('<field-value>', FValue)]);
-        {records, {true, CFName}} ->
+        {Records, {true, CFName}} when Records == records;
+                                       is_record(Records, natrecs) ->
             %% Create CTr({tag, OTr(<decode-expr>, TrUserData)}, TrUserData)
             CElemPath = [MsgName, CFName],
             OElemPath = [MsgName, CFName, FName],
@@ -1650,7 +1654,8 @@ p3wellknown_wrappers() ->
 
 format_json_p3wellknown_mk_msg(_Defs, _AnRes, Opts) ->
     [case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-         records ->
+         Records when Records == records;
+                      is_record(Records, natrecs) ->
              [gpb_codegen:format_fn(
                 fj_mk_msg,
                 fun(Values, MsgName, FieldInfos, TrUserData) ->
