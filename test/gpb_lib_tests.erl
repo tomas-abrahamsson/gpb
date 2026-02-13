@@ -24,6 +24,76 @@
 -endif.
 -include_lib("eunit/include/eunit.hrl").
 
+file_msg_format_opts_test() ->
+    [?assertEqual(Expected,
+                  gpb_lib:get_records_or_maps_by_opts(
+                    gpb_lib:normalize_opts(Opts)),
+                  #{opts => Opts,
+                    norm => gpb_lib:normalize_opts(Opts)})
+     || {Expected, Opts} <- [{records, []},
+                             {records, [{maps, false}]},
+                             {maps, [maps]},
+                             {maps, [{maps, true}]},
+                             %% Overrides (first hit of 'maps'wins):
+                             {records, [{maps, false}, {maps, true}]},
+                             end_marker]],
+    ok.
+
+mapfields_opts_test() ->
+    [?assertEqual(Expected,
+                  gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(
+                    gpb_lib:normalize_opts(Opts)),
+                  #{opts => Opts,
+                    norm => gpb_lib:normalize_opts(Opts)})
+     || {Expected, Opts} <- [{'2tuples', []},
+                             {maps,      [maps]},
+                             {'2tuples', [{maps, false}, maps]},
+                             {'2tuples', [{maps, false}, maps]},
+                             %% mapfields may overrides:a
+                             {'2tuples', [{mapfields_as_maps, false}, maps]},
+                             {maps,      [{mapfields_as_maps, true}]},
+                             {'2tuples', [{mapfields_as_maps, false}]},
+                             {'2tuples', [{mapfields_as_maps, false}, maps]},
+                             end_marker]],
+    ok.
+
+defs_format_opts_test() ->
+    %% Defs
+    [?assertEqual(Expected,
+                  gpb_lib:get_defs_as_maps_or_records(
+                    gpb_lib:normalize_opts(Opts)),
+                  #{opts => Opts,
+                    norm => gpb_lib:normalize_opts(Opts)})
+     || {Expected, Opts} <- [{records, []},
+                             {maps, [{maps, true}]},
+                             {maps, [maps]},
+                             {maps, [defs_as_maps]},
+                             {maps, [{defs_as_maps, true}]},
+                             {records, [{maps, false}, {maps, true}]},
+                             end_marker]],
+    %% Fields
+    [?assertEqual(Expected,
+                  gpb_lib:get_field_format_by_opts(
+                    gpb_lib:normalize_opts(Opts)),
+                  #{opts => Opts,
+                    norm => gpb_lib:normalize_opts(Opts)})
+     || {Expected, Opts} <- [{fields_as_records, []},
+                             {fields_as_records, [{maps, false}]},
+                             {fields_as_records, [{maps, false}, maps]},
+                             {fields_as_proplists, [defs_as_proplists]},
+                             {fields_as_proplists, [defs_as_proplists, maps]},
+                             %% 'defs_as_proplists' "wins" even if 'maps'
+                             %% is before (historical reasons/mistakes)
+                             {fields_as_proplists, [maps, defs_as_proplists]},
+                             %%
+                             {fields_as_maps, [maps]},
+                             {fields_as_maps, [{maps, true}]},
+                             {fields_as_maps, [{maps, true}, {maps, false}]},
+                             {fields_as_maps, [defs_as_maps]},
+                             {fields_as_maps, [{defs_as_maps, true}]},
+                             end_marker]],
+    ok.
+
 snake_case_test() ->
     [?assertEqual(Expected, gpb_lib:snake_case(Input), {input_is, Input})
      || {Expected, Input} <- snake_casings()],

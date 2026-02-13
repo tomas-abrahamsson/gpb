@@ -82,6 +82,7 @@
 -export([map_create/2]).
 -export([map_set/3]).
 
+-export([normalize_opts/1]).
 -export([get_2tuples_or_maps_for_maptype_fields_by_opts/1]).
 -export([get_records_or_maps_by_opts/1]).
 -export([get_mapping_and_unset_by_opts/1]).
@@ -656,6 +657,148 @@ mapkey_expr_by_opts(Opts) ->
     end.
 
 %% Option helpers ---------------
+
+normalize_opts(Opts0) ->
+    normalize_list_deps_rules(
+      normalize_return_report_opts(
+        normalize_alias_opts(Opts0))).
+
+normalize_alias_opts(Opts) ->
+    lists:foldl(fun(F, OptsAcc) -> F(OptsAcc) end,
+                Opts,
+                [fun norm_opt_alias_to_msg_proto_defs/1,
+                 fun norm_opt_epb_compat_opt/1,
+                 fun norm_opt_map_opts/1,
+                 fun norm_opt_any_translate/1,
+                 fun norm_opt_json_format/1,
+                 fun norm_opt_json_print_fields_with_no_presence/1,
+                 fun norm_opt_gen_encoders/1,
+                 fun norm_opt_gen_decoders/1,
+                 fun norm_opt_gen_verifiers/1]).
+
+norm_opt_alias_to_msg_proto_defs(Opts) ->
+    lists:map(fun(to_msg_defs)         -> to_proto_defs;
+                 ({to_msg_defs, Bool}) -> {to_proto_defs, Bool};
+                 (Opt)                 -> Opt
+              end,
+              Opts).
+
+norm_opt_epb_compat_opt(Opts) ->
+    proplists:expand(
+      [{epb_compatibility, [epb_functions,
+                            defaults_for_omitted_optionals,
+                            {module_name_suffix,"_pb"},
+                            {msg_name_to_lower, true}]},
+       {{epb_compatibility,false}, [{epb_functions,false},
+                                    {defaults_for_omitted_optionals,false}]}],
+      Opts).
+
+norm_opt_map_opts(Opts) ->
+    proplists:expand(
+      [{maps, [msgs_as_maps,
+               mapfields_as_maps,
+               defs_as_maps]},
+       {{maps,false}, [{msgs_as_maps, false},
+                       {mapfields_as_maps, false},
+                       {defs_as_maps, false}]}],
+      Opts).
+
+norm_opt_any_translate(Opts) ->
+    AnyType = {msg, 'google.protobuf.Any'},
+    lists:map(fun({any_translate, Transls}) ->
+                      {translate_type, {AnyType, Transls}};
+                 (Opt) ->
+                      Opt
+              end,
+              Opts).
+
+norm_opt_json_format(Opts) ->
+    proplists:expand(
+      [{{json_format, maps},       [{json_object_format, map},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]},
+       {{json_format, jsx},        [{json_object_format, eep18},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]},
+       {{json_format, mochijson2}, [{json_object_format, {struct, proplist}},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]},
+       {{json_format, jiffy},      [{json_object_format, {proplist}},
+                                    {json_key_format, binary},
+                                    {json_array_format, list},
+                                    {json_string_format, binary},
+                                    {json_null, null}]}],
+      Opts).
+
+norm_opt_json_print_fields_with_no_presence(Opts) ->
+    proplists:substitute_aliases(
+      [{json_always_print_primitive_fields,
+        json_always_print_fields_with_no_presence}],
+      Opts).
+
+norm_opt_gen_encoders(Opts) ->
+    proplists:expand(
+      [{{gen_encoders, false}, [{gen_verifiers, false},
+                                {gen_encoders, false}]}],
+      Opts).
+
+norm_opt_gen_decoders(Opts) ->
+    proplists:expand(
+      [{{gen_decoders, false}, [{gen_mergers, false},
+                                {gen_decoders, false}]}],
+      Opts).
+
+
+norm_opt_gen_verifiers(Opts) ->
+    proplists:expand(
+      [{{gen_verifiers, false}, [{verify, never},
+                                 {gen_verifiers, false}]}],
+      Opts).
+
+normalize_return_report_opts(Opts1) ->
+    Opts2 = expand_opt(return, [return_warnings, return_errors], Opts1),
+    Opts3 = expand_opt(report, [report_warnings, report_errors], Opts2),
+    Opts4 = unless_defined_set(return_warnings, report_warnings, Opts3),
+    Opts5 = unless_defined_set(return_errors,   report_errors, Opts4),
+    Opts5.
+
+normalize_list_deps_rules(Opts) ->
+    OptM = proplists:get_value(list_deps, Opts),
+    OptMF = proplists:get_value(list_deps_dest_file, Opts),
+    OptMMD = proplists:get_bool(list_deps_and_generate, Opts),
+    if OptMF /= undefined, OptM == undefined;
+       OptMMD, OptM == undefined ->
+            %% -MF <file> implies -M
+            %% -MMD implies -M
+            [{list_deps, makefile_rules} | Opts];
+       true ->
+            Opts
+    end.
+
+expand_opt(OptionToTestFor, OptionsToExpandTo, Opts) ->
+    lists:append(
+      lists:map(fun(Opt) when Opt == OptionToTestFor -> OptionsToExpandTo;
+                   (Opt) -> [Opt]
+                end,
+                Opts)).
+
+unless_defined_set(OptionToTestFor, Default, Opts) ->
+    case is_option_defined(OptionToTestFor, Opts) of
+        true  -> Opts;
+        false -> Opts ++ [Default]
+    end.
+
+is_option_defined(Key, Opts) ->
+    lists:any(fun({K, _V}) -> K =:= Key;
+                 (K)       -> K =:= Key
+              end,
+              Opts).
 
 get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) ->
     Default = false,
