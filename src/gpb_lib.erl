@@ -81,6 +81,7 @@
 -export([map_match/2]).
 -export([map_create/2]).
 -export([map_set/3]).
+-export([term_mapping/3]).
 
 -export([normalize_opts/1]).
 -export([get_2tuples_or_maps_for_maptype_fields_by_opts/1]).
@@ -655,6 +656,50 @@ mapkey_expr_by_opts(Opts) ->
                                            [Expr, erl_syntax:atom(utf8)])
             end
     end.
+
+%% Return an abstract syntax tree for the term, such that
+%% when formatting it to text using erl_prettypr:format, records in `Records'
+%% gets formatted as either record expressions, map expressions or proplists
+%% according to Opts. In particular, they do not become tuple expressions.
+%% This applies also recursively.
+-spec term_mapping(term(), Records, gpb_compile:opts()) -> Result when
+      Records :: #{RecordName::atom() => [FieldName::atom()]},
+      Result  :: erl_syntax:syntaxTree().
+term_mapping(List, Records, Opts) when is_list(List) ->
+    erl_syntax:list(
+      [term_mapping(Elem, Records, Opts) || Elem <- List]);
+term_mapping(Record, Records, Opts)
+  when is_tuple(Record),
+       tuple_size(Record) >= 1,
+       is_map_key(element(1, Record), Records) ->
+    RName = element(1, Record),
+    [RName | RValues] = tuple_to_list(Record),
+    #{RName := FNames} = Records,
+    FValues = [term_mapping(RValue, Records, Opts)
+               || RValue <- RValues],
+    FNamesValues = lists:zip(FNames, FValues),
+    case get_field_format_by_opts(Opts) of
+        fields_as_records ->
+            mapping_create(RName, FNamesValues,
+                           mk_get_defs_as_maps_or_records_fn(Opts),
+                           Opts);
+        fields_as_maps ->
+            mapping_create(RName, FNamesValues,
+                           mk_get_defs_as_maps_or_records_fn(Opts),
+                           Opts);
+        fields_as_proplists ->
+            erl_syntax:list(
+              [erl_syntax:tuple([erl_syntax:atom(FName), FValue])
+               || {FName, FValue} <- FNamesValues])
+    end;
+term_mapping(Tuple, Records, Opts) when is_tuple(Tuple) ->
+    erl_syntax:tuple(
+      [term_mapping(Elem, Records, Opts)
+       || Elem <- tuple_to_list(Tuple)]);
+term_mapping(Map, _Records, _Opts) when is_map(Map) ->
+    error({not_expected, Map}); % don't currently expect maps to be formatted
+term_mapping(Noncompound, _Records, _Opts) ->
+    erl_syntax:abstract(Noncompound).
 
 %% Option helpers ---------------
 

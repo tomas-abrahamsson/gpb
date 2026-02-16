@@ -94,6 +94,40 @@ defs_format_opts_test() ->
                              end_marker]],
     ok.
 
+term_mapping_test() ->
+    KnownRecords = #{a => [f], b => []},
+    S1 = erl_prettypr:format(
+          gpb_lib:term_mapping([{x, {a, {b}}, {}}], KnownRecords, [])),
+    assert_substring("#a{f", S1),
+    assert_substring("#b{}", S1),
+    %%
+    ?assertEqual(
+       [{x, #{f => #{}}, {}}],
+       eval_formatted(
+         erl_prettypr:format(
+           gpb_lib:term_mapping([{x, {a, {b}}, {}}], KnownRecords,
+                                [defs_as_maps])))),
+    %%
+    ?assertEqual(
+       [{x, [{f, []}], {}}],
+       eval_formatted(
+         erl_prettypr:format(
+           gpb_lib:term_mapping([{x, {a, {b}}, {}}], KnownRecords,
+                                [defs_as_proplists])))),
+    ok.
+
+assert_substring(ExpectedSubstr, Str) ->
+    case string:find(Str, ExpectedSubstr) of
+        nomatch -> error({substr_not_present, #{expected => ExpectedSubstr,
+                                                string => Str}});
+        _ -> ok
+    end.
+
+eval_formatted(Str) ->
+    {ok, Tokens, _End} = erl_scan:string(Str ++ ".", 1),
+    {ok, Term} = erl_parse:parse_term(Tokens),
+    Term.
+
 snake_case_test() ->
     [?assertEqual(Expected, gpb_lib:snake_case(Input), {input_is, Input})
      || {Expected, Input} <- snake_casings()],
