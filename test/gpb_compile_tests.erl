@@ -608,8 +608,8 @@ default_value_handling_test() ->
                                 type_defaults_for_omitted_optionals]},
              {{m,undefined,2}, [defaults_for_omitted_optionals]},
              {{m,0,0},         [type_defaults_for_omitted_optionals]}],
-        OptVariation <- [[pass_as_params],
-                         [pass_as_record]]].
+        OptVariation <- [[{field_pass_method, pass_as_params}],
+                         [{field_pass_method, pass_as_record}]]].
 
 type_default_option_should_be_ignored_for_proto3_test() ->
     Proto = ["syntax=\"proto3\";\n",
