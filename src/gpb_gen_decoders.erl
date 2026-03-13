@@ -109,28 +109,6 @@ format_decoders_top_function_no_msgs(Opts) ->
 
 format_decoders_top_function_msgs(Defs, AnRes, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
-    Error = ("error({gpb_error," ++
-             ""     "{decoding_failure," ++
-             ""     " {Bin, MsgName, {Class, Reason, StackTrace}}}})"),
-    DecodeMsg1Catch_GetStackTraceAsPattern =
-        ?f("decode_msg_1_catch(Bin, MsgName, TrUserData) ->~n"
-           "    try decode_msg_2_doit(MsgName, Bin, TrUserData)~n"
-           "    catch~n"
-           "        error:{gpb_error,_}=Reason:StackTrace ->~n"
-           "            erlang:raise(error, Reason, StackTrace);~n"
-           "        Class:Reason:StackTrace -> ~s~n"
-           "    end.~n", [Error]),
-    DecodeMsg1Catch_GetStackTraceAsCall =
-        ?f("decode_msg_1_catch(Bin, MsgName, TrUserData) ->~n"
-           "    try decode_msg_2_doit(MsgName, Bin, TrUserData)~n"
-           "    catch~n"
-           "        error:{gpb_error,_}=Reason ->~n"
-           "            erlang:raise(error, Reason,~n"
-           "                         erlang:get_stacktrace());~n"
-           "        Class:Reason ->~n"
-           "            StackTrace = erlang:get_stacktrace(),~n"
-           "            ~s~n"
-           "    end.~n", [Error]),
     [gpb_codegen:format_fn(
        decode_msg,
        fun(Bin, MsgName) when is_binary(Bin) ->
@@ -142,11 +120,18 @@ format_decoders_top_function_msgs(Defs, AnRes, Opts) ->
                TrUserData = proplists:get_value(user_data, Opts),
                decode_msg_1_catch(Bin, MsgName, TrUserData)
        end),
-     ["-ifdef('OTP_RELEASE').\n", % This macro appeared in Erlang 21
-      DecodeMsg1Catch_GetStackTraceAsPattern,
-      "-else.\n",
-      DecodeMsg1Catch_GetStackTraceAsCall,
-      "-endif.\n\n"],
+     "\n"
+     "decode_msg_1_catch(Bin, MsgName, TrUserData) ->\n"
+     "    try decode_msg_2_doit(MsgName, Bin, TrUserData)\n"
+     "    catch\n"
+     "        error:{gpb_error,_}=Reason:StackTrace ->\n"
+     "            erlang:raise(error, Reason, StackTrace);\n"
+     "        Class:Reason:StackTrace ->\n"
+     "            error({gpb_error,\n"
+     "                   {decoding_failure,\n"
+     "                    {Bin, MsgName, {Class, Reason, StackTrace}}}})\n"
+     "    end.\n"
+     "\n",
      gpb_codegen:format_fn(
        decode_msg_2_doit,
        fun('MsgName', Bin, TrUserData) ->
@@ -273,29 +258,25 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                    gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=present_undefined},pass_as_record} ->
                   [gpb_decoders_lib:rework_records_to_maps(5, FieldInfos,
-                                                           undefined),
-                   gpb_decoders_lib:underscore_unused_vars(),
-                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
+                                                           undefined, Opts),
+                   gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=present_undefined},pass_as_params} ->
                   [gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 5),
                    gpb_decoders_lib:explode_param_pass(MsgName, FNames, 5),
-                   gpb_decoders_lib:implode_to_map_exprs_all_mandatory(),
-                   gpb_decoders_lib:underscore_unused_vars(),
-                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
+                   gpb_decoders_lib:implode_to_map_exprs_all_mandatory(Opts),
+                   gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=omitted}, pass_as_record} ->
                   [gpb_decoders_lib:change_undef_marker_in_clauses('$undef'),
                    gpb_decoders_lib:rework_records_to_maps(5, FieldInfos,
-                                                           '$undef'),
-                   gpb_decoders_lib:underscore_unused_vars(),
-                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
+                                                           '$undef', Opts),
+                   gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=omitted}, pass_as_params} ->
                   [gpb_decoders_lib:change_undef_marker_in_clauses('$undef'),
                    gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 5),
                    gpb_decoders_lib:explode_param_pass(MsgName, FNames, 5),
                    gpb_decoders_lib:implode_to_map_exprs(5, FieldInfos,
-                                                         '$undef'),
-                   gpb_decoders_lib:underscore_unused_vars(),
-                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)]
+                                                         '$undef', Opts),
+                   gpb_decoders_lib:underscore_unused_vars()]
           end,
     gpb_decoders_lib:run_morph_ops(Ops, Fns).
 
@@ -304,12 +285,12 @@ format_msg_decoder_read_field(MsgName, MsgDef, InitExprs, AnRes, Opts) ->
     Rest = ?expr(Rest),
     {Param, FParam, FParamBinds} =
         gpb_decoders_lib:decoder_read_field_param(MsgName, MsgDef, Opts),
-    Bindings = new_bindings([{'Param', Param},
-                             {'FParam', FParam},
-                             {'FFields', FParamBinds},
-                             {'Key', Key},
-                             {'Rest', Rest},
-                             {'TrUserData', ?expr(TrUserData)}]),
+    Bindings = #{'Param' => Param,
+                 'FParam' => FParam,
+                 'FFields' => FParamBinds,
+                 'Key' => Key,
+                 'Rest' => Rest,
+                 'TrUserData' => ?expr(TrUserData)},
     [format_msg_init_decoder(MsgName, InitExprs),
      format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts),
      format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts)].
@@ -332,9 +313,9 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The fast-path decoder directly matches the minimal varint form
     %% of the field-number combined with the wiretype.
     %% Unrecognized fields fall back to the more generic decoder-loop
-    Param = fetch_binding('Param', Bindings),
-    FParam = fetch_binding('FParam', Bindings),
-    FFields = fetch_binding('FFields', Bindings),
+    #{'Param' := Param,
+      'FParam' := FParam,
+      'FFields' := FFields} = Bindings,
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(dfp_read_field_def_, MsgName),
           fun('precomputed-binary-match', Z1, Z2, F, 'Param', TrUserData) ->
@@ -370,11 +351,11 @@ format_msg_fastpath_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
 format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
     %% The more general field selecting decoder
     %% Stuff that ends up here: non-minimal varint forms and field to skip
-    Key = fetch_binding('Key', Bindings),
-    Rest = fetch_binding('Rest', Bindings),
-    Param = fetch_binding('Param', Bindings),
-    FParam = fetch_binding('FParam', Bindings),
-    FFields = fetch_binding('FFields', Bindings),
+    #{'Key' := Key,
+      'Rest' := Rest,
+      'Param' := Param,
+      'FParam' := FParam,
+      'FFields' := FFields} = Bindings,
     T = gpb_codegen:mk_fn(
           gpb_lib:mk_fn(dg_read_field_def_, MsgName),
           fun(<<1:1, X:7, 'Rest'/binary>>, N, Acc, F, 'Param', TrUserData)
@@ -409,9 +390,9 @@ format_msg_generic_decoder(Bindings, MsgName, MsgDef, AnRes, Opts) ->
 
 %% compute info for the fast-path field recognition/decoding-call
 decoder_fp(Bindings, MsgName, MsgDef) ->
-    Rest = fetch_binding('Rest', Bindings),
-    Param = fetch_binding('Param', Bindings),
-    TrUserDataVar = fetch_binding('TrUserData', Bindings),
+    #{'Rest' := Rest,
+      'Param' := Param,
+      'TrUserData' := TrUserDataVar} = Bindings,
     [begin
          BMatch = ?expr(<<'field-and-wiretype-bytes', 'Rest'/binary>>,
                         [splice_trees('field-and-wiretype-bytes',
@@ -429,16 +410,16 @@ decoder_fp(Bindings, MsgName, MsgDef) ->
      || {Selector, DecodeFn} <- decoder_field_selectors(MsgName, MsgDef)].
 
 decoder_field_calls(Bindings, MsgName, []=_MsgDef, _AnRes) ->
-    Key = fetch_binding('Key', Bindings),
+    #{'Key' := Key} = Bindings,
     WiretypeExpr = ?expr('Key' band 7, [replace_tree('Key', Key)]),
-    Bindings1 = add_binding({'wiretype-expr', WiretypeExpr}, Bindings),
+    Bindings1 = Bindings#{'wiretype-expr' => WiretypeExpr},
     decoder_skip_calls(Bindings1, MsgName);
 decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
-    Key = fetch_binding('Key', Bindings),
-    Rest = fetch_binding('Rest', Bindings),
-    Param = fetch_binding('Param', Bindings),
+    #{'Key' := Key,
+      'Rest' := Rest,
+      'Param' := Param,
+      'TrUserData' := TrUserDataVar} = Bindings,
     SkipCalls = decoder_field_calls(Bindings, MsgName, [], AnRes),
-    TrUserDataVar = fetch_binding('TrUserData', Bindings),
     FieldSelects = decoder_field_selectors(MsgName, MsgDef),
     ?expr(case 'Key' of
               'selector' -> 'decode_field'('Rest', 0, 0, 0, 'Param',
@@ -456,12 +437,12 @@ decoder_field_calls(Bindings, MsgName, MsgDef, AnRes) ->
         replace_tree('TrUserData', TrUserDataVar)]).
 
 decoder_skip_calls(Bindings, MsgName) ->
-    KeyExpr = fetch_binding('Key', Bindings),
+    #{'Key'           := KeyExpr,
+      'wiretype-expr' := WiretypeExpr,
+      'Rest'          := RestExpr,
+      'Param'         := Param,
+      'TrUserData'    := TrUserDataVar} = Bindings,
     FieldNumExpr = ?expr('Key' bsr 3, [replace_tree('Key', KeyExpr)]),
-    WiretypeExpr = fetch_binding('wiretype-expr', Bindings),
-    RestExpr = fetch_binding('Rest', Bindings),
-    Param = fetch_binding('Param', Bindings),
-    TrUserDataVar = fetch_binding('TrUserData', Bindings),
     ?expr(case 'wiretype-expr' of
               0 -> skip_vi('Rest', 0, 0, 'FNum', 'Param', 'TrUserData');
               1 -> skip_64('Rest', 0, 0, 'FNum', 'Param', 'TrUserData');
@@ -1413,18 +1394,6 @@ format_field_skippers(MsgName) ->
          passes_msg = true,
          tree=T}
      || T <- lists:flatten(Ts)].
-
-new_bindings(Tuples) ->
-    lists:foldl(fun add_binding/2, new_bindings(), Tuples).
-
-new_bindings() ->
-    dict:new().
-
-add_binding({Key, Value}, Bindings) ->
-    dict:store(Key, Value, Bindings).
-
-fetch_binding(Key, Bindings) ->
-    dict:fetch(Key, Bindings).
 
 %% The fun takes two args: Fun(#?gpb_field{}, IsOneofField) -> term()
 map_msgdef_fields_o_for_non_unknowns(Fun, Fields) ->

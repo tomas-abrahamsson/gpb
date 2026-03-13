@@ -169,7 +169,6 @@ format_nif_cc(Mod, Defs, AnRes, Opts) ->
        format_nif_cc_oneof_version_check_if_present(Defs),
        format_nif_cc_maptype_version_check_if_present(Defs),
        format_nif_cc_proto3_version_check_if_present(Defs),
-       format_nif_cc_map_api_check_if_needed(Opts),
        format_nif_cc_json_api_check_if_needed(Opts),
        format_nif_cc_json_includes_if_needed(Opts),
        format_nif_cc_byte_size_macros(Defs),
@@ -275,7 +274,7 @@ calc_cc_mapping(Defs, #anres{renamings=Renamings}, Opts) ->
           end,
           {[], '$undefined', ""},
           Defs),
-    dict:from_list(CCMapping).
+    maps:from_list(CCMapping).
 
 split_enum_with_pkg(EnumName, Pkg) ->
     EnumStr = atom_to_list(EnumName),
@@ -385,24 +384,6 @@ format_nif_cc_proto3_version_check_if_present(Defs) ->
             ""
     end.
 
-format_nif_cc_map_api_check_if_needed(Opts) ->
-    case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
-        '2tuples' ->
-            "";
-        maps ->
-            %% The maps api functions appeared in erl_nif.h version 2.6,
-            %% which is Erlang 17, but they were not documented until 18.0.
-            %% There were some changes to the iterators in 2.8 (= Erlang 18.0)
-            %% but those are not needed.
-            ["#if (!(", format_nif_check_version_or_later(2, 6), "))\n"
-             "#error \"Maps was specified. The needed nif interface for\"\n"
-             "#error \"maps appeared in version 2.6 (Erlang 17), but\"\n"
-             "#error \"it appears your erl_nif version is older.  Please\"\n"
-             "#error \"update Erlang.\"\n"
-             "#endif\n"
-             "\n"]
-    end.
-
 format_nif_cc_json_api_check_if_needed(Opts) ->
     case gpb_lib:json_by_opts(Opts) of
         true ->
@@ -474,7 +455,7 @@ format_nif_cc_local_function_decls(_Mod, Defs, CCMapping, AnRes, _Opts) ->
     [[begin
           PackFnName = mk_c_fn(p_msg_, MsgName),
           UnpackFnName = mk_c_fn(u_msg_, MsgName),
-          #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+          #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
           [["static int ",PackFnName,["(ErlNifEnv *env, ",
                                       "const ERL_NIF_TERM r,",
                                       CMsgType," *m);\n"]],
@@ -1205,34 +1186,16 @@ format_nif_cc_foot(Mod, Defs, Opts) ->
      "\n",
      "static ErlNifFunc nif_funcs[] =\n",
      "{\n",
-     %% Dirty schedulers flags appeared in Erlang 17.3 = enif 2.7
-     %% but only if Erlang was configured with --enable-dirty-schedulers
-     "#if ", format_nif_check_version_or_later(2, 7), "\n"
-     "#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT\n",
-     format_nif_cc_nif_funcs_list(Defs, "ERL_NIF_DIRTY_JOB_CPU_BOUND, ", Opts),
-     "#else /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
-     format_nif_cc_nif_funcs_list(Defs, "", Opts),
-     "#endif /* ERL_NIF_DIRTY_SCHEDULER_SUPPORT */\n",
-     "#else /* before 2.7 or 17.3 */\n",
-     format_nif_cc_nif_funcs_list(Defs, no_flags, Opts),
-     "#endif /* before 2.7 or 17.3 */\n"
+     format_nif_cc_nif_funcs_list(Defs, Opts),
      "};\n",
      "\n",
      ?f("ERL_NIF_INIT(~s, nif_funcs, load, reload, upgrade, unload)\n",
         [Mod])].
 
-format_nif_check_version_or_later(Major, Minor) ->
-    ?f("ERL_NIF_MAJOR_VERSION > ~w"
-       " || "
-       "(ERL_NIF_MAJOR_VERSION == ~w && ERL_NIF_MINOR_VERSION >= ~w)",
-       [Major, Major, Minor]).
-
-format_nif_cc_nif_funcs_list(Defs, Flags, Opts) ->
+format_nif_cc_nif_funcs_list(Defs, Opts) ->
     DoJson = gpb_lib:json_by_opts(Opts),
     MsgNames = [MsgName || {{msg, MsgName}, _MsgFields} <- Defs],
-    FlagStr = if Flags == no_flags -> "";
-                 true -> ", " ++ Flags
-              end,
+    FlagStr = ", ERL_NIF_DIRTY_JOB_CPU_BOUND, ",
     [begin
          EncodeFnName = gpb_lib:mk_fn(encode_msg_, MsgName),
          EncodeCFnName = mk_c_fn(encode_msg_, MsgName),
@@ -1267,7 +1230,7 @@ format_nif_cc_encoders(Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_encoder(_Mod, MsgName, _Fields, CCMapping, _Opts) ->
     FnName = mk_c_fn(encode_msg_, MsgName),
     PackFnName = mk_c_fn(p_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     ["static ERL_NIF_TERM\n",
      FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
      "{\n",
@@ -1325,7 +1288,7 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
                       MsgFields
               end,
     PackFnName = mk_c_fn(p_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     ["static int\n",
      PackFnName,["(ErlNifEnv *env, ",
                  "const ERL_NIF_TERM r,",
@@ -1336,7 +1299,7 @@ format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
               "    ErlNifMapIterator iter;\n",
               "    ErlNifMapIteratorEntry first;\n",
               "",
-              initialize_map_iterator(4, "first"),
+              "    first = ERL_NIF_MAP_ITERATOR_FIRST;\n",
               "    if (!enif_map_iterator_create(env, r, &iter, first))\n",
               "        return 0;\n\n",
               ""
@@ -1583,7 +1546,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, CCMapping,
                [SrcVar, SetFn(["1"]), SrcVar, SetFn(["1"]), SetFn(["0"])]);
         {enum, EnumName} ->
             #cc_enum{type=EType,
-                     enums=CCEnums} = dict:fetch(EnumName, CCMapping),
+                     enums=CCEnums} = maps:get(EnumName, CCMapping),
             ["{\n",
              ?f("    int v;\n"
                 "    if (enif_get_int(env, ~s, &v))\n"
@@ -1651,7 +1614,7 @@ format_nif_cc_field_packer_single(SrcVar, MsgVar, Field, Defs, CCMapping,
                [SrcVar, SetFn(["reinterpret_cast<char *>(b.data)", "b.size"]),
                 SrcVar, SrcVar, SetFn(["reinterpret_cast<char *>(b.data)", "b.size"])]);
         {msg, Msg2Name} ->
-            #cc_msg{type=CMsg2Type} = dict:fetch(Msg2Name, CCMapping),
+            #cc_msg{type=CMsg2Type} = maps:get(Msg2Name, CCMapping),
             PackFnName = mk_c_fn(p_msg_, Msg2Name),
             NewMsg2 = case Setter of
                           set -> ?f("~s->mutable_~s()", [MsgVar, CxxFName]);
@@ -1765,7 +1728,7 @@ format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field,
        "    ErlNifMapIterator iter;\n"
        "    ErlNifMapIteratorEntry first;\n\n"
        ""
-       "~s\n\n" %% init of iterator `first'
+       "    first = ERL_NIF_MAP_ITERATOR_FIRST;\n\n"
        ""
        "    if (!enif_map_iterator_create(env, ~s, &iter, first))\n"
        "        return 0;\n\n"
@@ -1777,8 +1740,7 @@ format_nif_cc_field_packer_maptype_m(SrcVar, MsgVar, Field,
        "    }\n"
        "    enif_map_iterator_destroy(env, &iter);\n"
        "}\n",
-       [initialize_map_iterator(4, "first"),
-        SrcVar,
+       [SrcVar,
         gpb_lib:split_indent_butfirst_iolist(
           8, format_nif_cc_field_packer_single(
                {"ik", "iv"}, MsgVar, Field, Defs, CCMapping, Opts, add))]).
@@ -1797,7 +1759,7 @@ format_nif_cc_decoders(Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_decoder(_Mod, MsgName, _Fields, CCMapping, _Opts) ->
     FnName = mk_c_fn(decode_msg_, MsgName),
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     ["static ERL_NIF_TERM\n",
      FnName,"(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])\n",
      "{\n",
@@ -1842,7 +1804,7 @@ format_nif_cc_unpackers(_Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
     Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     IFields = gpb_lib:index_seq(Fields),
     Is = [I || {I,_} <- IFields],
     %% Initialize the keys to silence "may be used uninitialized"
@@ -1972,7 +1934,7 @@ format_nif_cc_field_oneof_unpacker(MsgVar, MsgName,
                                    #gpb_oneof{name=OFName, fields=OFields},
                                    KSetter, VSetter, UndefSetter,
                                    Defs, CCMapping, _Opts) ->
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     UCOFName = to_upper(OFName),
     [?f("switch (~s->~s_case())\n", [MsgVar, OFName]),
      ?f("{\n"),
@@ -2082,7 +2044,7 @@ format_nif_cc_field_unpacker_by_type(DestVar, SrcExpr, FType,
              ?f("    ~s = gpb_aa_false;\n", [DestVar])];
         {enum, EnumName} ->
             #cc_enum{unaliased_enums=CCEnums} =
-                dict:fetch(EnumName, CCMapping),
+                maps:get(EnumName, CCMapping),
             [] ++
                 [?f("switch (~s) {\n", [SrcExpr])] ++
                 [?f("    case ~s: ~s = ~s; break;\n",
@@ -2191,7 +2153,7 @@ format_nif_cc_to_jsoners(Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_to_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
     FnName = mk_c_fn(to_json_msg_, MsgName),
     PackFnName = mk_c_fn(p_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     PrintNoPresence =
         atom_to_list(
           proplists:get_bool(json_always_print_fields_with_no_presence, Opts)),
@@ -2266,7 +2228,7 @@ format_nif_cc_from_jsoners(Mod, Defs, CCMapping, Opts) ->
 format_nif_cc_from_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
     FnName = mk_c_fn(from_json_msg_, MsgName),
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
-    #cc_msg{type=CMsgType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     CaseInsensitiveEnums =
         atom_to_list(
           proplists:get_bool(json_case_insensitive_enum_parsing, Opts)),
@@ -2322,13 +2284,13 @@ format_nif_cc_from_jsoner(_Mod, MsgName, _Fields, CCMapping, Opts) ->
      "\n"].
 
 mk_cctype_name({enum,EnumName}, CCMapping) ->
-    #cc_enum{type = CCType} = dict:fetch(EnumName, CCMapping),
+    #cc_enum{type = CCType} = maps:get(EnumName, CCMapping),
     CCType;
 mk_cctype_name({msg,MsgName}, CCMapping) ->
-    #cc_msg{type = CCType} = dict:fetch(MsgName, CCMapping),
+    #cc_msg{type = CCType} = maps:get(MsgName, CCMapping),
     CCType;
 mk_cctype_name({group,GName}, CCMapping) ->
-    #cc_msg{type = CCType} = dict:fetch(GName, CCMapping),
+    #cc_msg{type = CCType} = maps:get(GName, CCMapping),
     CCType;
 mk_cctype_name({map,KeyType,ValueType}, CCMapping) ->
     CKeyType = mk_cctype_name(KeyType, CCMapping),
@@ -2374,16 +2336,6 @@ categorize_field_kind(#?gpb_field{occurrence=Occurrence, type=Type}=Field) ->
                     end
             end
     end.
-
-initialize_map_iterator(Indent, IteratorVarName) ->
-    ?f("#if ~s\n"
-       "~s = ERL_NIF_MAP_ITERATOR_FIRST;\n"
-       "#else /* before 2.8 which appeared in 18.0 */\n"
-       "~s = ERL_NIF_MAP_ITERATOR_HEAD;\n"
-       "#endif\n",
-       [format_nif_check_version_or_later(2, 8),
-        gpb_lib:indent(Indent, IteratorVarName),
-        gpb_lib:indent(Indent, IteratorVarName)]).
 
 split_indent_iolist_unless_curly_block(Indent, IoList) ->
     gpb_lib:cond_split_indent_iolist(

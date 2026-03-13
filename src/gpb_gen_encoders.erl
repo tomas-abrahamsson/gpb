@@ -26,14 +26,14 @@
 -export([format_encoders_top_function/3]).
 -export([format_msg_encoders/4]).
 -export([format_map_encoders/4]).
--export([format_aux_encoders/3]).
+-export([format_aux_encoders/2]).
 -export([format_aux_common_encoders/3]).
 
 -include("../include/gpb.hrl").
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [replace_term/2, replace_tree/2,
+-import(gpb_lib, [replace_term/2, replace_tree/2, replace_map_key/3,
                   splice_trees/2, repeat_clauses/2]).
 
 %% -- exports -----------------------------------------------------
@@ -189,9 +189,9 @@ format_encoders_top_function_msgs(Defs, AnRes, Opts) ->
         || {{msg,MsgName}, _Fields}=MsgDef <- Defs]]
       || gpb_lib:get_epb_functions_by_opts(Opts)]].
 
-format_aux_encoders(Defs, AnRes, Opts) ->
+format_aux_encoders(Defs, AnRes) ->
     [format_enum_encoders(Defs, AnRes),
-     format_type_encoders(AnRes, Opts)
+     format_type_encoders(AnRes)
     ].
 
 format_aux_common_encoders(_Defs, AnRes, _Opts) ->
@@ -389,14 +389,14 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
-                           '#{fieldname := <F>}' ->
+                           #{fieldname := '<F>'} ->
                                '<encodeit>';
                            _ ->
                                '<Bin>'
                        end,
                        [replace_tree('M', MsgVar),
-                        replace_tree('#{fieldname := <F>}',
-                                     gpb_lib:map_match([{FName,FVar}], Opts)),
+                        replace_map_key(fieldname, FName, Opts),
+                        replace_tree('<F>', FVar),
                         replace_tree('<encodeit>', EncodeExpr)
                        | Transforms])
             end;
@@ -499,14 +499,14 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
-                           '#{fieldname := <F>}' ->
+                           #{fieldname := '<F>'} ->
                                '<encodeit>';
                            _ ->
                                '<Bin>'
                        end,
                        [replace_tree('M', MsgVar),
-                        replace_tree('#{fieldname := <F>}',
-                                     gpb_lib:map_match([{FName,FVar}], Opts)),
+                        replace_map_key(fieldname, FName, Opts),
+                        replace_tree('<F>', FVar),
                         replace_tree('<encodeit>', EncodeExpr)
                         | Transforms])
             end;
@@ -533,7 +533,7 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
-                           '#{fieldname := <F>}' ->
+                           #{fieldname := '<F>'} ->
                                'TrF' = 'Tr'('<F>', 'TrUserData'),
                                if 'TrF' == [] -> '<Bin>';
                                   true -> '<enc>'('TrF', '<Bin>', 'TrUserData')
@@ -542,8 +542,8 @@ field_encode_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                '<Bin>'
                        end,
                        [replace_tree('M', MsgVar),
-                        replace_tree('#{fieldname := <F>}',
-                                     gpb_lib:map_match([{FName,FVar}], Opts))
+                        replace_map_key(fieldname, FName, Opts),
+                        replace_tree('<F>', FVar)
                         | Transforms])
             end;
         required ->
@@ -584,11 +584,11 @@ field_encode_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                                   Defs, Tr, AnRes, Opts))]);
         #maps{unset_optional=omitted, oneof=tuples} ->
             ?expr(case 'M' of
-                      '#{fname:=F}' -> '<expr>';
+                      #{fname := 'F'} -> '<expr>';
                       _ -> 'Bin'
                   end,
-                  [replace_tree('#{fname:=F}',
-                                gpb_lib:map_match([{FName, FVar}], Opts)),
+                  [replace_map_key(fname, FName, Opts),
+                   replace_tree('F', FVar),
                    replace_tree('M', MsgVar),
                    replace_tree('Bin', PrevBVar),
                    replace_tree('<expr>',
@@ -641,7 +641,9 @@ field_encode_oneof_flat(ClauseMarker, MsgName, MsgVar, FVar, OFields,
                         Transl, TrUserDataVar, PrevBVar, Defs, Tr, AnRes, Opts) ->
     OFVar = gpb_lib:prefix_var("O", FVar),
     [begin
-         MatchPattern = gpb_lib:map_match([{Name, OFVar}], Opts),
+         MatchPattern = ?expr(#{name := 'OFVar'},
+                              [replace_map_key(name, Name, Opts),
+                               replace_tree('OFVar', OFVar)]),
          %% undefined is already handled, we have a match,
          %% the field occurs, as if it had been required
          OField2 = OField#?gpb_field{occurrence=required},
@@ -653,10 +655,10 @@ field_encode_oneof_flat(ClauseMarker, MsgName, MsgVar, FVar, OFields,
                            [replace_term('Tr', Transl),
                             replace_tree('EncExpr', EncExpr),
                             replace_tree('TrUserData', TrUserDataVar)]),
-             [replace_tree(ClauseMarker, MatchPattern),
-              replace_tree('<expr>', TrEncExpr)]
-         end
-         || #?gpb_field{name=Name}=OField <- OFields].
+         [replace_tree(ClauseMarker, MatchPattern),
+          replace_tree('<expr>', TrEncExpr)]
+     end
+     || #?gpb_field{name=Name}=OField <- OFields].
 
 
 mk_field_encode_fn_name(MsgName, #?gpb_field{occurrence=repeated, name=FName})->
@@ -787,10 +789,10 @@ possibly_format_mfield_encoder(_MsgName, _FieldDef, _Defs) ->
     [].
 
 is_msgsize_known_at_generationtime(MsgName, #anres{known_msg_size=MsgSizes}) ->
-    case dict:fetch(MsgName, MsgSizes) of
-        MsgSize when is_integer(MsgSize) ->
+    case MsgSizes of
+        #{MsgName := MsgSize} when is_integer(MsgSize) ->
             {yes, MsgSize};
-        undefined ->
+        #{MsgName := undefined} ->
             no
     end.
 
@@ -948,27 +950,27 @@ format_unknownsize_packed_field_encoder2(MsgName,
        [replace_term('<encode-elem>', ElemEncoderFn),
         replace_term('Tr', Transl)])].
 
-format_type_encoders(AnRes, Opts) ->
-    [format_varlength_field_encoders(AnRes, Opts),
-     format_fixlength_field_encoders(AnRes, Opts),
+format_type_encoders(AnRes) ->
+    [format_varlength_field_encoders(AnRes),
+     format_fixlength_field_encoders(AnRes),
      format_unknown_encoder(),
      format_varint_encoder()].
 
-format_varlength_field_encoders(AnRes, Opts) ->
+format_varlength_field_encoders(AnRes) ->
     [format_sint_encoder(),
-     format_int_encoder(int32, 32, AnRes, Opts),
-     format_int_encoder(int64, 64, AnRes, Opts),
-     format_bool_encoder(AnRes, Opts),
-     format_string_encoder(AnRes, Opts),
-     format_bytes_encoder(AnRes, Opts)].
+     format_int_encoder(int32, 32, AnRes),
+     format_int_encoder(int64, 64, AnRes),
+     format_bool_encoder(AnRes),
+     format_string_encoder(AnRes),
+     format_bytes_encoder(AnRes)].
 
-format_fixlength_field_encoders(AnRes, Opts) ->
-    [format_fixed_encoder(fixed32,  32, [little], AnRes, Opts),
-     format_fixed_encoder(sfixed32, 32, [little,signed], AnRes, Opts),
-     format_fixed_encoder(fixed64,  64, [little], AnRes, Opts),
-     format_fixed_encoder(sfixed64, 64, [little,signed], AnRes, Opts),
-     format_float_encoder(float, AnRes, Opts),
-     format_double_encoder(double, AnRes, Opts)].
+format_fixlength_field_encoders(AnRes) ->
+    [format_fixed_encoder(fixed32,  32, [little], AnRes),
+     format_fixed_encoder(sfixed32, 32, [little,signed], AnRes),
+     format_fixed_encoder(fixed64,  64, [little], AnRes),
+     format_fixed_encoder(sfixed64, 64, [little,signed], AnRes),
+     format_float_encoder(float, AnRes),
+     format_double_encoder(double, AnRes)].
 
 format_sint_encoder() ->
     [gpb_lib:nowarn_unused_function(e_type_sint,3),
@@ -980,10 +982,10 @@ format_sint_encoder() ->
                e_varint(Value * -2 - 1, Bin)
        end)].
 
-format_int_encoder(Type, _BitLen, AnRes, Opts) ->
+format_int_encoder(Type, _BitLen, AnRes) ->
     FnName = gpb_lib:mk_fn(e_type_, Type),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes, Opts),
+     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes),
      gpb_codegen:format_fn(
        FnName,
        fun(Value, Bin, _TrUserData) when 0 =< Value, Value =< 127 ->
@@ -996,10 +998,10 @@ format_int_encoder(Type, _BitLen, AnRes, Opts) ->
                e_varint(N, Bin)
        end)].
 
-format_bool_encoder(AnRes, Opts) ->
+format_bool_encoder(AnRes) ->
     FnName = e_type_bool,
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     maybe_no_dialyzer_warn_funcion(bool, FnName, 3, AnRes, Opts),
+     maybe_no_dialyzer_warn_funcion(bool, FnName, 3, AnRes),
      gpb_codegen:format_fn(
        FnName,
        fun(true, Bin, _TrUserData)  -> <<Bin/binary, 1>>;
@@ -1008,10 +1010,10 @@ format_bool_encoder(AnRes, Opts) ->
           (0, Bin, _TrUserData) -> <<Bin/binary, 0>>
        end)].
 
-format_fixed_encoder(Type, BitLen, BitType, AnRes, Opts) ->
+format_fixed_encoder(Type, BitLen, BitType, AnRes) ->
     FnName = gpb_lib:mk_fn(e_type_, Type),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes, Opts),
+     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes),
      gpb_codegen:format_fn(
        FnName,
        fun(Value, Bin, _TrUserData) ->
@@ -1060,10 +1062,10 @@ format_packed_double_encoder(FnName, TranslFn) ->
       end,
       [replace_term('Tr', TranslFn)]).
 
-format_float_encoder(Type, AnRes, Opts) ->
+format_float_encoder(Type, AnRes) ->
     FnName = gpb_lib:mk_fn(e_type_, Type),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes, Opts),
+     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes),
      gpb_codegen:format_fn(
        FnName,
        fun(V, Bin, _) when is_number(V) -> <<Bin/binary, V:32/little-float>>;
@@ -1072,10 +1074,10 @@ format_float_encoder(Type, AnRes, Opts) ->
           (nan, Bin, _)                 -> <<Bin/binary, 0:16,192,127>>
        end)].
 
-format_double_encoder(Type, AnRes, Opts) ->
+format_double_encoder(Type, AnRes) ->
     FnName = gpb_lib:mk_fn(e_type_, Type),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes, Opts),
+     maybe_no_dialyzer_warn_funcion(Type, FnName, 3, AnRes),
      gpb_codegen:format_fn(
        FnName,
        fun(V, Bin, _) when is_number(V) -> <<Bin/binary, V:64/little-float>>;
@@ -1084,10 +1086,10 @@ format_double_encoder(Type, AnRes, Opts) ->
           (nan, Bin, _)                 -> <<Bin/binary, 0:48,248,127>>
        end)].
 
-format_string_encoder(AnRes, Opts) ->
+format_string_encoder(AnRes) ->
     FnName = e_type_string,
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     maybe_no_dialyzer_warn_funcion(string, FnName, 3, AnRes, Opts),
+     maybe_no_dialyzer_warn_funcion(string, FnName, 3, AnRes),
      gpb_codegen:format_fn(
        FnName,
        fun(S, Bin, _TrUserData) ->
@@ -1096,10 +1098,10 @@ format_string_encoder(AnRes, Opts) ->
                <<Bin2/binary, Utf8/binary>>
        end)].
 
-format_bytes_encoder(AnRes, Opts) ->
+format_bytes_encoder(AnRes) ->
     FnName = e_type_bytes,
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     maybe_no_dialyzer_warn_funcion(bytes, FnName, 3, AnRes, Opts),
+     maybe_no_dialyzer_warn_funcion(bytes, FnName, 3, AnRes),
      gpb_codegen:format_fn(
        FnName,
        fun(Bytes, Bin, _TrUserData) when is_binary(Bytes) ->
@@ -1166,11 +1168,10 @@ format_is_empty_string(#anres{has_p3_opt_strings=true}) ->
        end)].
 
 maybe_no_dialyzer_warn_funcion(Type, FnName, Arity,
-                               #anres{types_only_via_translations=TrTypes},
-                               Opts) ->
+                               #anres{types_only_via_translations=TrTypes}) ->
     case sets:is_element(Type, TrTypes) of
         true ->
-            gpb_lib:nowarn_dialyzer_attr(FnName, Arity, Opts);
+            gpb_lib:nowarn_dialyzer_attr(FnName, Arity);
         false ->
             []
     end.

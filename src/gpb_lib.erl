@@ -77,6 +77,7 @@
 -export([record_match/2]).
 -export([record_create/2]).
 -export([record_update/3]).
+-export([replace_map_key/3]).
 -export([map_match/2]).
 -export([map_create/2]).
 -export([map_set/3]).
@@ -94,13 +95,6 @@
 -export([get_bypass_wrappers_by_opts/1]).
 -export([get_enum_macros_by_opts/1]).
 -export([is_target_major_version_at_least/2]).
--export([target_has_lists_join/1]).
--export([target_has_variable_key_map_update/1]).
--export([target_can_specify_map_item_presence_in_typespecs/1]).
--export([target_can_do_flat_oneof_for_maps/1]).
--export([target_may_fail_compilation_for_flat_oneof_for_maps/1]).
--export([target_has_stacktrace_syntax/1]).
--export([target_has_map_iterators/1]).
 -export([target_has_nifs_directive/1]).
 -export([current_otp_release/0]).
 -export([proto2_type_default/3]).
@@ -137,9 +131,8 @@
 -export([split_indent_iolist/2]).
 -export([split_indent_butfirst_iolist/2]).
 -export([cond_split_indent_iolist/3]).
--export([iolist_to_utf8_or_escaped_binary/2]).
 -export([nowarn_unused_function/2]).
--export([nowarn_dialyzer_attr/3]).
+-export([nowarn_dialyzer_attr/2]).
 -export([no_underspecs_dialyzer_attr/3]).
 
 -export([drop_filename_ext/1]).
@@ -161,6 +154,8 @@
 -export([lower_camel_case/1]).
 
 -export([ljoin/2]).
+
+-export([maps_merge_with/3]).
 
 -include("../include/gpb.hrl").
 
@@ -285,15 +280,17 @@ at_least_one_submsg_with_size_not_known_at_compile_time_exists(AnRes) ->
            known_msg_size=KnownSize} = AnRes,
     SubMsgNames = [MsgName || {msg,MsgName} <- sets:to_list(UsedTypes)],
     MapMsgNames = [MsgName || {{msg,MsgName},_} <- MapsAsMsgs],
-    IsMsgSizeUnknown = fun(Nm) -> dict:fetch(Nm, KnownSize) == undefined end,
+    IsMsgSizeUnknown = fun(Nm) -> maps:get(Nm, KnownSize) == undefined end,
     lists:any(IsMsgSizeUnknown, SubMsgNames) orelse
         lists:any(IsMsgSizeUnknown, MapMsgNames).
 
-get_field_pass(MsgName, #anres{d_field_pass_method=D}) ->
-    dict:fetch(MsgName, D).
+get_field_pass(MsgName, #anres{d_field_pass_method=M}) ->
+    #{MsgName := FieldPass} = M,
+    FieldPass.
 
-get_num_fields(MsgName, #anres{num_fields=D}) ->
-    dict:fetch(MsgName, D).
+get_num_fields(MsgName, #anres{num_fields=M}) ->
+    #{MsgName := NumFields} = M,
+    NumFields.
 
 is_packed(#?gpb_field{type=Type, opts=Opts}=Field) ->
     case is_field_for_unknowns(Field) of
@@ -573,7 +570,31 @@ record_update(Var, RecordName, FieldsValueTrees) ->
        || {FName, ValueSyntaxTree} <- FieldsValueTrees]).
 
 %% maps
--ifndef(NO_HAVE_MAPS).
+replace_map_key(Marker, Key, Opts) when is_atom(Key) ->
+    case get_maps_key_type_by_opts(Opts) of
+        atom ->
+            replace_term(Marker, Key);
+        binary ->
+            replace_tree(
+              Marker,
+              erl_syntax:binary(
+                [erl_syntax:binary_field(
+                   erl_syntax:string(atom_to_list(Key)))]))
+    end;
+replace_map_key(Marker, KeyExpr, Opts) ->
+    case get_maps_key_type_by_opts(Opts) of
+        atom ->
+            replace_tree(Marker, KeyExpr);
+        binary ->
+            replace_tree(
+              Marker,
+              erl_syntax:binary(
+                [erl_syntax:binary_field(
+                   erl_syntax:application(erl_syntax:atom(erlang),
+                                          erl_syntax:atom(atom_to_list),
+                                          [KeyExpr]))]))
+    end.
+
 map_match(Fields, Opts) ->
     Literal = mapkey_literal_by_opts(Opts),
     erl_syntax:map_expr(
@@ -632,79 +653,6 @@ mapkey_expr_by_opts(Opts) ->
                                            [Expr, erl_syntax:atom(utf8)])
             end
     end.
-
--else. %% on a pre Erlang 17 system
-
-map_match(Fields, Opts) ->
-    KVs = case get_maps_key_type_by_opts(Opts) of
-              atom ->
-                  [?ff("~p := ~s", [FName, Var])
-                   || {FName, Var} <- map_kvars(Fields)];
-              binary ->
-                  [?ff("<<\"~s\">> := ~s", [FName, Var])
-                   || {FName, Var} <- map_kvars(Fields)]
-          end,
-    erl_syntax:text(?ff("#{~s}", [string:join(KVs, ", ")])).
-
-map_create(Fields, Opts) ->
-    KVs = case get_maps_key_type_by_opts(Opts) of
-              atom ->
-                  [?ff("~p => ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(Fields)];
-              binary ->
-                  [?ff("<<\"~s\">> => ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(Fields)]
-          end,
-    erl_syntax:text(?ff("#{~s}", [string:join(KVs, ", ")])).
-
-map_update(Var, [], _Opts) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-map_update(Var, FieldsValueTrees, Opts) ->
-    KVs = case get_maps_key_type_by_opts(Opts) of
-              atom ->
-                  [?ff("~p := ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(FieldsValueTrees)];
-              binary ->
-                  [?ff("<<\"~s\">> := ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(FieldsValueTrees)]
-          end,
-    erl_syntax:text(?ff("~s#{~s}", [var_literal(Var), string:join(KVs, ", ")])).
-
-
-map_set(Var, [], _Opts) when Var /= none ->
-    %% No updates to be made, maybe no fields
-    Var;
-map_set(Var, FieldsValueTrees, Opts) ->
-    KVs = case get_maps_key_type_by_opts(Opts) of
-              atom ->
-                  [?ff("~p => ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(FieldsValueTrees)];
-              binary ->
-
-                  [?ff("<<\"~s\">> => ~s", [FName, Val])
-                   || {FName, Val} <- map_kvalues(FieldsValueTrees)]
-          end,
-    erl_syntax:text(?ff("~s#{~s}", [var_literal(Var), string:join(KVs, ", ")])).
-
-
-%% -> [{atom(), string()}]
-map_kvars(KVars) ->
-    [{Key, var_literal(Var)} || {Key, Var} <- KVars].
-
-var_literal(Var) ->
-    variable = erl_syntax:type(Var),
-    erl_syntax:variable_literal(Var).
-
-%% -> [{atom(), string()}]
-map_kvalues(KVars) ->
-    [begin
-         ExprAsStr = erl_prettypr:format(Expr),
-         {Key, ExprAsStr}
-     end
-     || {Key, Expr} <- KVars].
-
--endif. %% NO_HAVE_MAPS
 
 %% Option helpers ---------------
 
@@ -786,83 +734,15 @@ is_current_major_version_at_least(VsnMin) ->
     current_otp_release() >= VsnMin.
 
 current_otp_release() ->
-    case erlang:system_info(otp_release) of
-        "R"++Rest -> % R16 or earlier
-            FirstChunkOfDigits = lists:takewhile(fun is_digit/1, Rest),
-            list_to_integer(FirstChunkOfDigits);
-        RelStr ->
-            %% In Erlang 17 the leading "R" was dropped
-            %% The exact format isn't super documented,
-            %% so be prepared for some (future?) alternatives.
-            try list_to_integer(RelStr) of
-                N when is_integer(N) -> N
-            catch error:badarg ->
-                    Rel = lists:dropwhile(fun is_not_digit/1, RelStr),
-                    FirstChunkOfDigits = lists:takewhile(fun is_digit/1, Rel),
-                    list_to_integer(FirstChunkOfDigits)
-            end
+    RelStr = erlang:system_info(otp_release),
+    try list_to_integer(RelStr)
+    catch error:badarg ->
+            FirstChunkOfDigits = lists:takewhile(fun is_digit/1, RelStr),
+            list_to_integer(FirstChunkOfDigits)
     end.
-
-is_not_digit(C) -> not is_digit(C).
 
 is_digit(C) when $0 =< C, C =< $9 -> true;
 is_digit(_) -> false.
-
-%% Whether target version has the function lists:join/2.
-target_has_lists_join(Opts) ->
-    is_target_major_version_at_least(19, Opts).
-
-%% Whether target version supports M#{K => V} when K is a variable.
-%% If before this support was added, one must use maps:put(K, V, M) instead.
-target_has_variable_key_map_update(Opts) ->
-    is_target_major_version_at_least(18, Opts).
-
-%% Whether target version supports #{key := type()} type spec syntax.
-%% In Erlang 19, := indicates mandatory presence and => optional presence.
-%% In Erlang 18, only => was supported.
-target_can_specify_map_item_presence_in_typespecs(Opts) ->
-    is_target_major_version_at_least(19, Opts).
-
-target_can_do_flat_oneof_for_maps(Opts) ->
-    %% Not possible in Erlang 17 because:
-    %%    Variables as map keys appeared in 18.0. In 17, supports only literals
-    %%    as map keys.
-    is_target_major_version_at_least(18, Opts).
-
-target_may_fail_compilation_for_flat_oneof_for_maps(Opts) ->
-    %% In Erlang 18.3.4.6 .. 18.3.4.9
-    %% (ie the currently last/highest 4 Erlang 18 versions) this happens:
-    %% --
-    %%    % erlc <erl for flat oneof>.erl
-    %%    beamvalidatorerror: function v_msg_m1/3+75:
-    %%      Internal consistency check failed - please report this bug.
-    %%      Instruction: {move,{x,2},{y,0}}
-    %%      Error:       {uninitialized_reg,{x,2}}:
-    %% --
-    %% (introduced in c803276c9)
-    %% All Erlang 19 versions and later seems fine.
-    case target_can_do_flat_oneof_for_maps(Opts) of
-        true ->
-            AtLeast19 = is_target_major_version_at_least(19, Opts),
-            AtLeast18 = is_target_major_version_at_least(18, Opts),
-            AtLeast18 andalso (not AtLeast19);
-        false ->
-            true % On pre-18, it will definitely fail
-    end.
-
-%% In Erlang 21, the function erlang:get_stacktrace/0 was deprecated
-%% and there is new syntax for retrieving the stacktrace:
-%%
-%%   try ...
-%%   catch Class:Reason:Stacktrace -> ...
-%%   end
-target_has_stacktrace_syntax(Opts) ->
-    is_target_major_version_at_least(21, Opts).
-
-%% In Erlang 21, there is maps:iterator/1 and maps:next/1 where "the memory
-%% usage is guaranteed to be bounded no matter the size of the map."
-target_has_map_iterators(Opts) ->
-    is_target_major_version_at_least(21, Opts).
 
 %% In Erlang 25, declaring functions overridden as NIFs
 %% in -nifs([fn1/1, fn2/1, ...]). allows for the compiler and loader
@@ -1142,40 +1022,7 @@ split_indent_iolist(Indent, IoList) ->
 linesplit_iolist(Iolist) ->
     re:split(Iolist, ["\n"], [trim, {return,binary}]).
 
-iolist_to_utf8_or_escaped_binary(IoList, Opts) ->
-    case understands_coding(Opts) of
-        true  ->
-            unicode:characters_to_binary(
-              ["%% -*- coding: utf-8 -*-\n",
-               IoList]);
-        false ->
-            %% What to do if on Erlang R15 or earlier?  We can't utf8-encode
-            %% the file, because Erlang R15 will read it as latin1.
-            %%
-            %% For now, Assume such encodings are in strings only.
-            %% So far, this is safe, since neither message names nor field
-            %% names nor enum symbols are allowed to be non-ascii.
-            %%
-            %% This means only place for non-ascii is in comments and
-            %% in default strings. Hope I haven't overlooked some
-            %% important place...
-            iolist_to_binary(esc_non_ascii(IoList))
-    end.
-
-understands_coding(Opts) ->
-    %% version   coding: X             default source encoding
-    %% R15:      ignores               latin1
-    %% R16:      understands           latin1
-    %% 17:       understands           utf-8
-    is_target_major_version_at_least(16, Opts).
-
-esc_non_ascii([H|T]) -> [esc_non_ascii(H) | esc_non_ascii(T)];
-esc_non_ascii([])    -> [];
-esc_non_ascii(B) when is_binary(B) -> B;
-esc_non_ascii(C) when is_integer(C), C =< 127 -> C;
-esc_non_ascii(C) when is_integer(C), C > 127  -> ?f("\\x{~.16b}", [C]).
-
-nowarn_dialyzer_attr(FnName,Arity,Opts) ->
+nowarn_dialyzer_attr(FnName,Arity) ->
     %% Especially for the verifiers, dialyzer's success typing can
     %% think that some code paths in the verifiers can't be reached,
     %% and in a sense, it is right: the verifiers do much the same
@@ -1185,19 +1032,7 @@ nowarn_dialyzer_attr(FnName,Arity,Opts) ->
     %% can take some time to analyze a non-trivial proto file.
     %%
     %% So mute dialyzer for the verifier functions.
-    case can_do_dialyzer_attr(Opts) of
-        true ->
-            ?f("-dialyzer({nowarn_function,~p/~w}).~n", [FnName,Arity]);
-        false ->
-            %% Too old system (Erlang 17 or older), which will see
-            %% the dialyzer attr as just another plain attr,
-            %% which must be located before all functions.
-            %% Just don't silence dialyzer on these systems.
-            ""
-    end.
-
-can_do_dialyzer_attr(Opts) ->
-    is_target_major_version_at_least(18, Opts).
+    ?f("-dialyzer({nowarn_function,~p/~w}).~n", [FnName,Arity]).
 
 no_underspecs_dialyzer_attr(FnName, Arity, Opts) ->
     %% Silence 'dialyzer -Wunderspecs' warnings about functions' specs
@@ -1221,8 +1056,6 @@ can_do_no_underspecs_dialyzer_attr(Opts) ->
 
 nowarn_unused_function(FnName, Arity) ->
     ?f("-compile({nowarn_unused_function,~p/~w}).~n", [FnName,Arity]).
-
--ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
 
 comma_join(Elements) ->
     lists:append(lists:join(", ", Elements)).
@@ -1253,40 +1086,6 @@ lowercase(Str) ->
 
 uppercase(Str) ->
     string:uppercase(Str).
-
--else.  % NO_HAVE_ERL20_STR_FUNCTIONS
-
-comma_join(Elements) ->
-    string:join(Elements, ", ").
-
-nl_join(Elements) ->
-    string:join(Elements, "\n").
-
-or_join(Alternatives) ->
-    string:join(Alternatives, " | ").
-
-dot_join(Alternatives) ->
-    string:join(Alternatives, ".").
-
-string_join(Alternatives, Sep) ->
-    string:join(Alternatives, Sep).
-
-is_substr(SearchPattern, String) ->
-    string:str(String, SearchPattern) > 0.
-
-string_slice(String, Start0) ->
-    string:substr(String, Start0 + 1).
-
-string_lexemes(String, Separators) ->
-    string:tokens(String, Separators).
-
-lowercase(Str) ->
-    string:to_lower(Str).
-
-uppercase(Str) ->
-    string:to_upper(Str).
-
--endif. % NO_HAVE_ERL20_STR_FUNCTIONS
 
 snake_case(Str) ->
     lowercase(
@@ -1329,17 +1128,22 @@ camel_case([], _) ->
 capitalize_letter(C) ->
     C + ($A - $a).
 
--ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
-%% Improve by making a separate test for lists:join (added in erl19)
-%% instead of piggybacking on the test for erl20 string functions.
-
 ljoin(Sep, List) ->
     lists:join(Sep, List).
 
--else. % NO_HAVE_ERL20_STR_FUNCTIONS
+-ifndef(NO_HAVE_MAPS_MERGE_WITH_3).
 
-ljoin(_Sep, []) -> [];
-ljoin(_Sep, [Elem]) -> [Elem];
-ljoin(Sep, [Hd | Rest]) -> [Hd, Sep | ljoin(Sep, Rest)].
+maps_merge_with(Combiner, Map1, Map2) ->
+    maps:merge_with(Combiner, Map1, Map2). % appeared in Erlang 24
 
--endif. % NO_HAVE_ERL20_STR_FUNCTIONS
+-else. % NO_HAVE_MAPS_MERGE_WITH_3
+
+maps_merge_with(Combiner, Map1, Map2) ->
+    maps:fold(
+      fun(K, V1, Acc) ->
+              maps:update_with(K, fun(V2) -> Combiner(K, V1, V2) end, V1, Acc)
+      end,
+      Map2,
+      Map1).
+
+-endif. % NO_HAVE_MAPS_MERGE_WITH_3

@@ -22,12 +22,6 @@
 -include("../src/gpb_codegen.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R:St ->).
--else. % -ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
--endif. % -ifdef(OTP_RELEASE).
-
 %-compile(export_all).
 
 -define(dummy_mod, list_to_atom(lists:concat([?MODULE, "-test"]))).
@@ -362,7 +356,7 @@ l(Mod, Exports, Form) ->
             ?debugFmt("~nCompilation Error:~n~s~n  ~p~n",
                       [format_form_debug(Form), Error]),
             Error
-    catch ?STACKTRACE(error,Error,ST) % ->
+    catch error:Error:ST ->
             ?debugFmt("~nCompilation crashed (malformed parse-tree?):~n"
                       ++ "~s~n"
                       ++ "  ~p~n",

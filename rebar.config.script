@@ -1,28 +1,5 @@
 %% -*- erlang -*-
 
-NoHaveMapsOpts = try maps:size(maps:new()) of
-                     0 -> []
-                 catch error:undef -> [{d,'NO_HAVE_MAPS',true}]
-                 end.
-
-%% In Erlang 19, the random module is deprecated
-NoHaveRandOpts = try rand:uniform() of
-                     F when is_float(F) -> []
-                 catch error:undef -> [{d,'NO_HAVE_RAND',true}]
-                 end.
-
-%% In Erlang 21, a number of string module functions are deprecated:
-%%   string:join/2 -> lists:join/2       (appeared in Erlang 19)
-%%   string:str/2  -> string:find/2      (appeared in Erlang 20)
-%%   string:substr/2 -> string:slice/2   (appeared in Erlang 20)
-%%   string:tokens/2 -> string:lexemes/2 (appeared in Erlang 20)
-%%   string:{to_lower,to_upper}/1 ->  and string:{lowercase,uppercase}/1
-NoHaveErl20StrFunctions =
-                 try string:find("abc", "b") of
-                     "bc" -> []
-                 catch error:undef -> [{d,'NO_HAVE_ERL20_STR_FUNCTIONS'}]
-                 end.
-
 %% In Erlang 27, the expression +0.0 =:= -0.0 will evaluate to false
 %% whereas in Erlang 26 and earlier, it evaluates to true.
 %% In Erlang 26.1, as a prep for Erlang 27, using 0.0 in match expreessions or
@@ -36,8 +13,15 @@ NoHavePlusMinusZeroFloat =
                      false -> []
                  end.
 
-ConfigOpts = NoHaveMapsOpts ++ NoHaveRandOpts ++ NoHaveErl20StrFunctions ++
-                 NoHavePlusMinusZeroFloat.
+%% maps:merge_with/3 appeared in Erlang 24.0
+NoHaveMapsMergeWith3 =
+                 try maps:merge_with(fun(K, V1, V2) -> V1 + V2 end,
+                                     #{a => 1}, #{a => 2}) of
+                     #{a := 3} -> []
+                 catch error:undef -> [{d,'NO_HAVE_MAPS_MERGE_WITH_3'}]
+                 end.
+
+ConfigOpts = NoHavePlusMinusZeroFloat ++ NoHaveMapsMergeWith3.
 
 [{require_otp_vsn, ".*"},
 

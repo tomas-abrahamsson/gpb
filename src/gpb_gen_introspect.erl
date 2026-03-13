@@ -548,11 +548,11 @@ compute_service_renaming_infos(ServiceDefs,
 renamings_as_list(_Key, no_renamings) ->
     no_renamings;
 renamings_as_list(Key, Renamings) ->
-    case proplists:get_value(Key, Renamings) of
-        D when D /= undefined ->
-            dict:to_list(D);
-        undefined ->
-            error({internal_error, no_key, Key, [K || {K, _} <- Renamings]})
+    case Renamings of
+        #{Key := NameChanges} ->
+            maps:to_list(NameChanges);
+        #{} ->
+            error({internal_error, no_key, Key, maps:keys(Renamings)})
     end.
 
 find_orig_from_renamed(Name, no_renamings) ->
@@ -826,10 +826,10 @@ format_get_proto_by_enum_name_as_fqbin(EnumInfos, Defs) ->
 
 format_get_protos_by_pkg_name_as_fqbin(Defs) ->
     FqbinToProtos1 =
-        dict:to_list(
+        maps:to_list(
           lists:foldl(
-            fun({PkgName, Proto}, D) -> dict:append(PkgName, Proto, D) end,
-            dict:new(),
+            fun({PkgName, Proto}, M) -> map_append(PkgName, Proto, M) end,
+            #{},
             [{PkgName, Proto} || {{pkg_containment, Proto}, PkgName} <- Defs])),
     FqbinToProtos2 = [{Pkg, lists:usort(Protos)}
                       || {Pkg, Protos} <- FqbinToProtos1],
@@ -852,16 +852,16 @@ format_get_proto_aux(FnName, Infos, BadWhat) ->
         replace_term('Bad<What>', BadWhat)])].
 
 compute_proto_by_fqbin(Infos, Containment) ->
-    FqbinByName = dict:from_list([{Name, FqBin} || {FqBin, Name} <- Infos]),
-    dict:to_list(
+    FqbinByName = maps:from_list([{Name, FqBin} || {FqBin, Name} <- Infos]),
+    maps:to_list(
       lists:foldl(
-        fun({Proto, Names}, D) ->
+        fun({Proto, Names}, Acc) ->
                 lists:foldl(
-                  fun(Fqbin, D2) -> dict:store(Fqbin, Proto, D2) end,
-                  D,
-                  [dict:fetch(Name, FqbinByName) || Name <- Names])
+                  fun(Fqbin, Acc2) -> Acc2#{Fqbin => Proto} end,
+                  Acc,
+                  [maps:get(Name, FqbinByName) || Name <- Names])
         end,
-        dict:new(),
+        #{},
         Containment)).
 
 %% ---
@@ -881,3 +881,9 @@ sym_val_eopt(Elems, DefsVsn) when DefsVsn >= 3 ->
 sym_val_eopt(Elems, DefsVsn) when DefsVsn =< 2 ->
     %% Filter away {option, NameComponents, Value} elems:
     [{Sym, Num, []} || {Sym, Num} <- Elems].
+
+map_append(Key, NewElem, M) ->
+    case M of
+        #{Key := Elems} -> M#{Key := Elems ++ [NewElem]};
+        #{}             -> M#{Key => [NewElem]}
+    end.

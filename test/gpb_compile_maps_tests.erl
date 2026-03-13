@@ -22,16 +22,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/gpb.hrl").
 
--ifdef(NO_HAVE_MAPS).
-
-no_maps_tests__test() ->
-    %% rebar.config.script or the Makefile
-    %% sets HAVE_MAPS if they detect that there is
-    %% support for maps.
-    ok.
-
--else. %% NO_HAVE_MAPS
-
 -include("gpb_nif_test_helpers.hrl"). % the `?nif_if_supported(FnName)' macro
 
 -export([dict_to_map/1, map_to_dict/1]).
@@ -39,9 +29,6 @@ no_maps_tests__test() ->
 %% Translators for {translate_field, {<Oneof>,...}} tests
 -export([e_ipv4/1, d_ipv4/1, v_ipv4/1]).
 -export([e_ipv6/1, d_ipv6/1, v_ipv6/1]).
-
--export([flat_map_prerequisites/1]).
--export([can_do_flat_oneof/0, can_do_flat_oneof/1]).
 
 -import(gpb_compile_tests, [compile_iolist/2]).
 -import(gpb_compile_tests, [compile_to_string_get_hrl/2]).
@@ -278,9 +265,9 @@ map_type_with_mapfields_as_maps_option_test() ->
     unload_code(M2).
 
 flat_oneof_maps_test_() ->
-    flat_map_prerequisites(
-      [{"pass as params", fun() -> flat_oneof_maps_test_aux(pass_as_params) end},
-       {"pass as record", fun() -> flat_oneof_maps_test_aux(pass_as_record) end}]).
+    {"flat oneof for maps",
+     [{"pass as params", fun() -> flat_oneof_maps_test_aux(pass_as_params) end},
+      {"pass as record", fun() -> flat_oneof_maps_test_aux(pass_as_record) end}]}.
 
 flat_oneof_maps_test_aux(FieldPass) ->
     M = compile_iolist(["message m1 {",
@@ -583,11 +570,7 @@ translate_oneof_test() ->
                  M:verify_msg(#{ip => {1,2,3,4,5,6}}, m)), % wrong tuple size
     unload_code(M).
 
-translate_flat_oneof_maps_test_() ->
-    flat_map_prerequisites(
-      [{"translate flat oneof", fun translate_flat_oneof_test_aux/0}]).
-
-translate_flat_oneof_test_aux() ->
+translate_flat_oneof_test() ->
     %% For this test, we'll have an oneof which is either an ipv4 or ipv6
     %% (with some non-obvious types, just to test different)
     %% and translations of the ip field itself (the oneo) is what we want
@@ -652,12 +635,7 @@ oneof_with_translation_with_typespec_maps_test() ->
             ]),
     ?assert(gpb_lib:is_substr("c=>{a1,string()}", strip_ws(Erl))).
 
-flat_oneof_with_translation_with_typespec_maps_test_() ->
-    flat_map_prerequisites(
-      [{"oneof field translation with type specs for flat oneof",
-        fun flat_oneof_with_translation_with_typespec_maps_test_aux/0}]).
-
-flat_oneof_with_translation_with_typespec_maps_test_aux() ->
+flat_oneof_with_translation_with_typespec_maps_test() ->
     Proto = "message m1 {
                oneof c {
                  fixed32 a1 = 1;
@@ -739,19 +717,6 @@ type_syntax_for_required_fields_test() ->
     RepProto = "message m { repeated uint32 f = 1; }",
     Common = [type_specs, maps],
 
-    RqS1 = compile_to_string(ReqProto, [{target_erlang_version,18} | Common]),
-    OpS1 = compile_to_string(OptProto, [{target_erlang_version,18} | Common]),
-    RpS1 = compile_to_string(RepProto, [{target_erlang_version,18} | Common]),
-    RqT1 = get_type(RqS1),
-    OpT1 = get_type(OpS1),
-    RpT1 = get_type(RpS1),
-    [true, false] = [gpb_lib:is_substr(X, RqT1) || X <- ["=>", ":="]],
-    [true, false] = [gpb_lib:is_substr(X, OpT1) || X <- ["=>", ":="]],
-    [true, false] = [gpb_lib:is_substr(X, RpT1) || X <- ["=>", ":="]],
-    ?assertMatch({false, _}, {type_is_out_commented(RqT1), RqT1}),
-    ?assertMatch({false, _}, {type_is_out_commented(OpT1), OpT1}),
-    ?assertMatch({false, _}, {type_is_out_commented(RpT1), RpT1}),
-
     RqS2 = compile_to_string(ReqProto, [{target_erlang_version,19} | Common]),
     OpS2 = compile_to_string(OptProto, [{target_erlang_version,19} | Common]),
     RpS2 = compile_to_string(RepProto, [{target_erlang_version,19} | Common]),
@@ -775,10 +740,6 @@ type_syntax_for_required_fields_test() ->
     [false, true] = [gpb_lib:is_substr(X, RqT3) || X <- ["=>", ":="]],
     [true, false] = [gpb_lib:is_substr(X, OpT3) || X <- ["=>", ":="]],
     [true, false] = [gpb_lib:is_substr(X, RpT3) || X <- ["=>", ":="]],
-
-    RqS4 = compile_to_string(ReqProto, [{target_erlang_version,18} | Common2]),
-    RqT4 = get_type(RqS4),
-    [true, false] = [gpb_lib:is_substr(X, RqT4) || X <- ["=>", ":="]],
 
     ok.
 
@@ -1308,7 +1269,6 @@ nif_encode_decode_omitted() ->
       end).
 
 nif_encode_decode_flat_oneof(features) -> [oneof];
-nif_encode_decode_flat_oneof(extra_checks) -> [fun can_do_flat_oneof/1];
 nif_encode_decode_flat_oneof(title) -> "Nif encode decode with flat oneof".
 nif_encode_decode_flat_oneof() ->
     with_tmpdir(
@@ -1345,7 +1305,6 @@ nif_encode_decode_flat_oneof() ->
       end).
 
 nif_encode_decode_flat_oneof_proto3(features) -> [oneof, proto3];
-nif_encode_decode_flat_oneof_proto3(extra_checks) -> [fun can_do_flat_oneof/1];
 nif_encode_decode_flat_oneof_proto3(title) -> "Flat oneof with proto3".
 nif_encode_decode_flat_oneof_proto3() ->
     with_tmpdir(
@@ -1589,28 +1548,3 @@ nif_preserve_unknown_fields() ->
 -compile({nowarn_unused_function, with_tmpdir/1}).
 with_tmpdir(F) ->
     with_tmpdir(dont_save, F). % -import()ed from gpb_compile_tests
-
-flat_map_prerequisites(Tests) ->
-    case can_do_flat_oneof() of
-        ok -> {"flat oneof for maps", Tests};
-        {error, Text} -> {Text, []}
-    end.
-
-can_do_flat_oneof(_Features) ->
-    can_do_flat_oneof().
-
-can_do_flat_oneof() ->
-    CanDoFlatMaps = gpb_lib:target_can_do_flat_oneof_for_maps([]),
-    MayFailCompilation =
-        gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps([]),
-    if CanDoFlatMaps,
-       MayFailCompilation ->
-            {error, "flat oneof for maps skipped (may hit compiler error)"};
-       CanDoFlatMaps,
-       not MayFailCompilation ->
-            ok;
-       not CanDoFlatMaps ->
-            {error, "flat oneof for maps skipped (Erlang 17 or earlier)"}
-    end.
-
--endif. %% NO_HAVE_MAPS

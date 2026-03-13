@@ -309,12 +309,6 @@
 -export_type([comp_ret/0]).
 -export_type([io_info_item/0]).
 
--ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R:St ->).
--else. % -ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
--endif. % -ifdef(OTP_RELEASE).
-
 -record(path,
         {%% The path as located eg on the file system
          %% via the {i,Dir} options:
@@ -943,14 +937,13 @@ file(File) ->
 %%
 %% The `copy_bytes' option specifies whether when decoding data of
 %% type `bytes' (or strings if the `strings_as_binaries' is set), the
-%% decoded bytes should be copied or not.  Copying requires the
-%% `binary' module, which first appeared in Erlang R14A. When not
-%% copying decoded bytes, they will become sub binaries of the larger
-%% input message binary. This may tie up the memory in the input
-%% message binary longer than necessary after it has been
-%% decoded. Copying the decoded bytes will avoid creating sub
-%% binaries, which will in turn make it possible to free the input message
-%% binary earlier. The `copy_bytes' option can have the following values:
+%% decoded bytes should be copied or not. When not copying decoded bytes,
+%% they will become sub binaries of the larger input message binary.
+%% This may tie up the memory in the input message binary longer than
+%% necessary after it has been decoded. Copying the decoded bytes will
+%% avoid creating sub binaries, which will in turn make it possible to free
+%% the input message binary earlier.
+%% The `copy_bytes' option can have the following values:
 %% <dl>
 %%   <dt>`false'</dt><dd>Never copy bytes/(sub-)binaries.</dd>
 %%   <dt>`true'</dt><dd>Always copy bytes/(sub-)binaries.</dd>
@@ -1953,9 +1946,7 @@ proto_defs(Mod, Defs, DefsNoRenamings, Renamings, Opts) ->
 
 do_proto_defs_aux1(Mod, Defs, DefsNoRenamings, Sources, Renamings, Opts) ->
     possibly_probe_defs(Defs, Opts),
-    Warns0 = check_unpackables_marked_as_packed(Defs),
-    Warns1 = check_maps_flat_oneof_may_fail_on_compilation(Opts),
-    Warns = Warns0 ++ Warns1,
+    Warns = check_unpackables_marked_as_packed(Defs),
     Defs1 = case proplists:get_bool(preserve_unknown_fields, Opts) of
                 true  -> gpb_defs:extend_with_field_for_unknowns(Defs);
                 false -> Defs
@@ -1976,7 +1967,6 @@ verify_opts(Defs, Opts) ->
     while_ok([fun() -> verify_opts_translation_and_nif(Opts) end,
               fun() -> verify_opts_preserve_unknown_fields_and_json(Opts) end,
               fun() -> verify_opts_epb_compat(Defs, Opts) end,
-              fun() -> verify_opts_flat_oneof(Opts) end,
               fun() -> verify_opts_no_gen_decoders_mergers_nif(Opts) end,
               fun() -> verify_opts_no_gen_verifiers(Opts) end,
               fun() -> verify_opts_allow_preencoded_submsgs(Opts) end]).
@@ -2032,34 +2022,6 @@ verify_opts_epb_compat(Defs, Opts) ->
                        ok
                end
        end]).
-
-verify_opts_flat_oneof(Opts) ->
-    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        #maps{oneof=flat} ->
-            case gpb_lib:target_can_do_flat_oneof_for_maps(Opts) of
-                true ->
-                    ok;
-                false -> {error, maps_flat_oneof_not_supported_for_target_version}
-            end;
-        _ ->
-            ok
-    end.
-
-check_maps_flat_oneof_may_fail_on_compilation(Opts) ->
-    CanFlatOneof = gpb_lib:target_can_do_flat_oneof_for_maps(Opts),
-    MayFail = gpb_lib:target_may_fail_compilation_for_flat_oneof_for_maps(Opts),
-    case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-        #maps{oneof=flat} ->
-            if CanFlatOneof, MayFail ->
-                    [maps_flat_oneof_generated_code_may_fail_to_compile];
-               not CanFlatOneof ->
-                    []; % a later check will signal an error
-               true ->
-                    []
-            end;
-        _ ->
-            []
-    end.
 
 verify_opts_no_gen_decoders_mergers_nif(Opts) ->
     %% Default for gen_decoders and gen_mergers is true.
@@ -2505,8 +2467,6 @@ fmt_err({epb_compatibility_impossible, {with_msg_named, msg}}) ->
     "Not possible to generate epb compatible functions when a message "
         "is named 'msg' because of collision with the standard gpb functions "
         "'encode_msg' and 'decode_msg'";
-fmt_err(maps_flat_oneof_not_supported_for_target_version) ->
-    "Flat oneof for maps is only supported on Erlang 18 and later";
 fmt_err({rename_defs, Reason}) ->
     gpb_names:format_error(Reason);
 fmt_err({cvt_proto_defs_version_to_latest_error, Reason}) ->
@@ -2532,9 +2492,6 @@ format_warning({ignored_field_opt_packed_for_unpackable_type,
                 MsgName, FName, Type, _Opts}) ->
     ?f("Warning: ignoring option packed for non-packable field ~s.~s "
        "of type ~w", [MsgName, FName, Type]);
-format_warning(maps_flat_oneof_generated_code_may_fail_to_compile) ->
-    "Warning: Generated code for flat oneof for maps may fail to compile "
-        "on 18.3.4.6, or later Erlang 18 versions, due to a compiler issue";
 format_warning(X) ->
     case io_lib:deep_char_list(X) of
         true  -> X;
@@ -4432,8 +4389,9 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
     DoEncoders = gpb_lib:get_gen_encoders(Opts),
     DoDecoders = gpb_lib:get_gen_decoders(Opts),
     CompileOptsStr = get_erlc_compile_options_str(Opts),
-    gpb_lib:iolist_to_utf8_or_escaped_binary(
-      [?f("%% @private~n"
+    unicode:characters_to_binary(
+      ["%% -*- coding: utf-8 -*-\n",
+       ?f("%% @private~n"
           "%% Automatically @generated, do not edit~n"
           "%% Generated by ~p version ~s~n"
           "%% Version source: ~s~n",
@@ -4529,7 +4487,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
                                                        true),
                   gpb_gen_encoders:format_map_encoders(MapsAsMsgs, AnRes, Opts,
                                                        false),
-                  gpb_gen_encoders:format_aux_encoders(Defs, AnRes, Opts),
+                  gpb_gen_encoders:format_aux_encoders(Defs, AnRes),
                   gpb_gen_encoders:format_aux_common_encoders(Defs, AnRes,
                                                               Opts)]
          end]
@@ -4593,8 +4551,7 @@ format_erl(Mod, Defs, DefsNoRenamings, DefsForIntrospect,
        ?f("    ~s.~n", [gpb_version_as_list_pretty()]),
        "\n",
        ?f("gpb_version_source() ->~n"),
-       ?f("    ~p.~n", [gpb:version_source()])],
-      Opts).
+       ?f("    ~p.~n", [gpb:version_source()])]).
 
 gpb_version_as_list_pretty() ->
     %% The version "2.2-60-gb0decf3" is rendered with ~w
@@ -4644,7 +4601,7 @@ possibly_format_descriptor(Defs, Opts) ->
                           [[replace_term('"base"', ProtoBase),
                             replace_term('<<PBin>>', PBin)]
                            || {ProtoBase, PBin} <- PBins])])]
-            catch ?STACKTRACE(error,undef,ST) % ->
+            catch error:undef:ST ->
                     case {element(1,hd(ST)), element(2,hd(ST))} of
                         {gpb_compile_descr, encode_defs_to_descriptors} ->
                             ["-spec descriptor() -> no_return().\n",
@@ -4677,8 +4634,9 @@ format_hrl(Mod, Defs, AnRes, Opts0) ->
     Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
     DoEnumMacros = gpb_lib:get_enum_macros_by_opts(Opts),
     ModVsn = list_to_atom(atom_to_list(Mod) ++ "_gpb_version"),
-    gpb_lib:iolist_to_utf8_or_escaped_binary(
-      [?f("%% Automatically generated, do not edit~n"
+    unicode:characters_to_binary(
+      ["%% -*- coding: utf-8 -*-\n",
+       ?f("%% Automatically generated, do not edit~n"
           "%% Generated by ~p version ~s~n",
           [?MODULE, gpb:version_as_string()]),
        "\n",
@@ -4702,8 +4660,7 @@ format_hrl(Mod, Defs, AnRes, Opts0) ->
            || {_,Msg,Fields} <- gpb_lib:msgs_or_groups(Defs)])
         || Mapping == records],
        "\n",
-       ?f("-endif.~n")],
-      Opts).
+       ?f("-endif.~n")]).
 
 %% -- nif c++ code -----------------------------------------------------
 
@@ -4717,7 +4674,7 @@ possibly_format_nif_cc(Mod, Defs, AnRes, Opts) ->
 
 compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
     ModAsStr = flatten_iolist(?f("~p", [Mod])),
-    ErlCode2 = nano_epp(ErlCode, ModAsStr, HrlText, Opts),
+    ErlCode2 = nano_epp(ErlCode, ModAsStr, HrlText),
     {ok, Toks, _EndLine} = erl_scan:string(ErlCode2),
     FormToks = split_toks_at_dot(Toks),
     Forms = [case erl_parse:parse_form(Ts) of
@@ -4739,7 +4696,7 @@ compile_to_binary(Mod, HrlText, ErlCode, PossibleNifCode, Opts) ->
          hrl,
          defs}).
 
-nano_epp(Code, ModAsStr, HrlText, Opts) ->
+nano_epp(Code, ModAsStr, HrlText) ->
     %% nepp = nano-erlang-preprocessor. Couldn't find a way to run
     %% the epp from a string, and don't want or need to use the file
     %% system when everything is already in memory.
@@ -4747,16 +4704,8 @@ nano_epp(Code, ModAsStr, HrlText, Opts) ->
     %% Setup a dictionary, mostly to handle -ifdef...-endif
     %% in hrls and in the decoders.
     %% The OTP_RELEASE first appeared in Erlang 21.
-    D0 = dict:new(),
-    OtpRelease = gpb_lib:current_otp_release(),
-    TargetOtpRelease = proplists:get_value(target_erlang_version, Opts,
-                                           OtpRelease),
-    D1 = if TargetOtpRelease >= 21 ->
-                 dict:store('OTP_RELEASE', OtpRelease, D0);
-            TargetOtpRelease < 21 ->
-                 D0
-         end,
-    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=D1},
+    M = #{'OTP_RELEASE' => gpb_lib:current_otp_release()},
+    NState = #nepp{depth=1, mod=ModAsStr, hrl=HrlText, defs=M},
     {Txt, <<>>, _EndNState, _EndLine} = nepp1(Code, NState, _Line=1, []),
     Txt.
 
@@ -4831,7 +4780,7 @@ nepp2_def(Rest, #nepp{defs=Ds}=NState, N, Acc) ->
     {Sym, Rest2} = read_until(Rest1, ",", ""),
     {Val, Rest3} = read_until(Rest2, ")", ""),
     {_,   Rest4} = read_until(Rest3, "\n", ""),
-    Ds1 = dict:store(parse_term(Sym), parse_term(Val), Ds),
+    Ds1 = Ds#{parse_term(Sym) => parse_term(Val)},
     nepp2_nl(Rest4, NState#nepp{defs=Ds1}, N+1, Acc).
 
 nepp2_ifdef(Rest, SkipCond, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
@@ -4839,7 +4788,7 @@ nepp2_ifdef(Rest, SkipCond, #nepp{depth=Depth, defs=Ds}=NState, N, Acc) ->
     {Sym, Rest2} = read_until(Rest1, ")", ""),
     {_,   Rest3} = read_until(Rest2, "\n", ""),
     {Txt, Rest4, NState2, N2} =
-        case {dict:is_key(parse_term(Sym), Ds), SkipCond} of
+        case {maps:is_key(parse_term(Sym), Ds), SkipCond} of
             {true,  ifdef}  -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
             {false, ifndef} -> nepp2_nl(Rest3, NState#nepp{depth=1}, N+1, []);
             _ -> nepp2_skip(Rest3, NState#nepp{depth=1}, N+1, [])
@@ -4886,7 +4835,7 @@ nepp2_eval_cond(Str, Ds) ->
 
 nepp2_simple_expand([{'?', _}, {var, _, Sym} | Rest], Ds) ->
     nepp2_assert_not_parameterized(Sym, Rest),
-    Val = dict:fetch(Sym, Ds),
+    Val = maps:get(Sym, Ds),
     [erl_parse:abstract(Val) | nepp2_simple_expand(Rest, Ds)];
 nepp2_simple_expand([Tok | Rest], Ds) ->
     [Tok | nepp2_simple_expand(Rest, Ds)];

@@ -49,23 +49,24 @@
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [replace_term/2, replace_tree/2, splice_trees/2]).
+-import(gpb_lib, [replace_term/2, replace_tree/2, splice_trees/2,
+                  replace_map_key/3]).
 
 format_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
+    [[[format_field_op_translator(ElemPath, Op, CallTemplates)
        || {Op, CallTemplates} <- OpTransls,
           Op /= type_spec]
-      || {ElemPath, OpTransls} <- dict:to_list(Ts)],
+      || {ElemPath, OpTransls} <- maps:to_list(Ts)],
      format_default_translators(AnRes, Opts)].
 
 format_merge_translators(_Defs, #anres{translations=Ts}=AnRes, Opts) ->
-    [[[format_field_op_translator(ElemPath, Op, CallTemplates, Opts)
+    [[[format_field_op_translator(ElemPath, Op, CallTemplates)
        || {Op, CallTemplates} <- OpTransls,
           Op == merge]
-      || {ElemPath, OpTransls} <- dict:to_list(Ts)],
+      || {ElemPath, OpTransls} <- maps:to_list(Ts)],
      format_default_merge_translators(AnRes, Opts)].
 
-format_field_op_translator(ElemPath, Op, CallTemplates, Opts) ->
+format_field_op_translator(ElemPath, Op, CallTemplates) ->
     FnName = mk_tr_fn_name(ElemPath, Op),
     {InPatterns, Body} =
         stack_transl_calls(
@@ -77,7 +78,7 @@ format_field_op_translator(ElemPath, Op, CallTemplates, Opts) ->
              %% Dialyzer might complain that "The created fun has no
              %% local return", for a $errorf, which is true, but also
              %% not surprising, so shut this warning down.
-             gpb_lib:nowarn_dialyzer_attr(FnName,length(InPatterns),Opts);
+             gpb_lib:nowarn_dialyzer_attr(FnName,length(InPatterns));
         true ->
              ""
      end,
@@ -287,14 +288,7 @@ abstractify_tr_param(B, _Outs) when is_bitstring(B) ->
     catch error:{badarg,_} ->
             erl_parse:abstract(B)
     end;
-abstractify_tr_param(X, Outs) ->
-    abstractify_tr_param_check_for_map(X, Outs).
-
--ifdef(NO_HAVE_MAPS).
-abstractify_tr_param_check_for_map(X, _Outs) ->
-    error({translator,cant_make_abstraxt_code_for,X}).
--else.
-abstractify_tr_param_check_for_map(M, Outs) when is_map(M) ->
+abstractify_tr_param(M, Outs) when is_map(M) ->
     {MItems, MUsed} =
         lists:unzip([begin
                          {AK,UK} = abstractify_tr_param(K, Outs),
@@ -303,9 +297,8 @@ abstractify_tr_param_check_for_map(M, Outs) when is_map(M) ->
                      end
                      || {K,V} <- maps:to_list(M)]),
     {erl_syntax:map_expr(MItems), lists:usort(lists:append(MUsed))};
-abstractify_tr_param_check_for_map(X, _Outs) ->
+abstractify_tr_param(X, _Outs) ->
     error({translator,cant_make_abstraxt_code_for,X}).
--endif. % NO_HAVE_MAPS.
 
 mk_pass_straight_through_rel(Names) ->
     [{Name,[Name]} || Name <- Names].
@@ -387,7 +380,6 @@ format_default_map_translators(#anres{map_types=MapTypes,
     DoDecoders = gpb_lib:get_gen_decoders(Opts),
     HaveMaps = sets:size(MapTypes) > 0,
     {HaveMapSubmsgs, HaveMapNonSubmsgs} = MVT,
-    {M,K,V} = {?expr(M), ?expr(K), ?expr(V)},
     [%% Auxiliary helpers in case of fields of type map<_,_>
      [[%% If encoders:
        case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts) of
@@ -400,10 +392,9 @@ format_default_map_translators(#anres{map_types=MapTypes,
                [inline_attr(mt_maptuple_to_pseudomsg_m,1),
                 gpb_codegen:format_fn(
                   mt_maptuple_to_pseudomsg_m,
-                  fun({K,V}) -> '#{key => K, value => V}' end,
-                  [replace_tree('#{key => K, value => V}',
-                                gpb_lib:map_create([{key,K}, {value,V}],
-                                                   Opts))]),
+                  fun({K,V}) -> #{key => K, value => V} end,
+                  [replace_map_key(key, key, Opts),
+                   replace_map_key(value, value, Opts)]),
                 "\n",
                 inline_attr(mt_map_to_list_m,1),
                 gpb_codegen:format_fn(
@@ -454,72 +445,27 @@ format_default_map_translators(#anres{map_types=MapTypes,
                [inline_attr(mt_empty_map_m,0),
                 gpb_codegen:format_fn(
                   mt_empty_map_m,
-                  fun() -> '#{}' end,
-                  [replace_tree('#{}', gpb_lib:map_create([], []))]),
+                  fun() -> #{} end),
                 "\n",
                 [[inline_attr(mt_add_item_m,2),
-                  case gpb_lib:target_has_variable_key_map_update(Opts) of
-                      true ->
-                          gpb_codegen:format_fn(
-                            mt_add_item_m,
-                            fun('#{key := K,value := V}', M) ->
-                                    'M#{K => V}'
-                            end,
-                            [replace_tree(
-                               '#{key := K,value := V}',
-                               gpb_lib:map_match([{key,K}, {value,V}], Opts)),
-                             replace_tree(
-                               'M#{K => V}',
-                               gpb_lib:map_set(M, [{K,V}], []))]);
-                      false ->
-                          gpb_codegen:format_fn(
-                            mt_add_item_m,
-                            fun('#{key := K,value := V}', M) ->
-                                    maps:put('K', 'V', 'M')
-                            end,
-                            [replace_tree(
-                               '#{key := K,value := V}',
-                               gpb_lib:map_match([{key,K}, {value,V}], Opts)),
-                             replace_tree('K', K),
-                             replace_tree('V', V),
-                             replace_tree('M', M)])
-                  end]
+                 gpb_codegen:format_fn(
+                   mt_add_item_m,
+                   fun(#{key := K,value := V}, M) -> M#{K => V} end,
+                   [replace_map_key(key, key, Opts),
+                    replace_map_key(value, value, Opts)])]
                  || HaveMapNonSubmsgs],
                 [[inline_attr(mt_add_item_m_verify_value,2),
-                  case gpb_lib:target_has_variable_key_map_update(Opts) of
-                      true ->
-                          gpb_codegen:format_fn(
-                            mt_add_item_m_verify_value,
-                            fun('#{key := K,value := V}', M) ->
-                                    if V =:= '$undef' ->
-                                            error({gpb_error, missing_value});
-                                       true ->
-                                            'M#{K => V}'
-                                    end
-                            end,
-                            [replace_tree(
-                               '#{key := K,value := V}',
-                               gpb_lib:map_match([{key,K}, {value,V}], Opts)),
-                             replace_tree(
-                               'M#{K => V}',
-                               gpb_lib:map_set(M, [{K,V}], []))]);
-                      false ->
-                          gpb_codegen:format_fn(
-                            mt_add_item_m_verify_value,
-                            fun('#{key := K,value := V}', M) ->
-                                    if V =:= '$undef' ->
-                                            error({gpb_error, missing_value});
-                                       true ->
-                                            maps:put('K', 'V', 'M')
-                                    end
-                            end,
-                            [replace_tree(
-                               '#{key := K,value := V}',
-                               gpb_lib:map_match([{key,K}, {value,V}], Opts)),
-                             replace_tree('K', K),
-                             replace_tree('V', V),
-                             replace_tree('M', M)])
-                  end]
+                 gpb_codegen:format_fn(
+                   mt_add_item_m_verify_value,
+                   fun(#{key := K,value := V}, M) ->
+                           if V =:= '$undef' ->
+                                   error({gpb_error, missing_value});
+                              true ->
+                                   M#{K => V}
+                           end
+                   end,
+                   [replace_map_key(key, key, Opts),
+                    replace_map_key(value, value, Opts)])]
                  || HaveMapSubmsgs]]
        end
        || DoDecoders],
@@ -537,9 +483,8 @@ format_default_merge_translators(#anres{map_types=MapTypes}, Opts) ->
               gpb_codegen:format_fn(
                 mt_merge_maptuples_r,
                 fun(L1, L2) ->
-                        dict:to_list(dict:merge(fun(_Key, _V1, V2) -> V2 end,
-                                                dict:from_list(L1),
-                                                dict:from_list(L2)))
+                        maps:to_list(maps:merge(maps:from_list(L1),
+                                                maps:from_list(L2)))
                 end),
               "\n"];
          maps ->
@@ -566,7 +511,7 @@ format_default_msg_translators(#anres{translations=Translations}, _Opts) ->
        "\n"] || sets:is_element(verify, Needs)]].
 
 compute_needed_default_translations(Translations, Defaults) ->
-    dict:fold(
+    maps:fold(
       fun(_ElemPath, Ops, Acc) ->
               lists:foldl(
                 fun({type_spec, _}, Acc2) ->
@@ -633,22 +578,22 @@ find_translation(ElemPath, Op, AnRes, Default) ->
             default_fn_by_op(Op, Default)
     end.
 
-has_translation(ElemPath, Op, #anres{translations=Ts}) ->
-    case dict:find(ElemPath, Ts) of
-        {ok, OpTransls} ->
+has_translation(ElemPath, Op, #anres{translations=Translations}) ->
+    case Translations of
+        #{ElemPath := OpTransls} ->
             case lists:keyfind(Op, 1, OpTransls) of
                 {Op, _Calls} ->
                     {true, mk_tr_fn_name(ElemPath, Op)};
                 false ->
                     false
             end;
-        error ->
+        #{} ->
             false
     end.
 
-has_type_spec_translation(ElemPath, #anres{translations=Ts}) ->
-    case dict:find(ElemPath, Ts) of
-        {ok, OpTransls} ->
+has_type_spec_translation(ElemPath, #anres{translations=Translations}) ->
+    case Translations of
+        #{ElemPath := OpTransls} ->
             case lists:keyfind(type_spec, 1, OpTransls) of
                 {type_spec, TypeSpec} when is_list(TypeSpec) ->
                     {true, TypeSpec};
@@ -657,7 +602,7 @@ has_type_spec_translation(ElemPath, #anres{translations=Ts}) ->
                 false ->
                     false
             end;
-        error ->
+        #{} ->
             false
     end.
 
@@ -691,7 +636,7 @@ default_merge_translator() -> {msg_m_overwrite,['$2','$user_data']}.
 default_verify_translator() -> {msg_v_no_check,['$1', '$user_data']}.
 
 exists_tr_for_msg(MsgName, Op, #anres{translations=Translations}) ->
-    dict:fold(fun(_Key, _OpCalls, true) ->
+    maps:fold(fun(_Key, _OpCalls, true) ->
                       true;
                  ([Name,_Field|_], OpCalls, false) when Name == MsgName ->
                       lists:keymember(Op, 1, OpCalls);

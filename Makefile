@@ -131,54 +131,6 @@ OTP_MAJOR_MINOR = $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
 plt = $(GPB_PREFIX).gpb-$(OTP_MAJOR_MINOR).plt
 
 
-ifdef NO_HAVE_MAPS
-override ERLC_FLAGS += -DNO_HAVE_MAPS=true
-else
-## attempt to auto-detect
-ERLVM_SUPPORTS_MAPS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
-                             try maps:size(maps:new()) of \
-                                0 -> io:format("true~n") \
-                             catch error:undef -> io:format("false~n") \
-                             end, \
-                             receive after 10 -> ok end.' \
-                         -s erlang halt)
-ifeq ($(ERLVM_SUPPORTS_MAPS),false)
-override ERLC_FLAGS += -DNO_HAVE_MAPS=true
-endif
-endif
-
-ifdef NO_HAVE_RAND
-override ERLC_FLAGS += -DNO_HAVE_RAND=true
-else
-## attempt to auto-detect
-ERL_HAS_RAND := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
-                             try rand:uniform() of \
-                                F when is_float(F) -> io:format("true~n") \
-                             catch error:undef -> io:format("false~n") \
-                             end, \
-                             receive after 10 -> ok end.' \
-                         -s erlang halt)
-ifeq ($(ERL_HAS_RAND),false)
-override ERLC_FLAGS += -DNO_HAVE_RAND=true
-endif
-endif
-
-ifdef NO_HAVE_ERL20_STR_FUNCTIONS
-override ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
-else
-## attempt to auto-detect
-ERL_HAS_ERL20_STR_FUNCTIONS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
-                             try string:find("abc", "b") of \
-                                "bc" -> io:format("true~n") \
-                             catch error:undef -> io:format("false~n") \
-                             end, \
-                             receive after 10 -> ok end.' \
-                         -s erlang halt)
-ifeq ($(ERL_HAS_ERL20_STR_FUNCTIONS),false)
-override ERLC_FLAGS += -DNO_HAVE_ERL20_STR_FUNCTIONS=true
-endif
-endif
-
 ifdef NO_HAVE_PLUS_MINUS_ZERO_FLOAT
 override ERLC_FLAGS += -DNO_HAVE_PLUS_MINUS_ZERO_FLOAT=true
 else
@@ -192,7 +144,21 @@ override ERLC_FLAGS += -DNO_HAVE_PLUS_MINUS_ZERO_FLOAT=true
 endif
 endif
 
-
+ifdef NO_HAVE_MAPS_MERGE_WITH_3
+override ERLC_FLAGS += -DNO_HAVE_MAPS_MERGE_WITH_3=true
+else
+## attempt to auto-detect
+ERL_HAS_MAPS_MERGE_WITH_3 := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                          try maps:merge_with(fun(K, V1, V2) -> V1 + V2 end, \
+                                              #{a => 1}, #{a => 2}) of \
+                              #{a := 3} -> io:format("true~n") \
+                          catch error:undef -> io:format("false~n") \
+                          end.' \
+                      -s erlang halt)
+ifeq ($(ERL_HAS_MAPS_MERGE_WITH_3),false)
+override ERLC_FLAGS += -DNO_HAVE_MAPS_MERGE_WITH_3=true
+endif
+endif
 
 # Sorting it also eliminates duplicates
 MODULES := \

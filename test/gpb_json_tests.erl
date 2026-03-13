@@ -34,8 +34,6 @@
 -import(gpb_compile_tests, [in_separate_vm/4]).
 -import(gpb_compile_tests, [compile_nif_msg_defs/4]).
 
--import(gpb_compile_maps_tests, [flat_map_prerequisites/1]).
-
 -export([json_encode/1, json_decode/1]). % for debugging
 
 %% For testing translations
@@ -43,32 +41,6 @@
 -export([fraction_to_nanos/1, nanos_to_fraction/1]).
 -export([string_to_int/1, int_to_string/1]).
 -export([id/1]).
-
--ifdef('OTP_RELEASE').
-%% ?assertEqual/3 appeared in Erlang 20 already,
-%% but it is easier to test for 'OTP_RELEASE' which
-%% appeared in Erlang 21, and we need a fallback to
-%% support older releases anyway...
--define(assert_eq_3(ExpectedExpr, ActualExpr, DebugInfo),
-        ?assertEqual(ExpectedExpr, ActualExpr, DebugInfo)).
--else. % -ifdef('OTP_RELEASE').
-%% Fallback
--define(assert_eq_3(ExpectedExpr, ActualExpr, DebugInfo),
-        ((fun() ->
-                  X@@ = (ExpectedExpr),
-                  case (ActualExpr) of
-                      X@@ -> ok;
-                      Actual@@ ->
-                          error({not_equal, [{line, ?LINE},
-                                             {expr,??ActualExpr},
-                                             {debug, DebugInfo},
-                                             {expected,X@@},
-                                             {actual,Actual@@}]})
-                  end
-
-          end)())).
--endif. % -ifdef('OTP_RELEASE').
-
 
 object_format_test() ->
     Proto = "
@@ -104,7 +76,6 @@ object_format_test() ->
     {'Msg', undefined} = M4:from_json({struct, []}, 'Msg'),
     unload_code(M4).
 
--ifndef(NO_HAVE_MAPS).
 object_format_map_test() ->
     Proto = "
         message Msg {
@@ -117,7 +88,6 @@ object_format_map_test() ->
     {'Msg', 17}        = M1:from_json(#{<<"i">> => 17}, 'Msg'),
     {'Msg', undefined} = M1:from_json(#{}, 'Msg'),
     unload_code(M1).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 key_format_test() ->
     Proto = "
@@ -227,7 +197,6 @@ optional_requred_repeated_test() ->
     unload_code(M3),
     ok.
 
--ifndef(NO_HAVE_MAPS).
 optional_requred_repeated_maps_test() ->
     Proto = ["message Msg {",
              "  optional uint32 op = 1;",
@@ -248,7 +217,6 @@ optional_requred_repeated_maps_test() ->
     ?assertEqual(Msg2,  MM1:from_json(J2, 'Msg')),
     unload_code(MM2),
     ok.
--endif. % -ifndef(NO_HAVE_MAPS).
 
 verify_option_test() ->
     Proto = ["message Msg {",
@@ -270,7 +238,6 @@ verify_option_test() ->
     unload_code(M3),
     ok.
 
--ifndef(NO_HAVE_MAPS).
 verify_option_maps_test() ->
     Proto = ["message Msg {",
              "  optional uint32 f = 1;",
@@ -281,7 +248,6 @@ verify_option_maps_test() ->
     #{<<"f">> := inv} = MM:to_json(#{f => inv}, 'Msg', []),
     unload_code(MM),
     ok.
--endif. % -ifndef(NO_HAVE_MAPS).
 
 various_types_proto() ->
     "message MsgMsg    { optional Sub    f = 1; };
@@ -383,7 +349,6 @@ various_types_test() ->
     {'StringMsg', undefined} = M1:from_json([{}], 'StringMsg'),
     unload_code(M1).
 
--ifndef(NO_HAVE_MAPS).
 various_types_maps_test() ->
     M1 = compile_iolist(various_types_proto(), [json, maps]),
     ?assertEqual(#{<<"f">> => #{<<"s">> => 11}},
@@ -400,7 +365,6 @@ various_types_maps_test() ->
     ?assertEqual(#{}, M1:from_json(#{<<"f">> => null}, 'MsgMsg')),
     ?assertEqual(#{}, M1:from_json(#{}, 'MsgMsg')),
     unload_code(M1).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 enums_proto() ->
     "
@@ -493,7 +457,6 @@ type_defaults_test() ->
     unload_code(M1),
     unload_code(M2).
 
--ifndef(NO_HAVE_MAPS).
 type_defaults_maps_test() ->
     M1 = compile_iolist(types_defaults_proto(), [json, maps]),
     M2 = compile_iolist(types_defaults_proto(),
@@ -533,7 +496,6 @@ type_defaults_maps_test() ->
 
     unload_code(M1),
     unload_code(M2).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 oneof_proto() ->
     "syntax=\"proto3\";
@@ -556,7 +518,6 @@ oneof_test() ->
     {'Msg', {b, true}} = M1:from_json([{<<"b">>, true}], 'Msg'),
     unload_code(M1).
 
--ifndef(NO_HAVE_MAPS).
 oneof_maps_test() ->
     M1 = compile_iolist(oneof_proto(), [json, maps]),
     ?assertEqual(#{},                M1:to_json(#{}, 'Msg')),
@@ -569,11 +530,7 @@ oneof_maps_test() ->
     ?assertEqual(#{c => {b, true}}, M1:from_json(#{<<"b">> => true}, 'Msg')),
     unload_code(M1).
 
-flat_oneof_maps_test_() ->
-    flat_map_prerequisites(
-      [{"flat oneof", fun flat_oneof_maps_test_aux/0}]).
-
-flat_oneof_maps_test_aux() ->
+flat_oneof_maps_test() ->
     M1 = compile_iolist(oneof_proto(), [json, maps, {maps_oneof, flat}]),
     ?assertEqual(#{},                M1:to_json(#{}, 'Msg')),
     ?assertEqual(#{<<"a">> => 10},   M1:to_json(#{a => 10}, 'Msg')),
@@ -584,7 +541,6 @@ flat_oneof_maps_test_aux() ->
     ?assertEqual(#{a => 0},    M1:from_json(#{<<"a">> => 0}, 'Msg')),
     ?assertEqual(#{b => true}, M1:from_json(#{<<"b">> => true}, 'Msg')),
     unload_code(M1).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 %% map<_,_> tests
 mapfield_proto() ->
@@ -646,7 +602,6 @@ mapfield_test() ->
 element2sort(Tuple) ->
     setelement(2, Tuple, lists:sort(element(2, Tuple))).
 
--ifndef(NO_HAVE_MAPS).
 mapfield_map_test() ->
     M1 = compile_iolist(mapfield_proto(), [json, maps]),
     %% -- internal -> json
@@ -704,6 +659,21 @@ mapfield_map_test() ->
                               'StrToSub')),
     unload_code(M1).
 
+mapfields_with_binary_keys_test() ->
+    M1 = compile_iolist("message M { map<int32,string> f = 1; }",
+                        [json, maps, {maps_key_type, binary}]),
+    ?assertEqual(#{<<"f">> => #{<<"0">> => <<"a">>,
+                                <<"1">> => <<"b">>}},
+                 M1:to_json(#{<<"f">> => #{0 => "a",
+                                           1 => "b"}},
+                            'M')),
+    ?assertEqual(#{<<"f">> => #{0 => "a",
+                                1 => "b"}},
+                 M1:from_json(#{<<"f">> => #{<<"0">> => <<"a">>,
+                                             <<"1">> => <<"b">>}},
+                              'M')),
+    unload_code(M1).
+
 mapfields_as_maps_test() ->
     M1 = compile_iolist(small_mapfields_proto(),
                         [json, mapfields_as_maps]),
@@ -718,7 +688,6 @@ mapfields_as_maps_test() ->
                                {<<"map">>, [{<<"a">>, <<"b">>}]}],
                               'Msg')),
     unload_code(M1).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 p3wellknown_duration_test() ->
     Proto = "
@@ -773,7 +742,6 @@ p3wellknown_duration_test() ->
     %% done
     unload_code(M1).
 
--ifndef(NO_HAVE_MAPS).
 p3wellknown_duration_map_test() ->
     Proto = "
         syntax='proto3';
@@ -801,7 +769,6 @@ p3wellknown_duration_map_test() ->
     ?assertEqual(#{f => #{seconds => 1, nanos => 0}},
                  M2:from_json(#{<<"f">> => <<"1s">>}, 'D')),
     unload_code(M2).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 p3wellknown_duration_with_translations_test() ->
     Proto = "
@@ -1081,7 +1048,6 @@ p3wellknown_listvalue_with_translation_test() ->
         lists:sort(sets:to_list(S)),
     unload_code(M1).
 
--ifndef(NO_HAVE_MAPS).
 p3wellknown_struct_list_value_map_test() ->
     Proto = "
         syntax='proto3';
@@ -1114,11 +1080,7 @@ p3wellknown_struct_list_value_map_test() ->
     ?assertEqual(E2, M1:from_json(J2, 'S')),
     unload_code(M1).
 
-p3wellknown_struct_list_value_flat_map_test_() ->
-    flat_map_prerequisites(
-      [{"flat oneof", fun p3wellknown_struct_list_value_flat_map_aux/0}]).
-
-p3wellknown_struct_list_value_flat_map_aux() ->
+p3wellknown_struct_list_value_flat_map_test() ->
     Proto = "
         syntax='proto3';
         import 'google/protobuf/struct.proto';
@@ -1149,26 +1111,17 @@ p3wellknown_struct_list_value_flat_map_aux() ->
     ?assertEqual(J2, M1:to_json(E2, 'S')),
     ?assertEqual(E2, M1:from_json(J2, 'S')),
     unload_code(M1).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 change_term(Old, Old, New) -> New;
 change_term([H | T], Old, New) ->
     [change_term(H, Old, New) | change_term(T, Old, New)];
 change_term(T, Old, New) when is_tuple(T) ->
     list_to_tuple(change_term(tuple_to_list(T), Old, New));
-change_term(X, Old, New) ->
-    maybe_change_map_term(X, Old, New).
-
--ifndef(NO_HAVE_MAPS).
-maybe_change_map_term(M, Old, New) when is_map(M) ->
+change_term(M, Old, New) when is_map(M) ->
     maps:from_list([{change_term(K, Old, New), change_term(V, Old, New)}
                     || {K, V} <- maps:to_list(M)]);
-maybe_change_map_term(X, _Old, _New) -> % simple/scalar term, no change
+change_term(X, _Old, _New) ->
     X.
--else. % -ifndef(NO_HAVE_MAPS).
-maybe_change_map_term(X, _Old, _New) -> % simple/scalar term, no change
-    X.
--endif. % -ifndef(NO_HAVE_MAPS).
 
 p3wellknown_empty_test() ->
     Proto = "
@@ -1293,7 +1246,6 @@ field_pass_as_record_test() ->
          M1:to_json({'Msg', 1, 2, [{"a", 1}, {"b", 2}]}),
     unload_code(M1).
 
--ifndef(NO_HAVE_MAPS).
 json_maps_and_records_with_mapfields_test() ->
     Proto = "
        message Msg {
@@ -1312,7 +1264,6 @@ json_maps_and_records_with_mapfields_test() ->
     ?assertEqual(lists:sort(element(4, Msg)),
                  lists:sort(element(4, Msg2))),
     unload_code(M1).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 msg_with_only_groups_test() ->
     Proto = "
@@ -1355,14 +1306,12 @@ bypass_wrappers_test() ->
     {'Msg', 17} = M1:from_json_msg_Msg([{<<"f">>, 17}]),
     unload_code(M1).
 
--ifndef(NO_HAVE_MAPS).
 bypass_wrappers_maps_test() ->
     M1 = compile_iolist(bypass_wrappers_proto(),
                         [json, maps, bypass_wrappers]),
     ?assertEqual(#{<<"f">> => 17}, M1:to_json_msg_Msg(#{f => 17})),
     ?assertEqual(#{f => 17}, M1:from_json_msg_Msg(#{<<"f">> => 17})),
     unload_code(M1).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 json_name_proto() ->
     "
@@ -1498,8 +1447,6 @@ nif_test_() ->
        ?nif_if_supported(nif_bypass_wrappers),
        ?nif_if_supported(nif_json_name)]).
 
-
--ifndef(NO_HAVE_MAPS).
 nif_maps_test_() ->
     nif_tests_check_prerequisites(
       [?nif_if_supported(nif_misc_types_maps),
@@ -1507,7 +1454,6 @@ nif_maps_test_() ->
        ?nif_if_supported(nif_oneof_flat_maps),
        ?nif_if_supported(nif_mapfields_maps),
        ?nif_if_supported(nif_mapfields_as_maps_rec)]).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 nif_misc_types_proto() ->
     "
@@ -1569,7 +1515,6 @@ nif_misc_types_rec() ->
       end,
       [json]).
 
--ifndef(NO_HAVE_MAPS).
 nif_misc_types_maps(features) -> [json|guess_features(nif_misc_types_proto())];
 nif_misc_types_maps(title) -> "types (maps)".
 nif_misc_types_maps() ->
@@ -1595,7 +1540,6 @@ nif_misc_types_maps() ->
               ok
       end,
       [json, maps]).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 field_names_and_defaults_proto() ->
     "
@@ -1661,7 +1605,6 @@ nif_oneof_rec() ->
       end,
       [json]).
 
--ifndef(NO_HAVE_MAPS).
 nif_oneof_maps(features) -> [json | guess_features(oneof_proto())];
 nif_oneof_maps(title) -> "oneof (maps)".
 nif_oneof_maps() ->
@@ -1676,7 +1619,6 @@ nif_oneof_maps() ->
       [json, maps]).
 
 nif_oneof_flat_maps(features) -> [json | guess_features(oneof_proto())];
-nif_oneof_flat_maps(extra_checks) -> [fun can_do_flat_oneof/1];
 nif_oneof_flat_maps(title) -> "oneof (flat maps)".
 nif_oneof_flat_maps() ->
     nif_to_from_json_aux(
@@ -1688,7 +1630,6 @@ nif_oneof_flat_maps() ->
               ok
       end,
       [json, maps, {maps_oneof, flat}]).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 mapfields_proto() ->
     "
@@ -1727,7 +1668,6 @@ nif_mapfields_rec() ->
       end,
       [json]).
 
--ifndef(NO_HAVE_MAPS).
 nif_mapfields_maps(features) -> [json | guess_features(mapfields_proto())];
 nif_mapfields_maps(title) -> "map<_,_> fields (maps)".
 nif_mapfields_maps() ->
@@ -1763,7 +1703,6 @@ nif_mapfields_as_maps_rec() ->
               ok
       end,
       [json, mapfields_as_maps]).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 nif_bypass_wrappers(features) -> [json |
                                   guess_features(bypass_wrappers_proto())];
@@ -1811,12 +1750,6 @@ nif_json_name() ->
 with_tmpdir(F) ->
     with_tmpdir(dont_save, F). % -import()ed from gpb_compile_tests
 
--ifndef(NO_HAVE_MAPS).
-can_do_flat_oneof(Features) ->
-    gpb_compile_maps_tests:can_do_flat_oneof(Features).
--endif. % -ifndef(NO_HAVE_MAPS).
-
-
 %% roundtrip for records/tuples
 j_roundtrip(Msg, NifModule, ErlModule) ->
     j_roundtrip(Msg, NifModule, ErlModule, fun id/1).
@@ -1829,18 +1762,17 @@ j_roundtrip_nif_to_erl(Msg, NifModule, ErlModule, PrepF) ->
     JRepr = json_decode(JStr),
     MsgName = element(1, Msg),
     DebugInfo = [nif_to_erl, {jstr, JStr}, {jrepr, JRepr}],
-    ?assert_eq_3(Msg, PrepF(ErlModule:from_json(JRepr, MsgName)), DebugInfo).
+    ?assertEqual(Msg, PrepF(ErlModule:from_json(JRepr, MsgName)), DebugInfo).
 
 j_roundtrip_erl_to_nif(Msg, NifModule, ErlModule, PrepF) ->
     JRepr = ErlModule:to_json(Msg),
     JStr = json_encode(JRepr),
     MsgName = element(1, Msg),
     DebugInfo = [erl_to_nif, {jstr, JStr}, {jrepr, JRepr}],
-    ?assert_eq_3(Msg, PrepF(NifModule:from_json(JStr, MsgName)), DebugInfo).
+    ?assertEqual(Msg, PrepF(NifModule:from_json(JStr, MsgName)), DebugInfo).
 
 id(X) -> X.
 
--ifndef(NO_HAVE_MAPS).
 %% roundtrip for maps
 j_map_roundtrip(Msg, MsgName, NifModule, ErlModule) when is_map(Msg) ->
     j_map_roundtrip_nif_to_erl(Msg, MsgName, NifModule, ErlModule),
@@ -1850,14 +1782,13 @@ j_map_roundtrip_nif_to_erl(Msg, MsgName, NifModule, ErlModule) ->
     JStr = NifModule:to_json(Msg, MsgName),
     JRepr = pl_to_map(json_decode(JStr)),
     DebugInfo = [nif_to_erl, {jstr, JStr}, {jrepr, JRepr}],
-    ?assert_eq_3(Msg, ErlModule:from_json(JRepr, MsgName), DebugInfo).
+    ?assertEqual(Msg, ErlModule:from_json(JRepr, MsgName), DebugInfo).
 
 j_map_roundtrip_erl_to_nif(Msg, MsgName, NifModule, ErlModule) ->
     JRepr = ErlModule:to_json(Msg, MsgName),
     JStr = json_encode(map_to_pl(JRepr)),
     DebugInfo = [erl_to_nif, {jstr, JStr}, {jrepr, JRepr}],
-    ?assert_eq_3(Msg, NifModule:from_json(JStr, MsgName), DebugInfo).
--endif. % -ifndef(NO_HAVE_MAPS).
+    ?assertEqual(Msg, NifModule:from_json(JStr, MsgName), DebugInfo).
 
 %% -- Simplified json encoder/decoder for subset that occurs here --
 json_encode(Obj) -> iolist_to_binary(je(Obj)).
@@ -1940,7 +1871,6 @@ sp("\n"++Rest) -> sp(Rest);
 sp(Rest) -> Rest.
 
 %% Extra helpers for maps
--ifndef(NO_HAVE_MAPS).
 map_to_pl(M) when is_map(M) ->
     case [{K, map_to_pl(V)} || {K,V} <- maps:to_list(M)] of
         [] -> [{}];
@@ -1959,7 +1889,6 @@ pl_to_map(L) when is_list(L) ->
     [pl_to_map(Elem) || Elem <- L];
 pl_to_map(X) ->
     X.
--endif. % -ifndef(NO_HAVE_MAPS).
 
 strip_occurrence("optional" ++ Rest) -> strip_occurrence(Rest);
 strip_occurrence("required" ++ Rest) -> strip_occurrence(Rest);

@@ -81,12 +81,6 @@
 -export([e_l2b/1, d_b2l/1, v_l/1]).
 
 
--ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R:St ->).
--else. % -ifdef(OTP_RELEASE).
--define(STACKTRACE(C,R,St), C:R -> St = erlang:get_stacktrace(),).
--endif. % -ifdef(OTP_RELEASE).
-
 %% Include a bunch of tests from gpb_tests.
 %% The shared tests are for stuff that must work both
 %% for gpb and for the code that gpb_compile generates.
@@ -570,15 +564,6 @@ code_generation_when_map_enum_size_is_unknown_at_compile_time_test() ->
     M = compile_defs(Defs),
     true = is_binary(M:encode_msg({m1,[{true,x1}]})),
     unload_code(M).
-
-no_dialyzer_attributes_for_erlang_version_pre_18_test() ->
-    %% -dialyzer({nowarn_function,f/1}). attrs first appeared in Erlang/OTP 18
-    %% such attributes are emitted for verifiers and map translators
-    Proto = "message m { map<uint32,string> m = 1; }",
-    S1 = compile_to_string(Proto, [{target_erlang_version,17}]),
-    false = gpb_lib:is_substr("-dialyzer(", S1),
-    S2 = compile_to_string(Proto, [{target_erlang_version,18}]),
-    true = gpb_lib:is_substr("-dialyzer(", S2).
 
 nifs_attribute_for_erlang_version_25_or_later_test() ->
     %% -nifs([...]). for Erlang >= 25 helps the compiler and loader to do better
@@ -1615,20 +1600,6 @@ error_for_invalid_boms_test() ->
                 <<16#FE,16#FF>>,     % utf16-big
                 <<16#FF,16#FE>>]].   % utf16-little
 
-
-generates_escaped_utf8_for_old_erlang_versions_test() ->
-    Unicode = [255],
-    Utf8 = unicode:characters_to_binary(Unicode),
-    Proto = ["message m1 {"
-             "  required string f1 = 1 [default=\"",Unicode,"\"];",
-             "}"],
-    S1 = compile_to_string_get_hrl(Proto, [{target_erlang_version,15}]),
-    true = gpb_lib:is_substr("x{ff}", S1), %% 255 = 16#ff
-    S2 = compile_to_string_get_hrl(Proto, [{target_erlang_version,16}]),
-    true = gpb_lib:is_substr(binary_to_list(Utf8), S2),
-    [Line1 | _] = gpb_lib:string_lexemes(S2, "\n"),
-    true = gpb_lib:is_substr("coding: ", Line1).
-
 %% -- translation of google.protobuf.Any ----------
 
 -define(x_com_atom_1(C), 10,10,"x.com/atom",18,1,C).
@@ -1870,7 +1841,7 @@ verify_callback_with_and_without_errorf_test() ->
     unload_code(Mod2).
 
 dialzer_nowarn_when_scalar_only_for_translated_fields_test_() ->
-    case gpb_lib:nowarn_dialyzer_attr(a, 0, []) of
+    case gpb_lib:nowarn_dialyzer_attr(a, 0) of
         "" -> %
             {"dialzer_nowarn_when_scalar_only_for_translated_fields_test_"
              " skipped on older Erlang", []};
@@ -2541,7 +2512,6 @@ preencoded_msg_with_repeated_test() ->
     Top   = M:encode_msg({'Top', [Sub17, Sub18]}),
     unload_code(M).
 
--ifndef(NO_HAVE_MAPS).
 preencoded_msg_with_maps_test() ->
     M = compile_iolist(["message Top { optional Sub s = 1; }
                          message Sub { required uint32 a = 1; }
@@ -2552,7 +2522,6 @@ preencoded_msg_with_maps_test() ->
     ok  = M:verify_msg(#{s => Sub}, 'Top'),
     Top = M:encode_msg(#{s => Sub}, 'Top', [{verify, true}]),
     unload_code(M).
--endif. % -ifndef(NO_HAVE_MAPS).
 
 %% --- locate_import and read_import ----------
 
@@ -3018,7 +2987,7 @@ report_or_return_warnings_or_errors_test_aux() ->
          Options = WarningOptions ++ ErrorOptions ++ WarnsAsErrsOpts,
          try
              rwre_go(Options, CompileTo, SrcType, SrcQuality)
-         catch ?STACKTRACE(Class,Reason,Stack)
+         catch Class:Reason:Stack ->
                  %% Need some trouble shooting info for the failing combination
                  %% This could have been made into a test generator,
                  %% with each combination its won test,
@@ -3482,7 +3451,7 @@ compile_and_assert_that_format_x_produces_iolist(Contents,
                   {ok, Warns} when FormatWhat == format_warning ->
                       [gpb_compile:format_warning(Warn) || Warn <- Warns]
               end
-          catch ?STACKTRACE(Class, Reason, Stack)
+          catch Class:Reason:Stack ->
                   %% for debugging, if gpb_compile:format_error crashes:
                   io:format("Res from gpb_compile:file =~n"
                             "  ~p~n", [Res]),
@@ -3603,8 +3572,6 @@ enum_macros_test() ->
     assert_contains_regexp(Hrl4, "-define.'FOO.BAR.A.NO', *'NO'"),
     ok.
 
-
--ifndef(NO_HAVE_MAPS).
 enum_macros_means_hrl_even_with_maps_test() ->
     Proto = ["enum A { NO = 0; YES = 1; }
               message M { optional A f1 = 1; }
@@ -3612,7 +3579,6 @@ enum_macros_means_hrl_even_with_maps_test() ->
     Hrl = compile_to_string_get_hrl(Proto, [maps, gen_enum_macros]),
     assert_contains_regexp(Hrl, "-define.'A.YES', *'YES'"),
     ok.
--endif. % NO_HAVE_MAPS
 
 %% --- nif generation tests -----------------
 
@@ -4737,7 +4703,6 @@ with_tmpdir(Save, Fun) ->
     end.
 
 get_tmpdir() ->
-    rand_seed(),
     mktempdir(
       filename:join(case os:getenv("TMPDIR") of
                         false -> "/tmp";
@@ -4747,7 +4712,7 @@ get_tmpdir() ->
                                   os:getpid(),"-"]))).
 
 mktempdir(Base) ->
-    D = Base ++ f("~8..0w", [rand_uniform(90000000)]),
+    D = Base ++ f("~8..0w", [rand:uniform(90000000)]),
     case file:make_dir(D) of
         ok             -> {ok, D};
         {error, exist} -> mktempdir(Base);
@@ -4800,7 +4765,7 @@ main_in_separate_vm([FBinFile, FResFile]) ->
     {ok, FBin} = file:read_file(FBinFile),
     Fun = binary_to_term(FBin),
     Res = try Fun()
-          catch ?STACKTRACE(Class,Reason,Stack) % ->
+          catch Class:Reason:Stack ->
                   if Reason == {badmatch, {error, on_load_failure}} ->
                           %% A .nif.so might have failed to load.
                           io:format("LD_LIBRARY_PATH='~ts'~n",
@@ -4816,24 +4781,7 @@ main_in_separate_vm([FBinFile, FResFile]) ->
     ResBin = term_to_binary(Res),
     WRes = file:write_file(FResFile, ResBin),
     io:format("Wrote result file (~p bytes) -> ~p~n", [byte_size(ResBin),WRes]),
-    ensure_output_flushed_halt().
-
-ensure_output_flushed_halt() ->
-    case erlang:system_info(otp_release) of
-        "R"++_ = Release ->
-            %% Erlang R16 or earlier, attempt to support earlier releases
-            %% if not too much work.
-            if Release >= "R15B01" ->
-                    %% R15B01 and later: halt waits until pending io has finished
-                    halt(0);
-               Release < "R15B01" ->
-                    timer:sleep(100),
-                    halt(0)
-            end;
-        _ ->
-            %% Erlang 17 or later
-            halt(0)
-    end.
+    halt(0).
 
 run_cmd_collect_output(Cmd, Args) ->
     case os:find_executable(Cmd) of
@@ -5148,7 +5096,7 @@ mk_fields_of_type(Types, Occurrence) ->
 mk_fields_of_type(Types, Occurrence, Opts) ->
     FieldOptsF = proplists:get_value(field_opts_f, Opts, fun(_) -> [] end),
     Offset = proplists:get_value(offset, Opts, 0),
-    Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
+    Types1 = [Type || Type <- Types],
     [#?gpb_field{name=list_to_atom(lists:concat([f, I + Offset])),
                  rnum=I + 1 + Offset,
                  fnum=I + Offset,
@@ -5158,7 +5106,7 @@ mk_fields_of_type(Types, Occurrence, Opts) ->
      || {I, Type} <- index_seq(Types1)].
 
 mk_oneof_fields_of_type(Types, Pos) ->
-    Types1 = [Type || Type <- Types, can_do_nif_type(Type)],
+    Types1 = [Type || Type <- Types],
     [#gpb_oneof{
         name   = o,
         rnum   = Pos+1,
@@ -5171,8 +5119,8 @@ mk_oneof_fields_of_type(Types, Pos) ->
                   || {I, Type} <- index_seq(Types1)]}].
 
 mk_map_fields_of_type(KeyTypes, ValueTypes) ->
-    KeyTypes1 = [KT1 | _] = [T || T <- KeyTypes, can_do_nif_type(T)],
-    ValueTypes1 = [VT1 | _] = [T || T <- ValueTypes, can_do_nif_type(T)],
+    KeyTypes1 = [KT1 | _] = [T || T <- KeyTypes],
+    ValueTypes1 = [VT1 | _] = [T || T <- ValueTypes],
     Fs1 = [#?gpb_field{type={map,KT1,VT}, occurrence=repeated, opts=[]}
            || VT <- ValueTypes1],
     Fs2 = [#?gpb_field{type={map,KT,VT1}, occurrence=repeated, opts=[]}
@@ -5188,60 +5136,6 @@ maybe_packed({map,_,_}) -> [];
 maybe_packed(string)    -> [];
 maybe_packed(bytes)     -> [];
 maybe_packed(_)         -> [packed].
-
-can_do_nif_type(Type) ->
-    if Type == int64;
-       Type == sint64;
-       Type == sfixed64 ->
-            %% There's an issue with Erlang 17.0+ (will probably be
-            %% fixed in 17.2): if compiled with gcc 4.9.0 (or newer, probably)
-            %% and running on a 32-bit, there is an undefined behaviour
-            %% which will make the test fail for nifs for sint64
-            %% for INT64_MIN (-9223372036854775808). See also:
-            %% http://erlang.org/pipermail/erlang-bugs/2014-July/004513.html
-            case {is_erlvm_compiled_with_gcc490_or_later(), is_32_bit_os()} of
-                {true, true} ->
-                    OtpVsn = get_erlang_otp_major(),
-                    if OtpVsn <  17 -> true;
-                       OtpVsn == 17 -> false; % assume bug present
-                       OtpVsn >  17 -> true   % assume fixed
-                    end;
-                _ ->
-                    true
-            end;
-       true ->
-            true
-    end.
-
-is_erlvm_compiled_with_gcc490_or_later() ->
-    {Compiler, Version} = erlang:system_info(c_compiler_used),
-    if Compiler == gnuc, is_tuple(Version) ->
-            tuple_to_list(Version) >= [4,9,0];
-       true ->
-            undefined
-    end.
-
-is_32_bit_os() ->
-    erlang:system_info({wordsize,external}) == 4. %% Erlang R14+
-
-get_erlang_otp_major() ->
-    case erlang:system_info(otp_release) of
-        "R"++Rest -> % R16 or earlier
-            list_to_integer(lists:takewhile(fun is_digit/1, Rest));
-        RelStr ->
-            %% In Erlang 17 the leading "R" was dropped,
-            %% allow for some (possible?) variation
-            try list_to_integer(RelStr)
-            catch error:badarg ->
-                    [NStr | _] = gpb_lib:string_lexemes(RelStr, ".-"),
-                    try list_to_integer(NStr)
-                    catch error:badarg -> error({unexpected_otp_version,RelStr})
-                    end
-            end
-    end.
-
-is_digit(C) when $0 =< C, C =< $9 -> true;
-is_digit(_) -> false.
 
 mk_msg(MsgName, Defs, Variant) ->
     {{msg, MsgName}, Fields} = lists:keyfind({msg, MsgName}, 1, Defs),
@@ -5334,11 +5228,7 @@ random_nth(Seq) ->
     lists:nth(random_int(1, length(Seq)), Seq).
 
 random_int(LowerLim, UpperLim) ->
-    ensure_seeded(),
-    rand_uniform(UpperLim - LowerLim + 1) + LowerLim - 1.
-
-ensure_seeded() ->
-    rand_seed().
+    rand:uniform(UpperLim - LowerLim + 1) + LowerLim - 1.
 
 %% --- command line options tests -----------------
 
@@ -5470,10 +5360,10 @@ opt_test() ->
         gpb_compile:parse_opts_and_args(
           ["-epb", "-epb-functions",
            "x.proto"]),
-    {ok, {[{target_erlang_version,18}],
+    {ok, {[{target_erlang_version,99}],
           ["x.proto"]}} =
         gpb_compile:parse_opts_and_args(
-          ["-for-version", "18",
+          ["-for-version", "99",
            "x.proto"]),
     {ok, {[bypass_wrappers],
           ["x.proto"]}} =
@@ -5730,10 +5620,10 @@ makedeps_cmdline_opts_test() ->
     ok.
 
 dashes_and_underscores_are_interchangeable_in_options_test() ->
-    {ok, {[{target_erlang_version,18}, {target_erlang_version,18}],
+    {ok, {[{target_erlang_version,96}, {target_erlang_version,99}],
           ["x.proto"]}} =
-        gpb_compile:parse_opts_and_args(["-for-version", "18", % norm
-                                         "-for_version", "18", % also accepted
+        gpb_compile:parse_opts_and_args(["-for-version", "96", % norm
+                                         "-for_version", "99", % also accepted
                                          "x.proto"]),
     {ok, {[{erlc_compile_options, "debug_info, inline_list_funcs"},
            {erlc_compile_options, "debug_info, inline_list_funcs"}],
@@ -6090,26 +5980,5 @@ id(X) -> X.
 
 f(Fmt, Args) -> lists:flatten(io_lib:format(Fmt, Args)).
 
--ifndef(NO_HAVE_RAND).
-%% Erlang 19 or later
-rand_uniform(Limit) -> rand:uniform(Limit).
-rand_seed() -> _ = rand:uniform().
--else.
-%% Erlang 18 or earlier
-rand_uniform(Limit) -> random:uniform(Limit).
-rand_seed() ->
-    {A, B, C} = os:timestamp(),
-    random:seed(erlang:phash2(A+B+C), erlang:phash2(B+C), erlang:phash2(A+C)).
--endif. % NO_HAVE_RAND
-
--ifndef(NO_HAVE_ERL20_STR_FUNCTIONS).
-
 string_trim(Str) ->
     string:trim(Str).
-
--else.  % NO_HAVE_ERL20_STR_FUNCTIONS
-
-string_trim(Str) ->
-    string:strip(Str).
-
--endif. % NO_HAVE_ERL20_STR_FUNCTIONS

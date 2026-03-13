@@ -30,7 +30,7 @@
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [replace_term/2, replace_tree/2,
+-import(gpb_lib, [replace_term/2, replace_tree/2, replace_map_key/3,
                   splice_trees/2, repeat_clauses/2]).
 
 format_exports(_Defs, Opts) ->
@@ -133,10 +133,10 @@ format_verifiers_top_with_msgs(Defs, AnRes, Opts) ->
 
 format_verifiers(Defs, AnRes, Opts) ->
     [format_msg_verifiers(Defs, AnRes, Opts),
-     format_enum_verifiers(Defs, AnRes, Opts),
-     format_type_verifiers(AnRes, Opts),
+     format_enum_verifiers(Defs, AnRes),
+     format_type_verifiers(AnRes),
      format_map_verifiers(AnRes, Opts),
-     format_verifier_auxiliaries(Defs, Opts)
+     format_verifier_auxiliaries(Defs)
     ].
 
 format_msg_verifiers(Defs, AnRes, Opts) ->
@@ -156,7 +156,7 @@ format_submsg_verifier_wrapper(MsgName, Opts) ->
     case proplists:get_bool(allow_preencoded_submsgs, Opts) of
         true ->
             [gpb_lib:nowarn_unused_function(FnNameSub, 3),
-             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3,Opts),
+             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3),
              gpb_codegen:format_fn(
                FnNameSub,
                fun(Preencoded, _Path, _TrUserData) when is_binary(Preencoded) ->
@@ -167,7 +167,7 @@ format_submsg_verifier_wrapper(MsgName, Opts) ->
                [replace_term('FnName', FnName)])];
         false ->
             [gpb_lib:nowarn_unused_function(FnNameSub, 3),
-             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3,Opts),
+             gpb_lib:nowarn_dialyzer_attr(FnNameSub, 3),
              gpb_codegen:format_fn(
                FnNameSub,
                fun(Msg, Path, TrUserData) ->
@@ -228,7 +228,7 @@ format_msg_verifier(MsgName, MsgDef0, AnRes, Opts) ->
     FnName = gpb_lib:mk_fn(v_msg_, MsgName),
     TrUserDataVar = ?expr(TrUserData),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName,3,Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun('<msg-match>', '<Path>', 'TrUserData') ->
@@ -335,15 +335,15 @@ field_verifier(MsgName,
                           RReplacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                              #{'<FName>' := '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FNameAtom>' | Path],
                                                 'TrUserData');
                               _ ->
                                   ok
                           end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
+                          [replace_map_key('<FName>', FName, Opts),
+                           replace_term('<FNameAtom>', FName),
+                           replace_tree('<F>', FVar),
                            replace_tree('M', MsgVar) | RReplacements])
             end;
         repeated when not IsMapField ->
@@ -383,29 +383,31 @@ field_verifier(MsgName,
                           end,
                           Replacements);
                 #maps{unset_optional=omitted} ->
-                    ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  if is_list('<F>') ->
-                                          %% _ = [...] to avoid dialyzer error
-                                          %% "Expression produces a value of type
-                                          %% ['ok'], but this value is unmatched"
-                                          %% with the -Wunmatched_returns flag.
-                                          _ = ['<verify-fn>'(Elem, ['<FName>' | Path],
-                                                             'TrUserData')
-                                               || Elem <- '<F>'],
-                                          ok;
-                                     true ->
-                                          mk_type_error(
-                                            {invalid_list_of, '<Type>'},
-                                            '<F>',
-                                            ['<FName>' | Path])
-                                  end;
-                              _ -> ok
-                          end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
-                           replace_tree('M', MsgVar) | Replacements])
+                    ?expr(
+                       case 'M' of
+                           #{'<FName>' := '<F>'} ->
+                               if is_list('<F>') ->
+                                       %% _ = [...] to avoid dialyzer error
+                                       %% "Expression produces a value of type
+                                       %% ['ok'], but this value is unmatched"
+                                       %% with the -Wunmatched_returns flag.
+                                       _ = ['<verify-fn>'(Elem,
+                                                          ['<FNameAtom>'|Path],
+                                                          'TrUserData')
+                                            || Elem <- '<F>'],
+                                       ok;
+                                  true ->
+                                       mk_type_error(
+                                         {invalid_list_of, '<Type>'},
+                                         '<F>',
+                                         ['<FNameAtom>' | Path])
+                               end;
+                           _ -> ok
+                       end,
+                       [replace_map_key('<FName>', FName, Opts),
+                        replace_term('<FNameAtom>', FName),
+                        replace_tree('<F>', FVar),
+                        replace_tree('M', MsgVar) | Replacements])
             end;
         repeated when IsMapField ->
             MFVerifierFn = gpb_gen_translators:find_translation(
@@ -423,15 +425,15 @@ field_verifier(MsgName,
                           MReplacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                              #{'<FName>' := '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FNameAtom>' | Path],
                                                 'TrUserData');
                               _ ->
                                   ok
                           end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
+                          [replace_map_key('<FName>', FName, Opts),
+                           replace_term('<FNameAtom>', FName),
+                           replace_tree('<F>', FVar),
                            replace_tree('M', MsgVar) | MReplacements])
             end;
         optional ->
@@ -450,15 +452,15 @@ field_verifier(MsgName,
                           Replacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                              #{'<FName>' := '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FNameAtom>' | Path],
                                                 'TrUserData');
                               _ ->
                                   ok
                           end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
+                          [replace_map_key('<FName>', FName, Opts),
+                           replace_term('<FNameAtom>', FName),
+                           replace_tree('<F>', FVar),
                            replace_tree('M', MsgVar) | Replacements])
             end;
         defaulty ->
@@ -477,15 +479,15 @@ field_verifier(MsgName,
                           Replacements);
                 #maps{unset_optional=omitted} ->
                     ?expr(case 'M' of
-                              '#{<FName> := <F>}' ->
-                                  '<verify-fn>'('<F>', ['<FName>' | Path],
+                              #{'<FName>' := '<F>'} ->
+                                  '<verify-fn>'('<F>', ['<FNameAtom>' | Path],
                                                 'TrUserData');
                               _ ->
                                   ok
                           end,
-                          [replace_tree('#{<FName> := <F>}',
-                                        gpb_lib:map_match([{FName, FVar}],
-                                                          Opts)),
+                          [replace_map_key('<FName>', FName, Opts),
+                           replace_term('<FNameAtom>', FName),
+                           replace_tree('<F>', FVar),
                            replace_tree('M', MsgVar) | Replacements])
             end
     end;
@@ -597,18 +599,17 @@ field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
     ?expr(
        case 'M' of
            '<oneof-pattern>' ->
-               '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
+               '<verify-fn>'('<OFVar>', ['<OFName>', '<FNameAtom>' | Path],
                              'TrUserData');
-           '#{<FName> := <F>}' ->
-               mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path]);
+           #{'<FName>' := '<F>'} ->
+               mk_type_error(invalid_oneof, '<F>', ['<FNameAtom>' | Path]);
            _ ->
                ok
        end,
        [replace_tree('<F>', FVar),
-        replace_term('<FName>', FName),
+        replace_map_key('<FName>', FName, Opts),
+        replace_term('<FNameAtom>', FName),
         replace_tree('M', MsgVar),
-        replace_tree('#{<FName> := <F>}',
-                     gpb_lib:map_match([{FName, FVar}], Opts)),
         repeat_clauses(
           '<oneof-pattern>',
           [begin
@@ -638,14 +639,15 @@ field_oneof_omitted_tuples_verifier(MsgName, FName, OFields,
 tr_field_oneof_omitted_tuples_verifier(MsgVar, FName, FVar,
                                        Transl, TrUserDataVar, Opts) ->
     ?expr(case 'M' of
-              '#{fname := F}' ->
-                  'Tr'('F', ['fname' | Path], 'TrUserData');
+              #{fname := 'F'} ->
+                  'Tr'('F', ['fname-atom' | Path], 'TrUserData');
               _ ->
                   ok
           end,
           [replace_tree('M', MsgVar),
-           replace_tree('#{fname := F}', gpb_lib:map_match([{FName, FVar}],
-                                                           Opts)),
+           replace_map_key(fname, FName, Opts),
+           replace_term('fname-atom', FName),
+           replace_tree('F', FVar),
            replace_term('Tr', Transl),
            replace_tree('F', FVar),
            replace_term('fname', FName),
@@ -703,15 +705,15 @@ field_oneof_omitted_flat_verifier(MsgName, FName, OFields,
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
 
-format_enum_verifiers(Defs, #anres{used_types=UsedTypes}, Opts) ->
-    [format_enum_verifier(EnumName, Def, Opts)
+format_enum_verifiers(Defs, #anres{used_types=UsedTypes}) ->
+    [format_enum_verifier(EnumName, Def)
      || {{enum,EnumName}, Def} <- Defs,
         gpb_lib:smember({enum, EnumName}, UsedTypes)].
 
-format_enum_verifier(EnumName, EnumMembers, Opts) ->
+format_enum_verifier(EnumName, EnumMembers) ->
     FnName = gpb_lib:mk_fn(v_enum_, EnumName),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun('<sym>', _Path, _TrUserData) ->
@@ -726,13 +728,13 @@ format_enum_verifier(EnumName, EnumMembers, Opts) ->
                                  || {EnumSym, _Value, _} <- EnumMembers]),
         replace_term('<EnumName>', EnumName)])].
 
-format_type_verifiers(#anres{used_types=UsedTypes}, Opts) ->
+format_type_verifiers(#anres{used_types=UsedTypes}) ->
     NeedBool   = gpb_lib:smember(bool, UsedTypes),
     NeedFloat  = gpb_lib:smember(float, UsedTypes),
     NeedDouble = gpb_lib:smember(double, UsedTypes),
     NeedString = gpb_lib:smember(string, UsedTypes),
     NeedBytes  = gpb_lib:smember(bytes, UsedTypes),
-    [[format_int_verifier(Type, Signedness, Bits, Opts)
+    [[format_int_verifier(Type, Signedness, Bits)
       || {Type, Signedness, Bits} <- [{sint32,   signed,   32},
                                       {sint64,   signed,   64},
                                       {int32,    signed,   32},
@@ -744,13 +746,13 @@ format_type_verifiers(#anres{used_types=UsedTypes}, Opts) ->
                                       {sfixed32, signed,   32},
                                       {sfixed64, signed,   64}],
          gpb_lib:smember(Type, UsedTypes)],
-     [format_bool_verifier(Opts)                || NeedBool],
-     [format_float_verifier(float, Opts)        || NeedFloat],
-     [format_float_verifier(double, Opts)       || NeedDouble],
-     [format_string_verifier(Opts)              || NeedString],
-     [format_bytes_verifier(Opts)               || NeedBytes]].
+     [format_bool_verifier()                    || NeedBool],
+     [format_float_verifier(float)              || NeedFloat],
+     [format_float_verifier(double)             || NeedDouble],
+     [format_string_verifier()                  || NeedString],
+     [format_bytes_verifier()                   || NeedBytes]].
 
-format_int_verifier(IntType, Signedness, NumBits, Opts) ->
+format_int_verifier(IntType, Signedness, NumBits) ->
     Min = case Signedness of
               unsigned -> 0;
               signed   -> -(1 bsl (NumBits-1))
@@ -761,7 +763,7 @@ format_int_verifier(IntType, Signedness, NumBits, Opts) ->
           end,
     FnName = gpb_lib:mk_fn(v_type_, IntType),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(N, _Path, _TrUserData) when is_integer(N),
@@ -778,10 +780,10 @@ format_int_verifier(IntType, Signedness, NumBits, Opts) ->
                                    erl_syntax:atom(Signedness),
                                    erl_syntax:integer(NumBits)])])].
 
-format_bool_verifier(Opts) ->
+format_bool_verifier() ->
     FnName = gpb_lib:mk_fn(v_type_, bool),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(false, _Path, _TrUserData) -> ok;
@@ -791,11 +793,11 @@ format_bool_verifier(Opts) ->
           (X, Path, _TrUserData) -> mk_type_error(bad_boolean_value, X, Path)
        end)].
 
-format_float_verifier(FlType, Opts) ->
+format_float_verifier(FlType) ->
     BadTypeOfValue = list_to_atom(lists:concat(["bad_", FlType, "_value"])),
     FnName = gpb_lib:mk_fn(v_type_, FlType),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(N, _Path, _TrUserData) when is_float(N) -> ok;
@@ -812,10 +814,10 @@ format_float_verifier(FlType, Opts) ->
        end,
        [replace_term('<bad_x_value>', BadTypeOfValue)])].
 
-format_string_verifier(Opts) ->
+format_string_verifier() ->
     FnName = gpb_lib:mk_fn(v_type_, string),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(S, Path, _TrUserData) when is_list(S); is_binary(S) ->
@@ -831,10 +833,10 @@ format_string_verifier(Opts) ->
                mk_type_error(bad_unicode_string, X, Path)
        end)].
 
-format_bytes_verifier(Opts) ->
+format_bytes_verifier() ->
     FnName = gpb_lib:mk_fn(v_type_, bytes),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      gpb_codegen:format_fn(
        FnName,
        fun(B, _Path, _TrUserData) when is_binary(B) ->
@@ -847,10 +849,10 @@ format_bytes_verifier(Opts) ->
 
 format_map_verifiers(#anres{map_types=MapTypes}=AnRes, Opts) ->
     MapsOrTuples = gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts),
-    [format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts)
+    [format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes)
      || {KeyType,ValueType} <- sets:to_list(MapTypes)].
 
-format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
+format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes) ->
     MsgName = gpb_lib:map_type_to_msg_name(KeyType, ValueType),
     FnName = gpb_lib:mk_fn(v_, MsgName),
     KeyVerifierFn = gpb_lib:mk_fn(v_type_, KeyType),
@@ -864,7 +866,7 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
                          ElemPath, verify, AnRes,
                          ValueVerifierFn1),
     [gpb_lib:nowarn_unused_function(FnName, 3),
-     gpb_lib:nowarn_dialyzer_attr(FnName, 3, Opts),
+     gpb_lib:nowarn_dialyzer_attr(FnName, 3),
      case MapsOrTuples of
          '2tuples' ->
              gpb_codegen:format_fn(
@@ -903,7 +905,7 @@ format_map_verifier(KeyType, ValueType, MapsOrTuples, AnRes, Opts) ->
                 replace_term('VerifyValue', ValueVerifierFn2)])
      end].
 
-format_verifier_auxiliaries(Defs, Opts) ->
+format_verifier_auxiliaries(Defs) ->
     [gpb_lib:nowarn_unused_function(mk_type_error, 3),
      "-spec mk_type_error(_, _, list()) -> no_return().\n",
      gpb_codegen:format_fn(
@@ -921,16 +923,11 @@ format_verifier_auxiliaries(Defs, Opts) ->
                fun([]) -> top_level end);
          true ->
              [gpb_lib:nowarn_unused_function(prettify_path, 1),
-              gpb_lib:nowarn_dialyzer_attr(prettify_path, 1, Opts),
-              case gpb_lib:target_has_lists_join(Opts) of
-                  true ->
-                      format_prettify_path_with_lists_join();
-                  false ->
-                      format_prettify_path_with_string_join()
-              end]
+              gpb_lib:nowarn_dialyzer_attr(prettify_path, 1),
+              format_prettify_path()]
      end].
 
-format_prettify_path_with_lists_join() ->
+format_prettify_path() ->
     gpb_codegen:format_fn(
       prettify_path,
       fun([]) ->
@@ -939,17 +936,6 @@ format_prettify_path_with_lists_join() ->
               lists:append(
                 lists:join(".", lists:map(fun atom_to_list/1,
                                           lists:reverse(PathR))))
-      end).
-
-format_prettify_path_with_string_join() ->
-    gpb_codegen:format_fn(
-      prettify_path,
-      fun([]) ->
-              top_level;
-         (PathR) ->
-              string:join(lists:map(fun atom_to_list/1,
-                                    lists:reverse(PathR)),
-                          ".")
       end).
 
 map_keys_to_strees(Keys, Opts) ->

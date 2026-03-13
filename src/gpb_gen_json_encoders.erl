@@ -30,7 +30,7 @@
 -include("gpb_codegen.hrl").
 -include("gpb_compile.hrl").
 
--import(gpb_lib, [replace_term/2, replace_tree/2,
+-import(gpb_lib, [replace_term/2, replace_tree/2, replace_map_key/3,
                   splice_trees/2, repeat_clauses/2]).
 
 format_exports(Defs, Opts) ->
@@ -316,14 +316,14 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
-                           '#{fieldname := <F>}' ->
+                           #{fieldname := '<F>'} ->
                                '<encodeit>';
                            _ ->
                                'Json'
                        end,
                        [replace_tree('M', MsgVar),
-                        replace_tree('#{fieldname := <F>}',
-                                     gpb_lib:map_match([{FName,FVar}], Opts)),
+                        replace_map_key(fieldname, FName, Opts),
+                        replace_tree('<F>', FVar),
                         replace_tree('<encodeit>', EncodeExpr)
                         | Transforms])
             end;
@@ -446,14 +446,15 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
-                           '#{fieldname := <F>}' ->
+                           #{fieldname := '<F>'} ->
                                '<encodeit>';
                            _ ->
                                '<omitted-handling>'
                        end,
                        [replace_tree('M', MsgVar),
-                        replace_tree('#{fieldname := <F>}',
-                                     gpb_lib:map_match([{FName,FVar}], Opts)),
+
+                        replace_map_key(fieldname, FName, Opts),
+                        replace_tree('<F>', FVar),
                         replace_tree('<encodeit>', EncodeExpr),
                         replace_tree('<omitted-handling>', OnOmittedExpr)
                         | Transforms])
@@ -513,7 +514,7 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                 #maps{unset_optional=omitted} ->
                     ?expr(
                        case 'M' of
-                           '#{fieldname := <F>}' ->
+                            #{fieldname := 'F'} ->
                                'TrF' = 'Tr'('F', 'TrUserData'),
                                if 'TrF' == [] -> 'Json';
                                   true -> tj_add_field(jfieldname,
@@ -524,8 +525,8 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                'Json'
                        end,
                        [replace_tree('M', MsgVar),
-                        replace_tree('#{fieldname := <F>}',
-                                     gpb_lib:map_match([{FName,FVar}], Opts)) |
+                        replace_map_key(fieldname, FName, Opts),
+                        replace_tree('F', FVar) |
                         RTransforms])
             end;
         required ->
@@ -566,12 +567,12 @@ field_to_json_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                                   Defs, Tr, AnRes, Opts))]);
         #maps{unset_optional=omitted, oneof=tuples} ->
             ?expr(case 'M' of
-                      '#{fname:=F}' -> '<expr>';
+                      #{fname := 'F'} -> '<expr>';
                       _ -> 'Bin'
                   end,
-                  [replace_tree('#{fname:=F}',
-                                gpb_lib:map_match([{FName, FVar}], Opts)),
-                   replace_tree('M', MsgVar),
+                  [replace_tree('M', MsgVar),
+                   replace_map_key(fname, FName, Opts),
+                   replace_tree('F', FVar),
                    replace_tree('Bin', PrevJVar),
                    replace_tree('<expr>',
                                 field_encode_oneof(
@@ -1103,7 +1104,7 @@ format_json_helpers(_Defs, #anres{map_types=MapTypes}=AnRes, Opts) ->
          {Atom, proplist} ->
              format_tagged_proplist_object_helpers(Atom);
          map ->
-             format_map_object_helpers(Opts)
+             format_map_object_helpers()
      end,
      case gpb_lib:json_array_format_by_opts(Opts) of
          list ->
@@ -1184,34 +1185,24 @@ format_tagged_proplist_object_helpers(Tag) ->
        fun({struct, Object}) -> {struct, lists:reverse(Object)} end,
        [replace_term(struct, Tag)])].
 
-format_map_object_helpers(Opts) ->
+format_map_object_helpers() ->
+    {Object, FieldName, Value} =
+        {?expr(Object), ?expr(FieldName), ?expr(Value)},
     ["%% map object format helpers\n"
      "%% For example jsx, jiffy, others\n",
      gpb_lib:nowarn_unused_function(tj_new_object, 0),
      gpb_codegen:format_fn(
        tj_new_object,
-       fun() -> '#{}' end,
-       [replace_tree('#{}', gpb_lib:map_create([], Opts))]),
+       fun() -> #{} end),
      gpb_lib:nowarn_unused_function(tj_add_field, 3),
-     case gpb_lib:target_has_variable_key_map_update(Opts) of
-         true ->
-             {Object, FieldName, Value} =
-                 {?expr(Object), ?expr(FieldName), ?expr(Value)},
-             gpb_codegen:format_fn(
-               tj_add_field,
-               fun(FieldName, Value, Object) ->
-                       'Object#{FieldName => Value}'
-               end,
-               [replace_tree(
-                  'Object#{FieldName => Value}',
-                  gpb_lib:map_set(Object, [{FieldName,Value}], []))]);
-         false ->
-             gpb_codegen:format_fn(
-               tj_add_field,
-               fun(FieldName, Value, Object) ->
-                       maps:put(FieldName, Value, Object)
-               end)
-     end,
+     gpb_codegen:format_fn(
+       tj_add_field,
+       fun(FieldName, Value, Object) ->
+               'Object#{FieldName => Value}'
+       end,
+       [replace_tree(
+          'Object#{FieldName => Value}',
+          gpb_lib:map_set(Object, [{FieldName,Value}], []))]),
      gpb_lib:nowarn_unused_function(tj_finalize_obj, 1),
      gpb_codegen:format_fn(
        tj_finalize_obj,
@@ -1237,14 +1228,13 @@ format_mapfield_2tuples_helpers() ->
        end)].
 
 format_mapfield_map_helpers(Opts) ->
-    {K, V} = {?expr(K), ?expr(V)},
     [gpb_codegen:format_fn(
        tj_mapfield_fold,
        fun(TrElemF, ValueToJsonF, MapfieldElems) ->
                tj_finalize_obj(
                  lists:foldl(
                    fun(Elem, Obj) ->
-                           '#{key := K, value := V}' = TrElemF(Elem),
+                           #{key := K, value := V} = TrElemF(Elem),
                            tj_add_field(tj_mapfield_key_to_str(K),
                                         ValueToJsonF(V),
                                         Obj)
@@ -1252,8 +1242,8 @@ format_mapfield_map_helpers(Opts) ->
                    tj_new_object(),
                    MapfieldElems))
        end,
-       [replace_tree('#{key := K, value := V}',
-                     gpb_lib:map_match([{key,K}, {value,V}], Opts))])].
+       [replace_map_key(key, key, Opts),
+        replace_map_key(value, value, Opts)])].
 
 format_mapfield_key_to_str_helpers() ->
     [gpb_lib:nowarn_unused_function(tj_mapfield_key_to_str, 1),
