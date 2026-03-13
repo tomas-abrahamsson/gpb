@@ -192,15 +192,14 @@ explode_record_fields_to_params_with_passthrough_test() ->
 
 implode_to_map_exprs_test() ->
     F = fun(FnSTree) ->
-                gpb_codemorpher:marked_map_expr_to_map_expr(
-                  gpb_codemorpher:underscore_unused_vars(
-                    gpb_codemorpher:implode_to_map_exprs(
-                      FnSTree, 2,
-                      [{a, optional},
-                       {b, optional},
-                       {c, required}],
-                      '$novalue')),
-                  [])
+                gpb_codemorpher:underscore_unused_vars(
+                  gpb_codemorpher:implode_to_map_exprs(
+                    FnSTree, 2,
+                    [{a, optional},
+                     {b, optional},
+                     {c, required}],
+                    '$novalue',
+                    []))
         end,
     {module,M} = ls(?dummy_mod,
                     [{F, ["fn_f(<<>>, A, B, C) ->
@@ -218,15 +217,14 @@ implode_to_map_exprs_test() ->
 
 implode_to_map_exprs_with_flat_oneof_test() ->
     F = fun(FnSTree) ->
-                gpb_codemorpher:marked_map_expr_to_map_expr(
-                  gpb_codemorpher:underscore_unused_vars(
-                    gpb_codemorpher:implode_to_map_exprs(
-                      FnSTree, 2,
-                      [{a, optional},
-                       {b, flatten_oneof},
-                       {c, required}],
-                      '$novalue')),
-                  [])
+                gpb_codemorpher:underscore_unused_vars(
+                  gpb_codemorpher:implode_to_map_exprs(
+                    FnSTree, 2,
+                    [{a, optional},
+                     {b, flatten_oneof},
+                     {c, required}],
+                    '$novalue',
+                    []))
         end,
     {module,M} = ls(?dummy_mod,
                     [{F, ["fn_f(<<>>, A, B, C) ->
@@ -279,14 +277,13 @@ rework_clauses_for_records_to_maps_for_submsg_test() ->
                true -> {'merge(',Prev,',New)'}
             end.",
     [Pat, If] = parse_exprs([PatS, IfS]),
-    {_MapPat, Reworked1} = gpb_codemorpher:rework_clauses_for_records_to_maps(
-                             Pat, If, undefined),
-    Reworked2 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked1, []),
+    {_MapPat, Reworked} = gpb_codemorpher:rework_clauses_for_records_to_maps(
+                            Pat, If, undefined, []),
     Binds = fun(#{a := Val}=Msg) -> [{'Msg',Msg}, {'Prev', Val}];
                (#{}=Msg)         -> [{'Msg',Msg}, {'Prev', undefined}]
             end,
-    'New' = eval_expr(Reworked2, Binds(#{})),
-    {'merge(',x,',New)'} = eval_expr(Reworked2, Binds(#{a => x})).
+    'New' = eval_expr(Reworked, Binds(#{})),
+    {'merge(',x,',New)'} = eval_expr(Reworked, Binds(#{a => x})).
 
 rework_clauses_for_records_to_maps_for_oneof_submsg_test() ->
     PatS  = "#r{a=Prev}=Msg.",
@@ -302,30 +299,26 @@ rework_clauses_for_records_to_maps_for_oneof_submsg_test() ->
                  _            -> {tag,'New'}
              end.",
     [Pat,Case, Case2] = [parse_expr(S) || S <- [PatS, CaseS, Cas2S]],
-    {MsgVar, Reworked1} = gpb_codemorpher:rework_clauses_for_records_to_maps(
-                            Pat, Case, undefined),
-    Reworked2 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked1, []),
+    {MsgVar, Reworked} = gpb_codemorpher:rework_clauses_for_records_to_maps(
+                           Pat, Case, undefined, []),
     Msg = erl_syntax:variable_name(MsgVar),
+    {tag,'New'} = eval_expr(Reworked, [{Msg, #{}}]),
+    {tag,'merge(',x,',New)'} = eval_expr(Reworked, [{Msg, #{a => {tag,x}}}]),
+    {tag,'New'} = eval_expr(Reworked, [{Msg, #{a => {other,zz}}}]),
+    {MsgVar, Reworked2} = gpb_codemorpher:rework_clauses_for_records_to_maps(
+                            Pat, Case2, undefined, []),
     {tag,'New'} = eval_expr(Reworked2, [{Msg, #{}}]),
     {tag,'merge(',x,',New)'} = eval_expr(Reworked2, [{Msg, #{a => {tag,x}}}]),
-    {tag,'New'} = eval_expr(Reworked2, [{Msg, #{a => {other,zz}}}]),
-    {MsgVar, Reworked3} = gpb_codemorpher:rework_clauses_for_records_to_maps(
-                            Pat, Case2, undefined),
-    Reworked4 = gpb_codemorpher:marked_map_expr_to_map_expr(Reworked3, []),
-    {tag,'New'} = eval_expr(Reworked4, [{Msg, #{}}]),
-    {tag,'merge(',x,',New)'} = eval_expr(Reworked4, [{Msg, #{a => {tag,x}}}]),
-    {tag,'New'} = eval_expr(Reworked4, [{Msg, #{a => {other,zz}}}]).
+    {tag,'New'} = eval_expr(Reworked2, [{Msg, #{a => {other,zz}}}]).
 
 
 rework_records_to_maps_unset_optionals_present_undefined_test() ->
     _FieldNames = [a,b,c,d],
     FieldInfos = [{a,optional}, {b,required}, {c,repeated}, {d,optional}],
     F = fun(FnSTree) ->
-                gpb_codemorpher:marked_map_expr_to_map_expr(
-                  gpb_codemorpher:rework_records_to_maps(
-                    FnSTree, 2, FieldInfos,
-                    undefined),
-                  [])
+                gpb_codemorpher:rework_records_to_maps(
+                  FnSTree, 2, FieldInfos,
+                  undefined, [])
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",
@@ -381,12 +374,10 @@ rework_records_to_maps_unset_optionals_present_undefined_test() ->
 rework_records_to_maps_unset_optionals_omitted_test() ->
     FieldInfos = [{a,optional}, {b,required}, {c,repeated}, {d,optional}],
     F = fun(FnSTree) ->
-                gpb_codemorpher:marked_map_expr_to_map_expr(
-                  gpb_codemorpher:rework_records_to_maps(
-                    gpb_codemorpher:change_undef_marker_in_clauses(
-                      FnSTree, '$undef'),
-                    2, FieldInfos, '$undef'),
-                  [])
+                gpb_codemorpher:rework_records_to_maps(
+                  gpb_codemorpher:change_undef_marker_in_clauses(
+                    FnSTree, '$undef'),
+                  2, FieldInfos, '$undef', [])
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",
@@ -441,12 +432,10 @@ rework_records_to_maps_unset_optionals_omitted_test() ->
 rework_records_to_maps_with_flat_oneof_test() -> % implies omitted
     FieldInfos = [{a,optional}, {b,required}, {c,repeated}, {d,flatten_oneof}],
     F = fun(FnSTree) ->
-                gpb_codemorpher:marked_map_expr_to_map_expr(
-                  gpb_codemorpher:rework_records_to_maps(
-                    gpb_codemorpher:change_undef_marker_in_clauses(
-                      FnSTree, '$undef'),
-                    2, FieldInfos, '$undef'),
-                 [])
+                gpb_codemorpher:rework_records_to_maps(
+                  gpb_codemorpher:change_undef_marker_in_clauses(
+                    FnSTree, '$undef'),
+                  2, FieldInfos, '$undef', [])
         end,
     {module,M} = ls(?dummy_mod,
                     [%%["-record(r, {",

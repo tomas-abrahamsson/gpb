@@ -273,29 +273,25 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                    gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=present_undefined},pass_as_record} ->
                   [gpb_decoders_lib:rework_records_to_maps(5, FieldInfos,
-                                                           undefined),
-                   gpb_decoders_lib:underscore_unused_vars(),
-                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
+                                                           undefined, Opts),
+                   gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=present_undefined},pass_as_params} ->
                   [gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 5),
                    gpb_decoders_lib:explode_param_pass(MsgName, FNames, 5),
-                   gpb_decoders_lib:implode_to_map_exprs_all_mandatory(),
-                   gpb_decoders_lib:underscore_unused_vars(),
-                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
+                   gpb_decoders_lib:implode_to_map_exprs_all_mandatory(Opts),
+                   gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=omitted}, pass_as_record} ->
                   [gpb_decoders_lib:change_undef_marker_in_clauses('$undef'),
                    gpb_decoders_lib:rework_records_to_maps(5, FieldInfos,
-                                                           '$undef'),
-                   gpb_decoders_lib:underscore_unused_vars(),
-                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)];
+                                                           '$undef', Opts),
+                   gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=omitted}, pass_as_params} ->
                   [gpb_decoders_lib:change_undef_marker_in_clauses('$undef'),
                    gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 5),
                    gpb_decoders_lib:explode_param_pass(MsgName, FNames, 5),
                    gpb_decoders_lib:implode_to_map_exprs(5, FieldInfos,
-                                                         '$undef'),
-                   gpb_decoders_lib:underscore_unused_vars(),
-                   gpb_decoders_lib:finalize_marked_map_exprs(Opts)]
+                                                         '$undef', Opts),
+                   gpb_decoders_lib:underscore_unused_vars()]
           end,
     gpb_decoders_lib:run_morph_ops(Ops, Fns).
 

@@ -33,10 +33,9 @@
 -export([explode_param_init/3]).
 -export([explode_param_pass/3]).
 -export([change_undef_marker_in_clauses/1]).
--export([implode_to_map_exprs_all_mandatory/0]).
--export([implode_to_map_exprs/3]).
--export([rework_records_to_maps/3]).
--export([finalize_marked_map_exprs/1]).
+-export([implode_to_map_exprs_all_mandatory/1]).
+-export([implode_to_map_exprs/4]).
+-export([rework_records_to_maps/4]).
 
 -include("../include/gpb.hrl").
 -include("gpb_codegen.hrl").
@@ -326,11 +325,14 @@ change_undef_marker_in_clauses(Undef) ->
 %% optional = preset_undefined.
 %%
 %% Applies to finalization functions only.
-implode_to_map_exprs_all_mandatory() ->
+implode_to_map_exprs_all_mandatory(Opts) ->
     fun(Fns) ->
-            loop_fns(fun gpb_codemorpher:implode_to_map_expr/1,
-                     process_finalizers(),
-                     Fns)
+            loop_fns(
+              fun(FnTree) ->
+                      gpb_codemorpher:implode_to_map_expr(FnTree, Opts)
+              end,
+              process_finalizers(),
+              Fns)
     end.
 
 %% @doc The opposite of the {@link explode_param_init/3}, when a map is
@@ -338,12 +340,12 @@ implode_to_map_exprs_all_mandatory() ->
 %% unset optionals (which is the default)
 %%
 %% Applies to finalization functions only.
-implode_to_map_exprs(F1Pos, FieldInfos, Undef) ->
+implode_to_map_exprs(F1Pos, FieldInfos, Undef, Opts) ->
     fun(Fns) ->
             loop_fns(
               fun(FnTree) ->
                       gpb_codemorpher:implode_to_map_exprs(
-                        FnTree, F1Pos, FieldInfos, Undef)
+                        FnTree, F1Pos, FieldInfos, Undef, Opts)
               end,
               process_finalizers(),
               Fns)
@@ -351,39 +353,15 @@ implode_to_map_exprs(F1Pos, FieldInfos, Undef) ->
 
 %% @doc Change record expressions to map expressions. Useful when passing
 %% messages as maps/records.
-rework_records_to_maps(RecordParamPos, FieldInfos, Undef) ->
+rework_records_to_maps(RecordParamPos, FieldInfos, Undef, Opts) ->
     fun(Fns) ->
             loop_fns(
               fun(FnTree) ->
                       gpb_codemorpher:rework_records_to_maps(
-                        FnTree, RecordParamPos, FieldInfos, Undef)
+                        FnTree, RecordParamPos, FieldInfos, Undef, Opts)
               end,
               process_initializers_finalizers_and_msg_passers(),
               Fns)
-    end.
-
-%% @doc Finalize expressions that have been marked as map expressions.
-%%
-%% Initially of importance but now of continuously diminising value, gpb
-%% can generate code for maps also when hosted on a pre Erlang-17
-%% systems where maps does not exist. It does this by rendering the map
-%% expressions to string format using erl_syntax:text() nodes, which are
-%% rendered in verbatim by the erl_prettypr:format machinery.
-%%
-%% However, the code morpher must still be able to manipulate
-%% expressions.  To make this possible, it uses marked record
-%% expressions. The markup is specially tagged tuples.  As the last
-%% step, these tagged record expressions are converted to map
-%% expressions, possibly by using erl_syntax text nodes if on old
-%% systems, and otherwise map syntax nodes.
-%%
-%% That's what this morping step performs.
-finalize_marked_map_exprs(Opts) ->
-    F = fun(MarkedExpr) ->
-                gpb_codemorpher:marked_map_expr_to_map_expr(MarkedExpr, Opts)
-        end,
-    fun(Fns) ->
-            loop_fns(F, process_initializers_finalizers_and_msg_passers(), Fns)
     end.
 
 loop_fns(MapFun, Filter, Fns) ->
