@@ -21,6 +21,8 @@ jobs:
       GPB_ALLOW_NON_CONFORMING_VSN_FORMAT: 1
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Erlang ${{ matrix.otpvsn }}
         # TODO: test with protobuf (in the container)
         run: |
