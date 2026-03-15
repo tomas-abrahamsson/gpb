@@ -133,6 +133,7 @@
         boolean_opt(maps) |              % same as {msg_format, maps}
         boolean_opt(msgs_as_maps) |      % same as {msg_format, maps}
         {native_records_unset, atom()} |
+        {native_records_required_default, unset_value | none} |
         {mapfield_format, '2tuples' | maps} |
         boolean_opt(mapfields_as_maps) | % same as {mapfield_format, maps}
         {maps_unset_optional, omitted | present_undefined} |
@@ -383,6 +384,9 @@ file(File) ->
 %%            atom|binary}</tt>,
 %%       <tt>{<a href="#option-native_records_unset">native_records_unset</a>,
 %%            atom()}</tt>,
+%%       <tt>{<a href="#option-native_records_required_default"
+%%                            >native_records_required_default</a>,
+%%            unset_value|none}</tt>,
 %%       <tt><a href="#option-allow_preencoded_submsgs"
 %%                           >allow_preencoded_submsgs</a></tt>
 %%       <br/>
@@ -763,6 +767,24 @@ file(File) ->
 %% Corresponding command line option:
 %% <a href="#cmdline-option-native-records-unset-value"
 %%                       >`-native-records-unset-value'</a>.
+%%
+%% <h4><a id="option-native_records_required_default"/>
+%%                 `{native_records_required_default, unset_value|none}'</h4>
+%%
+%% Specifies whether native record definitions for proto2 required fields,
+%% should have the unset value or no default value at all.
+%%
+%% By default these fields have the unset value, `undefined' or another value
+%% if the <a href="#option-native_records_unset">`native_records_unset'</a>
+%% option is set.
+%%
+%% If set to `none', then the option
+%% <a href="#option-verify_decode_required_present"
+%%               >`verify_decode_required_present'</a> is automatically set.
+%%
+%% Corresponding command line option:
+%% <a href="#cmdline-option-native-records-required-no-default"
+%%                       >`-native-records-required-no-default'</a>.
 %%
 %% <h4><a id="option-allow_preencoded_submsgs"/>`allow_preencoded_submsgs'</h4>
 %%
@@ -2580,6 +2602,13 @@ c() ->
 %%       Default is the atom `undefined'.<br/>
 %%       Corresponding Erlang-level options:
 %%       <a href="#option-native_records_unset">`native_records_unset'</a></dd>
+%%   <dt><a id="cmdline-option-native-records-required-no-default">
+%%     `-native-records-required-no-default'</a></dt>
+%%     <dd>Corresponding Erlang-level option:
+%%       No default value is set for required fields. Implies `-vrdp'.<br/>
+%%       Corresponding Erlang-level option:
+%%       <a href="#option-native_records_required_default"
+%%                      >`native_records_required_default'</a></dd>
 %%   <dt><a id="cmdline-option-allow-preencoded-submsgs"/>
 %%       `-allow-preencoded-submsgs'</dt>
 %%     <dd>Allow pre-encoded submsgs to save cpu during encoding<br/>
@@ -3335,6 +3364,9 @@ opt_specs() ->
      {"native-records-unset-value", 'atom()', native_records_unset, "Atom\n"
       "       Value to use to indicate that a field is not set.\n"
       "       Default is the atom undefined.\n"},
+     {"native-records-required-no-default",
+      undefined, {native_records_required_default, none}, "\n"
+      "       No default is set for required fields. Implies -vrdp.\n"},
      {"allow-preencoded-submsgs", undefined, allow_preencoded_submsgs, "\n"
       "       Allow pre-encoded submsgs to save cpu during encoding.\n"},
      {{section, "Verification of inputs"}},

@@ -31,6 +31,7 @@
 -export([change_undef_marker_in_clauses/2]).
 -export([locate_record_param/1]).
 -export([rework_records_to_maps/5]).
+-export([rework_records_to_tuples/3]).
 
 -export([rework_clauses_for_records_to_maps/4]). % intended for testing
 -export([analyze_case_clauses/2]). % intended for testing
@@ -46,7 +47,7 @@
 
 -type syntax_tree() :: erl_parse:abstract_form() | % for an af_function_decl()
                        erl_syntax:syntaxTree().
--type pos() :: non_neg_integer().
+-type param_pos() :: non_neg_integer().
 
 -type clause_analysis() :: {clause_meaning(), body()}.
 -type body()            :: [syntax_tree()].
@@ -209,7 +210,7 @@ test_underscore(Node) ->
 %% '''
 -spec explode_record_fields_to_params_init(
         Function,
-        pos(),
+        param_pos(),
         {RName::atom(), InitFieldExprs}) -> Function when
       Function :: syntax_tree(),
       InitFieldExprs::[{FieldName::atom(), Expr::syntax_tree()}].
@@ -241,7 +242,7 @@ explode_record_fields_to_params_init(FnSTree, ArgPos, {RName, InitExprs}) ->
 %% '''
 %% (for performance reasons, typically)
 -spec explode_record_fields_to_params(Function,
-                                      pos(),
+                                      param_pos(),
                                       {atom(), [atom()]}) -> Function when
       Function :: syntax_tree().
 explode_record_fields_to_params(FnSTree, ArgPos, {RName, FieldNames}) ->
@@ -333,7 +334,7 @@ fill_updates(Updates, Binds) ->
 %% @doc Given a syntax tree for a function, locate the parameter that is a
 %% record.  Example: For `fn(Bin, Z1, Z2, #r{f=F}=M, Tr) -> ...', return 4.
 %% If no such parameter is found, fail with badarg.
--spec locate_record_param(Function::syntax_tree()) -> pos().
+-spec locate_record_param(Function::syntax_tree()) -> param_pos().
 locate_record_param(FnSTree) ->
     function = erl_syntax:type(FnSTree), % assert
     Clauses = erl_syntax:function_clauses(FnSTree),
@@ -428,7 +429,7 @@ map_tails2(F, Exprs) ->
     end.
 
 %% @doc From a syntax tree for a call, retrieve the nth argument.
--spec get_call_arg(Call::syntax_tree(), pos()) -> syntax_tree().
+-spec get_call_arg(Call::syntax_tree(), param_pos()) -> syntax_tree().
 get_call_arg(CallSTree, Pos) ->
     application = erl_syntax:type(CallSTree), % assert
     Args = erl_syntax:application_arguments(CallSTree),
@@ -442,8 +443,9 @@ get_call_arg(CallSTree, Pos) ->
 %%    splice([a,b,c,d,e], 2, 1, [])       -> [a,c,d,e]
 %%    splice([a,b,c,d,e], 2, 2, [b3, c3]) -> [a,b3,c3,d,e]
 %% '''
--spec splice(L::list(), pos(), NToReplace, NewElems::list()) -> L2::list() when
-      NToReplace :: non_neg_integer().
+-spec splice(L::list(), param_pos(), NToReplace, NewElems::list()) -> L2 when
+      NToReplace :: non_neg_integer(),
+      L2 :: list().
 splice(List,       1, N, NewElems) -> NewElems ++ drop_n(N, List);
 splice([H | Rest], P, N, NewElems) -> [H | splice(Rest, P-1, N, NewElems)].
 
@@ -454,7 +456,7 @@ drop_n(N, [_ | Tl]) -> drop_n(N-1, Tl).
 %% call arguments with a list of syntax trees for new call arguments.
 %% See also {@link splice/4}.
 -spec splice_call_arg(Call::syntax_tree(),
-                      pos(), non_neg_integer(),
+                      param_pos(), non_neg_integer(),
                       NewArgs::[syntax_tree()]) -> Call1 when
       Call1::syntax_tree().
 splice_call_arg(CallSTree, Pos, NumToReplace, NewArgs) ->
@@ -514,7 +516,7 @@ test_record_field_expr(Expr, Opts) ->
 %% then adds to the map each optional field, one at a time, unless it has the
 %% special value indicating that it is unset.
 %%
--spec implode_to_map_exprs(Function, pos(), FieldInfos, Undef, Opts) ->
+-spec implode_to_map_exprs(Function, param_pos(), FieldInfos, Undef, Opts) ->
                                   Function1 when
       Function   :: syntax_tree(),
       FieldInfos :: [{FieldName :: atom(),
@@ -685,7 +687,7 @@ atom_changer(Old, New) ->
 %%
 %% NB: An `Undef' value of `undefined' assumes the context is
 %% maps_unset_optional = `present_undefined', otherwise assumes `omitted'.
--spec rework_records_to_maps(Function, pos(), FieldInfos,
+-spec rework_records_to_maps(Function, param_pos(), FieldInfos,
                              atom(), Opts) -> Function1 when
       Function :: syntax_tree(),
       FieldInfos :: [{FieldName :: atom(),
@@ -1076,6 +1078,253 @@ rework_clauses_for_records_to_maps(Pattern, Expr, Undef, Opts) ->
             {MsgVar, erl_syntax:revert(E2)}
     end.
 
+-spec rework_records_to_tuples(Function, atom(), InitExprs) -> Function1 when
+      Function :: syntax_tree(),
+      InitExprs :: [{FName :: atom(), InitExpr :: syntax_tree()}],
+      Function1 :: syntax_tree().
+rework_records_to_tuples(FnSTree, MsgName, InitExprs) ->
+    AnnotatedFnSTree = annotate_record_nodes(FnSTree),
+    rework_records_to_tuples2(AnnotatedFnSTree, MsgName, InitExprs).
+
+annotate_record_nodes(FnSTree) ->
+    map_record_exprs(
+      fun(Node, #{position := {param, _},
+                  returns_record := true}=Ctxt) ->
+              case test_match_expr_binding(Node) of
+                  {true, _Pattern, Var} ->
+                      {Node, Ctxt#{msg_var => erl_syntax:variable_name(Var)}};
+                  false ->
+                      {Node, Ctxt}
+              end;
+         (Node, #{position := body,
+                  returns_record := true,
+                  is_return_expr := true,
+                  msg_var := MsgVar}=Ctxt) ->
+              case erl_syntax:type(Node) of
+                  variable ->
+                      case erl_syntax:variable_name(Node) of
+                          MsgVar ->
+                              Node1 = erl_syntax:add_ann(record_expr, Node),
+                              {Node1, Ctxt};
+                          _Other ->
+                              {Node, Ctxt}
+                      end;
+                  _ ->
+                      {Node, Ctxt}
+              end;
+         (Node, Ctxt) ->
+              {Node, Ctxt}
+      end,
+      FnSTree).
+
+rework_records_to_tuples2(FnSTree, MsgName, InitExprs) ->
+    {TPosByFName, TVarByFName, _} =
+        lists:foldl(
+          fun({FName, _InitExpr}, {AccPos, AccVar, I}) ->
+                  AccPos1 = AccPos#{FName => I},
+                  AccVar1 = AccVar#{FName => gpb_lib:var_n("T@@", I)},
+                  {AccPos1, AccVar1, I + 1}
+          end,
+          {#{}, #{}, 1},
+          InitExprs),
+    FNames = [FName || {FName, _InitExpr} <- InitExprs],
+    Type = erl_syntax:atom(MsgName),
+    map_record_exprs(
+      only_for_record_nodes(
+        fun(Node, #{position := {param, _},
+                    returns_record := IsReturnClause}=Ctxt) ->
+                Fields = record_kv_fields(Node),
+                if not IsReturnClause ->
+                        TElems = [case lists:keyfind(FName, 1, Fields) of
+                                      {FName, Var} -> Var;
+                                      false -> erl_syntax:underscore()
+                                  end
+                                  || FName <- FNames],
+                        Tuple = erl_syntax:tuple(TElems),
+                        {Tuple, Ctxt};
+                   IsReturnClause ->
+                        TElems = [case lists:keyfind(FName, 1, Fields) of
+                                      {FName, Var} -> Var;
+                                      false -> maps:get(FName, TVarByFName)
+                                  end
+                                  || FName <- FNames],
+                        Tuple = erl_syntax:tuple(TElems),
+                        Ctxt1 = Ctxt#{f_vars => lists:zip(FNames, TElems)},
+                        Ctxt2 = add_action(fun remove_match_expr_binding/2,
+                                           Ctxt1),
+                        {Tuple, Ctxt2}
+                end;
+           (Node, #{position := guard}=Ctxt) ->
+                {Node, Ctxt};
+           (Node, #{position := body,
+                    returns_record := true,
+                    f_vars := FVars}=Ctxt) ->
+                case erl_syntax:type(Node) of
+                    record_expr ->
+                        Fields = record_kv_fields(Node),
+                        Fields1 = [case lists:keyfind(FName, 1, Fields) of
+                                       false -> lists:keyfind(FName,1, FVars);
+                                       {FName, Expr} -> {FName, Expr}
+                                   end
+                                   || FName <- FNames],
+                        Node1 = record_kv_expr(Type, Fields1),
+                        {Node1, Ctxt};
+                    variable ->
+                        Node1 = record_kv_expr(Type, FVars),
+                        {Node1, Ctxt}
+                end;
+           (Node, #{position := body,
+                    returns_record := false}=Ctxt) ->
+                Arg = erl_syntax:record_expr_argument(Node),
+                Fields = record_kv_fields(Node),
+                if Arg == none ->
+                        TElems = [case lists:keyfind(FName, 1, Fields) of
+                                      {FName, Var} -> Var;
+                                      false -> InitExpr
+                                  end
+                                  || {FName, InitExpr} <- InitExprs],
+                        Node1 = erl_syntax:tuple(TElems),
+                        {Node1, Ctxt};
+                   Arg /= none ->
+                        %% Record update expression.
+                        %% Translate to Var#{a = A} to
+                        %% setelement(TPos, Var, A)
+                        Node1 = lists:foldl(
+                                  fun({FName, Val}, Acc) ->
+                                          #{FName := TPos} = TPosByFName,
+                                          mk_setelement_call(TPos, Acc, Val)
+                                  end,
+                                  Arg,
+                                  Fields),
+                        {Node1, Ctxt}
+                end
+        end),
+      FnSTree).
+
+map_record_exprs(Fn, FnSTree) ->
+     function = erl_syntax:type(FnSTree), % assert
+     FnName = erl_syntax:function_name(FnSTree),
+     Clauses = erl_syntax:function_clauses(FnSTree),
+     Clauses1 = [map_record_exprs_clause(Fn, C) || C <- Clauses],
+     erl_syntax:copy_pos(
+       FnSTree,
+       erl_syntax:function(FnName, Clauses1)).
+
+map_record_exprs_clause(Fn, Clause) ->
+    Params = erl_syntax:clause_patterns(Clause),
+    Guard = erl_syntax:clause_guard(Clause),
+    Body = erl_syntax:clause_body(Clause),
+
+    IsParam1EmptyBinary = test_is_empty_binary_as_param1(Params),
+    Ctxt0 = #{returns_record => IsParam1EmptyBinary},
+    {Params1, Ctxt1} = map_record_expr_params(Fn, Params, Ctxt0),
+    {Guard1, Ctxt2} = map_record_expr_guard(Fn, Guard, Ctxt1),
+    {Body1, _Ctxt3} = map_record_expr_body(Fn, Body, Ctxt2),
+    erl_syntax:clause(Params1, Guard1, Body1).
+
+map_record_expr_params(Fn, Params, Ctxt0) ->
+    lists:mapfoldl(
+      fun({I, Param}, Ctxt) ->
+              Ctxt1 = Ctxt#{position => {param, I}},
+              {Param1, Ctxt2} = erl_syntax_lib:mapfold(Fn, Ctxt1, Param),
+              Actions = maps:get(actions, Ctxt2, []),
+              Ctxt3 = maps:remove(actions, Ctxt2),
+              run_actions(Param1, Ctxt3, Actions) % -> {Param2, Ctxt4}
+      end,
+      Ctxt0,
+      gpb_lib:index_seq(Params)).
+
+map_record_expr_guard(_Fn, none, Ctxt0) ->
+    {none, Ctxt0};
+map_record_expr_guard(Fn, Guard, Ctxt0) ->
+    Ctxt1 = Ctxt0#{position => guard},
+    erl_syntax_lib:mapfold(Fn, Ctxt1, Guard).
+
+map_record_expr_body(Fn, Body, Ctxt0) ->
+    BodyLen = length(Body),
+    lists:mapfoldl(
+      fun({I, Expr}, Ctxt) ->
+              Ctxt1 = Ctxt#{is_return_expr => I == BodyLen},
+              {Expr1, Ctxt2} = erl_syntax_lib:mapfold(Fn, Ctxt1, Expr),
+              Actions = maps:get(actions, Ctxt2, []),
+              Ctxt3 = maps:remove(actions, Ctxt2),
+              run_actions(Expr1, Ctxt3, Actions)
+      end,
+      Ctxt0#{position => body},
+      index_seq(Body)).
+
+only_for_record_nodes(Fn) ->
+    fun(Node, Ctxt) ->
+            case test_record_node(Node) of
+                true -> Fn(Node, Ctxt);
+                false ->  {Node, Ctxt}
+            end
+    end.
+
+add_action(ActionFn, #{actions := Actions}=Ctxt) ->
+    Ctxt#{actions := Actions ++ [ActionFn]};
+add_action(ActionFn, Ctxt) ->
+    Ctxt#{actions => [ActionFn]}.
+
+run_actions(Node0, Ctxt0, Actions) ->
+    lists:foldl(
+      fun(Action, {Node, Ctxt}) -> Action(Node, Ctxt) end,
+      {Node0, Ctxt0},
+      Actions).
+
+%% Test if an expression is <Pattern> = Var
+test_match_expr_binding(Node) ->
+    case erl_syntax:type(Node) of
+        match_expr ->
+            Pattern = erl_syntax:match_expr_pattern(Node),
+            Body = erl_syntax:match_expr_body(Node),
+            case erl_syntax:type(Body) of
+                variable ->
+                    {true, Pattern, Body};
+                _ ->
+                    false
+            end;
+        _ ->
+            false
+    end.
+
+%% If an expression is <Pattern> = Var, replace it with just <Pattern>
+remove_match_expr_binding(Param, Ctxt) ->
+    case test_match_expr_binding(Param) of
+        {true, Pattern, _Var} -> {Pattern, Ctxt};
+        false                 -> {Param, Ctxt}
+    end.
+
+%% True if it s record_expr or has been annotated with a record_expr.
+test_record_node(Node) ->
+    case erl_syntax:type(Node) of
+        record_expr ->
+            true;
+        _ ->
+            Annotations = erl_syntax:get_ann(Node),
+            lists:member(record_expr, Annotations)
+    end.
+
+%% Return a 2-tuple list with field names as atoms, not syntax trees
+record_kv_fields(RecordExpr) ->
+    [{erl_syntax:atom_value(erl_syntax:record_field_name(Field)),
+      erl_syntax:record_field_value(Field)}
+     || Field <- erl_syntax:record_expr_fields(RecordExpr)].
+
+record_kv_expr(Type, Fields) ->
+    Fields1 = [erl_syntax:record_field(erl_syntax:atom(FName), Val)
+               || {FName, Val} <- Fields],
+    erl_syntax:record_expr(none, Type, Fields1).
+
+
+mk_setelement_call(Index, TupleExpr, NewValueExpr) ->
+    erl_syntax:application(
+      none,
+      erl_syntax:atom(setelement),
+      [erl_syntax:integer(Index),
+       TupleExpr,
+       NewValueExpr]).
+
 mk_case_expr(ArgExpr, Clauses) ->
     erl_syntax:case_expr(ArgExpr, Clauses).
 
@@ -1103,3 +1352,4 @@ mk_var(Base, Suffix) ->
 
 index_seq(L) ->
     lists:zip(lists:seq(1,length(L)), L).
+

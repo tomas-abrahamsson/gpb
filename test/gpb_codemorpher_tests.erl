@@ -482,6 +482,27 @@ rework_records_to_maps_with_flat_oneof_test() -> % implies omitted
     2 = maps:size(Msg9),
     ok.
 
+rework_records_to_tuple_test() ->
+    InitExprs = [{a, erl_syntax:atom(undefined)},
+                 {b, erl_syntax:atom(undefined)}],
+    Id = fun(FnSTree) -> FnSTree end,
+    F = fun(FnSTree) ->
+                gpb_codemorpher:rework_records_to_tuples(FnSTree, r, InitExprs)
+        end,
+    {module, M} = ls(?dummy_mod,
+                     [{Id, "-record(r, {a, b})."},
+                      {F, "fn_1(Bin) ->
+                               fn_x(Bin, #r{a = 0, b = 0})."},
+                      {F, "fn_x(<<1, Rest/binary>>, M) ->
+                               fn_x(Rest, M#r{a = 1});
+                           fn_x(<<2, Rest/binary>>, #r{b=B}=M) ->
+                               fn_x(Rest, M#r{b = if B == undefined -> 1;
+                                                     true -> B + 1
+                                                  end});
+                           fn_x(<<>>, #r{}=Msg) ->
+                               Msg."}]),
+    {r, 0, 0} = M:fn_1(<<>>).
+
 ls(Mod, FormStrs) ->
     Forms = parse_transform_form_strs(FormStrs),
     format_forms_debug(Forms),

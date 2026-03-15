@@ -480,18 +480,31 @@ has_type_spec_translation(#gpb_oneof{}, ElemPath, TypeTexts0, AnRes) ->
 %% Add information in " | undefined" to maybe later be added to each type
 augment_type_or_undefined(FieldInfos, TEnv) ->
     #t_env{mapping_and_unset=MappingAndUnset} = TEnv,
-    OrUndefined = case MappingAndUnset of
-                      records ->
-                          true;
-                      #natrecs{unset_value=Undef} ->
-                          {true, Undef};
-                      #maps{unset_optional=present_undefined} ->
-                          true;
-                      #maps{unset_optional=omitted} ->
-                          false
-                  end,
+    case MappingAndUnset of
+        records ->
+            set_all_to(FieldInfos, true);
+        #natrecs{required_default=unset_value, unset_value=Undef} ->
+            set_all_to(FieldInfos, {true, Undef});
+        #natrecs{required_default=none, unset_value=Undef} ->
+            set_to_unless_required(FieldInfos, {true, Undef});
+        #maps{unset_optional=present_undefined} ->
+            set_all_to(FieldInfos, true);
+        #maps{unset_optional=omitted} ->
+            set_all_to(FieldInfos, false)
+    end.
+
+set_all_to(FieldInfos, OrUndefined) ->
     [FI#field_info{or_undefined = OrUndefined}
      || #field_info{}=FI <- FieldInfos].
+
+set_to_unless_required(FieldInfos, OrUndefined) ->
+    [case Field of
+         #?gpb_field{occurrence=required} ->
+             FI#field_info{or_undefined = false};
+         _ ->
+             FI#field_info{or_undefined = OrUndefined}
+     end
+     || #field_info{field=Field}=FI <- FieldInfos].
 
 %% Step:
 %% Set the 'name' field
@@ -513,8 +526,19 @@ augment_default_values(FieldInfos, Opts, Defs, TEnv) ->
                      FI
              end
              || #field_info{field=Field}=FI <- FieldInfos];
-        #natrecs{unset_value=Undef} ->
+        #natrecs{required_default=unset_value, unset_value=Undef} ->
             [case Field of
+                 #?gpb_field{}=Field ->
+                     Default = record_field_default(Field, Opts, Defs, TEnv),
+                     FI#field_info{default = Default};
+                 #gpb_oneof{} ->
+                     FI#field_info{default = ?f("~p", [Undef])}
+             end
+             || #field_info{field=Field}=FI <- FieldInfos];
+        #natrecs{required_default=none, unset_value=Undef} ->
+            [case Field of
+                 #?gpb_field{occurrence=required}=Field ->
+                     FI;
                  #?gpb_field{}=Field ->
                      Default = record_field_default(Field, Opts, Defs, TEnv),
                      FI#field_info{default = Default};

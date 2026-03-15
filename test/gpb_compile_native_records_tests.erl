@@ -290,6 +290,128 @@ error_if_both_native_records_and_nif_test() ->
     assert_regexp_present_in("nif", Txt),
     ok.
 
+no_defaults_for_required_fields_w_repeated_test() ->
+    Proto = """
+            syntax="proto2";
+            message m1 {
+              required uint32 f1 = 1;
+              repeated uint32 f2 = 2;
+            };
+            """,
+    M = compile_iolist(Proto,
+                       [{msg_format, native_records},
+                        {native_records_required_default, none},
+                        {field_pass_method, pass_as_record}]),
+    R = records:create(M, m1, [{f1, 1}, {f2, [44]}],
+                       #{is_exported => true}),
+    Data = M:encode_msg(R),
+    R = M:decode_msg(Data, m1),
+    %% missing required field:
+    ?assertError({gpb_error, _}, M:decode_msg(<<>>, m1)),
+    unload_code(M).
+
+no_defaults_for_required_fields_w_submsgs_test() ->
+    Proto = """
+            syntax="proto2";
+            message m1 {
+              required uint32 f1 = 1;
+              optional submsg f2 = 2;
+            };
+            message submsg {};
+            """,
+    M = compile_iolist(Proto,
+                       [{msg_format, native_records},
+                        {native_records_required_default, none},
+                        {field_pass_method, pass_as_record}]),
+    SubMsg = records:create(M, submsg, [], #{is_exported => true}),
+    R = records:create(M, m1, [{f1, 1}, {f2, SubMsg}],
+                       #{is_exported => true}),
+    Data = M:encode_msg(R),
+    R = M:decode_msg(Data, m1),
+    %% missing required field:
+    ?assertError({gpb_error, _}, M:decode_msg(<<>>, m1)),
+    unload_code(M).
+
+no_defaults_for_required_fields_w_oneof_test() ->
+    Proto = """
+            syntax="proto2";
+            message m1 {
+              required uint32 f1 = 1;
+              oneof c {
+                uint32 a2 = 2;
+                uint32 a3 = 3;
+              }
+            };
+            """,
+    M = compile_iolist(Proto,
+                       [{msg_format, native_records},
+                        {native_records_required_default, none},
+                        {field_pass_method, pass_as_record}]),
+    R = records:create(M, m1, [{f1, 1}, {c, {a2, 2}}],
+                       #{is_exported => true}),
+    Data = M:encode_msg(R),
+    R = M:decode_msg(Data, m1),
+    %% missing required field:
+    ?assertError({gpb_error, _}, M:decode_msg(<<>>, m1)),
+    unload_code(M).
+
+no_defaults_for_required_fields_w_oneof_submsg_test() ->
+    Proto = """
+            syntax="proto2";
+            message m1 {
+              required uint32 f1 = 1;
+              oneof c {
+                submsg a2 = 2;
+                submsg a3 = 3;
+              }
+            };
+            message submsg {};
+            """,
+    M = compile_iolist(Proto,
+                       [{msg_format, native_records},
+                        {native_records_required_default, none},
+                        {field_pass_method, pass_as_record}]),
+    SubMsg = records:create(M, submsg, [], #{is_exported => true}),
+    R = records:create(M, m1, [{f1, 1}, {c, {a2, SubMsg}}],
+                       #{is_exported => true}),
+    Data = M:encode_msg(R),
+    R = M:decode_msg(Data, m1),
+    %% missing required field:
+    ?assertError({gpb_error, _}, M:decode_msg(<<>>, m1)),
+    unload_code(M).
+
+no_defaults_with_modified_unset_value_decoding_with_oneof_test() ->
+    Proto = """
+            syntax="proto2";
+            message m1 {
+              required uint32 f1 = 1;
+              oneof c {
+                uint32 a2 = 2;
+                uint32 a3 = 3;
+              }
+            };
+            """,
+    [begin
+         M = compile_iolist(Proto,
+                            [{msg_format, native_records},
+                             {native_records_required_default, none},
+                             {native_records_unset, '$undef'},
+                             FieldPassOpt]),
+         R = records:create(M, m1, [{f1, 1}, {c, {a2, 11}}],
+                            #{is_exported => true}),
+         Data = M:encode_msg(R),
+         R = M:decode_msg(Data, m1),
+         R2 = records:create(M, m1, [{f1, 11}, {c, '$undef'}],
+                            #{is_exported => true}),
+         Data2 = M:encode_msg(R2),
+         #_{f1=11, c='$undef'} = M:decode_msg(Data2, m1),
+
+         unload_code(M)
+     end
+     || FieldPassOpt <- [{field_pass_method, pass_as_params},
+                         {field_pass_method, pass_as_record}]],
+    ok.
+
 %% ----------------------------------------------------------------------
 
 compile_proto_get_written_files(Mod, Proto, Opts) ->

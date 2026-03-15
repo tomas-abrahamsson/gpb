@@ -256,9 +256,18 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                   [gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 5),
                    gpb_decoders_lib:explode_param_pass(MsgName, FNames, 5),
                    gpb_decoders_lib:underscore_unused_vars()];
-              {#natrecs{unset_value=UnsetValue}, pass_as_record} ->
+              {#natrecs{required_default=unset_value,
+                        unset_value=UnsetValue},
+               pass_as_record} ->
                   [gpb_decoders_lib:maybe_change_undef_marker_in_clauses(
                      UnsetValue),
+                   gpb_decoders_lib:underscore_unused_vars()];
+              {#natrecs{required_default=none, unset_value=UnsetValue},
+               pass_as_record} ->
+                  [gpb_decoders_lib:maybe_change_undef_marker_in_clauses(
+                     UnsetValue),
+                   gpb_decoders_lib:rework_records_to_tuples(MsgName,
+                                                             InitExprs),
                    gpb_decoders_lib:underscore_unused_vars()];
               {#natrecs{unset_value=UnsetValue}, pass_as_params} ->
                   [gpb_decoders_lib:maybe_change_undef_marker_in_clauses(

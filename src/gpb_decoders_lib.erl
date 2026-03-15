@@ -37,6 +37,8 @@
 -export([implode_to_map_exprs_all_mandatory/1]).
 -export([implode_to_map_exprs/4]).
 -export([rework_records_to_maps/4]).
+-export([rework_records_to_tuples/2]).
+
 
 -include("../include/gpb.hrl").
 -include("gpb_codegen.hrl").
@@ -128,7 +130,8 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
             pass_as_record ->
                 case MappingUnset of
                     records -> [m,d];
-                    #natrecs{} -> [m,d];
+                    #natrecs{required_default=unset_value} -> [m,d];
+                    #natrecs{required_default=none} -> [m,d,o];
                     #maps{unset_optional=present_undefined} -> [m,d,o];
                     #maps{unset_optional=omitted} -> [m]
                 end
@@ -366,6 +369,19 @@ rework_records_to_maps(RecordParamPos, FieldInfos, Undef, Opts) ->
               fun(FnTree) ->
                       gpb_codemorpher:rework_records_to_maps(
                         FnTree, RecordParamPos, FieldInfos, Undef, Opts)
+              end,
+              process_initializers_finalizers_and_msg_passers(),
+              Fns)
+    end.
+
+%% @doc Change record expressions to map expressions. Useful when passing
+%% messages as maps/records.
+rework_records_to_tuples(MsgName, InitExprs) ->
+    fun(Fns) ->
+            loop_fns(
+              fun(FnTree) ->
+                      gpb_codemorpher:rework_records_to_tuples(
+                        FnTree, MsgName, InitExprs)
               end,
               process_initializers_finalizers_and_msg_passers(),
               Fns)

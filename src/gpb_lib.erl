@@ -719,6 +719,7 @@ normalize_alias_opts(Opts) ->
                  fun norm_opt_epb_compat_opt/1,
                  fun norm_opt_map_opts/1,
                  fun norm_opt_msg_format/1,
+                 fun norm_opt_native_records_required_default/1,
                  fun norm_opt_mapfield_format/1,
                  fun norm_opt_defs_format/1,
                  fun norm_opt_any_translate/1,
@@ -759,6 +760,13 @@ norm_opt_msg_format(Opts) ->
     proplists:expand(
       [{msgs_as_maps,         [{msg_format, maps}]},
        {{msgs_as_maps, true}, [{msg_format, maps}]}],
+      Opts).
+
+norm_opt_native_records_required_default(Opts) ->
+    proplists:expand(
+      [{{native_records_required_default, none},
+        [{native_records_required_default, none},
+         {verify_decode_required_present, true}]}],
       Opts).
 
 norm_opt_mapfield_format(Opts) ->
@@ -891,7 +899,10 @@ get_mapping_and_unset_by_opts(Opts) ->
             records;
         natrecs ->
             Undef = proplists:get_value(native_records_unset, Opts, undefined),
-            #natrecs{unset_value=Undef};
+            Required = proplists:get_value(
+                         native_records_required_default, Opts, unset_value),
+            #natrecs{unset_value=Undef,
+                     required_default=Required};
         maps ->
             DefaultUnsetOptional = omitted,
             UnseOptional = proplists:get_value(maps_unset_optional, Opts,

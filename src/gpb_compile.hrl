@@ -37,7 +37,8 @@
           oneof           :: tuples | flat
          }).
 -record(natrecs, {
-          unset_value :: term()
+          unset_value :: term(),
+          required_default :: unset_value | none
          }).
 
 -define(f(Fmt),        io_lib:format(Fmt, [])).
