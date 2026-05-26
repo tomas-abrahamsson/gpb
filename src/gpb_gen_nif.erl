@@ -496,7 +496,7 @@ format_nif_cc_local_functions_for_unknowns() ->
      "    const ::google::protobuf::Message *m);\n"].
 
 format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
-    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_mapping_by_opts(Opts) == maps,
     MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
     #anres{unknowns_info=UnknownsInfo} = AnRes,
     %% About gpb_aa_<...> vs gpb_fa_<...>/gpb_xa_<...> C variables
@@ -562,7 +562,7 @@ format_nif_cc_mk_atoms(_Mod, Defs, AnRes, Opts) ->
       "\n"]].
 
 calc_atoms_fields(Defs, AnRes, Opts) ->
-    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_mapping_by_opts(Opts) == maps,
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     FlatMaps = case MappingUnset of
                    #maps{unset_optional=omitted, oneof=flat} -> true;
@@ -658,7 +658,7 @@ format_nif_cc_mk_consts(_Mod, _Defs, AnRes, _Opts) ->
     end.
 
 format_nif_cc_mk_is_key(_Mod, _Defs, _AnRes, Opts) ->
-    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_mapping_by_opts(Opts) == maps,
     MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
     if Maps, MapsKeyType == binary ->
             ["static int is_key(ErlNifEnv *env,\n"
@@ -685,7 +685,7 @@ format_nif_cc_mk_is_key(_Mod, _Defs, _AnRes, Opts) ->
     end.
 
 format_nif_cc_mk_mk_key(_Mod, _Defs, _AnRes, Opts) ->
-    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_mapping_by_opts(Opts) == maps,
     MapsKeyType = gpb_lib:get_maps_key_type_by_opts(Opts),
     if Maps, MapsKeyType == binary ->
             ["static ERL_NIF_TERM mk_key(ErlNifEnv *env,\n"
@@ -1279,7 +1279,7 @@ format_nif_cc_packers(_Mod, Defs, CCMapping, Opts) ->
      || {_msg_or_group, MsgName, Fields} <- gpb_lib:msgs_or_groups(Defs)].
 
 format_nif_cc_packer(MsgName, MsgFields, Defs, CCMapping, Opts) ->
-    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_mapping_by_opts(Opts) == maps,
     Mapping = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     Fields = case Mapping of
                   #maps{unset_optional=omitted, oneof=flat} ->
@@ -1802,7 +1802,7 @@ format_nif_cc_unpackers(_Mod, Defs, CCMapping, Opts) ->
      || {_msg_or_group, MsgName, Fields} <- gpb_lib:msgs_or_groups(Defs)].
 
 format_nif_cc_unpacker(MsgName, Fields, Defs, CCMapping, Opts) ->
-    Maps = gpb_lib:get_records_or_maps_by_opts(Opts) == maps,
+    Maps = gpb_lib:get_mapping_by_opts(Opts) == maps,
     UnpackFnName = mk_c_fn(u_msg_, MsgName),
     #cc_msg{type=CMsgType} = maps:get(MsgName, CCMapping),
     IFields = gpb_lib:index_seq(Fields),

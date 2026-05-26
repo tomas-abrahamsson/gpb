@@ -24,6 +24,139 @@
 -endif.
 -include_lib("eunit/include/eunit.hrl").
 
+file_msg_format_opts_test() ->
+    [?assertEqual(Expected,
+                  gpb_lib:get_mapping_by_opts(
+                    gpb_lib:normalize_opts(Opts)),
+                  #{opts => Opts,
+                    norm => gpb_lib:normalize_opts(Opts)})
+     || {Expected, Opts} <- [{records, []},
+                             {records, [{maps, false}]},
+                             {maps, [maps]},
+                             {maps, [{maps, true}]},
+                             %% Overrides (first hit of 'maps'wins):
+                             {records, [{maps, false}, {maps, true}]},
+                             %% Already on normalized form, (also w/ overrides)
+                             {records, [{msp_format, records}]},
+                             {records, [{msg_format, records}, maps]},
+                             {maps,    [{msg_format, maps}]},
+                             {maps,    [{msg_format, maps}, {maps, false}]},
+                             {natrecs, [{msg_format, native_records}]},
+                             end_marker]],
+    ok.
+
+mapfields_opts_test() ->
+    [?assertEqual(Expected,
+                  gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(
+                    gpb_lib:normalize_opts(Opts)),
+                  #{opts => Opts,
+                    norm => gpb_lib:normalize_opts(Opts)})
+     || {Expected, Opts} <- [{'2tuples', []},
+                             {maps,      [maps]},
+                             {'2tuples', [{maps, false}, maps]},
+                             {'2tuples', [{maps, false}, maps]},
+                             %% mapfields may overrides:a
+                             {'2tuples', [{mapfields_as_maps, false}, maps]},
+                             {maps,      [{mapfields_as_maps, true}]},
+                             {'2tuples', [{mapfields_as_maps, false}]},
+                             {'2tuples', [{mapfields_as_maps, false}, maps]},
+                             %% Already on normalized form, (also w/ overrides)
+                             {'2tuples', [{mapfield_format, '2tuples'}]},
+                             {'2tuples', [{mapfield_format, '2tuples'}, maps]},
+                             {maps,      [{mapfield_format, maps}]},
+                             {maps,      [{mapfield_format, maps},
+                                          {maps, false}]},
+                             end_marker]],
+    ok.
+
+defs_format_opts_test() ->
+    %% Defs
+    [?assertEqual(Expected,
+                  gpb_lib:get_defs_format(
+                    gpb_lib:normalize_opts(Opts)),
+                  #{opts => Opts,
+                    norm => gpb_lib:normalize_opts(Opts)})
+     || {Expected, Opts} <- [{records, []},
+                             {maps, [{maps, true}]},
+                             {maps, [maps]},
+                             {maps, [defs_as_maps]},
+                             {maps, [{defs_as_maps, true}]},
+                             {records, [{maps, false}, {maps, true}]},
+                             %% Already on normalized form, (also w/ overrides)
+                             {records, [{defs_format, records}]},
+                             {records, [{defs_format, records}, maps]},
+                             {maps,    [{defs_format, maps}]},
+                             {maps,    [{defs_format, maps}, {maps, false}]},
+                             end_marker]],
+    %% Fields
+    [?assertEqual(Expected,
+                  gpb_lib:get_field_format_by_opts(
+                    gpb_lib:normalize_opts(Opts)),
+                  #{opts => Opts,
+                    norm => gpb_lib:normalize_opts(Opts)})
+     || {Expected, Opts}
+            <- [{fields_as_records, []},
+                {fields_as_records, [{maps, false}]},
+                {fields_as_records, [{maps, false}, maps]},
+                {fields_as_proplists, [defs_as_proplists]},
+                {fields_as_proplists, [defs_as_proplists, maps]},
+                %%
+                %% This was oddly enough true previously, but no longer:
+                %% {fields_as_proplists, [maps, defs_as_proplists]},
+                %%
+                {fields_as_maps, [maps]},
+                {fields_as_maps, [{maps, true}]},
+                {fields_as_maps, [{maps, true}, {maps, false}]},
+                {fields_as_maps, [defs_as_maps]},
+                {fields_as_maps, [{defs_as_maps, true}]},
+                %% Already on normalized form, (also w/ overrides)
+                {fields_as_records,   [{defs_format, records}]},
+                {fields_as_records,   [{defs_format, records}, maps]},
+                {fields_as_maps,      [{defs_format, maps}]},
+                {fields_as_proplists, [{defs_format, proplists},
+                                       {maps, false}]},
+                {fields_as_proplists, [{defs_format, proplists}]},
+                {fields_as_proplists, [{defs_format, proplists}, maps]},
+                {fields_as_maps,      [{msg_format, native_records}]},
+                {fields_as_maps,      [{msg_format, maps}]},
+                {fields_as_records,   [{msg_format, records}]},
+                end_marker]],
+    ok.
+
+term_mapping_test() ->
+    KnownRecords = #{a => [f], b => []},
+    S1 = erl_prettypr:format(
+          gpb_lib:term_mapping([{x, {a, {b}}, {}}], KnownRecords, [])),
+    assert_substring("#a{f", S1),
+    assert_substring("#b{}", S1),
+    %%
+    ?assertEqual(
+       [{x, #{f => #{}}, {}}],
+       eval_formatted(
+         erl_prettypr:format(
+           gpb_lib:term_mapping([{x, {a, {b}}, {}}], KnownRecords,
+                                [{defs_format, maps}])))),
+    %%
+    ?assertEqual(
+       [{x, [{f, []}], {}}],
+       eval_formatted(
+         erl_prettypr:format(
+           gpb_lib:term_mapping([{x, {a, {b}}, {}}], KnownRecords,
+                                [{defs_format, proplists}])))),
+    ok.
+
+assert_substring(ExpectedSubstr, Str) ->
+    case string:find(Str, ExpectedSubstr) of
+        nomatch -> error({substr_not_present, #{expected => ExpectedSubstr,
+                                                string => Str}});
+        _ -> ok
+    end.
+
+eval_formatted(Str) ->
+    {ok, Tokens, _End} = erl_scan:string(Str ++ ".", 1),
+    {ok, Term} = erl_parse:parse_term(Tokens),
+    Term.
+
 snake_case_test() ->
     [?assertEqual(Expected, gpb_lib:snake_case(Input), {input_is, Input})
      || {Expected, Input} <- snake_casings()],

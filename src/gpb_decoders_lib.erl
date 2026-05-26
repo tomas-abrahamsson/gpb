@@ -33,9 +33,12 @@
 -export([explode_param_init/3]).
 -export([explode_param_pass/3]).
 -export([change_undef_marker_in_clauses/1]).
+-export([maybe_change_undef_marker_in_clauses/1]).
 -export([implode_to_map_exprs_all_mandatory/1]).
 -export([implode_to_map_exprs/4]).
 -export([rework_records_to_maps/4]).
+-export([rework_records_to_tuples/2]).
+
 
 -include("../include/gpb.hrl").
 -include("gpb_codegen.hrl").
@@ -57,46 +60,54 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
     MappingUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     R = % Whether required fields are present in init-exprs
         case MappingUnset of
-            records -> o;
-            #maps{} -> if DecVfy -> m;
-                          true   -> o
-                       end
+            records    -> o;
+            #natrecs{} -> o;
+            #maps{}    -> if DecVfy -> m;
+                             true   -> o
+                          end
         end,
+    Undef1 = case MappingUnset of
+                records -> undefined;
+                #natrecs{unset_value=NrUndef} -> NrUndef;
+                #maps{unset_optional=present_undefined} -> undefined;
+                #maps{unset_optional=omitted} -> '$undef'
+            end,
+    AUndef = erl_syntax:abstract(Undef1),
     ExprInfos1 =
         [case Field of
              #?gpb_field{name=FName, occurrence=Occurrence, type=Type,
                          opts=FOpts} ->
                  HasDefault = lists:keymember(default, 1, FOpts),
                  SubMsgType = is_msg_type(Type),
-                 {Undefined, Undef, P} =
+                 {Undef, P} =
                      if SubMsgType ->
-                             {?expr(undefined), ?expr('$undef'), o};
+                             {AUndef, o};
                         Occurrence == defaulty ->
                              TD = gpb_lib:proto3_type_default(Type, Defs, Opts),
                              ATD = erl_syntax:abstract(TD),
-                             {ATD, ATD, o};
+                             {ATD, o};
                         UseDefaults, HasDefault ->
                              {default,D} = lists:keyfind(default, 1, FOpts),
                              AD = erl_syntax:abstract(D),
-                             {AD, AD, m};
+                             {AD, m};
                         UseTypeDefaults ->
                              TD = gpb_lib:proto2_type_default(Type, Defs, Opts),
                              ATD = erl_syntax:abstract(TD),
-                             {ATD, ATD, m};
+                             {ATD, m};
                         true ->
                              Pr = if HasDefault -> d;
                                      true -> o
                                   end,
-                             {?expr(undefined), ?expr('$undef'), Pr}
+                             {AUndef, Pr}
                      end,
                  case Occurrence of
-                     repeated -> {FName, m, ?expr([]),        ?expr([])};
-                     required -> {FName, R, ?expr(undefined), ?expr('$undef')};
-                     optional -> {FName, P, Undefined,        Undef};
-                     defaulty -> {FName, o, Undefined,        Undef}
+                     repeated -> {FName, m, ?expr([])};
+                     required -> {FName, R, Undef};
+                     optional -> {FName, P, Undef};
+                     defaulty -> {FName, o, Undef}
                  end;
              #gpb_oneof{name=FName} ->
-                 {FName, o, ?expr(undefined), ?expr('$undef')}
+                 {FName, o, AUndef}
          end
          || Field <- MsgDef],
     ExprInfos2 =
@@ -110,35 +121,23 @@ init_exprs(MsgName, MsgDef, Defs, TrUserDataVar, AnRes, Opts)->
                                 [replace_tree('InitExpr', InitExpr),
                                  replace_term('Tr', TranslFn),
                                  replace_tree('TrUserData', TrUserDataVar)]),
-             TrMOExpr = ?expr('Tr'('MOExpr', 'TrUserData'),
-                              [replace_tree('MOExpr', MOExpr),
-                               replace_term('Tr', TranslFn),
-                               replace_tree('TrUserData', TrUserDataVar)]),
-             {FName, Presence, TrInitExpr, TrMOExpr}
+             {FName, Presence, TrInitExpr}
          end
-         || {FName, Presence, InitExpr, MOExpr} <- ExprInfos1],
-    case gpb_lib:get_field_pass(MsgName, AnRes) of
-        pass_as_params ->
-            case MappingUnset of
-                records ->
-                    [{FName, Expr} || {FName, _, Expr, _MOExpr} <- ExprInfos2];
-                #maps{unset_optional=present_undefined} ->
-                    [{FName, Expr} || {FName, _, Expr, _MOExpr} <- ExprInfos2];
-                #maps{unset_optional=omitted} ->
-                    [{FName, MapsOmittedExpr}
-                     || {FName, _, _Expr, MapsOmittedExpr} <- ExprInfos2]
-            end;
-        pass_as_record ->
-            case MappingUnset of
-                records ->
-                    [{FName, Expr} || {FName, P, Expr, _} <- ExprInfos2,
-                                      P == m orelse P == d];
-                #maps{unset_optional=present_undefined} ->
-                    [{FName, Expr} || {FName, _, Expr, _} <- ExprInfos2];
-                #maps{unset_optional=omitted} ->
-                    [{FName, Expr} || {FName, m, _, Expr} <- ExprInfos2]
-            end
-    end.
+         || {FName, Presence, InitExpr} <- ExprInfos1],
+    Presences =
+        case gpb_lib:get_field_pass(MsgName, AnRes) of
+            pass_as_params -> [m,d,o];
+            pass_as_record ->
+                case MappingUnset of
+                    records -> [m,d];
+                    #natrecs{required_default=unset_value} -> [m,d];
+                    #natrecs{required_default=none} -> [m,d,o];
+                    #maps{unset_optional=present_undefined} -> [m,d,o];
+                    #maps{unset_optional=omitted} -> [m]
+                end
+        end,
+    [{FName, Expr} || {FName, P, Expr} <- ExprInfos2,
+                      lists:member(P, Presences)].
 
 is_msg_type({msg,_}) -> true;
 is_msg_type(_)       -> false.
@@ -320,6 +319,17 @@ change_undef_marker_in_clauses(Undef) ->
               Fns)
     end.
 
+%% @doc If the unset_value has been redefined, change it by using
+%% change_undef_marker_in_clauses, otherwise leave it as is.
+maybe_change_undef_marker_in_clauses(UnsetValue) ->
+    if UnsetValue == undefined ->
+            fun(Fns) ->
+                    Fns
+            end;
+       true ->
+            change_undef_marker_in_clauses(UnsetValue)
+    end.
+
 %% @doc The opposite of the {@link explode_param_init/3}, when a map is
 %% constructed from all field parameters. Useful for maps with unset
 %% optional = preset_undefined.
@@ -359,6 +369,19 @@ rework_records_to_maps(RecordParamPos, FieldInfos, Undef, Opts) ->
               fun(FnTree) ->
                       gpb_codemorpher:rework_records_to_maps(
                         FnTree, RecordParamPos, FieldInfos, Undef, Opts)
+              end,
+              process_initializers_finalizers_and_msg_passers(),
+              Fns)
+    end.
+
+%% @doc Change record expressions to map expressions. Useful when passing
+%% messages as maps/records.
+rework_records_to_tuples(MsgName, InitExprs) ->
+    fun(Fns) ->
+            loop_fns(
+              fun(FnTree) ->
+                      gpb_codemorpher:rework_records_to_tuples(
+                        FnTree, MsgName, InitExprs)
               end,
               process_initializers_finalizers_and_msg_passers(),
               Fns)

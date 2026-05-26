@@ -35,8 +35,10 @@
 
 format_exports(Defs, Opts) ->
     DoNif = proplists:get_bool(nif, Opts),
-    [case gpb_lib:get_records_or_maps_by_opts(Opts) of
+    [case gpb_lib:get_mapping_by_opts(Opts) of
          records ->
+             ?f("-export([to_json/1, to_json/2, to_json/3]).~n");
+         natrecs ->
              ?f("-export([to_json/1, to_json/2, to_json/3]).~n");
          maps ->
              ?f("-export([to_json/2, to_json/3]).~n")
@@ -67,7 +69,7 @@ format_encoders(Defs, AnRes, Opts) ->
      format_json_helpers(Defs, AnRes, Opts)].
 
 format_top_function_no_msgs(Opts) ->
-    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    Mapping = gpb_lib:get_mapping_by_opts(Opts),
     [case Mapping of
          records ->
              ["-spec to_json(_) -> no_return().\n",
@@ -80,6 +82,19 @@ format_top_function_no_msgs(Opts) ->
                 fun(Msg,Opts) when tuple_size(Msg) >= 1, is_list(Opts)->
                         call_self(Msg, element(1,Msg), Opts);
                    (Msg,MsgName) when tuple_size(Msg) >= 1, is_atom(MsgName)->
+                        call_self(Msg, MsgName, [])
+                end)];
+         natrecs ->
+             ["-spec to_json(_) -> no_return().\n",
+              gpb_codegen:format_fn(
+                to_json,
+                fun(Msg) -> call_self(Msg, []) end),
+              ?f("-spec to_json(_,_) -> no_return().\n"),
+              gpb_codegen:format_fn(
+                to_json,
+                fun(Msg,Opts) when is_record(Msg) >= 1, is_list(Opts)->
+                        call_self(Msg, element(1,Msg), Opts);
+                   (Msg,MsgName) when is_record(Msg) >= 1, is_atom(MsgName)->
                         call_self(Msg, MsgName, [])
                 end)];
          maps ->
@@ -100,10 +115,9 @@ format_top_function_no_msgs(Opts) ->
 format_top_function_aux(MsgDefs, AnRes, Opts) ->
     Verify = proplists:get_value(verify, Opts, optionally),
     JVerify = proplists:get_value(json_verify, Opts, Verify),
-    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
+    Mapping = gpb_lib:get_mapping_by_opts(Opts),
     DoNif = proplists:get_bool(nif, Opts),
     [case Mapping of
-
          records ->
              [gpb_codegen:format_fn(
                 to_json,
@@ -113,6 +127,17 @@ format_top_function_aux(MsgDefs, AnRes, Opts) ->
                 fun(Msg,Opts) when tuple_size(Msg) >= 1, is_list(Opts)->
                         call_self(Msg, element(1,Msg), Opts);
                    (Msg,MsgName) when tuple_size(Msg) >= 1, is_atom(MsgName)->
+                        call_self(Msg, MsgName, [])
+                end)];
+         natrecs ->
+             [gpb_codegen:format_fn(
+                to_json,
+                fun(Msg) -> call_self(Msg, []) end),
+              gpb_codegen:format_fn(
+                to_json,
+                fun(Msg,Opts) when is_record(Msg) >= 1, is_list(Opts)->
+                        call_self(Msg, element(1,Msg), Opts);
+                   (Msg,MsgName) when is_record(Msg) >= 1, is_atom(MsgName)->
                         call_self(Msg, MsgName, [])
                 end)];
          maps ->
@@ -227,6 +252,8 @@ format_to_json_msg_aux(MsgName, MsgDef, FNames, Defs, AnRes, Opts) ->
         case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
             records ->
                 gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
+            #natrecs{} ->
+                gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
             #maps{unset_optional=present_undefined} ->
                 gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts);
             #maps{unset_optional=omitted} ->
@@ -305,6 +332,16 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                                '<encodeit>'
                        end,
                        [replace_tree('<encodeit>', EncodeExpr) | Transforms]);
+                #natrecs{unset_value=Undef} ->
+                    ?expr(
+                       if 'F' == 'Undef' ->
+                               'Json';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr),
+                        replace_tree('Undef', erl_syntax:abstract(Undef))
+                        | Transforms]);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(
                        if 'F' == undefined ->
@@ -433,6 +470,17 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
                        [replace_tree('<encodeit>', EncodeExpr),
                         replace_tree('<omitted-handling>', OnOmittedExpr) |
                         Transforms]);
+                #natrecs{unset_value=Undef} ->
+                    ?expr(
+                       if 'F' == 'Undef' ->
+                               '<omitted-handling>';
+                          true ->
+                               '<encodeit>'
+                       end,
+                       [replace_tree('<encodeit>', EncodeExpr),
+                        replace_tree('<omitted-handling>', OnOmittedExpr),
+                        replace_tree('Undef', erl_syntax:abstract(Undef)) |
+                        Transforms]);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(
                        if 'F' == undefined ->
@@ -489,7 +537,8 @@ field_to_json_expr(MsgName, MsgVar, #?gpb_field{name=FName}=Field,
             RTransforms = Transforms ++
                 [replace_tree('<tojson-repeated>', ToJsonExpr)],
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                records ->
+                Records when Records == records;
+                             is_record(Records, natrecs) ->
                     ?expr(
                        begin
                            'TrF' = 'Tr'('F', 'TrUserData'),
@@ -554,6 +603,18 @@ field_to_json_expr(MsgName, MsgVar, #gpb_oneof{name=FName, fields=OFields},
                                   MsgName, MsgVar, FVar, OFields,
                                   Transl, TrUserDataVar, PrevJVar,
                                   Defs, Tr, AnRes, Opts))]);
+        #natrecs{unset_value=Undef} ->
+            ?expr(if 'F' =:= 'Undef' -> 'Bin';
+                     true -> '<expr>'
+                  end,
+                  [replace_tree('F', FVar),
+                   replace_tree('Bin', PrevJVar),
+                   replace_tree('<expr>',
+                                field_encode_oneof(
+                                  MsgName, MsgVar, FVar, OFields,
+                                  Transl, TrUserDataVar, PrevJVar,
+                                  Defs, Tr, AnRes, Opts)),
+                   replace_tree('Undef', erl_syntax:abstract(Undef))]);
         #maps{unset_optional=present_undefined} ->
             ?expr(if 'F' =:= undefined -> 'Bin';
                      true -> '<expr>'
@@ -1307,7 +1368,8 @@ format_json_p3wellknowns_helpers(AnRes, Opts) ->
              "";
         NeedsGetFields ->
              [case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                  records ->
+                  Records when Records == records;
+                               is_record(Records, natrecs) ->
                       gpb_codegen:format_fn(
                         tj_get_fields,
                         fun(Msg, Infos, TrUserData) ->

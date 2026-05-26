@@ -203,8 +203,8 @@ format_enum_decoders(Defs, #anres{used_types=UsedTypes}) ->
 format_map_decoders(Defs, AnRes, Opts0) ->
     Opts1 = case gpb_lib:get_2tuples_or_maps_for_maptype_fields_by_opts(Opts0)
             of
-                '2tuples' -> [{msgs_as_maps, false} | Opts0];
-                maps      -> [{msgs_as_maps, true} | Opts0]
+                '2tuples' -> [{msg_format, records} | Opts0];
+                maps      -> [{msg_format, maps} | Opts0]
             end,
     format_msg_decoders(Defs, AnRes, Opts1).
 
@@ -254,6 +254,25 @@ format_msg_decoder(MsgName, MsgDef, Defs, AnRes, Opts) ->
                   [gpb_decoders_lib:underscore_unused_vars()];
               {records, pass_as_params} ->
                   [gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 5),
+                   gpb_decoders_lib:explode_param_pass(MsgName, FNames, 5),
+                   gpb_decoders_lib:underscore_unused_vars()];
+              {#natrecs{required_default=unset_value,
+                        unset_value=UnsetValue},
+               pass_as_record} ->
+                  [gpb_decoders_lib:maybe_change_undef_marker_in_clauses(
+                     UnsetValue),
+                   gpb_decoders_lib:underscore_unused_vars()];
+              {#natrecs{required_default=none, unset_value=UnsetValue},
+               pass_as_record} ->
+                  [gpb_decoders_lib:maybe_change_undef_marker_in_clauses(
+                     UnsetValue),
+                   gpb_decoders_lib:rework_records_to_tuples(MsgName,
+                                                             InitExprs),
+                   gpb_decoders_lib:underscore_unused_vars()];
+              {#natrecs{unset_value=UnsetValue}, pass_as_params} ->
+                  [gpb_decoders_lib:maybe_change_undef_marker_in_clauses(
+                     UnsetValue),
+                   gpb_decoders_lib:explode_param_init(MsgName, InitExprs, 5),
                    gpb_decoders_lib:explode_param_pass(MsgName, FNames, 5),
                    gpb_decoders_lib:underscore_unused_vars()];
               {#maps{unset_optional=present_undefined},pass_as_record} ->

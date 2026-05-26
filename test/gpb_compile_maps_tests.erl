@@ -459,8 +459,8 @@ default_value_handling_test_aux() ->
                                 type_defaults_for_omitted_optionals]},
              {{m,undefined,2}, [defaults_for_omitted_optionals]},
              {{m,0,0},         [type_defaults_for_omitted_optionals]}],
-        OptVariation1 <- [[pass_as_params],
-                          [pass_as_record]],
+        OptVariation1 <- [[{field_pass_method, pass_as_params}],
+                          [{field_pass_method, pass_as_record}]],
         OptVariation2 <- [[{maps_unset_optional,present_undefined}],
                           [{maps_unset_optional,omitted}]]].
 

@@ -175,6 +175,22 @@ override ERLC_FLAGS += -DNO_HAVE_JSON_MODULE=true
 endif
 endif
 
+ifdef NO_HAVE_NATIVE_RECORDS
+override ERLC_FLAGS += -DNO_HAVE_NATIVE_RECORDS=true
+else
+## attempt to auto-detect
+HAVE_NATIVE_RECORDS := $(shell $(ERL) $(ERL_BATCH_FLAGS) -eval ' \
+                             {ok,Ts,_} = erl_scan:string("#a:b{f=1}.",1), \
+                             case erl_parse:parse_exprs(Ts) of \
+                                 {ok,_}    -> io:format("true~n"); \
+                                 {error,_} -> io:format("false~n") \
+                             end.' \
+                         -s erlang halt)
+ifeq ($(HAVE_NATIVE_RECORDS),false)
+override ERLC_FLAGS += -DNO_HAVE_NATIVE_RECORDS=true
+endif
+endif
+
 ifdef NO_HAVE_PROPERTY_TESTER
 override ERLC_FLAGS += -DNO_HAVE_PROPERTY_TESTER=true
 else
@@ -229,7 +245,8 @@ EUNIT_MODULES := \
 BEAMS       := $(patsubst %,$(ebin)/%.beam,$(MODULES))
 DESCR_BEAMS := $(patsubst %,$(ebin)/%.beam,$(DESCR_MODULES))
 TEST_BEAMS  := $(patsubst %,$(test)/%.beam,$(TEST_MODULES)) \
-               $(test)/gpb_compile_maps_tests.beam
+               $(test)/gpb_compile_maps_tests.beam \
+               $(test)/gpb_compile_native_records_tests.beam
 
 TARGETS = \
 	$(incdir)/gpb_version.hrl \
@@ -386,6 +403,7 @@ $(ebin)/gpb_compile_descr.beam: $(incdir)/gpb.hrl
 $(ebin)/gpb_parse_descr.beam: $(incdir)/gpb.hrl 
 $(test)/gpb_compile_tests.beam: $(incdir)/gpb.hrl
 $(test)/gpb_compile_maps_tests.beam: $(incdir)/gpb.hrl
+$(test)/gpb_compile_native_records_tests.beam: $(incdir)/gpb.hrl
 $(test)/gpb_names_tests.beam: $(incdir)/gpb.hrl
 $(test)/gpb_defs_tests.beam: $(incdir)/gpb.hrl
 $(test)/gpb_json_tests.beam: $(incdir)/gpb.hrl

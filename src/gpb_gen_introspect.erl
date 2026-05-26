@@ -85,13 +85,19 @@ format_introspection(Defs, AnRes, Opts) ->
     [if GetProtoDefs ->
              gpb_codegen:format_fn(
                get_proto_defs, fun() -> '<Defs>' end,
-               [replace_tree('<Defs>', proto_def_trees(Defs, Opts))]);
+               [replace_tree('<Defs>',
+                             gpb_lib:term_mapping(
+                               Defs,
+                               known_records(),
+                               Opts))]);
         not GetProtoDefs ->
              gpb_codegen:format_fn(
                get_msg_defs, fun() -> '<Defs>' end,
                [replace_tree('<Defs>',
-                             msg_def_trees(EnumDefs, MsgDefs, GroupDefs,
-                                           Opts))])
+                             gpb_lib:term_mapping(
+                               EnumDefs ++ MsgDefs ++ GroupDefs,
+                               known_records(),
+                               Opts))])
      end,
      "\n",
      gpb_codegen:format_fn(
@@ -177,64 +183,6 @@ format_introspection(Defs, AnRes, Opts) ->
      ?f("~n"),
      format_get_protos_by_pkg_name_as_fqbin(Defs)].
 
-proto_def_trees(Defs, Opts) ->
-    Trees =
-        lists:map(
-          fun({{msg,_Name}, _}=Elem) -> msg_def_tree(Elem, Opts);
-             ({{group,_Name}, _}=Elem) -> group_def_tree(Elem, Opts);
-             ({{service,_Name}, _}=Elem) -> service_def_tree(Elem, Opts);
-             (Other) -> erl_parse:abstract(Other)
-          end,
-          Defs),
-    erl_syntax:list(Trees).
-
-msg_def_trees(EnumDefs, MsgDefs, GroupDefs, Opts) ->
-    EnumDefTrees = [erl_parse:abstract(EnumDef) || EnumDef <- EnumDefs],
-    MsgDefTrees = [msg_def_tree(MsgDef, Opts) || MsgDef <- MsgDefs],
-    GroupDefTrees = [group_def_tree(GroupDef, Opts) || GroupDef <- GroupDefs],
-    erl_syntax:list(EnumDefTrees ++ MsgDefTrees ++ GroupDefTrees).
-
-msg_def_tree({{msg, MsgName}, Fields}, Opts) ->
-    erl_syntax:tuple(
-      [erl_syntax:tuple([erl_syntax:atom(msg), erl_syntax:atom(MsgName)]),
-       fields_tree(Fields, Opts)]).
-
-group_def_tree({{group, Name}, Fields}, Opts) ->
-    erl_syntax:tuple(
-      [erl_syntax:tuple([erl_syntax:atom(group), erl_syntax:atom(Name)]),
-       fields_tree(Fields, Opts)]).
-
-fields_tree(Fields, Opts) ->
-    case gpb_lib:get_field_format_by_opts(Opts) of
-        fields_as_records ->
-            erl_syntax:list([field_tree(Field, Opts) || Field <- Fields]);
-        fields_as_maps ->
-            erl_syntax:list([field_tree(Field, Opts) || Field <- Fields]);
-        fields_as_proplists ->
-            erl_parse:abstract(gpb:field_records_to_proplists(Fields))
-    end.
-
-field_tree(#?gpb_field{}=F, Opts) ->
-    [?gpb_field | FValues] = tuple_to_list(F),
-    FNames = record_info(fields, ?gpb_field),
-    gpb_lib:mapping_create(
-      ?gpb_field,
-      lists:zip(FNames,
-                [erl_parse:abstract(FValue) || FValue <- FValues]),
-      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts),
-      Opts);
-field_tree(#gpb_oneof{fields=OFields}=F, Opts) ->
-    [gpb_oneof | FValues] = tuple_to_list(F),
-    FNames = record_info(fields, gpb_oneof),
-    gpb_lib:mapping_create(
-      gpb_oneof,
-      [if FName == fields -> {FName, fields_tree(OFields, Opts)};
-          FName /= fields -> {FName, erl_parse:abstract(FValue)}
-       end
-       || {FName, FValue} <- lists:zip(FNames, FValues)],
-      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts),
-      Opts).
-
 format_fetch_msg_defs([]) ->
     ["-spec fetch_msg_def(_) -> no_return().\n",
      gpb_codegen:format_fn(
@@ -273,7 +221,9 @@ format_find_msg_defs(Defs, Opts) ->
       end,
       [repeat_clauses('<Name>',
                       [[replace_term('<Name>', Name),
-                        replace_tree('<Fields>', fields_tree(Fields, Opts))]
+                        replace_tree('<Fields>',
+                                     gpb_lib:term_mapping(
+                                       Fields, known_records(), Opts))]
                        || {_, Name, Fields} <- gpb_lib:msgs_or_groups(Defs)])]).
 
 format_find_enum_defs(Enums) ->
@@ -417,7 +367,9 @@ format_get_service_defs(ServiceDefs, Opts) ->
       [repeat_clauses(
          '<ServiceName>',
          [[replace_term('<ServiceName>', ServiceName),
-           replace_tree('<ServiceDef>', service_def_tree(ServiceDef, Opts))]
+           replace_tree('<ServiceDef>',
+                        gpb_lib:term_mapping(
+                          ServiceDef, known_records(), Opts))]
           || {{service, ServiceName}, _Rpcs} = ServiceDef <- ServiceDefs])]).
 
 format_get_rpc_names(ServiceDefs) ->
@@ -454,7 +406,9 @@ format_find_service_rpc_defs(ServiceName, Rpcs, Opts) ->
       end,
       [repeat_clauses('<RpcName>',
                       [[replace_term('<RpcName>', RpcName),
-                        replace_tree('<RpcDef>', rpc_def_tree(Rpc, Opts))]
+                        replace_tree('<RpcDef>',
+                                     gpb_lib:term_mapping(
+                                       Rpc, known_records(), Opts))]
                        || #?gpb_rpc{name=RpcName} = Rpc <- Rpcs])]).
 
 format_fetch_rpc_defs([], _Opts) ->
@@ -474,53 +428,11 @@ format_fetch_rpc_defs(_ServiceDefs, Opts) ->
               end
       end,
       [replace_term(is_X,
-                    case get_rpc_format_by_opts(Opts) of
-                        rpcs_as_proplists ->
-                            is_list;
-                        rpcs_as_records ->
-                            case gpb_lib:get_records_or_maps_by_opts(Opts) of
-                                maps    -> is_map;
-                                records -> is_tuple
-                            end
+                    case gpb_lib:get_field_format_by_opts(Opts) of
+                        fields_as_proplists -> is_list;
+                        fields_as_records   -> is_tuple;
+                        fields_as_maps      -> is_map
                     end)]).
-
-service_def_tree({{service, ServiceName}, Rpcs}, Opts) ->
-    erl_syntax:tuple(
-      [erl_syntax:tuple([erl_syntax:atom(service),
-                         erl_syntax:atom(ServiceName)]),
-       rpcs_def_tree(Rpcs, Opts)]).
-
-get_rpc_format_by_opts(Opts) ->
-    case proplists:get_bool(defs_as_proplists, proplists:unfold(Opts)) of
-        false -> rpcs_as_records; %% default
-        true  -> rpcs_as_proplists
-    end.
-
-rpc_record_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
-    [?gpb_rpc | RValues] = tuple_to_list(Rpc),
-    RNames = record_info(fields, ?gpb_rpc),
-    gpb_lib:mapping_create(
-      ?gpb_rpc,
-      lists:zip(RNames,
-                [erl_parse:abstract(RValue) || RValue <- RValues]),
-      gpb_lib:mk_get_defs_as_maps_or_records_fn(Opts),
-      Opts).
-
-rpcs_def_tree(Rpcs, Opts) ->
-    case get_rpc_format_by_opts(Opts) of
-        rpcs_as_records   ->
-            erl_syntax:list([rpc_record_def_tree(Rpc, Opts) || Rpc <- Rpcs]);
-        rpcs_as_proplists ->
-            erl_parse:abstract(gpb:rpc_records_to_proplists(Rpcs))
-    end.
-
-rpc_def_tree(#?gpb_rpc{}=Rpc, Opts) ->
-    case get_rpc_format_by_opts(Opts) of
-        rpcs_as_records   ->
-            rpc_record_def_tree(Rpc, Opts);
-        rpcs_as_proplists ->
-            erl_parse:abstract(gpb:rpc_record_to_proplist(Rpc))
-    end.
 
 compute_service_renaming_infos(ServiceDefs,
                                Package,
@@ -887,3 +799,8 @@ map_append(Key, NewElem, M) ->
         #{Key := Elems} -> M#{Key := Elems ++ [NewElem]};
         #{}             -> M#{Key => [NewElem]}
     end.
+
+known_records() ->
+    #{?gpb_field => record_info(fields, ?gpb_field),
+      gpb_oneof => record_info(fields, gpb_oneof),
+      ?gpb_rpc => record_info(fields, ?gpb_rpc)}.

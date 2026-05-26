@@ -28,6 +28,16 @@ NoHaveJsonModule =
                  catch error:undef -> [{d,'NO_HAVE_JSON_MODULE'}]
                  end.
 
+%% Native records appeared in Erlang 29.0
+NoHaveNativeRecords =
+                 begin
+                     {ok, Ts, _} = erl_scan:string("#a:b{f=1}.", 1),
+                     case erl_parse:parse_exprs(Ts) of
+                         {ok,_}    -> [];
+                         {error,_} -> [{d,'NO_HAVE_NATIVE_RECORDS'}]
+                     end
+                 end.
+
 %% Run property-based tests if available.
 PropertyTesterOpts =
                  case [M || M <- [proper],
@@ -39,7 +49,7 @@ PropertyTesterOpts =
                  end.
 
 ConfigOpts = NoHavePlusMinusZeroFloat ++ NoHaveJsonModule ++
-                 PropertyTesterOpts.
+                 NoHaveNativeRecords ++ PropertyTesterOpts.
 
 [{require_otp_vsn, ".*"},
 

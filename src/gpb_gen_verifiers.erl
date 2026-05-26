@@ -34,8 +34,10 @@
                   splice_trees/2, repeat_clauses/2]).
 
 format_exports(_Defs, Opts) ->
-    case gpb_lib:get_records_or_maps_by_opts(Opts) of
+    case gpb_lib:get_mapping_by_opts(Opts) of
         records ->
+            ?f("-export([verify_msg/1, verify_msg/2, verify_msg/3]).~n");
+        natrecs ->
             ?f("-export([verify_msg/1, verify_msg/2, verify_msg/3]).~n");
         maps ->
             ?f("-export([verify_msg/2, verify_msg/3]).~n")
@@ -43,8 +45,9 @@ format_exports(_Defs, Opts) ->
 
 format_verifiers_top_function(Defs, AnRes, Opts) ->
     case {gpb_lib:contains_messages(Defs),
-          gpb_lib:get_records_or_maps_by_opts(Opts)} of
+          gpb_lib:get_mapping_by_opts(Opts)} of
         {false, records} -> format_verifiers_top_no_msgs_r();
+        {false, natrecs} -> format_verifiers_top_no_msgs_r();
         {false, maps}    -> format_verifiers_top_no_msgs_m();
         {true,  _}       -> format_verifiers_top_with_msgs(Defs, AnRes, Opts)
     end.
@@ -83,27 +86,58 @@ format_verifiers_top_no_msgs_m() ->
      "\n"].
 
 format_verifiers_top_with_msgs(Defs, AnRes, Opts) ->
-    Mapping = gpb_lib:get_records_or_maps_by_opts(Opts),
-    [[gpb_codegen:format_fn(
-        verify_msg,
-        fun(Msg) when tuple_size(Msg) >= 1 ->
-                verify_msg(Msg, element(1, Msg), []);
-           (X) ->
-                mk_type_error(not_a_known_message, X, [])
-        end) || Mapping == records],
-     gpb_codegen:format_fn(
-       verify_msg,
-       fun(Msg, MsgName) when is_atom(MsgName) ->
-               call_self(Msg, MsgName, []);
-          ('Msg', Opts) when tuple_size('Msg') >= 1 ->
-               call_self('Msg', element(1,'Msg'), Opts);
-          ('X', _Opts) ->
-               mk_type_error(not_a_known_message, 'X', [])
-       end,
-       [repeat_clauses('Msg', [[replace_tree('Msg', ?expr(Msg))]
-                               || Mapping == records]),
-        repeat_clauses('X', [[replace_tree('X', ?expr(X))]
-                             || Mapping == records])]),
+    Mapping = gpb_lib:get_mapping_by_opts(Opts),
+    [%% Arity 1:
+     case Mapping of
+         records ->
+             gpb_codegen:format_fn(
+               verify_msg,
+               fun(Msg) when tuple_size(Msg) >= 1 ->
+                       verify_msg(Msg, element(1, Msg), []);
+                  (X) ->
+                       mk_type_error(not_a_known_message, X, [])
+               end);
+         natrecs ->
+             gpb_codegen:format_fn(
+               verify_msg,
+               fun(Msg) when is_record(Msg) ->
+                       verify_msg(Msg, records:get_name(Msg), []);
+                  (X) ->
+                       mk_type_error(not_a_known_message, X, [])
+               end);
+         maps ->
+             ""
+     end,
+     %% Arity 2:
+     case Mapping of
+         records ->
+             gpb_codegen:format_fn(
+               verify_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       call_self(Msg, MsgName, []);
+                  (Msg, Opts) when tuple_size(Msg) >= 1, is_list(Opts) ->
+                       call_self(Msg, element(1, Msg), Opts);
+                  (X, _Opts) ->
+                       mk_type_error(not_a_known_message, X, [])
+               end);
+         natrecs ->
+             gpb_codegen:format_fn(
+               verify_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       call_self(Msg, MsgName, []);
+                  (Msg, Opts) when is_record(Msg) >= 1, is_list(Opts) ->
+                       call_self(Msg, element(1, Msg), Opts);
+                  (X, _Opts) ->
+                       mk_type_error(not_a_known_message, X, [])
+               end);
+         maps ->
+             gpb_codegen:format_fn(
+               verify_msg,
+               fun(Msg, MsgName) when is_atom(MsgName) ->
+                       call_self(Msg, MsgName, [])
+               end)
+     end,
+     %% Arity 3:
      gpb_codegen:format_fn(
        verify_msg,
        fun(Msg, MsgName, Opts) ->
@@ -180,10 +214,14 @@ format_msg_verifier(MsgName, MsgDef0, AnRes, Opts) ->
     MsgDef1 = drop_field_for_unknown_if_present(MsgDef0),
     FNames = gpb_lib:get_field_names(MsgDef1),
     FVars = [gpb_lib:var_f_n(I) || I <- lists:seq(1, length(FNames))],
+    MappingAndUnset = gpb_lib:get_mapping_and_unset_by_opts(Opts),
     MsgVar = ?expr(M),
     {FieldMatching, NonOptKeys} =
-        case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+        case MappingAndUnset of
             records ->
+                {gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts),
+                 FNames};
+            #natrecs{} ->
                 {gpb_lib:mapping_match(MsgName, lists:zip(FNames, FVars), Opts),
                  FNames};
             #maps{unset_optional=present_undefined} ->
@@ -198,8 +236,10 @@ format_msg_verifier(MsgName, MsgDef0, AnRes, Opts) ->
         end,
     NonOptKeys1 = erl_syntax:list(map_keys_to_strees(NonOptKeys, Opts)),
     ExtraneousFieldsChecks =
-        case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
+        case MappingAndUnset of
             records ->
+                [];
+            #natrecs{} ->
                 [];
             #maps{unset_optional=present_undefined} ->
                 [];
@@ -259,10 +299,12 @@ format_msg_verifier(MsgName, MsgDef0, AnRes, Opts) ->
         splice_trees('<maybe-verify-no-extraneous-fields>',
                      ExtraneousFieldsChecks),
         repeat_clauses('<M>',
-                       case gpb_lib:get_records_or_maps_by_opts(Opts) of
+                       case MappingAndUnset of
                            records ->
                                []; % omit this clause
-                           maps ->
+                           #natrecs{} ->
+                               [];
+                           #maps{} ->
                                [[replace_tree('<M>', ?expr(M)),
                                  replace_tree('NonOptKeys', NonOptKeys1)]]
                        end),
@@ -329,6 +371,10 @@ field_verifier(MsgName,
                     ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
                                         'TrUserData'),
                           RReplacements);
+                #natrecs{} ->
+                    ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
+                                        'TrUserData'),
+                          RReplacements);
                 #maps{unset_optional=present_undefined} ->
                     ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
                                         'TrUserData'),
@@ -348,7 +394,8 @@ field_verifier(MsgName,
             end;
         repeated when not IsMapField ->
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
-                records ->
+                Records when Records == records;
+                             is_record(Records, natrecs) ->
                     ?expr(if is_list('<F>') ->
                                   %% _ = [...] to avoid dialyzer error
                                   %% "Expression produces a value of type
@@ -419,6 +466,10 @@ field_verifier(MsgName,
                     ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
                                         'TrUserData'),
                           MReplacements);
+                #natrecs{} ->
+                    ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
+                                        'TrUserData'),
+                          MReplacements);
                 #maps{unset_optional=present_undefined} ->
                     ?expr('<verify-fn>'('<F>', ['<FName>' | Path],
                                         'TrUserData'),
@@ -444,6 +495,13 @@ field_verifier(MsgName,
                                                    'TrUserData')
                           end,
                           Replacements);
+                #natrecs{unset_value=Undef} ->
+                    ?expr(if '<F>' == 'Undef' -> ok;
+                             true -> '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                   'TrUserData')
+                          end,
+                          [replace_tree('Undef', erl_syntax:abstract(Undef))
+                           | Replacements]);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(if '<F>' == undefined -> ok;
                              true -> '<verify-fn>'('<F>', ['<FName>' | Path],
@@ -471,6 +529,13 @@ field_verifier(MsgName,
                                                    'TrUserData')
                           end,
                           Replacements);
+                #natrecs{unset_value=Undef} ->
+                    ?expr(if '<F>' == 'Undef' -> ok;
+                             true -> '<verify-fn>'('<F>', ['<FName>' | Path],
+                                                   'TrUserData')
+                          end,
+                          [replace_tree('Undef', erl_syntax:abstract(Undef))
+                           | Replacements]);
                 #maps{unset_optional=present_undefined} ->
                     ?expr(if '<F>' == undefined -> ok;
                              true -> '<verify-fn>'('<F>', ['<FName>' | Path],
@@ -499,10 +564,13 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                 records ->
                     tr_field_oneof_present_undefined_verifier(
-                      FName, FVar, Transl, TrUserDataVar);
+                      FName, FVar, undefined, Transl, TrUserDataVar);
+                #natrecs{unset_value=Undef} ->
+                    tr_field_oneof_present_undefined_verifier(
+                      FName, FVar, Undef, Transl, TrUserDataVar);
                 #maps{unset_optional=present_undefined} ->
                     tr_field_oneof_present_undefined_verifier(
-                      FName, FVar, Transl, TrUserDataVar);
+                      FName, FVar, undefined, Transl, TrUserDataVar);
                 #maps{unset_optional=omitted, oneof=tuples} ->
                     tr_field_oneof_omitted_tuples_verifier(
                       MsgVar, FName, FVar, Transl, TrUserDataVar, Opts);
@@ -517,12 +585,17 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
             case gpb_lib:get_mapping_and_unset_by_opts(Opts) of
                 records ->
                     field_oneof_present_undefined_verifier(
-                      MsgName, FName, OFields,
+                      MsgName, FName, OFields, undefined,
+                      FVar, MsgVar, TrUserDataVar,
+                      AnRes);
+                #natrecs{unset_value=Undef} ->
+                    field_oneof_present_undefined_verifier(
+                      MsgName, FName, OFields, Undef,
                       FVar, MsgVar, TrUserDataVar,
                       AnRes);
                 #maps{unset_optional=present_undefined} ->
                     field_oneof_present_undefined_verifier(
-                      MsgName, FName, OFields,
+                      MsgName, FName, OFields, undefined,
                       FVar, MsgVar, TrUserDataVar,
                       AnRes);
                 #maps{unset_optional=omitted, oneof=tuples} ->
@@ -538,12 +611,12 @@ field_verifier(MsgName, #gpb_oneof{name=FName, fields=OFields},
             end
     end.
 
-field_oneof_present_undefined_verifier(MsgName, FName, OFields,
+field_oneof_present_undefined_verifier(MsgName, FName, OFields, Undef,
                                        FVar, MsgVar, TrUserDataVar,
                                        AnRes) ->
     ?expr(
        case '<F>' of
-           undefined ->
+           'Undef' ->
                ok;
            '<oneof-pattern>' ->
                '<verify-fn>'('<OFVar>', ['<OFName>', '<FName>' | Path],
@@ -552,6 +625,7 @@ field_oneof_present_undefined_verifier(MsgName, FName, OFields,
                mk_type_error(invalid_oneof, '<F>', ['<FName>' | Path])
        end,
        [replace_tree('<F>', FVar),
+        replace_tree('Undef', erl_syntax:abstract(Undef)),
         replace_term('<FName>', FName),
         repeat_clauses(
           '<oneof-pattern>',
@@ -581,13 +655,15 @@ field_oneof_present_undefined_verifier(MsgName, FName, OFields,
            end
            || #?gpb_field{name=OFName, type=Type}=F <- OFields])]).
 
-tr_field_oneof_present_undefined_verifier(FName, FVar, Transl, TrUserDataVar) ->
-    ?expr(if '<F>' =:= undefined ->
+tr_field_oneof_present_undefined_verifier(FName, FVar, Undef,
+                                          Transl, TrUserDataVar) ->
+    ?expr(if '<F>' =:= 'Undef' ->
                   ok;
              true ->
                   'Tr'('<F>', ['fname' | Path], 'TrUserData')
           end,
           [replace_tree('<F>', FVar),
+           replace_tree('Undef', erl_syntax:abstract(Undef)),
            replace_term('Tr', Transl),
            replace_term('fname', FName),
            replace_tree('TrUserData', TrUserDataVar)]).
