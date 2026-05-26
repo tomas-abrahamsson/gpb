@@ -1,0 +1,15 @@
+#! /bin/bash
+
+tmpfile="$(mktemp "${TMPDIR:-/tmp}"/collected-output-XXXXXXXX)"
+
+cleanup ()
+{
+    /bin/rm -f "$tmpfile"
+}
+
+trap 'ec=$?; cleanup; exit $ec' EXIT INT TERM QUIT
+
+"$@" > "$tmpfile" 2>&1
+res=$?
+[[ "$res" = 0 ]] || cat "$tmpfile"
+exit "$res"

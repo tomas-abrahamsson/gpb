@@ -280,7 +280,8 @@ xref: all
 	    end."
 
 dialyze: all $(plt)
-	dialyzer -q --plt $(plt) -r $(ebin)
+	build/quiet-unless-fail \
+	    dialyzer --plt $(plt) -r $(ebin)
 
 build_plt: $(plt)
 
@@ -288,7 +289,8 @@ clean_plt:
 	$(RM) -f $(plt)
 
 $(plt):
-	dialyzer -q --build_plt --output_plt $@ \
+	build/quiet-unless-fail \
+	    dialyzer --build_plt --output_plt $@ \
 		--apps erts kernel stdlib syntax_tools compiler \
 			parsetools crypto eunit
 
